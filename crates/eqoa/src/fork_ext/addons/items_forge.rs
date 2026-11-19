@@ -8,11 +8,11 @@
 //! accessors the owner approved (`ItemMenu::read_state`, `Merchant::read_state`) through
 //! `Container.view` and `MerchantState`; the button hint uses `windows.format_hint`.
 //! Transaction support is provided by the native `eqoa.actions` service.
-use super::{host::Host, native::error};
+use super::{
+    host::Host,
+    native::{RefusalShape, refuse_member},
+};
 use mlua::{Function, Lua, MultiValue, Result, Table, Value};
-
-/// No deferred Forge item text reads remain.
-pub(super) const DEFERRED: &[&str] = &[];
 
 const ITEM: &str = r#"
 local eqoa, unsupported = ...
@@ -319,16 +319,8 @@ List.__index = List
 -- The rest of the reference's WindowObject (window.lua:207-263, 308-345, 412-430, 507-509) reads a window's
 -- memory in the emulator: a native list has none. Each is there, returns nothing, and says so in the Addon
 -- Manager (code `unsupported`); none is a missing-method error. `base`, the address, is not there either.
-local function memory(name)
-    return function()
-        unsupported("frontiers_forge.window.WindowObject:" .. name, "unsupported",
-            "a native window has no emulator memory to read; its rows and lit row are GetMenu and GetSelectedRow")
-        return nil
-    end
-end
-for _, name in ipairs({ "Read", "ReadText", "ReadTextPointer", "Child", "Parent", "GetDrawAddress",
-    "GetDrawSlotAddress", "GetChildWindows", "IsActive" }) do
-    List[name] = memory(name)
+for name, refuse in pairs(unsupported) do
+    List[name] = refuse
 end
 function List:IsVisible()
     local p = page()
@@ -615,8 +607,8 @@ fn real(lua: &Lua, short: &str) -> Result<Table> {
         return Ok(t);
     }
     let eqoa: Value = lua.globals().get("eqoa")?;
-    let unsupported: Function = lua.named_registry_value("eqoa_forge_unsupported")?;
-    let mut args = vec![eqoa, Value::Function(unsupported)];
+    let unsupported: Table = lua.named_registry_value("eqoa_forge_unsupported")?;
+    let mut args = vec![eqoa, Value::Table(unsupported)];
     if matches!(short, "inventory" | "loot" | "merchant") {
         args.push(Value::Table(real(lua, "item")?));
     }
@@ -633,17 +625,28 @@ fn real(lua: &Lua, short: &str) -> Result<Table> {
 
 pub(super) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
-    // `unsupported(symbol, code?, message?)`: a call the layer cannot back says so in the Addon Manager and
-    // returns nothing (a scheduled one is `not_yet`; one that has no native meaning is `unsupported`)
-    let unsupported = lua.create_function(|lua, (symbol, code, message): (String, Option<String>, Option<String>)| {
-        error(
+    let unsupported = lua.create_table()?;
+    for name in [
+        "Read",
+        "ReadText",
+        "ReadTextPointer",
+        "Child",
+        "Parent",
+        "GetDrawAddress",
+        "GetDrawSlotAddress",
+        "GetChildWindows",
+        "IsActive",
+    ] {
+        refuse_member(
             lua,
-            &symbol,
-            code.as_deref().unwrap_or("not_yet"),
-            message.as_deref().unwrap_or("not built yet (it needs windows.format_hint); see the round 5 report"),
+            &unsupported,
+            &format!("frontiers_forge.window.WindowObject:{name}"),
+            "unsupported",
+            None,
+            "a native window has no emulator memory to read; its rows and lit row are GetMenu and GetSelectedRow",
+            RefusalShape::ForgeNil,
         )?;
-        Ok(Value::Nil)
-    })?;
+    }
     lua.set_named_registry_value("eqoa_forge_unsupported", unsupported)?;
     // the raw state of the item page and the merchant window, which the Forge layer reads as the reference
     // read the windows' fields (the eqoa-family containers carry only what spec section 6 asks for)
@@ -652,12 +655,20 @@ pub(super) fn install(host: &Host) -> Result<()> {
     for (short, names) in NAMES {
         let proxy = lua.create_table()?;
         for name in names.split_whitespace() {
-            proxy.set(
-                name,
-                lua.create_function(move |lua, args: MultiValue| {
-                    let f: Function = real(lua, short)?.get(name)?;
-                    f.call::<MultiValue>(args)
-                })?,
+            let function = lua.create_function(move |lua, args: MultiValue| {
+                let f: Function = real(lua, short)?.get(name)?;
+                f.call::<MultiValue>(args)
+            })?;
+            let round = match (short, name) {
+                ("merchant", "GetButtonHint") => 6,
+                _ => 5,
+            };
+            super::native::bind_compat(
+                lua,
+                &proxy,
+                &format!("frontiers_forge.{short}.{name}"),
+                round,
+                function,
             )?;
         }
         // everything else (the constants, `max_slots`) reads from the built module

@@ -194,6 +194,7 @@ impl TakeoverState {
 thread_local! {
     static STATE: RefCell<TakeoverState> = RefCell::new(TakeoverState::default());
     static HAS_ACTIVITY: Cell<bool> = const { Cell::new(false) };
+    static USE_GAME_WINDOWS: Cell<bool> = const { Cell::new(false) };
     #[cfg(test)]
     static STATE_BORROWS: Cell<usize> = const { Cell::new(0) };
 }
@@ -227,12 +228,29 @@ pub(crate) fn take_state_borrows_for_test() -> usize {
     STATE_BORROWS.with(|n| n.replace(0))
 }
 
+pub(super) fn use_game_windows() -> bool {
+    USE_GAME_WINDOWS.with(Cell::get)
+}
+
+pub(super) fn set_use_game_windows(on: bool) {
+    USE_GAME_WINDOWS.with(|value| value.set(on));
+    if on && has_activity() {
+        release_claims("released by the player", true);
+    }
+}
+
 pub(crate) fn takeover(
     vm: u64,
     addon_id: &str,
     kind: TakeoverKind,
     scope: TakeoverScope,
 ) -> std::result::Result<(), (&'static str, String)> {
+    if use_game_windows() {
+        return Err((
+            "unavailable",
+            "the player is using the game's windows".into(),
+        ));
+    }
     with_state_mut(|s| {
         let idx = kind as usize;
         if let Some(existing) = &mut s.holders[idx] {
@@ -297,11 +315,19 @@ pub(crate) fn release_vm(vm: u64) {
 }
 
 pub(crate) fn release_all() {
+    release_claims("zoning", false);
+}
+
+fn release_claims(reason: &'static str, clear_grace: bool) {
     with_state_mut(|s| {
-        for idx in 0..3 {
+        if clear_grace {
+            s.grace_loot = None;
+        }
+        for kind in TakeoverKind::ALL {
+            let idx = kind as usize;
             if s.holders[idx].take().is_some() {
                 s.pending_opens[idx] = None;
-                s.pending_close[idx] = Some("zoning");
+                s.pending_close[idx] = Some(reason);
             }
         }
     });
@@ -581,7 +607,7 @@ pub(crate) fn end_session_for_vm(vm: u64, kind: TakeoverKind) {
             && s.hidden[idx].vm == vm
             && s.hidden[idx].scope == TakeoverScope::Own
         {
-            if kind == TakeoverKind::Loot {
+            if kind == TakeoverKind::Loot && !use_game_windows() {
                 s.grace_loot = Some(ListGrace {
                     target_id: s.hidden[idx].target_id,
                     until: Instant::now() + LIST_GRACE,
@@ -738,6 +764,7 @@ pub(crate) fn expire_hidden_session_for_test(kind: TakeoverKind) {
 }
 
 pub(crate) fn reset_all_for_test() {
+    USE_GAME_WINDOWS.with(|value| value.set(false));
     STATE.with(|s| *s.borrow_mut() = TakeoverState::default());
     HAS_ACTIVITY.with(|a| a.set(false));
     #[cfg(test)]

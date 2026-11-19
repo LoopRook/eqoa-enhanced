@@ -208,7 +208,7 @@ pub fn create_module(lua: &Lua) -> Result<Table> {
 }
 
 pub(crate) fn install_native(lua: &Lua) -> Result<()> {
-    super::native::describe(lua, "bit", "supported", Some(2), "native BitOp subset");
+    super::native::describe_module(lua, "bit", Some(2), "native BitOp subset");
     for name in [
         "tobit", "bnot", "band", "bor", "bxor", "lshift", "rshift", "arshift",
     ] {

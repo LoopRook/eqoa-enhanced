@@ -193,21 +193,22 @@ fn install_event_fields(lua: &mlua::Lua) {
                 lua,
                 &format!("eqoa.events.{name}.data.{field}"),
                 "supported",
-                Some(2),
+                Some(event_round(name)),
                 "",
             );
         }
     }
-    for (round, names) in [(4, "")] {
-        for name in names.split_whitespace() {
-            super::native::describe(
-                lua,
-                &format!("eqoa.events.{name}"),
-                "not_yet",
-                Some(round),
-                "scheduled for a later round",
-            );
-        }
+}
+
+fn event_round(name: &str) -> u8 {
+    match name {
+        "player.stats_changed" => 3,
+        "map.changed" | "shared.changed" | "mod.command" | "guide.lost" | "pointer.pressed"
+        | "pointer.wheel" => 4,
+        "inventory.changed" | "bank.changed" | "loot.changed" | "merchant.changed" => 5,
+        "action.result" | "batch.progress" | "batch.result" | "quests.changed"
+        | "camera.changed" | "windows.changed" | "mastery.changed" => 6,
+        _ => 2,
     }
 }
 pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
@@ -251,17 +252,12 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
             lua,
             &format!("eqoa.events.{name}"),
             "supported",
-            Some(match *name {
-                "player.stats_changed" => 3,
-                "action.result" | "batch.progress" | "batch.result" | "quests.changed"
-                | "camera.changed" | "windows.changed" | "mastery.changed" => 4,
-                _ => 2,
-            }),
+            Some(event_round(name)),
             "",
         );
     }
+    install_event_fields(lua);
     for (name, once) in [("on", false), ("once", true)] {
-        install_event_fields(lua);
         bind(
             lua,
             "events",

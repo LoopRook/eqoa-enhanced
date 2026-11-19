@@ -204,6 +204,56 @@ fn world() -> (Play, Host) {
 }
 
 #[test]
+fn round7c_item_records_and_window_events_use_projected_native_state() {
+    crate::fork_ext::addons::big_stack(|| {
+        let (mut p, host) = world();
+        host.execute(super::super::api_capture_tests::ROUND7C_CHECK_FIELDS)
+            .unwrap();
+        host.execute(
+            r#"
+            local inv = eqoa.inventory.get()
+            fields('items.Container', inv, 'merchant source')
+            fields('items.ContainerView', inv.view, 'selected selected_row rows')
+            fields('items.Tab', inv.view.tabs[1])
+            local sword = inv.items[1]
+            fields('items.Item', sword, 'quick_slot charges damage attack_type attack_name')
+            fields('items.ItemStat', sword.stats[1], 'name')
+            fields('items.CanUse', eqoa.items.can_use(sword.ref))
+            fields('items.SlotInfo', eqoa.items.slot_info(sword.wear_slot), 'name')
+        "#,
+        )
+        .unwrap();
+
+        apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+        native_events::dispatch(&host).unwrap();
+        host.execute(
+            r#"
+            local loot = eqoa.loot.get()
+            fields('items.Container', loot, 'money view merchant')
+            fields('items.LootSource', loot.source, 'name entity_id')
+            assert(log[#log].name == 'loot.changed', 'no loot event from the native open')
+        "#,
+        )
+        .unwrap();
+        apply(&mut p, opcode(0x0016, vec![]));
+        apply(
+            &mut p,
+            opcode(0x00B7, shop_bytes(17, 90, 110, &[sword()], "Welcome")),
+        );
+        native_events::dispatch(&host).unwrap();
+        host.execute(
+            r#"
+            local shop = eqoa.merchant.get()
+            fields('items.MerchantState', shop.merchant, 'selected_option button_hint')
+            fields('items.MerchantOption', shop.merchant.options[1])
+            assert(log[#log].name == 'merchant.changed', 'no merchant event from the native open')
+        "#,
+        )
+        .unwrap();
+    });
+}
+
+#[test]
 fn round5_pack_and_bank_come_from_the_dump_with_real_item_fields() {
     let mut p = ready();
     let h = Host::new().unwrap();
@@ -3449,7 +3499,10 @@ fn round65_window_takeover_scopes_own_and_all() {
         entry_mode: EntryMode::Once,
         capabilities_declared: true,
         requested_capabilities: vec!["eqoa.windows.takeover".into(), "eqoa.actions.*".into()],
-        extensions: Default::default(),
+        extensions: crate::fork_ext::addons::discovery::Extensions {
+            replaces: vec!["loot".into(), "merchant".into(), "bank".into()],
+            ..Default::default()
+        },
         initially_enabled: true,
         mods_root: None,
     })

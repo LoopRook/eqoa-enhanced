@@ -15,6 +15,213 @@ fn ready() -> Play {
     ));
     p
 }
+
+#[test]
+fn round7c_play_records_match_declared_fields() {
+    crate::fork_ext::addons::big_stack(|| {
+        let mut p = Play::bundled_ui_fixture();
+        let walker = Play::bundled_ui_walker();
+        p.pet_id = 2002;
+        let me = p.self_id32().unwrap();
+        p.entities.slots[0] = Some(net::entity::Entity {
+            id: me,
+            kind: net::entity::TYPE_CREATURE,
+            p19: 192,
+            creature: Some(net::entity::Creature {
+                name: "Wereoxx".into(),
+                level: 50,
+                target: 2002,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        CORE.with(|c| {
+            let mut c = c.borrow_mut();
+            c.effects_received = true;
+            c.mastery_flags.from_dump();
+        });
+        let host = Host::new().unwrap();
+        p.forge_snapshot(Some(&walker));
+        p.add_chat("Field audit".into(), [1.; 4]);
+        crate::fork_ext::addons::input::observe_report(
+            &mut crate::input::Report {
+                buttons: 0,
+                sticks: [0.25; 4],
+                triggers: [0.; 2],
+            },
+            true,
+            true,
+        );
+        host.execute(ROUND7C_CHECK_FIELDS).unwrap();
+        host.execute(
+            r#"
+            local p = eqoa.player.get()
+            fields('player.Player', p, 'location')
+            fields('player.Vital', p.hp)
+            fields('player.Vital', p.power)
+            fields('player.Attributes', p.attributes)
+            fields('player.SevenStats', p.attributes.base)
+            fields('player.SevenStats', p.attributes.total)
+            fields('player.Resists', p.resists)
+            fields('Vec3', p.position)
+            fields('Vec3', p.velocity)
+            fields('mastery.Mastery', p.mastery, 'stats bonuses')
+            fields('entities.Entity', eqoa.entities.list()[1], 'disposition disposition_name')
+        "#,
+        )
+        .unwrap();
+        host.execute(r#"
+            local g = eqoa.group.get()
+            fields('group.Group', g)
+            fields('group.Member', g.members[1], 'entity power')
+            local ability = eqoa.abilities.list()[1]
+            fields('abilities.Ability', ability, 'spellbook_slot')
+            fields('abilities.RangeResult', eqoa.abilities.in_range(ability.ref,
+                {x=0,y=0,z=0}, {x=1,y=2,z=3}))
+            fields('cooldowns.Cooldown', eqoa.cooldowns.get(ability.ref), 'started_at estimated_remaining')
+            local bar = eqoa.hotbar.list()[1]
+            fields('hotbar.Hotbar', bar, 'selected_slot')
+            fields('hotbar.HotbarSlot', bar.slots[1], 'item weapon_set command icon ui_icon')
+            fields('effects.Effect', eqoa.effects.list()[1])
+            local chat = eqoa.chat.history()
+            fields('chat.ChatMessage', chat[#chat], 'channel_code sender outgoing')
+            fields('Color', chat[#chat].color)
+            local inp = eqoa.input.get()
+            fields('input.InputState', inp)
+            fields('input.Pad', inp.pad)
+            fields('input.RawAxes', inp.pad.raw_left)
+            fields('Vec2', inp.pad.left)
+            fields('input.Pointer', eqoa.input.pointer())
+            fields('client.Client', eqoa.client.get())
+            fields('camera.Camera', eqoa.camera.get())
+            fields('quests.Quest', eqoa.quests.list()[1])
+            fields('windows.Windows', eqoa.windows.get(), 'active')
+            fields('combat.Counters', eqoa.combat.get_counters())
+            local _, err = eqoa.actions.move()
+            fields('Error', err, 'retry_after')
+            fields('capabilities.Capability', eqoa.capabilities.get('eqoa.api'), 'reason')
+        "#).unwrap();
+    });
+}
+
+pub(super) const ROUND7C_CHECK_FIELDS: &str = r#"
+function fields(name, record, optional)
+    local path = 'eqoa.' .. name
+    assert(type(record) == 'table', path .. ' did not produce a record')
+    local declared = {}
+    for _, field in ipairs(assert(eqoa.capabilities.get(path)).children) do
+        declared[field:sub(#path + 2)] = eqoa.capabilities.get(field).status
+    end
+    local may_be_nil = {}
+    for field in (optional or ''):gmatch('%S+') do
+        assert(declared[field], path .. '.' .. field .. ' is no longer declared')
+        may_be_nil[field] = true
+    end
+    local actual = {}
+    for key, value in pairs(record) do
+        assert(declared[key], path .. '.' .. key .. ' is undeclared')
+        actual[key] = value
+    end
+    for key, status in pairs(declared) do
+        if status == 'supported' and not may_be_nil[key] then
+            assert(actual[key] ~= nil, path .. '.' .. key .. ' is missing')
+        end
+    end
+end
+"#;
+
+#[test]
+fn round7c_world_events_come_from_play_changes() {
+    crate::fork_ext::addons::big_stack(|| {
+        use super::api_capture::updates::{Kind, capture};
+        use crate::fork_ext::addons::{input, native_core};
+
+        let mut p = Play::bundled_ui_fixture();
+        let mut walker = Play::bundled_ui_walker();
+        let host = Host::new().unwrap();
+        host.execute(
+            r#"
+            world_events = {
+                'world.entered', 'world.leaving', 'state.reset',
+                'player.changed', 'player.stats_changed', 'target.changed',
+                'entity.added', 'entity.changed', 'entity.removed', 'group.changed',
+                'map.changed', 'inventory.changed', 'bank.changed',
+                'quests.changed', 'camera.changed', 'windows.changed', 'mastery.changed',
+                'abilities.changed', 'hotbar.changed', 'effects.changed',
+                'cooldown.started', 'cooldown.updated', 'cooldown.ended', 'guide.lost',
+                'chat.message', 'chat.history_scroll', 'combat.hit', 'input.key', 'input.pad',
+            }
+            seen = {}
+            for _, name in ipairs(world_events) do
+                assert(eqoa.capabilities.has('eqoa.events.' .. name), name)
+                assert(eqoa.events.on(name, function(e) seen[name] = e end))
+            end
+            "#,
+        )
+        .unwrap();
+        CORE.with(|c| c.borrow_mut().mastery_flags.from_dump());
+        p.forge_snapshot(Some(&walker));
+        host.execute("assert(eqoa.map.set_guide{world_id=0, entity_id=2002, label='Moss Snake'})")
+            .unwrap();
+
+        p.entities.slots[2] = p.entities.slots[1].clone();
+        p.entities.slots[2].as_mut().unwrap().id = 2003;
+        capture(&p, &Kind::Entity(2), None);
+        p.entities.slots[2].as_mut().unwrap().p19 = 100;
+        capture(&p, &Kind::Entity(2), None);
+        p.entities.slots[1] = None;
+        capture(&p, &Kind::Entity(1), None);
+        p.target = 2003;
+        p.group.members[0].hp = 128;
+        capture(&p, &Kind::Group, None);
+        p.stats.stat[8] += 10;
+        capture(&p, &Kind::Player, None);
+        p.quests.add("A new quest".encode_utf16().collect());
+        capture(&p, &Kind::Quests, None);
+        p.effects.name[0] = "A different effect".encode_utf16().collect();
+        capture(&p, &Kind::Effects, None);
+        p.hud_menus.defs[0].entries[0].id = 2;
+        for (old, new) in [(0., 5000), (5., 2500), (2.5, 0)] {
+            p.abilities.get_mut(&1).unwrap().lockout = new;
+            capture(&p, &Kind::Ability(1), Some((1, old)));
+        }
+        p.cm.m.x0c += 1;
+        p.mode = 13;
+        walker.cam.walk.phys.position.x = vi::fpu::F::new(10.);
+        p.forge_snapshot(Some(&walker));
+        p.add_chat("Event audit".into(), [1.; 4]);
+        crate::fork_ext::chat_history::key(19, true);
+        native_core::observe_hit(0x100, 2003, -7, Some([255; 3]));
+        input::emit_named_key_event("f2", true);
+        input::observe_report(
+            &mut crate::input::Report {
+                buttons: 1 << 4,
+                sticks: [0.; 4],
+                triggers: [0.; 2],
+            },
+            true,
+            true,
+        );
+        native_events::dispatch(&host).unwrap();
+        p.session.self_id = None;
+        p.forge_snapshot(None);
+        native_events::dispatch(&host).unwrap();
+
+        host.execute(ROUND7C_CHECK_FIELDS).unwrap();
+        host.execute(
+            r#"
+            local missing = {}
+            for _, name in ipairs(world_events) do
+                if not seen[name] then missing[#missing + 1] = name end
+            end
+            assert(#missing == 0, 'Play did not emit: ' .. table.concat(missing, ', '))
+            fields('events.Event', seen['combat.hit'])
+            fields('combat.CombatHit', seen['combat.hit'].data)
+        "#,
+        )
+        .unwrap();
+    });
+}
 // Shared bundled-UI fixture: populate the native client structures, then use
 // exactly the cached projection that Play supplies to the addon manager.
 impl Play {

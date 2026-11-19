@@ -452,8 +452,27 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     );
                 }
             };
+            let addon = {
+                let session = session(lua);
+                let session = session.borrow();
+                (
+                    session.addon.clone(),
+                    session.replaces.iter().any(|kind| kind == parsed.name()),
+                )
+            };
+            let (addon, declared) = addon;
+            if scope == TakeoverScope::All && !declared {
+                return error(
+                    lua,
+                    "eqoa.windows.takeover",
+                    "not_declared",
+                    &format!(
+                        "scope 'all' for '{}' requires a matching 'replaces' entry in mod.json",
+                        parsed.name()
+                    ),
+                );
+            }
             let vm = super::native_events::bus(lua).borrow().vm;
-            let addon = session(lua).borrow().addon.clone();
             match window_takeover::takeover(vm, &addon, parsed, scope) {
                 Ok(()) => lua.pack_multi((true, Value::Nil)),
                 Err((code, msg)) => {
@@ -574,9 +593,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             "id skill_id parent_key name title category cost text known owned level_required points_spent_required minimum_stats",
         ),
     ] {
-        describe(lua, path, "supported", Some(4), "");
+        describe(lua, path, "supported", Some(6), "");
         for field in fields.split_whitespace() {
-            describe(lua, &format!("{path}.{field}"), "supported", Some(4), "");
+            describe(lua, &format!("{path}.{field}"), "supported", Some(6), "");
         }
     }
 

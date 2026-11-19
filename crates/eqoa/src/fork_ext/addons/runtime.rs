@@ -853,6 +853,30 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
     }
 }
 
+fn replacement_label(replaces: &[String]) -> Option<String> {
+    if replaces.is_empty() {
+        return None;
+    }
+    let names = replaces
+        .iter()
+        .map(|kind| match kind.as_str() {
+            "loot" => "Loot",
+            "merchant" => "Merchant",
+            "bank" => "Bank",
+            "inventory" => "Bags",
+            "spellbook" => "Spellbook",
+            "journal" => "Quest journal",
+            "hud.target" => "Target frame",
+            kind => kind,
+        })
+        .collect::<Vec<_>>();
+    Some(format!("Replaces game windows: {}", names.join(", ")))
+}
+
+fn declares_dialog_actions(caps: &[String]) -> bool {
+    super::native::capability_grants(caps, "eqoa.actions.dialog_answer")
+}
+
 fn controls(
     ui: &Ui,
     manager: &mut Manager,
@@ -865,6 +889,10 @@ fn controls(
         if let Some(readiness)=manager.health_readiness() {ui.text_wrapped(readiness);}
         if let Some(root)=root {ui.text_wrapped(root.to_string_lossy());}
         if ui.button("Rescan folder") {actions.push(Action::Rescan);}
+        let mut use_game_windows = super::window_takeover::use_game_windows();
+        if ui.checkbox("Use the game's windows", &mut use_game_windows) {
+            super::window_takeover::set_use_game_windows(use_game_windows);
+        }
         let entries=manager.entries();
         if entries.is_empty() {ui.text_wrapped("No addons found. Open Mods Folder in Options to add Lua files or addon folders, then rescan.");}
         for entry in entries {
@@ -877,6 +905,12 @@ fn controls(
             }
             if let Some(label) = autonomous_action_label(caps) {
                 ui.text_wrapped(label);
+            }
+            if let Some(label) = replacement_label(&entry.metadata.extensions.replaces) {
+                ui.text_wrapped(label);
+            }
+            if declares_dialog_actions(caps) {
+                ui.text_wrapped("Can answer NPC dialogs");
             }
             let id=&entry.metadata.id;
             let warnings=manager.diagnostics().iter().filter(|d|d.id.as_ref()==Some(id)).count();
@@ -2408,6 +2442,21 @@ mod tests {
             !root.0.join("imgui.ini").exists(),
             "Must never write into mods dir"
         );
+    }
+
+    #[test]
+    fn round7c_manager_labels_come_from_manifest_declarations() {
+        assert_eq!(replacement_label(&[]), None);
+        assert_eq!(
+            replacement_label(&["inventory".into(), "spellbook".into(), "hud.target".into()])
+                .as_deref(),
+            Some("Replaces game windows: Bags, Spellbook, Target frame")
+        );
+        assert!(declares_dialog_actions(&[
+            "eqoa.actions.dialog_answer".into()
+        ]));
+        assert!(declares_dialog_actions(&["eqoa.actions.*".into()]));
+        assert!(!declares_dialog_actions(&["eqoa.actions.talk".into()]));
     }
 
     #[test]

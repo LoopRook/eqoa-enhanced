@@ -555,15 +555,21 @@ fn draw_ui_icon(
 }
 
 fn install_icon_helpers(host: &Host, ui: &mlua::Table) -> mlua::Result<()> {
-    ui.set(
-        "GetDispositionFaceTexId",
+    super::native::bind_compat(
+        &host.lua,
+        ui,
+        "frontiers_forge.ui.GetDispositionFaceTexId",
+        6,
         host.lua.create_function(|_, val: Option<Value>| {
             Ok(parse_lua_int(val).map(disposition_tex_id))
         })?,
     )?;
 
-    ui.set(
-        "GetClassIconTexId",
+    super::native::bind_compat(
+        &host.lua,
+        ui,
+        "frontiers_forge.ui.GetClassIconTexId",
+        6,
         host.lua.create_function(|_, val: Option<Value>| {
             Ok(parse_lua_int(val)
                 .filter(|&c| c >= 0)
@@ -571,8 +577,11 @@ fn install_icon_helpers(host: &Host, ui: &mlua::Table) -> mlua::Result<()> {
         })?,
     )?;
 
-    ui.set(
-        "GetClassIconTexture",
+    super::native::bind_compat(
+        &host.lua,
+        ui,
+        "frontiers_forge.ui.GetClassIconTexture",
+        6,
         host.lua.create_function(|lua, val: Option<Value>| {
             let tex_id = parse_lua_int(val)
                 .filter(|&c| c >= 0)
@@ -581,16 +590,22 @@ fn install_icon_helpers(host: &Host, ui: &mlua::Table) -> mlua::Result<()> {
         })?,
     )?;
 
-    ui.set(
-        "DrawDispositionIcon",
+    super::native::bind_compat(
+        &host.lua,
+        ui,
+        "frontiers_forge.ui.DrawDispositionIcon",
+        6,
         host.lua
             .create_function(|lua, (val, scale): (Option<Value>, Option<Value>)| {
                 draw_ui_icon(lua, parse_lua_int(val).map(disposition_tex_id), scale)
             })?,
     )?;
 
-    ui.set(
-        "DrawClassIcon",
+    super::native::bind_compat(
+        &host.lua,
+        ui,
+        "frontiers_forge.ui.DrawClassIcon",
+        6,
         host.lua
             .create_function(|lua, (val, scale): (Option<Value>, Option<Value>)| {
                 let tex_id = parse_lua_int(val)

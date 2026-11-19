@@ -1,5 +1,5 @@
 use super::{
-    native::{bind, describe, error},
+    native::{RefusalShape, bind, describe, describe_module, error, refuse_member},
     textures::{Handle, Textures},
 };
 use mlua::{AnyUserData, Function, Lua, Result, Table, UserData, Value};
@@ -22,13 +22,9 @@ pub(crate) fn imgui(lua: &Lua, imgui: &Table) -> Result<()> {
             }
         }
     }
-    describe(
-        lua,
-        "eqoa.imgui",
-        "partial",
-        Some(2),
-        "bounded native bridge; unbound members are unsupported",
-    );
+    for module in ["eqoa.imgui", "ImGui"] {
+        describe_module(lua, module, Some(2), "bounded native bridge");
+    }
     for name in [
         "BeginTooltip",
         "EndTooltip",
@@ -54,20 +50,14 @@ pub(crate) fn imgui(lua: &Lua, imgui: &Table) -> Result<()> {
         "GetForegroundDrawList",
     ] {
         if imgui.raw_get::<Value>(name)?.is_nil() {
-            let path = format!("ImGui.{name}");
-            describe(lua, &path, "not_yet", Some(4), "scheduled for round 4");
-            describe(
+            refuse_member(
                 lua,
-                &format!("eqoa.imgui.{name}"),
+                imgui,
+                &format!("ImGui.{name}"),
                 "not_yet",
                 Some(4),
-                "scheduled for round 4",
-            );
-            imgui.set(
-                name,
-                lua.create_function(move |lua, _: mlua::MultiValue| {
-                    error(lua, &path, "not_yet", "scheduled for round 4")
-                })?,
+                "planned for the mod API plan's round 4 map and ImGui additions",
+                RefusalShape::Native,
             )?;
         }
     }
@@ -264,14 +254,6 @@ pub(crate) fn sound(lua: &Lua, owner: &Rc<RefCell<super::sound::SoundBank>>) -> 
         "sound",
         "load",
         lua.create_function(move |lua, path: Value| {
-            if !cfg!(windows) {
-                return error(
-                    lua,
-                    "eqoa.sound.load",
-                    "unsupported",
-                    "no native sound backend on this platform",
-                );
-            }
             let Some(path) = path
                 .as_string()
                 .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
@@ -320,14 +302,6 @@ pub(crate) fn sound(lua: &Lua, owner: &Rc<RefCell<super::sound::SoundBank>>) -> 
             name,
             lua.create_function(move |lua, (value, option): (Value, Option<Value>)| {
                 let symbol = format!("eqoa.sound.{name}");
-                if !cfg!(windows) {
-                    return error(
-                        lua,
-                        &symbol,
-                        "unsupported",
-                        "no native sound backend on this platform",
-                    );
-                }
                 if value.is_nil() && matches!(name, "stop" | "release" | "is_playing") {
                     return lua.pack_multi((name != "is_playing", Value::Nil));
                 }
@@ -426,23 +400,6 @@ pub(crate) fn sound(lua: &Lua, owner: &Rc<RefCell<super::sound::SoundBank>>) -> 
                 }
             })?,
         )?;
-    }
-    #[cfg(not(windows))]
-    for name in [
-        "load",
-        "play",
-        "stop",
-        "set_volume",
-        "is_playing",
-        "release",
-    ] {
-        describe(
-            lua,
-            &format!("eqoa.sound.{name}"),
-            "unsupported",
-            None,
-            "no native sound backend on this platform",
-        );
     }
     Ok(())
 }

@@ -248,18 +248,14 @@ pub(crate) fn install_package_loader(
     ] {
         let table = lua.create_table()?;
         for name in names {
-            let symbol = format!("frontiers_forge.{module}.{name}");
-            table.set(
-                *name,
-                lua.create_function(move |lua, _: mlua::MultiValue| {
-                    super::native::diagnose(
-                        lua,
-                        &symbol,
-                        "unsupported",
-                        "raw memory is excluded; use eqoa.quests for native quest records",
-                    );
-                    Ok(Value::Nil)
-                })?,
+            super::native::refuse_member(
+                lua,
+                &table,
+                &format!("frontiers_forge.{module}.{name}"),
+                "unsupported",
+                None,
+                "raw memory is excluded; use eqoa.quests for native quest records",
+                super::native::RefusalShape::ForgeNil,
             )?;
         }
         let mt = lua.create_table()?;

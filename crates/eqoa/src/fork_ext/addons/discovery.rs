@@ -38,6 +38,7 @@ pub(crate) struct Extensions {
     pub shares: Vec<String>,
     pub commands: Vec<String>,
     pub permissions: Vec<String>,
+    pub replaces: Vec<String>,
 }
 fn extension_list(raw: &serde_json::Value, field: &str) -> Result<Vec<String>, String> {
     let Some(value) = raw.get(field) else {
@@ -66,6 +67,12 @@ fn extension_list(raw: &serde_json::Value, field: &str) -> Result<Vec<String>, S
                     && !value.ends_with(['.', ' '])
             }
             "commands" => is_valid_id(value),
+            "replaces" => value.split('.').all(|part| {
+                !part.is_empty()
+                    && part.bytes().all(|byte| {
+                        byte.is_ascii_lowercase() || byte == b'_' || byte.is_ascii_digit()
+                    })
+            }),
             "permissions" => matches!(value, "import" | "export"),
             _ => false,
         };
@@ -83,6 +90,7 @@ fn extensions(raw: &serde_json::Value) -> Result<Extensions, String> {
         shares: extension_list(raw, "shares")?,
         commands: extension_list(raw, "commands")?,
         permissions: extension_list(raw, "permissions")?,
+        replaces: extension_list(raw, "replaces")?,
     })
 }
 
@@ -947,6 +955,44 @@ mod tests {
     impl Drop for TempDir {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn round7c_manifest_declares_full_takeover_for_the_named_window_only() {
+        let temp = TempDir::new("r7c_replaces");
+        let pkg = temp.path().join("replacement");
+        fs::create_dir(&pkg).unwrap();
+        fs::write(pkg.join("main.lua"), "-- fixture").unwrap();
+        let manifest = serde_json::json!({
+            "schemaVersion": 1, "runtime": "lua", "api": "eqoa/1",
+            "id": "replacement", "entry": "main.lua",
+            "capabilities": ["eqoa.windows.takeover"],
+            "replaces": ["bank", "bank", "hud.target"]
+        });
+        fs::write(pkg.join("mod.json"), manifest.to_string()).unwrap();
+        let discovered = discover(temp.path());
+        assert!(discovered.diagnostics.is_empty());
+        let addon = &discovered.addons[0];
+        assert_eq!(addon.extensions.replaces, ["bank", "hud.target"]);
+        let host = super::super::host::Host::for_addon(addon).unwrap();
+        host.execute(
+            r#"
+            assert(eqoa.capabilities.get('frontiers_forge.cave').status == 'unsupported')
+            assert(eqoa.windows.takeover('bank', {scope='all'}))
+            local ok, err = eqoa.windows.takeover('merchant', {scope='all'})
+            assert(ok == nil and err.code == 'not_declared' and not eqoa.windows.taken('merchant'))
+            assert(eqoa.windows.release('bank'))
+        "#,
+        )
+        .unwrap();
+        for invalid in [serde_json::json!("bank"), serde_json::json!(["../bank"])] {
+            let mut bad = manifest.clone();
+            bad["replaces"] = invalid;
+            fs::write(pkg.join("mod.json"), bad.to_string()).unwrap();
+            let discovered = discover(temp.path());
+            assert!(discovered.addons.is_empty());
+            assert!(discovered.diagnostics[0].message.contains("replaces"));
         }
     }
 

@@ -272,17 +272,14 @@ pub fn install_combat_adapter(host: &Host) -> LuaResult<()> {
         "GetDroppedCount",
         lua.create_function(|lua, ()| Ok(super::native_events::bus(lua).borrow().dropped))?,
     )?;
-    combat_mod.set(
-        "ReadForeignCave",
-        lua.create_function(|lua, _max: Option<u32>| {
-            super::native::diagnose(
-                lua,
-                "frontiers_forge.combat.ReadForeignCave",
-                "unsupported",
-                "native client has no foreign code cave",
-            );
-            Ok(Value::Nil)
-        })?,
+    super::native::refuse_member(
+        lua,
+        &combat_mod,
+        "frontiers_forge.combat.ReadForeignCave",
+        "unsupported",
+        None,
+        "native client has no foreign code cave",
+        super::native::RefusalShape::ForgeNil,
     )?;
 
     // On(owner, event_name, fn)

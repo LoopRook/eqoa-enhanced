@@ -186,30 +186,22 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         (
             "set_waypoint",
             "not_yet",
-            "not built; use eqoa.map.set_guide",
+            "approved in the round 7 plan (Part A); use eqoa.map.set_guide meanwhile",
         ),
         (
             "clear_waypoint",
             "not_yet",
-            "not built; use eqoa.map.set_guide",
+            "approved in the round 7 plan (Part A); use eqoa.map.set_guide meanwhile",
         ),
     ] {
-        let symbol = format!("eqoa.map.{name}");
-        bind(
+        super::native::refuse_native(
             lua,
             "map",
             name,
-            lua.create_function(move |lua, _: mlua::MultiValue| {
-                error(lua, &symbol, status, reason)
-            })?,
-        )?;
-        super::native::describe(
-            lua,
-            &format!("eqoa.map.{name}"),
             status,
-            if status == "not_yet" { Some(4) } else { None },
+            (status == "not_yet").then_some(7),
             reason,
-        );
+        )?;
     }
 
     bind(

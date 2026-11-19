@@ -1,6 +1,175 @@
 use super::host::Host;
 
 #[test]
+fn round7c_refusing_members_report_the_same_capability_as_their_call() {
+    let host = Host::new().unwrap();
+    host.execute(
+        r#"
+        local caps = eqoa.capabilities
+        local f = require('frontiers_forge.util')
+        local value, reason = f.utf8_to_utf16('text')
+        local d = caps.get('frontiers_forge.util.utf8_to_utf16')
+        assert(value == nil and d.status == 'unsupported' and d.reason == reason, d.reason)
+        local result, err = eqoa.actions.move()
+        d = caps.get('eqoa.actions.move')
+        assert(result == nil and d.status == err.code and d.reason == err.message)
+        assert(d.reason:find('upstream PR', 1, true), d.reason)
+        assert(caps.get('eqoa.actions').status == 'partial')
+        assert(caps.get('eqoa.capabilities').status == 'supported')
+        assert(caps.get('eqoa.inventory.get').round == 5)
+        assert(caps.get('eqoa.windows.takeover').round == 6)
+        assert(caps.get('eqoa.entities.Entity.npc_flags').round == 6)
+        assert(caps.get('eqoa.files.list').round == 7)
+        for _, row in ipairs(caps.list('')) do
+            if row.status == 'not_yet' then
+                assert(row.reason and (row.reason:find('plan', 1, true)
+                    or row.reason:find('upstream PR', 1, true)), row.path)
+            end
+        end
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round7c_all_scope_refuses_an_undeclared_window_without_claiming_it() {
+    let host = Host::with_test_capabilities(&["eqoa.windows.takeover"]).unwrap();
+    host.execute(
+        r#"
+        local ok, err = eqoa.windows.takeover('bank', {scope='all'})
+        assert(ok == nil and err.code == 'not_declared')
+        assert(eqoa.windows.taken('bank') == false)
+        assert(eqoa.windows.takeover('bank', {scope='own'}))
+        assert(eqoa.windows.release('bank'))
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round7c_native_switch_releases_every_holder_and_prevents_reclaims() {
+    use super::window_takeover::{
+        TakeoverKind, is_taken, reset_all_for_test, set_use_game_windows, try_accept_open,
+    };
+
+    reset_all_for_test();
+    let loot = Host::with_test_capabilities(&["eqoa.windows.takeover"]).unwrap();
+    let other = Host::with_test_capabilities(&["eqoa.windows.takeover"]).unwrap();
+    loot.execute("assert(eqoa.windows.takeover('loot'))")
+        .unwrap();
+    other
+        .execute("assert(eqoa.windows.takeover('merchant')); assert(eqoa.windows.takeover('bank'))")
+        .unwrap();
+    assert!(TakeoverKind::ALL.into_iter().all(is_taken));
+    set_use_game_windows(true);
+    assert!(!TakeoverKind::ALL.into_iter().any(is_taken));
+    assert!(!try_accept_open(
+        TakeoverKind::Loot,
+        Some(17),
+        Some(17),
+        None
+    ));
+    loot.execute(
+        "local ok,e=eqoa.windows.takeover('loot'); assert(ok==nil and e.code=='unavailable')",
+    )
+    .unwrap();
+    set_use_game_windows(false);
+    loot.execute("assert(eqoa.windows.takeover('loot'))")
+        .unwrap();
+    reset_all_for_test();
+}
+
+#[test]
+fn round7c_host_service_events_reach_lua_from_their_producers() {
+    use super::{action_broker, native_core, native_events, pointer_api};
+    use serde_json::json;
+    use winit::event::{
+        DeviceId, ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
+    };
+
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
+    native_events::bus(&host.lua).borrow_mut().once_mode = true;
+    native_core::CORE.with(|core| {
+        let mut core = core.borrow_mut();
+        *core = native_core::Core::default();
+        core.view.in_world = true;
+    });
+    host.execute(
+        r#"
+        service_events = {
+            'enabled', 'disabling', 'render', 'settings.render', 'timer',
+            'pointer.pressed', 'pointer.wheel', 'resource.ready', 'resource.failed',
+            'shared.changed', 'mod.command', 'action.result', 'batch.progress', 'batch.result',
+        }
+        seen = {}
+        for _, name in ipairs(service_events) do
+            assert(eqoa.capabilities.has('eqoa.events.' .. name), name)
+            assert(eqoa.events.on(name, function(e) seen[name] = e end))
+        end
+        assert(eqoa.events.after(0, function(e) seen.timer = e end))
+    "#,
+    )
+    .unwrap();
+    native_events::lifecycle(&host, "enabled").unwrap();
+    native_events::lifecycle(&host, "disabling").unwrap();
+    native_events::render(&host).unwrap();
+    native_events::settings_render(&host).unwrap();
+    pointer_api::position([10., 20.], true, (100, 100));
+    let device_id = DeviceId::dummy();
+    pointer_api::observe(
+        &WindowEvent::MouseInput {
+            device_id,
+            state: ElementState::Pressed,
+            button: MouseButton::Left,
+        },
+        (100, 100),
+    );
+    pointer_api::observe(
+        &WindowEvent::MouseWheel {
+            device_id,
+            delta: MouseScrollDelta::LineDelta(0., 1.),
+            phase: TouchPhase::Moved,
+        },
+        (100, 100),
+    );
+    native_events::resource(&host.lua, "font", mlua::Value::Integer(1), None).unwrap();
+    native_events::resource(&host.lua, "font", mlua::Value::Nil, Some("fixture failure")).unwrap();
+    native_events::shared_changed("owner", "data/journal.json");
+    native_events::command(
+        &native_events::bus(&host.lua),
+        json!({"from":"owner","command":"refresh","args":{"id":17}}),
+        || None,
+    )
+    .unwrap();
+
+    host.execute(
+        r#"
+        assert(eqoa.actions.assist())
+        assert(eqoa.actions.batch({{kind='assist'}}))
+    "#,
+    )
+    .unwrap();
+    for _ in 0..6 {
+        native_core::iteration(true);
+        action_broker::dispatch_all_for_test();
+        native_events::dispatch(&host).unwrap();
+    }
+    host.execute(
+        r#"
+        local missing = {}
+        for _, name in ipairs(service_events) do
+            if not seen[name] then missing[#missing + 1] = name end
+        end
+        assert(#missing == 0, 'Host did not emit: ' .. table.concat(missing, ', '))
+        assert(seen['pointer.pressed'].data.x == 10)
+        assert(seen['mod.command'].data.args.id == 17)
+        assert(seen['batch.result'].data.completed == 1)
+    "#,
+    )
+    .unwrap();
+}
+
+#[test]
 fn native_capabilities_are_probeable_and_stubs_diagnose_even_when_caught() {
     let h = Host::new().unwrap();
     h.execute(

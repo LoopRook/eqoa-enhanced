@@ -3554,14 +3554,14 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua,
         "eqoa.actions.RequestId",
         "supported",
-        Some(4),
+        Some(6),
         "opaque action request handle",
     );
     describe(
         lua,
         "eqoa.actions.ActionResult",
         "supported",
-        Some(4),
+        Some(6),
         "action status and result record",
     );
     for field in [
@@ -3581,7 +3581,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             lua,
             &format!("eqoa.actions.ActionResult.{field}"),
             "supported",
-            Some(4),
+            Some(6),
             "ActionResult field",
         );
     }
@@ -3590,14 +3590,14 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua,
         "eqoa.actions.BatchId",
         "supported",
-        Some(4),
+        Some(6),
         "opaque action batch handle",
     );
     describe(
         lua,
         "eqoa.actions.BatchResult",
         "supported",
-        Some(4),
+        Some(6),
         "batch progress and completion record",
     );
     for field in BATCH_RESULT_KEYS {
@@ -3605,26 +3605,28 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             lua,
             &format!("eqoa.actions.BatchResult.{field}"),
             "supported",
-            Some(4),
+            Some(6),
             "BatchResult field",
         );
     }
 
-    describe(
+    super::native::refuse_native(
         lua,
-        "eqoa.actions.destroy",
+        "actions",
+        "destroy",
         "unsupported",
         None,
-        "not offered before the PR (owner)",
-    );
+        "excluded until after the upstream PR by the mod API plan",
+    )?;
     for name in ["move", "look", "buttons"] {
-        describe(
+        super::native::refuse_native(
             lua,
-            &format!("eqoa.actions.{name}"),
+            "actions",
+            name,
             "not_yet",
-            Some(4),
-            "continuous controls come after the PR",
-        );
+            Some(6),
+            "continuous controls come after the upstream PR (mod API plan, round 6)",
+        )?;
     }
     bind(
         lua,
@@ -3950,14 +3952,6 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             })
         })?,
     )?;
-    describe(
-        lua,
-        "eqoa.actions.camera",
-        "supported",
-        Some(4),
-        "native WalkCamera/camstyle setter applied at Play::frame",
-    );
-
     install_non_item_actions(lua)?;
     install_item_actions(lua)?;
     super::window_actions::install(lua)?;
