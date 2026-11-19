@@ -152,6 +152,7 @@ fn wereoxxs_run_busy_zone(reference_chat: Option<&Path>, capture: bool) -> Optio
     addon_perf::force_for_test(true);
     let Some(mut rm) = Rm::with(|p| matches!(p, WEREOXXS | "resources"), 200) else {
         addon_perf::force_for_test(false);
+        eprintln!("SKIP wereoxxs_busy_zone_frame_cost: no GPU available");
         return None;
     };
     let label = if let Some(path) = reference_chat {
@@ -237,6 +238,7 @@ fn wereoxxs_run_busy_zone(reference_chat: Option<&Path>, capture: bool) -> Optio
         eprintln!("wereoxxs busy zone ({label}): {line}");
     }
     // An instruction budget keeps the regression independent of machine load.
+    // The measured peak was about six 1,000-instruction hook steps below this limit.
     const PEAK_INSTRUCTION_BUDGET: u32 = 110_000;
     if reference_chat.is_some() {
         assert!(

@@ -336,13 +336,6 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
   refused by upstream with 0x0016 and the pending open must be cleared). `report_viewer.rs:61` keeps keys from addons only for
   `merc_win_owns() || dyepick_owns()`: a "not plain play" rule (mode not 0/38) would survive future upstream windows.
 
-## Small tooling and Wereoxxs follow-ups (2026-11-19)
-
-- **Status:** Small, not scheduled. run_gates: an empty `cargo-build.lock` directory (no token) with no cargo/rustc running
-  blocked every build for ~1.5 h on 11-19; treat it as stale after a few minutes. Wereoxxs perf test: SKIP line when no GPU
-  is counted only through the manager's prerequisite line; the 110k instruction budget is ~6 steps above the measured peak
-  (tight); the old-Forge-host fallback path in chat_window.lua is untested.
-
 ## Map Search reads the Creature Journal before it is running (owner screenshot, 2026-11-19)
 
 - **Status:** Not scheduled; not caused by round 6.5 (`exchange.rs` and Map Search are the same as on develop). At
@@ -355,3 +348,7 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
   only the diagnostic shows. Proposed fix: (1) Map Search makes its first journal read at its first `render`, not in
   its entry; (2) the host answers a read whose owner is enabled but not yet primed with a `not_yet` code that is not a
   diagnostic, keeping `permission_denied` for an owner that is disabled or missing.
+
+## Old Forge chat fallback (2026-11-19)
+
+The fallback drawing path in Wereoxxs `chat_window.lua` still needs a check on an older Forge host.
