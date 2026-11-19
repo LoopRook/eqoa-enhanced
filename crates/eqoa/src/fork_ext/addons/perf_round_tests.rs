@@ -128,7 +128,8 @@ fn wereoxxs_busy_zone_frame_cost() {
         .as_deref()
         .and_then(|path| wereoxxs_run_busy_zone(Some(path), true));
     let after = wereoxxs_run_busy_zone(None, before.is_some());
-    if let (Some(before), Some(after)) = (before, after) {
+    if let Some(before) = before {
+        let after = after.expect("the bundled UI must render when the original rendered");
         assert!(
             before == after,
             "the busy-zone picture differs from the original"
@@ -231,6 +232,20 @@ fn wereoxxs_run_busy_zone(reference_chat: Option<&Path>, capture: bool) -> Optio
     );
     for line in addon_perf::take_report() {
         eprintln!("wereoxxs busy zone ({label}): {line}");
+    }
+    // An instruction budget keeps the regression independent of machine load.
+    const PEAK_INSTRUCTION_BUDGET: u32 = 110_000;
+    if reference_chat.is_some() {
+        assert!(
+            peak_instructions > PEAK_INSTRUCTION_BUDGET,
+            "the original chat must exceed the budget"
+        );
+        eprintln!("wereoxxs original exceeded the {PEAK_INSTRUCTION_BUDGET} instruction budget");
+    } else {
+        assert!(
+            peak_instructions <= PEAK_INSTRUCTION_BUDGET,
+            "wereoxxs used {peak_instructions} instructions in one frame (budget {PEAK_INSTRUCTION_BUDGET})"
+        );
     }
     if std::env::var_os("EQOA_WEREOXXS_PROFILE").is_some() {
         wereoxxs_profile(&mut rm, SAMPLES);
