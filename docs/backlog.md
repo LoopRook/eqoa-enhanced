@@ -321,3 +321,9 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
   Loot. Later: an Auto-loot setting "my kills only" / "anything the server lets me loot" (ask for every nearby corpse,
   hide the server's refusals; check that chat stays quiet and the server tolerates it) and group kills (only if the client
   can see what group members hit: unverified).
+
+## Scripted-input follow-ups (review 2026-11-18)
+
+- **Status:** Small, not scheduled. `EQOA_MOD_KEYS` alone leaves `input::from_device()` true (`input.rs:518` lists the upstream
+  script variables); count it as scripted fork-side without editing input.rs. The bag-viewer scene clicks fixed pixels
+  (fails closed if the layout moves); add a negative control for a missing loot receipt in tools/test_local_scene.py.
