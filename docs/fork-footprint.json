@@ -68,7 +68,10 @@
     "tools/test_local_scene.py",
     "crates/net/src/fork_record.rs",
     "tools/rec_dump.py",
-    "tools/test_rec_dump.py"
+    "tools/test_rec_dump.py",
+    ".github/workflows/branch-gates.yml",
+    "tools/ci_gates.py",
+    "tools/test_ci_gates.py"
   ],
   "shared": {
     ".gitignore": {
