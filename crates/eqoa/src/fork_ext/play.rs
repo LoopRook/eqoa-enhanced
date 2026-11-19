@@ -3811,6 +3811,7 @@ mod tests {
         p.session.quest_progress.push(net::session::TrackedQuest {
             name: "Wrong tracker title".into(),
             goals: vec![],
+            ability: false,
         });
         let journal = p.forge_snapshot(None).journal;
         assert_eq!(journal.count, 2);
