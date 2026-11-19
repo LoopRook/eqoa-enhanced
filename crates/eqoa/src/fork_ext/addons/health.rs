@@ -225,8 +225,12 @@ pub fn install_health_adapter(
 ) -> mlua::Result<()> {
     let lua = &host.lua;
 
-    // 1. Module `frontiers_forge.player`
-    let player = lua.create_table()?;
+    // Extend an already installed full player table. A standalone health host
+    // still exposes only health; installing player later supplies its full API.
+    let player = match host.registered_modules().get("frontiers_forge.player") {
+        Some(Value::Table(table)) => table.clone(),
+        _ => lua.create_table()?,
+    };
     let s = snapshot.clone();
     player.set(
         "GetCurrentHp",
@@ -280,6 +284,7 @@ mod tests {
             resource_dirs: Vec::new(),
             api: None,
             entry_mode: Default::default(),
+            capabilities_declared: true,
             requested_capabilities: Vec::new(),
             extensions: Default::default(),
             initially_enabled: true,
@@ -629,7 +634,7 @@ mod tests {
     }
 
     #[test]
-    fn forge_health_adapter_unsupported_apis_absent() {
+    fn forge_health_adapter_preserves_supported_player_apis_and_omits_unsupported_members() {
         let host = test_host("unsupported_absent_test");
         let token = InstanceToken::next().unwrap();
         let snapshot = Rc::new(Cell::new(HealthSnapshot::new(true, 100, 100)));
@@ -645,9 +650,12 @@ mod tests {
 
             assert(type(player.GetCurrentHp) == "function")
             assert(type(player.GetMaxHp) == "function")
-            assert(player.GetName == nil, "unsupported Player APIs must be absent")
-            assert(player.GetLevel == nil, "unsupported Player APIs must be absent")
-            assert(player.GetTotalStr == nil, "unsupported Player APIs must be absent")
+            assert(type(player.GetName) == "function", "full Player API must survive health install")
+            assert(type(player.GetLevel) == "function", "full Player API must survive health install")
+            assert(type(player.GetTotalStr) == "function", "full Player API must survive health install")
+            assert(type(player.GetCMs) == "function", "full Player API must survive health install")
+            -- The native Player adapter is read-only; health must not add setters.
+            assert(player.SetCurrentHp == nil, "unsupported Player setters must stay absent after health install")
 
             assert(type(ui.DisableHealthBar) == "function")
             assert(type(ui.EnableHealthBar) == "function")

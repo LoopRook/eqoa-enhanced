@@ -184,10 +184,26 @@ impl Default for Create {
     }
 }
 
+thread_local! {
+    /// The server offered Hardcore (go-eqoa-server's 0x7EB0, `net::hardcore`) and
+    /// the session took it: the review page shows its row.
+    static HARDCORE_OFFERED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the review page offers Hardcore (the session's `hardcore`, each frame).
+pub fn set_hardcore_offered(on: bool) {
+    HARDCORE_OFFERED.with(|c| c.set(on));
+}
+
+/// The review page's Hardcore row is up.
+pub fn hardcore_offered() -> bool {
+    HARDCORE_OFFERED.with(|c| c.get())
+}
+
 /// `VIWndCharCreateBlank::Reset`'s form: no name, city 0, and every choice
 /// -1 (the pages then take the race's defaults), no points spent.
 pub fn blank_form() -> NewChar {
-    NewChar { name: String::new(), race: -1, class: -1, sex: -1, hair_color: -1, hair_length: -1, hair_style: -1, face: -1, city: 0, stats: [0; 7], options: Vec::new() }
+    NewChar { name: String::new(), race: -1, class: -1, sex: -1, hair_color: -1, hair_length: -1, hair_style: -1, face: -1, city: 0, stats: [0; 7], options: Vec::new(), hardcore: None }
 }
 
 impl Create {
@@ -379,6 +395,9 @@ impl Create {
                 // select takes the rest
                 self.open = false;
                 self.env.release();
+                // Hardcore as the review page's row has it (`net::hardcore`: the
+                // session writes it only to a server that offered it)
+                self.form.hardcore = Some(self.review.hardcore && hardcore_offered());
                 session.create_character(&self.form);
                 self.sent = self.form.clone();
                 return Out::Done;
@@ -461,13 +480,8 @@ impl Create {
 
 /// The model (`CreateActor` + `SetHair` + `SetFace`), its sprite and its
 /// look, at `at` facing `hpr` (a server's race's body until it is read: its
-/// `like` race's, `Figure::new`).
-pub(crate) fn create_model(cx: &mut Ctx, model: u32, look: [i32; 4], at: [f32; 3], hpr: [f32; 3]) -> Option<Figure> {
-    create_model_dressed(cx, model, look, None, at, hpr)
-}
-
-/// `create_model` in a server's race's look too (`raceopts`: its parts'
-/// colours and textures, on the body they were chosen on).
+/// `like` race's, `Figure::new`), in a server's race's look too (`raceopts`:
+/// its parts' colours and textures, on the body they were chosen on).
 pub(crate) fn create_model_dressed(cx: &mut Ctx, model: u32, look: [i32; 4], race_look: Option<&net::raceopts::Look>, at: [f32; 3], hpr: [f32; 3]) -> Option<Figure> {
     let l = cust_look(look);
     let g = cx.gpu.as_mut()?;
@@ -486,11 +500,10 @@ fn cust_look(look: [i32; 4]) -> vi::cust::Look {
 pub(crate) fn redress_dressed(cx: &mut Ctx, f: &mut Figure, look: [i32; 4], race_look: Option<&net::raceopts::Look>) {
     let Some(g) = cx.gpu.as_mut() else { return };
     let l = cust_look(look);
-    if let Some(mut n) = Figure::new_dressed(&cx.res.lib, g, f.model, l, race_look.cloned(), [0; 3], f.at, f.hpr, cx.now) {
-        // the new body, the old sprite: its animation goes on
-        std::mem::swap(&mut n.gpu, &mut f.gpu);
-        f.look = l;
-        f.race_look = n.race_look.take();
+    if let Some(n) = Figure::new_dressed(&cx.res.lib, g, f.model, l, race_look.cloned(), [0; 3], f.at, f.hpr, cx.now) {
+        // the new body and what hangs on it (a Wisp's wisp in its colour), the
+        // old sprite: its animation goes on
+        f.dress_as(n);
     }
 }
 

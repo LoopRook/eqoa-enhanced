@@ -190,7 +190,31 @@ pub fn create_module(lua: &Lua) -> Result<Table> {
         })?,
     )?;
 
+    let mt = lua.create_table()?;
+    mt.set(
+        "__index",
+        lua.create_function(|lua, (_, key): (Table, String)| {
+            super::native::diagnose(
+                lua,
+                &format!("bit.{key}"),
+                "unknown_symbol",
+                "unknown BitOp member",
+            );
+            Ok(mlua::Value::Nil)
+        })?,
+    )?;
+    bit.set_metatable(Some(mt))?;
     Ok(bit)
+}
+
+pub(crate) fn install_native(lua: &Lua) -> Result<()> {
+    super::native::describe(lua, "bit", "supported", Some(2), "native BitOp subset");
+    for name in [
+        "tobit", "bnot", "band", "bor", "bxor", "lshift", "rshift", "arshift",
+    ] {
+        super::native::describe(lua, &format!("bit.{name}"), "supported", Some(2), "");
+    }
+    Ok(())
 }
 
 #[cfg(test)]

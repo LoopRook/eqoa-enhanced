@@ -100,6 +100,7 @@ impl Play {
                     self.mode = 11;
                     self.bank.state = 0;
                 }
+                if self.mode == 11 && super::fork_hooks::window_taken(self, 11) { self.bank.open = false; self.mode = 0; }
             }
             0x1253 => {
                 // the bank's tunar
@@ -184,6 +185,7 @@ impl Play {
             self.run_auction_search(vui, r);
             return;
         }
+        if self.mode != 11 && super::fork_hooks::bank_taken_tick(self, vui) { return; }
         if self.mode != 11 {
             self.bank.keys.clear();
             return;

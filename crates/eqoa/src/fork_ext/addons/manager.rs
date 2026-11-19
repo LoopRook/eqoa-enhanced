@@ -26,6 +26,34 @@ use mlua::{Function, Value};
 use render::wgpu;
 use std::{cell::RefCell, collections::VecDeque, path::PathBuf, rc::Rc};
 
+/// A line a mod wrote with `eqoa.log.write`. Every one goes to the game's log (eqoa.log, as `addon <id>: [level]
+/// text`). "info" and "debug" are the mod's own record of what it did, not a problem: they stop there and stay out of
+/// the Mods & Addons diagnostics (returns true). "warn" and "error" go on to the diagnostics as well.
+fn mod_log_line(id: &str, message: &str) -> bool {
+    let Some(rest) = message.strip_prefix("eqoa/1 [") else {
+        return false;
+    };
+    let Some((level, text)) = rest.split_once("] ") else {
+        return false;
+    };
+    let line = format!("addon {id}: [{level}] {text}");
+    crate::say(&line);
+    #[cfg(test)]
+    MOD_LOG.with(|l| l.borrow_mut().push(line));
+    matches!(level, "info" | "debug")
+}
+
+#[cfg(test)]
+thread_local! {
+    static MOD_LOG: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The `eqoa.log.write` lines that reached the game's log on this thread since the last call.
+#[cfg(test)]
+pub(crate) fn take_mod_log_for_test() -> Vec<String> {
+    MOD_LOG.with(|l| std::mem::take(&mut *l.borrow_mut()))
+}
+
 const MAX_INSTANCES: usize = 16;
 const MAX_DIAGNOSTICS: usize = 128;
 #[path = "manager_profiles.rs"]
@@ -221,6 +249,7 @@ impl Manager {
         self.frame_number = self.frame_number.saturating_add(1);
         let _prologue = super::addon_perf::section("mgr.prologue");
         if !snapshot.in_game && self.snapshot.in_game {
+            super::window_takeover::release_all();
             super::native_core::CORE
                 .with(|c| c.borrow_mut().publish(super::native_core::View::default()));
             for entry in &self.entries {
@@ -340,6 +369,9 @@ impl Manager {
                     self.diagnostic(Some(&entry.metadata.id), "imgui", message);
                 }
                 for message in i.host.drain_logs().unwrap_or_default() {
+                    if mod_log_line(&entry.metadata.id, &message) {
+                        continue;
+                    }
                     self.diagnostic(Some(&entry.metadata.id), "lua", message);
                 }
                 let messages = i.textures.borrow_mut().drain_diagnostics();
@@ -405,6 +437,32 @@ impl Manager {
         super::native_core::manager_demand(false);
         super::visibility::publish(false);
         self.shutdown_inner(true);
+    }
+
+    /// Expose the bundled Bag Viewer's rendered loot log to the local scene runner.
+    pub(super) fn log_bag_viewer_scene(&self) {
+        let Some(instance) = self.entries.iter().find_map(|entry| {
+            (entry.metadata.id == "eqoa_bag_viewer"
+                && super::named_profiles::is_bundled(&entry.metadata))
+            .then_some(entry.instance.as_ref())
+            .flatten()
+        }) else {
+            return;
+        };
+        let log = (|| -> mlua::Result<mlua::Table> {
+            let require = instance.host.lua.globals().get::<Function>("require")?;
+            require.call::<mlua::Table>("bags")?.raw_get("log")
+        })();
+        match log {
+            Ok(log) => {
+                for row in log.sequence_values::<mlua::Table>().take(50).flatten() {
+                    if let Ok(text) = row.raw_get::<String>("text") {
+                        crate::say(&format!("scene: Bag Viewer loot log {text}"));
+                    }
+                }
+            }
+            Err(error) => crate::say(&format!("scene: Bag Viewer loot log unavailable: {error}")),
+        }
     }
 
     fn diagnostic(&mut self, id: Option<&str>, phase: &'static str, message: String) {
@@ -1008,6 +1066,8 @@ mod tests {
     include!("round_minimap_manager_tests.rs");
     include!("bag_viewer_tests.rs");
     include!("perf_round_tests.rs");
+
+    use super::super::big_stack;
     use super::*;
     use dear_imgui_rs::Context;
     use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo};
@@ -1703,6 +1763,9 @@ mod tests {
 
     #[test]
     fn forge_manager_health_pending_cleanup_pause_reload_and_coherent_snapshot() {
+        big_stack(forge_manager_health_pending_cleanup_pause_reload_and_coherent_snapshot_body)
+    }
+    fn forge_manager_health_pending_cleanup_pause_reload_and_coherent_snapshot_body() {
         let Some(mut gpu) = Gpu::new() else { return };
         let scripts = Scratch::new();
         let config = Scratch::new();
@@ -2542,6 +2605,9 @@ mod tests {
 
     #[test]
     fn round6b_frame_mode_and_forge_widget_click_grants_one_gesture_via_manager() {
+        big_stack(round6b_frame_mode_and_forge_widget_click_grants_one_gesture_via_manager_body)
+    }
+    fn round6b_frame_mode_and_forge_widget_click_grants_one_gesture_via_manager_body() {
         super::super::action_broker::reset_all_for_test();
         super::super::native_core::CORE.with(|c| {
             let mut core = super::super::native_core::Core::default();
@@ -2606,7 +2672,7 @@ mod tests {
         );
 
         let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
-        // Prime first frame without mouse press -> idle call refused with needs_player_action.
+        // Prime first frame without mouse press -> idle call succeeds autonomously with eqoa.actions.*.
         gpu.frame(&mut manager);
         assert!(
             manager.diagnostics().iter().all(|d| !d.message.contains("DoAssist")),
@@ -2618,8 +2684,7 @@ mod tests {
             .load("return idle_req, idle_err and idle_err.code")
             .eval()
             .unwrap();
-        assert!(idle_req.is_none());
-        assert_eq!(idle_code.as_deref(), Some("needs_player_action"));
+        assert!(idle_req.is_some(), "idle call with capability succeeds: {idle_code:?}");
 
         // Physical mouse hover then click on frame_btn's Button(DoAssist) inside Manager::frame.
         gpu.context.io_mut().add_mouse_pos_event([50.0, 35.0]);
@@ -2645,11 +2710,10 @@ mod tests {
             .unwrap();
         assert!(
             c_req.is_some(),
-            "frame-mode Button click must authorize 1 action (c_code={c_code:?}, diag={:?})",
+            "frame-mode Button click must queue action (c_code={c_code:?}, diag={:?})",
             manager.diagnostics()
         );
-        assert!(s_req.is_none(), "second action in same frame-mode click must fail");
-        assert_eq!(s_code.as_deref(), Some("needs_player_action"));
+        assert!(s_req.is_some(), "second action in same callback also succeeds (s_code={s_code:?})");
 
         // Physical hover + click on Forge mod's ImGui.Button(ForgeDo) inside Manager::frame.
         gpu.context.io_mut().add_mouse_pos_event([170.0, 40.0]);

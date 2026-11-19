@@ -440,5 +440,195 @@ class TestRunGates(unittest.TestCase):
         self.assertIn("Stream reader error for full: simulated read failure", stderr_capture.getvalue())
 
 
+class TestSharedTargetGuard(unittest.TestCase):
+    """The shared CARGO_TARGET_DIR stale-binary guard (no cargo is run; timestamps are set by hand)."""
+
+    HOUR = 3600
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory(prefix="test-run-gates-guard-")
+        self.addCleanup(self.temp_dir.cleanup)
+        base = Path(self.temp_dir.name)
+        self.root = base / "wt-a"
+        self.other_root = base / "wt-b"
+        self.target = base / "target"
+        self.past = time.time() - 10 * self.HOUR
+        (self.root / "docs").mkdir(parents=True)
+        (self.root / "docs" / "fork-footprint.json").write_text(
+            json.dumps({"reviewed_base": "1234567890abcdef1234567890abcdef12345678"}), encoding="utf-8"
+        )
+        self.sources = []
+        for crate, names in {"eqoa": ["src/main.rs", "build.rs", "src/other.rs"], "vi": ["src/lib.rs"]}.items():
+            for name in names:
+                path = self.root / "crates" / crate / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("// x\n", encoding="utf-8")
+                os.utime(path, (self.past, self.past))
+                self.sources.append(path)
+        self.deps = self.target / "debug" / "deps"
+        self.deps.mkdir(parents=True)
+
+    def _exe(self, mtime, name="eqoa-abc.exe"):
+        exe = self.deps / name
+        exe.write_bytes(b"MZ")
+        os.utime(exe, (mtime, mtime))
+        return exe
+
+    def _dep_info(self, mtime):
+        d = self.deps / "eqoa-abc.d"
+        d.write_text("x", encoding="utf-8")
+        os.utime(d, (mtime, mtime))
+
+    def _gate(self, fake_tree, *, branch, only="addons", release=False):
+        with mock.patch("run_gates.run_subprocess_tree", side_effect=fake_tree), mock.patch("sys.stdout", io.StringIO()):
+            code = run_gates.run_gates(
+                root=self.root,
+                only=only,
+                release=release,
+                cargo_target_dir=self.target,
+                lock_dir=Path(self.temp_dir.name) / "cargo.lock",
+                branch=branch,
+            )
+        gates = self.target / "gates"
+        summary = (gates / f"{branch}-summary.md").read_text("utf-8")
+        log = (gates / f"{branch}-{only}.log").read_text("utf-8")
+        return code, summary, log
+
+    def test_touch_marks_only_workspace_root_files_new(self):
+        now, files = run_gates.touch_workspace_sources(self.root)
+        self.assertEqual(sorted(f.name for f in files), ["build.rs", "lib.rs", "main.rs"])
+        for path in self.sources:
+            if path.name == "other.rs":
+                self.assertLess(path.stat().st_mtime, self.past + 1)
+            else:
+                self.assertAlmostEqual(path.stat().st_mtime, now, delta=1.0)
+
+    def test_needs_touch_rules(self):
+        marker = {"root": run_gates._norm_root(self.root), "touched_at": 5.0, "stamp": 100.0}
+        self.assertTrue(run_gates.guard_needs_touch(None, self.root, 100.0))
+        self.assertFalse(run_gates.guard_needs_touch(marker, self.root, 100.0))
+        self.assertTrue(run_gates.guard_needs_touch(marker, self.other_root, 100.0))  # another worktree built last
+        self.assertTrue(run_gates.guard_needs_touch(marker, self.root, 250.0))  # someone built since
+        self.assertTrue(run_gates.guard_needs_touch({"root": marker["root"]}, self.root, 100.0))  # damaged marker
+
+    def test_newest_artifact_mtime(self):
+        self.assertEqual(run_gates.newest_artifact_mtime(self.target), 0.0)
+        self._dep_info(self.past)
+        release = self.target / "release" / "deps"
+        release.mkdir(parents=True)
+        newer = release / "eqoa-def.d"
+        newer.write_text("x", encoding="utf-8")
+        os.utime(newer, (self.past + 50, self.past + 50))
+        self.assertAlmostEqual(run_gates.newest_artifact_mtime(self.target), self.past + 50, delta=0.01)
+
+    def test_parse_test_exes(self):
+        out = (
+            "   Compiling eqoa v0.1.0\n"
+            "    Finished `test` profile [unoptimized] target(s) in 0.87s\n"
+            "     Running unittests src/main.rs (C:\\t\\debug\\deps\\eqoa-abc.exe)\n"
+            "     Running unittests src/main.rs (C:\\t\\debug\\deps\\eqoa-abc.exe)\n"
+            "     Running unittests src/lib.rs (target\\debug\\deps\\vi-1.exe)\n"
+        )
+        self.assertEqual(
+            run_gates.parse_test_exes(out, self.root),
+            [Path("C:\\t\\debug\\deps\\eqoa-abc.exe"), self.root / "target" / "debug" / "deps" / "vi-1.exe"],
+        )
+        self.assertEqual(run_gates.parse_test_exes("nothing here\n"), [])
+
+    def test_verify_accepts_rebuilt_and_rejects_stale_or_unknown_exe(self):
+        guard = run_gates.SharedTargetGuard(self.root, self.target)
+        touched = guard.begin()
+        fresh = self._exe(touched + 5)
+        stale = self._exe(touched - self.HOUR, name="eqoa-old.exe")
+        ((exe, mtime),) = guard.verify([fresh])
+        self.assertEqual(exe, fresh)
+        self.assertAlmostEqual(mtime, touched + 5, delta=0.01)
+        with self.assertRaisesRegex(run_gates.StaleBinaryError, "not rebuilt"):
+            guard.verify([fresh, stale])
+        with self.assertRaisesRegex(run_gates.StaleBinaryError, "could not identify"):
+            guard.verify([])
+        with self.assertRaisesRegex(run_gates.StaleBinaryError, "missing"):
+            guard.verify([self.deps / "gone.exe"])
+
+    def test_begin_skips_touch_only_while_this_worktree_built_last(self):
+        guard = run_gates.SharedTargetGuard(self.root, self.target)
+        first = guard.begin()
+        self.assertTrue(guard.touched_now)
+        self._dep_info(first + 2)  # this worktree's build
+        guard.end()
+
+        again = run_gates.SharedTargetGuard(self.root, self.target)
+        self.assertEqual(again.begin(), first)  # nothing built since: no re-touch, no needless rebuild
+        self.assertFalse(again.touched_now)
+
+        time.sleep(0.05)  # coarse Windows clock: keep touches on distinct stamps
+        self._dep_info(time.time() + 60)  # another worktree builds
+        third = run_gates.SharedTargetGuard(self.root, self.target)
+        self.assertGreater(third.begin(), first)
+        self.assertTrue(third.touched_now)
+
+        # The owner package builder forces a touch even when the marker says this worktree built last.
+        third.end()
+        time.sleep(0.05)  # Windows runners tick time.time() at ~15 ms; two touches can share a stamp
+        forced = run_gates.SharedTargetGuard(self.root, self.target)
+        self.assertGreater(forced.begin(force=True), third.touched_at)
+        self.assertTrue(forced.touched_now)
+
+    def _addons_step(self, exe_offset_from_touch, branch):
+        """Run the addons step with a fake cargo reporting an exe whose mtime is touch time + offset."""
+        exe = self.deps / "eqoa-run.exe"
+        exe.write_bytes(b"MZ")
+
+        def fake_tree(cmd, cwd, env, timeout_minutes, **kwargs):
+            touched = max(p.stat().st_mtime for p in self.sources)  # the guard has touched by now
+            mtime = touched + exe_offset_from_touch
+            os.utime(exe, (mtime, mtime))
+            return 0, (
+                "    Finished `test` profile target(s) in 0.87s\n"
+                f"     Running unittests src/main.rs ({exe})\n"
+                "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s\n"
+            )
+
+        return (*self._gate(fake_tree, branch=branch), exe)
+
+    def test_gate_passes_and_records_exe_when_rebuilt_after_touch(self):
+        code, summary, log, exe = self._addons_step(5.0, "fresh")
+        self.assertEqual(code, 0)
+        self.assertIn("- **addons**: PASS", summary)
+        self.assertIn(f"Tested executable: `{exe}", summary)
+        self.assertIn("(modified ", summary)
+        self.assertNotIn("STALE BINARY", summary)
+
+    def test_gate_fails_loudly_when_cargo_reused_another_worktrees_exe(self):
+        # The exe is an hour older than this worktree's touch: another worktree built it.
+        code, summary, log, exe = self._addons_step(-self.HOUR, "stale")
+        self.assertEqual(code, 1)
+        self.assertIn("- **addons**: FAIL", summary)
+        self.assertIn("**STALE BINARY**", summary)
+        self.assertIn("SOME GATES FAILED", summary)
+        self.assertIn("STALE BINARY CHECK FAILED", log)
+
+    def test_gate_without_a_reported_exe_fails(self):
+        def fake_tree(cmd, cwd, env, timeout_minutes, **kwargs):
+            return 0, "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;\n"
+
+        code, summary, log = self._gate(fake_tree, branch="noexe")
+        self.assertEqual(code, 1)
+        self.assertIn("could not identify", summary)
+
+    def test_release_step_checks_exe_is_rebuilt(self):
+        release_exe = run_gates._release_exe_path(self.target)
+        release_exe.parent.mkdir(parents=True)
+        release_exe.write_bytes(b"MZ")
+        os.utime(release_exe, (self.past, self.past))  # left by another worktree
+
+        def fake_tree(cmd, cwd, env, timeout_minutes, **kwargs):
+            return 0, "    Finished `release` profile [optimized] target(s) in 0.9s\n"
+
+        code, summary, log = self._gate(fake_tree, branch="rel", only="release", release=True)
+        self.assertEqual(code, 1)
+        self.assertIn("**STALE BINARY**", summary)
+
+
 if __name__ == "__main__":
     unittest.main()

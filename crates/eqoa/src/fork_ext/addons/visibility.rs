@@ -932,6 +932,7 @@ mod tests {
             resource_dirs: vec![],
             api: None,
             entry_mode: Default::default(),
+            capabilities_declared: true,
             requested_capabilities: vec![],
             extensions: Default::default(),
             initially_enabled: true,

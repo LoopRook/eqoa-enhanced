@@ -18,7 +18,7 @@ use std::{
 
 const PERIOD: Duration = Duration::from_secs(5);
 /// Calls named per addon in the `addon-api:` line.
-const TOP_CALLS: usize = 6;
+const TOP_CALLS: usize = 12;
 
 #[cfg(test)]
 thread_local! {

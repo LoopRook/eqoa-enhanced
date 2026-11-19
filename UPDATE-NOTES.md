@@ -5,7 +5,462 @@ in the same push as the changes it describes. The dev release's page shows them
 (`release/notes.sh`, from `.github/workflows/dev.yml`); an edit to this file alone
 is put on the page by `.github/workflows/notes.yml`.
 
+## 2026-11-18 · Small bodies' shields and weapons at a distance
+- **A fairy's or a pixie's shield and weapons stay their size as you zoom out**: a Druid in Fey Mask (or a
+  Fairy) held a shield that grew three times larger once the camera was a few steps back, and its weapons did
+  the same farther out. They are now drawn at the hands' size at every distance (and the fairy's shield is no
+  longer shrunk too small up close). The original game drew them this way too; this client puts it right.
 
+## 2026-11-18 · The keyboard in a mercenary's windows
+- **A mercenary's spell window and inventory take the keyboard** like your own spell book and item menu: the
+  arrow keys move through them, Enter (or E) picks and Escape closes, and Page Up/Down turns a spell's
+  description. Before, only a controller or the mouse worked there.
+
+## 2026-11-18 · Hardcore characters
+- **Make a Hardcore character** on a server that has them: the last page of character creation has a
+  Hardcore row (left or right turns it on), and creating with it on asks you to confirm. It is for good: a
+  Hardcore character's first death is its last, with no respawn and no resurrection, and it shows as
+  "[HC] Name" to everyone in the world.
+- **When a Hardcore character falls**, the screen says what slew it and where, and a few seconds later you are
+  back at the server list (your login kept). Its slot stays on character select as a memorial, greyed, with
+  when it fell ("Fallen 2026-11-18 08:45 UTC"), what slew it and where; it cannot enter the world again, and
+  Delete removes it as any character.
+
+## 2026-11-18 · [OG] accounts on the Vanilla Test server
+- **An [OG] account plays the game as it was** on the Vanilla Test server: every extra this client adds is off
+  (as below), the map, the minimap and item links included and locked off, and the mouse and the touch screen
+  do nothing in the world (the keyboard and controllers play). Your frame rate, widescreen and graphics
+  settings stay. Everywhere else, and before you enter the world, nothing changes. An account is made [OG]
+  when it is created, and its characters show as "[OG] Name" there.
+
+## 2026-11-18 · The game's own screens on the Vanilla Test server
+- **On a server that asks for the game as it was** (the Vanilla Test server), the extras this client adds are
+  off while you play there: the quest helper (its tracker, the quest marks on the map and the "!" and "?" over
+  quest givers), a target's level in the target box, the DPS meter, Number Colors and Merc Colors (every number
+  in the game's own colour), the stat caps in Character > Summary (the value alone, as on a PS2), the group's
+  power bars, the buff window (the game's own effects strip instead), the pet's effects under its bar,
+  auto-cast and auto target, and the third and fourth ability bars and Stacked Spell Bars (the game's two
+  bars). Their rows in Extended say "Off on this server" and do not change. The server's /con, which named a
+  creature's level, is off there too.
+- **The map, the minimap and item links start off there**: their rows say "Off by default on this server", and
+  you can turn them on in Extended. What you choose there is kept for that server and does not change your
+  choice anywhere else.
+- **Your own choices are kept**: on any other server everything is back exactly as you set it.
+## 2026-11-18 · Texture packs: precache, compression, a cache that makes later starts fast
+- **Texture packs load ahead of you**: when a zone comes into range its pack textures are loaded before you
+  reach it, so walking into a town shows the pack's textures at once far more often instead of the game's
+  own first.
+- **Several textures load at once**: a pack's files are now read by several helpers at a time, and what is
+  on screen always goes first.
+- **Precache Textures** (Extended > Texture Cache): on, the whole pack is loaded into memory in the
+  background as you play, nearest needs first, and it stops by itself before it takes too much memory. On
+  by default.
+- **Pack Compression** (Extended > Texture Cache): on a graphics card that supports it, a pack's textures
+  can be kept compressed, four times smaller, so far more of a large pack fits in the card's memory before
+  any is let go or drawn smaller. Auto (the default) compresses only a pack too large for the card's memory;
+  On always; Off never. DDS packs that are already compressed are now kept compressed as they are.
+- **Faster starts with a pack**: the first time a PNG texture is loaded it is also saved, ready to use, in
+  the game's cache folder (never in your pack's folder), so the next time the game starts it loads far
+  faster. Rebuild Pack Cache (Extended > Texture Cache) clears it if you ever need to.
+- **Several game windows share**: windows open together share the saved textures on disk and in memory,
+  and with Texture Pack Memory on Auto they split the graphics card's memory between them instead of each
+  taking a third of it.
+
+## 2026-11-18 · Texture packs load all their textures again
+- **Texture packs show all their textures again**: since the last update a large pack could stop loading
+  textures once it had filled the memory set aside for it, most of all in busy places like Freeport, and the
+  game's own textures showed instead. Now the pack's textures you have not seen for the longest are let go to
+  make room and load again when you come back to them. Only if what is on screen alone is more than the memory
+  allows are some drawn at half size or smaller, and the game's own texture is the last resort.
+- **More memory for packs on a graphics card**: it now takes a third of the card's own memory (from 1 GB up to
+  4 GB) where the card says how much it has. Built-in graphics keep the smaller amount that stops them running out.
+- **Texture Pack Memory** (Extended > Textures, beside Texture Packs): Auto, or 512 MB, 1 GB, 2 GB or 4 GB. The
+  page says what the pack's textures take, such as "Pack textures: 812 of 1024 MB", with "(held)" when some
+  were let go or drawn smaller to stay within it. If your graphics still run out of memory the game recovers
+  with a smaller amount, as before.
+
+## 2026-11-18 · The catapult's spoon throws with its arm
+- **The catapult's spoon swings with its arm**: the cup at the end of the arm now goes up with it on every throw,
+  and the boulder leaves from the spoon.
+
+## 2026-11-18 · The catapult's wheels and arm, two-tone dyes, everywhere
+- **The catapult pet stays a catapult in every world**: after a teleport to Odus or any land whose ground has no
+  catapult it no longer turns back into its old body; the catapult is read off your disc wherever you are.
+- **Its wheels roll**: they turn as it moves, forward and back, and stop when it stands.
+- **Its arm throws**: at each shot the arm swings up fast, lets the boulder go from its tip at the top of the swing,
+  and winds back down slowly. The ram still lunges at each swing.
+- **Two colours at the Pet Groomer**: its wood and stone take one dye, its iron the other.
+
+## 2026-11-18 · The colour picker on a controller, R2 to change chat channels
+- **The dyers' colour picker works on a controller**: the d-pad or the left stick moves between the sliders,
+  the recent colours and OK/Cancel (held, it keeps going), left and right change the value (L1/R1 or L2/R2 by
+  ten), ✕ picks the colour, △ or ○ cancels. The row you are on is framed in yellow, and the bottom of the
+  window shows the buttons.
+- **No more preset colours at the dyers**: choosing what to dye now opens the colour picker straight away
+  (the Weapon Enchanter asks "Its own colours" or "Pick any colour..."). Your recent colours are still in the
+  picker, and its new **No dye** button, between OK and Cancel, takes the dye off just the piece you chose.
+- **R2 Channel Switch** (Extended > UI > Chat, off unless you turn it on): hold R2 and press left or right on
+  the d-pad to switch the chat channel (Say, Group, Shout, Guild); the new channel is shown in the chat box.
+  On a keyboard, hold C and press the arrows.
+## 2026-11-18 · Christmas lights on the cape, a tidier Gingerbread Man, golems emote
+- **The String of Lights looks like a string of lights**: the bulbs now run all the way round the cape's edge
+  (both sides, across the shoulders and along the hem), straight down its middle and in a zigzag across it, and
+  each bulb is a bigger, solid coloured bulb that shows by day as well as glowing by night.
+- **The Gingerbread Man's face sits in its face**: its icing eyes are in the golem's eye sockets and its smile at
+  its mouth, and the icing round its wrists sits at the wrists (it was round the hands).
+- **Golems emote**: in the Gingerbread Man's look, or as a clay, stone or iron golem, your character now waves,
+  bows, points and cheers as everyone else does (before, it only stood there).
+
+## 2026-11-17 · Look around while you run
+- **Hold the left mouse button while running to look around**: the camera swings freely and your character keeps
+  running the way it was going. Let go and the camera eases back behind you in about a quarter second. (Before,
+  the left button turned your character while you moved, as the right button does.)
+- **Both mouse buttons run straight ahead where the camera faces**, and the movement keys and the controller's
+  stick are ignored while both are held. To run diagonally, hold the right button with W and A or D.
+- Standing still the left button looks around as before, and the right button still turns your character with the
+  camera.
+
+
+
+
+
+
+
+## 2026-11-17 · An item's stats before you auction it
+- **See an item's stats before you put it up for auction**: in the bank's auction page, press □ (Q on the
+  keyboard), or click or tap the item's text, to see everything about the selected item, its stat bonuses and
+  its description too; it works from the sell form as well (click its Item row). △ closes it, and your prices
+  stay as you typed them.
+## 2026-11-17 · Ability quests in green
+- **Ability quests stand out on the map**: a quest that teaches your class a new ability now has a **green** "!"
+  or "?" on the map and the minimap, its name green with "- Ability" after it on the mark's card, and green in the
+  quest tracker, so you can tell it from the other quests at a glance (thanks, Zerkziee). Needs the Heirloom Test
+  Server's update; elsewhere the client's own quest guide marks its class quests the same way.
+## 2026-11-17 · A pet in a siege catapult
+- **Pets in a prop's body**: a server can dress a pet as a piece of scenery, such as Tunaria's siege catapult. It
+  rams forward at each of its swings and, at its strikes, hurls a boulder from its arm in an arc onto its target.
+  It keeps its name, can be targeted, and never blocks your way.
+## 2026-11-17 · Rudolph's nose, moved
+- **Rudolph's nose glows where the GMs put it**: moving the glow now shows at once, without restarting the game.
+
+## 2026-11-17 · Weather where you stand, a smooth sleigh ride
+- **The weather goes by where your character stands**, not where the camera is: swinging the camera under an
+  awning, through a wall or across a region's edge no longer changes the sky, how hard it rains or the wind.
+- **A smooth sleigh ride**: the sleigh, its team, Santa and its riders now glide along a smooth curve through the
+  server's updates, a fraction of a second behind them, turning smoothly too, with no nudge as each update comes.
+- **Rudolph's nose sits on his nose**: the glow was above his head; it now starts on his nose and moves with it.
+
+## 2026-11-17 · Rudolph's nose, a steadier sleigh ride
+- **Rudolph's nose glows on his nose**: the red glow now moves with his head as he runs, instead of hanging where
+  his nose would be standing still.
+- **A steadier sleigh ride**: each correction from the server now eases in over a third of a second, so the
+  sleigh, its team and its riders no longer shake, and the view from the deck is smooth.
+## 2026-11-17 · Robes on treants
+- **A robe fits a treant**: in a treant's form (the druid's Spirit Form), a robe is now worn as a long gown: the
+  robe's chest and sash over the upper trunk and its skirt down to the roots, which keep their bark. Before, the
+  sash sat at the foot of the trunk and the skirt was stretched out along one of the roots.
+
+## 2026-11-17 · Smoother sleigh, no flicker on the tree
+- **Santa and his riders stay in the sleigh**: on the sleigh tour, Santa at the reins and the players riding along
+  are no longer dropped through the sleigh, or onto a roof it flies over, between the server's updates.
+- **A smoother flight**: the sleigh, its team, Santa and its riders now glide along together between updates
+  instead of being set down and lifted again.
+- **No more flicker on the decorations**: the tree's ribbon and tinsel, and the ribbons on the presents, no longer
+  flicker where they overlap the boughs, the paper or each other.
+
+## 2026-11-17 · No stars through a sandstorm
+- **The stars, moon and sun no longer shine through a storm**: a heavy sandstorm, whiteout or snowstorm now hides
+  them completely, and a lighter one dims them in proportion. By day the sun no longer glows through a heavy
+  sandstorm.
+- **No more sky where the walls should be**: in a storm, distant walls and cliffs fade into the storm itself, not
+  into a starry sky. Low down, the sky is always the storm's colour.
+- **Heavy snow fills the sky too**: a heavy snowstorm's sky now turns the colour of the storm, as a sandstorm's does.
+## 2026-11-17 · Weapon Swap Back
+- **Press a weapon set again to swap back**: with Extended > Other > Combat > Weapon Swap Back on, using a weapon set
+  from the HUD switches to it as before, and using the same set again puts back exactly what you had in your hands.
+  Two swords, the bow's set, the bow; the bow's set again, the same two swords. Bare hands works the same way, to
+  sheathe and draw your weapons.
+- Off by default. Your items are moved by the server, never copied: an item you sold, banked or traded since is
+  simply left out.
+
+## 2026-11-17 · Chat tabs, stacked spell bars, targeting mercenaries
+- **What someone says stays in the tab for says**: a /say, an NPC's words or a quick chat line with a word like
+  "hit", "resist", "loot" or "xp" in it went to the Combat (or Loot, Experience) tab; it goes where you send says now.
+- **The Stacked Spell Bars move on their own** with Move HUD on: they were part of the chat box and moved with it.
+  They start where they were, over the chat box; drag either one and the other stays put.
+- **The crosshair targets mercenaries**: in first person (and with the camera all the way in) aiming at a mercenary
+  targets it, as it does a creature, to heal or buff it. Pets are still passed over, as on the PS2.
+- **The web page survives the browser running short of graphics memory** when making a buffer: it makes its
+  graphics again, with a texture pack given less memory, where it stopped with a crash before.
+
+## 2026-11-17 · Zone ambience now follows the Music volume
+- **Zone ambience now follows the Music volume**: the background sounds of each place (and the wind in snow and
+  sandstorms) are turned down by Music Volume, not Fx Volume, so Music at 0 makes the world quiet of everything but
+  its effects; Fx at 0 silences only the effects (swings, spells, the interface).
+
+
+## 2026-11-17 · Santa's reindeer in Santa Hats
+- **Santa's reindeer can wear Santa Hats**, sitting between their ears and moving with their heads as they rear and
+  fly (they floated above their heads before).
+
+## 2026-11-17 · Two-tone hats
+- **Hats take two dyes**, as two-tone armour does: the helm dye colours the hat, the **helm trim** dye its trim: the
+  kappa straw hat's steel spike, the Santa Hat's white band and bobble, the turban's tail. Without a trim dye the trim
+  keeps its own colours. The Equipment Dyer's "Helm trim" (and a GM's #dye helmtrim) sets it.
+
+## 2026-11-17 · Any colour at the dyers
+- **The Equipment Dyer, the Pet Groomer and the Weapon Enchanter now offer "Pick any colour..."** after their
+  colour families: a colour picker opens with a colour square, a hue strip, hue, saturation, value and red, green,
+  blue sliders with their numbers (and how strong a pet's dye is), the colour in hex, the colour before beside the
+  new one, your recent colours and the dyer's own as swatches, and OK and Cancel. Your character (or pet, or weapon's
+  aura) shows the colour while you pick it; Cancel puts it back. It works with the mouse (drag the square, the strip
+  or a slider), a controller (up and down a row, left and right its value, L1 and R1 by ten, Start or OK to dye,
+  Triangle to cancel), the keyboard (arrows, Tab, Enter, Escape, and typing a hex colour such as 3FA7D6) and a
+  touch screen.
+## 2026-11-17 · Toymaker Tinsel's new toys
+- **The String of Lights**: a cape with a string of tiny twinkling lights in many colours along its edges, over your
+  shoulders and down its sides, on a thin green cord. The lights move with you, and glow at night.
+- **The Candy Cane Staff** is striped red and white, with a twinkle at its tip.
+- **The Gingerbread Man**: become a gingerbread man with white icing eyes, a smile, three buttons and wavy icing at the
+  wrists and ankles.
+- **The Santa Hat's white ball no longer glows at night**: it is lit like the rest of the hat.
+## 2026-11-17 · Bushy tinsel
+- **The Christmas tree's gold tinsel is real tinsel now**: short twisted pieces along the garland, bushy from every side,
+  where it was a flat strip.
+
+## 2026-11-17 · Ride Santa's sleigh over Freeport
+- **Santa's sleigh tour**: talk to Santa Claus by the Christmas tree and choose the sleigh ride; Santa calls everyone
+  aboard, and anyone standing on or beside the sleigh when it leaves flies with him and the whole team over Freeport's
+  harbor, gates and quarters, with Santa saying a word at each. You ride on the sleigh's deck the whole way and are
+  set down beside the tree at the end.
+- **You can run onto the sleigh** without jumping, and walk through Santa's team.
+## 2026-11-17 · Volumes stay where you set them
+- **Fx Volume and Music Volume are kept the moment you change them**: before, a volume turned down or off was only
+  kept with Save Changes, so backing out of Options with Triangle put the old volume back, and a window closed any
+  other way lost it at the next zone into a new world, login or start. The volumes are now kept as you move the
+  slider, at 0 silent.
+## 2026-11-17 · No more "Out of Memory" crashes with texture packs
+- **The game no longer crashes with "wgpu error: Out of Memory"** on graphics chips with little memory of their own
+  (laptops' Intel Iris Xe and other integrated graphics), most of all with a texture pack on in a busy place like
+  Freeport. A texture pack's pictures are now kept within a graphics memory budget (256 MB on integrated graphics,
+  1 GB on a graphics card); past it, the rest show the game's own textures. A pack's pictures larger than 1024
+  (integrated) or 2048 (a card) a side are drawn at that size. If the graphics memory still runs out, the game makes
+  its graphics again with a smaller budget and plays on, instead of closing.
+
+## 2026-11-17 · Brighter Christmas globes, a steady ribbon
+- **The Christmas tree's glass globes are brighter**: each shows its colour clearly by day and glows at night.
+- **The tree's red ribbon no longer flickers** against the boughs, near or far.
+
+## 2026-11-17 · Hats have an inside
+- **Looking up under a hat** (the Santa Hat, the kappa's straw hat, the turban) now shows its inside, a shade darker,
+  instead of seeing straight through it. The Santa Hat's white bobble is now round from every side.
+## 2026-11-17 · The froglok's jump
+- **Frogloks jump like frogs**: a froglok player now springs off with its legs thrown out straight below it, reaches
+  down with them coming back, and lands in a deep crouch, from the froglok's own leap. Before, it borrowed the
+  human's knee bend, which stood it stiff through the jump and stretched it tall as it landed. Every froglok body
+  (the robed and spiked ones too), as its own player sees it and as other players on this client see it.
+## 2026-11-17 · A robe's hem takes its trim
+- **The dark robe's skirt now has a trimmed hem**: a trim dye on the legs colours the robe's lower band too, so Santa's
+  robe has a white hem like a Santa suit.
+
+## 2026-11-17 · Santa wears his hat
+- **Santa Claus now wears his Santa Hat** by the tree: the hat a creature is given by its name was dropped because
+  it changes none of its colours, so he showed his own red cloth cap.
+## 2026-11-17 · Brighter Christmas globes, a steady ribbon
+- **The Christmas tree's glass globes are brighter**: each shows its colour clearly by day and glows at night.
+- **The tree's red ribbon no longer flickers** against the boughs, near or far.
+
+## 2026-11-17 · The Santa Hat
+- **Santa's hat**: a red pointed cap with a white band and a white bobble on the end, cut from the gnome's cap and
+  fitted to any head (every race, illusions and were forms too). Santa Claus wears one; Toymaker Tinsel sells them
+  for Holly Tokens. A helm dye colours the red, the white stays white.
+
+## 2026-11-17 · Dark dyes on hats
+- **A dark or black helm dye now darkens a hat** (the kappa's straw hat in black is black): before, a black dye only
+  greyed it, so it looked undyed. Bright dyes still colour a dark hat (the turban), a little more softly.
+
+## 2026-11-17 · Storms no longer clear as the camera turns
+- **Snow, whiteouts and sandstorms stay put when you turn the camera**: turning the camera could swing it under a
+  tree, an awning or an arch, and the storm then thinned to almost nothing (heavy snow looked clear) until it
+  swung out again. The storm now goes by where your character stands, not where the camera is.
+- **A storm's fog is as thick whichever way you face**: it is now measured from your eyes in every direction, so
+  the ground at your feet no longer shows clear or fogged by which way the camera points.
+
+## 2026-11-17 · Hats fit illusions
+- **A hat (the Turban of Twisted Virtue, the kappa's straw hat) now sits on whatever body you wear**: an ogre pill,
+  an illusion, a were form or a custom race's body. It is fitted as a helm would be, to that head, and fitted again
+  when the illusion starts and ends; before, the turban could float over a troll's or a gnome's head or sit forward
+  on an ogre's.
+- A were's beast form, which wears no helm, now shows the hat too.
+## 2026-11-17 · Globe bulbs, tinsel and wrapped presents
+- **New Christmas decorations**: strings of glass globes in many colours, garlands of gold and silver tinsel and of red
+  rope, and presents wrapped in patterned cloth, where a server puts them (Freeport's tree and its square). Their art
+  is read from your own disc, whatever world it comes from.
+
+## 2026-11-16 · Santa's sleigh stays on the ground
+- **Decorations stay where they are placed**: a decoration made of a zone's art (Santa's sleigh) no longer drifts up
+  into the sky; it stands on the sand where the server puts it.
+
+## 2026-11-16 · Name plates in front of the presents
+- **Names no longer disappear behind the presents**: the presents and the lights' cord round the Christmas tree were
+  drawn over the names of players and NPCs standing among them. They are now drawn with the world, so a name in
+  front of a present shows whole.
+
+## 2026-11-16 · Presents under the Christmas tree
+- **Presents under Freeport's Christmas tree**: wrapped boxes in red, green, blue, gold, silver and purple, some
+  stacked, with ribbons and bows, round the foot of the tree.
+- The tree's lights now follow its boughs.
+## 2026-11-16 · Sandstorms blow fine dust, not discs
+- **A sandstorm now looks like blowing sand**: thousands of fine, faint grains streaking past on the wind, sand
+  skimming low over the ground, and soft sheets of dust drifting across, all in the storm's colour. The round flakes
+  that flew at your face are gone, and nothing pops up right in front of the camera.
+
+## 2026-11-16 · Christmas lights
+- **Seasonal decorations from the server**: when a GM puts the Christmas season up on eqoaclassic.com, a great fir
+  stands lit in Freeport's north plaza, wound with **twinkling lights in many colours** on a dark green cord, and a **gold star** on top.
+  At night the lights glow on the sand round it (with Dynamic Lighting on).
+- The fir is art from your own disc (a fir of Tunaria's northern forests), read while the season is up.
+- A PS2 sees the plaza tree too, as a treant, without the lights.
+
+## 2026-11-16 · Auras on hats
+- **An aura put on your helm now lights a hat you wear** (the Turban of Twisted Virtue, say) instead of turning it
+  back into a cloth cap: the glow, sparkles or trim wrap the hat.
+- **Hats can be dyed**: the Equipment Dyer's helm colour (or a GM's dye) colours the hat; undyed, it keeps its own
+  colours.
+## 2026-11-16 · Helms on goblins, brownies, kerrans and orcs
+- **Hair, caps and manes now go under a helm** on the new races' bodies, as a Dryad's do: the goblins' topknots,
+  tufts, the ice goblin chieftain's mohawk and braid, the brownie's spikes and the brownie elder's red cap, the
+  white tiger's and the maned lion's manes where they cover the head, the Deathfist slayer's hair and the orcs' long
+  hair no longer stick out through the top or back of the helm.
+- **Helms sit a little higher on goblins, brownies, the white tiger, the maned lion and the Deathfist slayer**, so
+  the top of the head no longer shows through. Ears and horns still come out, as a gnoll's ears do.
+## 2026-11-16 · Sandstorms in third person, and no hills through the storm
+- **A sandstorm's blowing sand now shows in third person too**, not only in first person, filling the air round you
+  and your character whichever camera you use, and it reads better against the dunes.
+- **In a sandstorm or a whiteout the distant hills now disappear into the storm** (Freeport's mountains stood dark
+  against a sand-coloured sky). The far horizon is the storm's colour, as everything nearer already was.
+- **/weatherpreview whiteout** now brings the heavy snow with it, as a real whiteout does.
+## 2026-11-16 · Pet dyes: clothing and body
+- **The Pet Groomer now dyes a pet's clothing one colour and its body another**, as the Equipment Dyer two-tones
+  armour: a djinn's vest and trousers, an efreet's kilt and bracers, a construct's plating, a zombie's rags, the
+  drachnid's plated bodice apart from her spider body and skin.
+- A pet that wears no clothing (a skeleton, an elemental, a spirit) is dyed whole.
+
+## 2026-11-16 · Alt-Tab lets go of the mouse
+- **On Windows, alt-tabbing (or minimising) while you look round with the mouse no longer leaves your cursor stuck in
+  the game's window.** The game now hands the cursor back as soon as it loses the focus, and leaves it where it is
+  instead of pulling it back into the game.
+- Buttons and keys you were holding are let go as the window loses the focus. Coming back, the mouse look starts
+  again only when you press and drag.
+## 2026-11-16 · Sandstorms, whiteouts and fog in storms
+- **Weather: the server's sandstorms and whiteouts, and fog in storms (Options -> Weather turns it down or off).**
+  On eqoaclassic.com the weather now follows the ground: sandstorms blow over the deserts, snow and whiteouts on the
+  icy lands, rain elsewhere, and none over lava, unless a GM calls a storm. Sand blows past you on the wind, a
+  whiteout closes in to a few steps, names fade into the storm, and you hear the wind (quieter under a roof).
+- **/weatherpreview sand** (or rain, snow, whiteout, clear; light, moderate or heavy) shows a weather on your own
+  screen only, until **/weatherpreview off** or you travel to another world.
+
+## 2026-11-16 · A hill giant's shadow is his shape
+- **With Light Shadows on, a hill giant's lantern now throws his own shape on the ground round his feet**, as
+  everyone else's does. His lantern rides inside him (he is taller than it), and his shadow was a dark square at his
+  feet instead. A troll's or an ogre's head is no longer missing from its shadow either.
+## 2026-11-16 · Hats worn from other bodies
+- **A character can now wear a hat another body has built in**, given by a GM on eqoaclassic.com: the first is the
+  kappa's wide-brimmed straw hat with its steel spike, sized to your head and worn in place of your helm (the hair
+  is dressed as under a helm). Others see it on you; a PS2 shows your helm as before.
+## 2026-11-16 · Dyed pets
+- **Pets can be dyed** on eqoaclassic.com: a **Pet Groomer** now stands beside every Equipment Dyer. With your pet out,
+  talk to the groomer and pick a colour, free, from the dyers' palette. A pet body can have **two colour areas** (the
+  drachnid's torso and its spider body), each dyed apart; every other pet is dyed whole.
+- Each form of a pet keeps its own colours. Everyone playing this client sees your pet's dyes; a PS2 sees its own colours.
+- **An item can be such a hat too**: the first is the **Turban of Twisted Virtue**, the efreeti lord's turban, drawn
+  on your head while you wear it in your helm's place.
+## 2026-11-16 · Dryad helms
+- **A Dryad's helm now sits right**: her locks, and the long tail down her back, no longer stick out of the top, the
+  sides and the back of every helm. Under a helm her hair is tucked away, as a human's is, and the helm sits on her head
+  as on a woman's.
+- The Erych guardian, Haliai and Erych arbiter bodies too: their hair goes under the helm, and the helm sits a little
+  larger and higher, so their heads no longer show through its top. Horns and fins still come out, as a gnoll's ears do.
+
+## 2026-11-16 · See more players and creatures, farther
+- **NPC/PC Display now starts at 48** (it was the game's 24) and **NPC/PC Distance at 200** (it was 100), in
+  Options > Extended. You see more of the people and creatures round you, and farther out.
+- If you had set your own numbers they are kept; you can still turn either down to the game's.
+
+## 2026-11-16 · Auto-cast keeps Fervor up as a buff
+- **Auto-cast now reads a paladin's Fervor as a buff**, not a heal: it is a damage shield you wear that heals you when
+  you are hit, so auto-cast keeps it on you (casting it again when it wears off) instead of waiting for you to drop
+  below half health. Other spells that heal their wearer when struck are read the same way.
+- A Fervor slot you already set to auto as a heal keeps that until you change it: switch its auto off and on again,
+  or type **/autocast Fervor buff**.
+
+## 2026-11-16 · A clearer start page
+- **The start page asks for one disc**: your *Frontiers* disc image. The 2002 disc, which only changes the older
+  character art (F9 in the game), is now tucked under **Pre-Frontiers Models (2002), optional**: you do not need it
+  to play. A 2002 disc you had remembered still shows itself.
+
+## 2026-11-16 · Two auras on one weapon
+- **A weapon can now wear two auras at once** on eqoaclassic.com, both drawn on the blade in your hand:
+  **Icingdeath** carries the Sword of Virtue's glow and sparkles in blue together with its freezing drip, and
+  **Twinkle** the Sword of Virtue's glow with the monk staff's twinkle at the blade's tip.
+- Other players see both on your weapon too. An older client shows a weapon's first aura alone, as before.
+
+## 2026-11-16 · The Wisp at character creation
+- **Choosing the Wisp on the race page now shows the wisp**, glowing where a human's head would be, as character select
+  and the world draw it. The page showed a plain human, face and all.
+- **A Wisp's Color on the appearance page changes the wisp at once.** It kept the colour it was first drawn in until the
+  review page.
+
+## 2026-11-16 · The mouse on character select's scroll bar
+- **Character select's scroll bar now takes the mouse**, on a server that keeps more than eight characters: click
+  its top or bottom end to scroll a character, click above or below the handle to scroll a whole page, or drag the
+  handle. The selected character stays selected while the list moves, as with the wheel.
+- The mouse wheel over the list no longer ignores a trackpad's small turns: they add up to a row.
+- The keyboard and the controller work as before.
+
+## 2026-11-16 · The server's own account pages, and why a login is refused
+- **The Station pages before the server list are now your server's own**, as a PlayStation 2 shows them after its
+  patch: on eqoaclassic.com, Create User Name asks only for a name, a password twice and your e-mail address, Forgot
+  Password for your name and e-mail, and Manage Account offers Change Password and Change E-mail. No billing, address
+  or birthday fields.
+- **A login refused because your account has no verified e-mail now says so** on its own page: "Your account needs a
+  verified e-mail. Verify it at eqoaclassic.com/eqoa/password." Open the link we e-mailed you (or add your address on
+  that page's E-mail tab), then log in again. Press Triangle (Escape) to go back to the login.
+- A server whose patch has no Station pages shows the disc's, as before.
+
+## 2026-11-15 · Sliders for flora, environment effects and weather
+- **Options > Extended > Graphics > World's Flora and Environment are sliders now**, like Fog, from 0 to 100%.
+  Flora is how much of the grass and plants round you is drawn; Environment is how strong the ground fog, dust,
+  falling leaves and light shafts are, and how many birds fly in a flock.
+- **A new Weather page** beside them has a **Weather** slider: how much of the rain and snow falls on your screen.
+- Each starts at 100%, the game as it has always looked, so nothing changes unless you move one. 0% is the same as
+  the old Off, and a setting of Off you chose before is kept.
+
+## 2026-11-15 · Your alchemist's potions in its inventory
+- **An alchemist mercenary's inventory now has a Stock tab**: the draughts, potions and cocktails your alchemists have
+  brewed, each with its count. They used to be shown nowhere but the Potion stock box.
+- Choose one to **Take a Stack** or **Take One** into your pack. The counts update while the window is open as your
+  alchemist brews and throws.
+
+## 2026-11-15 · Your mercenary's inventory and spell book
+- **Your mercenary's Inventory opens a window like your own inventory** on eqoaclassic.com: press □ on your merc,
+  choose Items, then Inventory (or type `/merc <name> inv`). Its tabs are **Worn** (what it wears, its own gear and
+  its heirlooms where it wears nothing of its own), **Carried** and **Your Pack**. Beside the list are its level,
+  hit points, power, AC and stats, which change as its gear does.
+- Pick an item to **Equip**, **Unequip**, **Inspect** or **Take Back**. An item put on in place of another swaps them,
+  the old piece going to what it carries. From Your Pack, **Give** hands it one of your items. Your own inventory
+  has **Give to Merc** on each item you are not wearing while your merc is out.
+- **Its Spells open a spell book like yours**, with ten slots (□ on your merc, Spells, or `/merc <name> spells`):
+  Memorize puts a spell on a slot, Unmemorize takes it off, Unmemorize All empties them. Once you change them it
+  casts only what its ten slots hold; until then it casts as it always has, and the slots show the ten it picks first.
+- The server checks every move by the rules for a player's gear (class, race, level, two-handers, a full pack, lore
+  items) and nothing is lost. A PlayStation 2 keeps the merc's boxes.
+
+## 2026-11-15 · Tailoring in the Recipe Book
+- **Character > Tradeskills > Recipe Book now lists Tailoring**, fourth after Jewelry, Armor and Weapons: choose it
+  to see your tailoring recipes, as the other three show theirs. Until now only a server's patch added the row, and
+  eqoaclassic.com sends none, so neither the web page nor the downloaded game had it.
+- Jewelry, Armor and Weapons are where they were. A PlayStation 2 shows the row only with a patch that adds it.
 
 ## 2026-11-15 · Every race's monk kicks and strikes
 - **A monk of any race now shows the monk's moves**: Flame Kick, Spinning Kick, Lightning Kick and Force Kick are

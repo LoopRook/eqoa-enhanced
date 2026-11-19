@@ -104,6 +104,7 @@ mod livewords;
 mod hud;
 mod raidlist;
 mod readywnd;
+mod dyepicker;
 mod buffwnd;
 mod tips;
 mod rollwnd;
@@ -112,7 +113,13 @@ mod damage;
 mod numcolor;
 mod autocast;
 mod dpsmeter;
+#[cfg(not(target_arch = "wasm32"))]
+mod decorfit;
+mod decorlights;
+mod ride;
 mod npctint;
+mod petart;
+mod petdye;
 mod display;
 mod hudlayout;
 mod hudmenu;
@@ -132,6 +139,7 @@ mod inventory;
 mod hidelook;
 mod itemlink;
 mod itemmenu;
+mod mercwnd;
 mod classmastery;
 mod cs;
 mod faction;
@@ -161,6 +169,8 @@ mod seabody;
 mod racelabel;
 mod raceopts;
 mod wisp;
+mod hat;
+mod toys;
 mod record;
 mod alarm;
 mod startmenu;
@@ -173,6 +183,7 @@ mod options;
 // the system's browser, a page's new tab, Android's intent
 mod openurl;
 mod settings;
+mod texcache;
 mod fork_ext;
 mod texpack;
 mod social;
@@ -218,6 +229,8 @@ mod viewer;
 mod wndlist;
 mod walker;
 mod weather;
+mod weather_zones;
+mod sanddust;
 mod winplace;
 // Windows' Xbox controllers, read in the background (its mapping checked
 // natively by its tests)
@@ -363,7 +376,8 @@ fn listen(file: &str, x: f32, z: f32, secs: f32, out: &str, hour: f32, walk: boo
         sound.battle_music(Some(fight && (60..240).contains(&k)));
         let eye = walker.eye;
         sound.frame(&mut walker.scene, &eye, hour, now);
-        weather.frame(&mut walker.scene, Some(&mut sound), &eye, now, hour);
+        let at = walker.cam.walk.phys.position;
+        weather.frame(&mut walker.scene, Some(&mut sound), &eye, &at, now, hour);
         weather.lightning();
         let _ = weather.render(&eye);
         pcm.extend(sound.audio().render(1600));
@@ -447,6 +461,7 @@ fn volumes(file: &str) -> Result<()> {
 }
 
 fn run(args: &[String]) -> Result<()> {
+    if let Some(r) = fork_ext::modtools::run(args) { return r; }
     // a server's own worlds are built off the player's disc (`serverworlds`)
     #[cfg(not(target_arch = "wasm32"))]
     serverworlds::install();
@@ -491,6 +506,33 @@ fn run(args: &[String]) -> Result<()> {
                     lo[2]
                 );
             }
+        }
+        // `eqoa actormesh <WORLD.ESF> <x> <z> <radius> [0xDictID]`: the zone actors
+        // placed within radius of (x, z) (of that sprite), each with its
+        // triangles in world coordinates, as JSON on stdout: what a server's tool
+        // fits decoration lights to (a wall's top, a well's rim, a post)
+        #[cfg(not(target_arch = "wasm32"))]
+        Some("actormesh") => {
+            let usage = "usage: eqoa actormesh <WORLD.ESF> <x> <z> <radius> [0xDictID]";
+            let file = args.get(1).ok_or(usage)?;
+            let num = |i: usize| -> Result<f32> { Ok(args.get(i).ok_or(usage)?.parse::<f32>()?) };
+            let (x, z, r) = (num(2)?, num(3)?, num(4)?);
+            let only = args.get(5).map(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).map(|v| v as i32)).transpose()?;
+            print!("{}", decorfit::actor_meshes(&disc_path(None), file, x, z, r, only)?);
+        }
+        // `eqoa dictzones <WORLD.ESF> 0xID...`: which zones hold each DictID;
+        // `eqoa texpng <WORLD.ESF> <zone|-1> 0xID <out.png>`: a texture as a PNG
+        #[cfg(not(target_arch = "wasm32"))]
+        Some("dictzones") => {
+            let ids = args[2..].iter().map(|v| u32::from_str_radix(v.trim_start_matches("0x").trim_start_matches("0X"), 16).map(|v| v as i32)).collect::<std::result::Result<Vec<_>, _>>()?;
+            print!("{}", decorfit::dict_zones(&disc_path(None), args.get(1).ok_or("usage: eqoa dictzones <WORLD.ESF> 0xID...")?, &ids)?);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        Some("texpng") => {
+            let usage = "usage: eqoa texpng <WORLD.ESF> <zone|-1> 0xID <out.png>";
+            let zone: i64 = args.get(2).ok_or(usage)?.parse()?;
+            let id = u32::from_str_radix(args.get(3).ok_or(usage)?.trim_start_matches("0x").trim_start_matches("0X"), 16)? as i32;
+            say(&decorfit::texture_png(&disc_path(None), args.get(1).ok_or(usage)?, zone, id, args.get(4).ok_or(usage)?)?);
         }
         Some("volumes") => {
             let file = args.get(1).ok_or("usage: eqoa volumes <world.esf>")?;
@@ -587,7 +629,7 @@ fn run(args: &[String]) -> Result<()> {
         // in a look, standing, from four sides (`dressview`)
         #[cfg(not(target_arch = "wasm32"))]
         Some("dress") => {
-            let usage = "usage: eqoa dress <body DictID> <out.png> [set=N armor=a,b,c,d,e tint=T robe=R rtint=T dye=RRGGBB hair=c,l,s face=F helm=N helmfit=0 main=ID off=ID shield=ID race=1 action=N at=ms size=WxH cape=N capecolor=RRGGBB maincolor=RRGGBB offcolor=RRGGBB shieldcolor=RRGGBB trim=RRGGBB night=1 era=2002 npctint=RRGGBBAA npcglow=RRGGBBAA aura=default|none|shell|particles|both aurasrc=DictID auranodes=N pieceaura=slot:RRGGBBAA[:kind[:DictID[:nodes]]]]";
+            let usage = "usage: eqoa dress <body DictID> <out.png> [set=N armor=a,b,c,d,e tint=T robe=R rtint=T dye=RRGGBB hair=c,l,s face=F helm=N helmfit=0 main=ID off=ID shield=ID race=1 action=N at=ms size=WxH cape=N capecolor=RRGGBB maincolor=RRGGBB offcolor=RRGGBB shieldcolor=RRGGBB trim=RRGGBB night=1 era=2002 npctint=RRGGBBAA npcglow=RRGGBBAA petdye=RRGGBBAA,RRGGBBAA petmask=0,2 petareas=1 aura=default|none|shell|particles|both aurasrc=DictID auranodes=N pieceaura=slot:RRGGBBAA[:kind[:DictID[:nodes]]]]";
             let model = args.get(1).and_then(|m| fxview::parse_visual(m)).ok_or(usage)? as i32;
             let out = args.get(2).filter(|o| o.ends_with(".png")).ok_or(usage)?;
             let words = dressview::parse(&args[3..])?;
@@ -610,12 +652,34 @@ fn run(args: &[String]) -> Result<()> {
             }
             dressview::shot(&lib, model, &words, out)?;
         }
+        // `eqoa petclothes`: every body of CHAR.ESF that wears clothing by the
+        // pet dyes' rule (`petdye::clothed`), as go-eqoa-server's
+        // `internal/entity/petclothes.go` lists them (its Pet Groomers' menu)
+        #[cfg(not(target_arch = "wasm32"))]
+        Some("petclothes") => {
+            let mut iso = disc(None)?;
+            let mut lib = esf::Library::new();
+            for f in dressview::FILES {
+                lib.add(*f, esf::Container::open(iso.read(f)?)?);
+            }
+            let char_esf = lib.file_named("CHAR.ESF").ok_or("no CHAR.ESF")?;
+            let mut ids: Vec<u32> = lib
+                .file(char_esf)
+                .models()
+                .iter()
+                .filter(|m| lib.lookup(m.dict_id).is_some_and(|r| r.file == char_esf))
+                .filter_map(|m| lib.build_model(esf::Ref { file: char_esf, node: m.node }).filter(petdye::clothed).map(|_| m.dict_id as u32))
+                .collect();
+            ids.sort_unstable();
+            ids.dedup();
+            println!("{}", petdye::go_list(&ids));
+        }
         // `eqoa emotes <body> <out.png> [pose...]`: the body's emotes as a
         // race's player plays them (`raceemote`), or its own actions, or the
         // human's carried onto it, a row each (`emoteview`)
         #[cfg(not(target_arch = "wasm32"))]
         Some("emotes") => {
-            let usage = "usage: eqoa emotes <body DictID> <out.png> [wave bow point cheer N human:N cols=N size=WxH]";
+            let usage = "usage: eqoa emotes <body DictID> <out.png> [wave bow point cheer N human:N jump runjump humanjump humanrunjump cols=N size=WxH]";
             let model = args.get(1).and_then(|m| fxview::parse_visual(m)).ok_or(usage)? as i32;
             let out = args.get(2).filter(|o| o.ends_with(".png")).ok_or(usage)?;
             let words = emoteview::parse(&args[3..])?;
@@ -1007,6 +1071,16 @@ fn source(file: &str, rest: &[String]) -> Result<(esf::Library, viewer::Source)>
             // `EQOA_BODY=<DictID>`: another body than the human's (`viewer::shot_body`)
             let character = lib.lookup(viewer::shot_body() as i32).ok_or("no such body")?;
             Ok((lib, viewer::Source::Walk { file: main, index, character, spawn: None }))
+        }
+        // `zonemodel <n> <0xDictID>`: one sprite a zone holds (its own
+        // dictionary's), as a model is shown: finding a zone's art by sight
+        [z, n, id] if z == "zonemodel" => {
+            let index: usize = n.parse()?;
+            lib.file(main).zones().get(index).ok_or("no such zone")?;
+            stream::load_zone_now(&mut lib, main, index)?;
+            let id = u32::from_str_radix(id.trim_start_matches("0x"), 16)? as i32;
+            let r = lib.lookup(id).ok_or("no model with that DictID in the zone")?;
+            Ok((lib, viewer::Source::Models { list: vec![(id, r)], index: 0, tint: None }))
         }
         [z, n] if z == "zone" => {
             let index: usize = n.parse()?;

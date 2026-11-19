@@ -786,6 +786,7 @@ pub(crate) fn clear(host: &Host) {
     super::chat::cancel_vm(vm);
     super::weapon_sets::cancel_vm(vm);
     super::action_broker::clear_vm(vm, "addon disabled or reloaded");
+    super::window_takeover::release_vm(vm);
     let b = bus(&host.lua);
     let mut b = b.borrow_mut();
     b.subscriptions.clear();

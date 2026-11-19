@@ -38,6 +38,8 @@ mod linkplay;
 mod buffplay;
 #[path = "mercplay.rs"]
 mod mercplay;
+#[path = "dyeplay.rs"]
+mod dyeplay;
 #[path = "autoplay.rs"]
 mod autoplay;
 pub use mercplay::{ENTRY as MERC_ENTRY, MSG_DISMISS_MERC};
@@ -107,12 +109,18 @@ struct Puppet {
     /// its skeleton and drawn on its palette; none where no art or body
     /// fits. None while it wears none: nothing more is drawn.
     cape: Option<(net::cape::Cape, Option<GpuModel>)>,
+    /// The String of Lights along its cape (`toys::cape_lights`: the cape's
+    /// aura of kind lights), laid on the cape as fitted; none without.
+    lights: Option<crate::toys::Lights>,
     /// A server's race's look its body took (`raceopts`: a player's, by its
     /// name): another, or one gone, rebuilds it.
     race_look: Option<std::rc::Rc<net::raceopts::Look>>,
     /// The tint the server names for its body (`npctint`: an NPC's, by its
     /// name): another, or one gone, rebuilds it.
     tint: Option<crate::npctint::Tint>,
+    /// The dyes the server says its body wears (`petdye`: a pet's, by its id
+    /// and body): others, or none, rebuild it.
+    petdye: Option<crate::petdye::PetDye>,
     /// Its auras' particles (`aura::Worn`): a body whose tint asks for them
     /// (`aura::npc_particles`) and each worn piece's whose aura does
     /// (`aura::pieces`, `aura::helm_aura`), none for every other. Its shells
@@ -125,6 +133,9 @@ struct Puppet {
     /// (`shadow_casters`) nor any of its models into the shadow maps
     /// (`set_casts`).
     wisp: bool,
+    /// A pet in a zone's prop (`petart`): its moving parts, the wheels and
+    /// the arm, its model made skinned by them; none for every other.
+    prop: Option<crate::petart::Rig>,
 }
 
 impl Puppet {
@@ -204,6 +215,16 @@ fn mark_size(w: f32) -> f32 {
     MARK_SIZE * (MARK_NEAR / w.max(1e-3)).clamp(MARK_SCALE.0, MARK_SCALE.1)
 }
 
+/// Out of the world, nothing the server turned off stays off
+/// (`settings::qol`): the pregame's Extended, and the next server until it
+/// says, have every addition.
+impl Drop for Play {
+    fn drop(&mut self) {
+        crate::settings::qol::set_off(0);
+        fork_hooks::dropped(self);
+    }
+}
+
 pub struct Play {
     pub session: Session,
     pub player: Player,
@@ -256,6 +277,16 @@ pub struct Play {
     /// What the server's messages asked of the atmosphere this frame, in
     /// their order (`Atmos`), for `weather::Weather::take`.
     pub weather: Vec<Atmos>,
+    /// A server's regional weather (0x7E94, `weather_zones`; board entry
+    /// #1550): its zones on `regional_clock`'s ms, and `/weatherpreview`'s
+    pub regional: crate::weather_zones::Zones,
+    regional_clock: web_time::Instant,
+    /// the last retail weather byte the server sent (a preview's end puts
+    /// it back)
+    retail_weather: u8,
+    /// the storms' fog this frame (near, far), which the name plates fade
+    /// across (`labels`); set by the frame's caller (`viewer`)
+    pub weather_fog: Option<(f32, f32)>,
     /// Each creature's `m_walk`, made with it (`CreateEntity`: `Init` at the
     /// origin), keyed by the entity's id.
     walks: Vec<Option<(u32, WalkControl<Ee>)>>,
@@ -266,6 +297,13 @@ pub struct Play {
     /// Each player's jump as drawn, by slot (`jump::Air`): its fall in by the
     /// top of its arc, its landing played once it comes down.
     airs: Vec<crate::jump::Air>,
+    /// Each slot's creature carried by a flying vehicle (`carried_by`): the
+    /// sleigh's team, Santa at the reins, its riders. Carried along their
+    /// velocity like the vehicle, never stood on a floor.
+    carried: Vec<bool>,
+    /// Each carried slot's last updates (`CarrySample`), drawn `CARRY_DELAY`
+    /// behind the newest along a curve through them (`carry_at`).
+    carry_buf: Vec<std::collections::VecDeque<CarrySample>>,
     /// Each entity's actor in the walker's collision world (`m_actor`), by
     /// slot (`place_actors`), and the player's own (`place_self_actor`): what
     /// a walk stops at. The scene they are in (`World::serial`), and the
@@ -321,6 +359,9 @@ pub struct Play {
     cast_window: (i64, i64),
     /// `m_p06DC8`: 0x00FC's byte, the player held in place.
     rooted: bool,
+    /// The server's ride (`ride`): the vehicle whose deck the walker is kept
+    /// on, no fall and no walk of its own, until it says off.
+    ride: Option<crate::ride::Ride>,
     /// `m_p06DC0` and `m_p06DC4`: movement and the camera allowed
     /// (`ApplyRaceCamera` takes both away while the start menu frames the
     /// character, `ApplyDefaultCamera` gives them back; the manual camera's
@@ -450,6 +491,8 @@ pub struct Play {
     pub meter: crate::dpsmeter::Meter,
     /// A server's mercenaries' entry in the start menu (`mercplay`).
     merc: mercplay::MercPlay,
+    /// the dyers' colour picker and its preview (`dyeplay`)
+    dyepick: dyeplay::DyePlay,
     /// `VIWndMBox` (mode 14).
     mbox: crate::dialog::MBox,
     /// The player's death camera (`m_pC1B0`) and the screen's fade; the
@@ -493,6 +536,10 @@ pub struct Play {
     /// (`net::session::disconnect_word`); the viewer leaves, and a page
     /// shows the reason on its login screen.
     pub disconnected: Option<i32>,
+    /// The player's Hardcore character fell (go-eqoa-server's 0x7EB2,
+    /// `net::hardcore`): its words drawn over the death's black until the server
+    /// ends the connection (0x0777, `msg_0777`).
+    hc_fall: Option<net::hardcore::FallNotice>,
     /// Start-menu work waiting for the HUD's raster (the font): an open
     /// (with its reset) and keys (code, down).
     start_open: Option<bool>,
@@ -626,6 +673,10 @@ pub struct Play {
     /// next.
     projectiles: std::collections::BTreeMap<u32, (Option<esf::Model>, Vec<GpuModel>)>,
     casts: Vec<crate::spells::Cast>,
+    /// The pets in a zone's prop (`petart`: Zerkziee's catapult): their rams
+    /// and shots, and each prop's drawn bounds.
+    petart: crate::petart::State,
+    pet_tops: crate::petart::Tops,
     spell_ids: Vec<Option<u32>>,
     spell_rand: Rand,
     /// The corpse, merchant and trade windows (modes 1, 10, 15, 16).
@@ -814,6 +865,135 @@ pub fn login_world_file(player: &net::session::Player) -> String {
         return path();
     }
     crate::s2::get().world_file(player.world).unwrap_or_else(path)
+}
+
+/// The size a pet in a zone's prop is drawn at (`petart`): its row's scale
+/// times the pet's size.
+fn pet_scale(art: &net::decor::PetArt, e: &net::entity::Entity) -> f32 {
+    let base = if e.scale > 0.0 { e.scale } else { 1.0 };
+    base * if art.scale > 0.0 { art.scale } else { 1.0 }
+}
+
+/// The vehicles flying now: each decoration's art moving (`decorlights::is_art`,
+/// a speed over half a unit a second), its place and its velocity.
+fn flying_vehicles(slots: &[Option<net::entity::Entity>]) -> Vec<([f32; 3], [f32; 3])> {
+    slots
+        .iter()
+        .flatten()
+        .filter(|e| crate::decorlights::is_art(e.model))
+        .filter_map(|e| {
+            let v = e.creature.as_ref()?.velocity;
+            (v[0] * v[0] + v[1] * v[1] + v[2] * v[2] > 0.25).then_some((e.pos, v))
+        })
+        .collect()
+}
+
+/// A creature at `pos` moving at `vel` flies with one of `movers`: within
+/// [`CARRY_REACH`] of it and at its velocity, give or take a third (the team
+/// turning with the sleigh ahead of it), as the server flies a tour's team,
+/// host and riders as one body.
+fn carried_by(movers: &[([f32; 3], [f32; 3])], pos: [f32; 3], vel: [f32; 3]) -> bool {
+    movers.iter().any(|&(at, v)| {
+        let d2: f32 = (0..3).map(|i| (pos[i] - at[i]).powi(2)).sum();
+        let speed = (0..3).map(|i| v[i] * v[i]).sum::<f32>().sqrt();
+        let off = (0..3).map(|i| (vel[i] - v[i]).powi(2)).sum::<f32>().sqrt();
+        d2 < CARRY_REACH * CARRY_REACH && off <= 0.35 * speed + 0.5
+    })
+}
+
+/// How far behind its newest update a carried creature is drawn (ms): a
+/// little over the server's 100 ms between updates, so there is nearly always
+/// an update on each side of the moment drawn.
+const CARRY_DELAY: i64 = 150;
+
+/// An update past this is a move, taken at once.
+const CARRY_SNAP: f32 = 25.0;
+
+/// One update of a carried creature: when it came (the game's ms), where,
+/// its velocity and its heading.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CarrySample {
+    ms: i64,
+    pos: [f32; 3],
+    vel: [f32; 3],
+    heading: f32,
+}
+
+/// Where `buf`'s creature is at `t`: between two updates on the cubic through
+/// both with their velocities (Hermite: no corner at an update), the heading
+/// turned the short way between theirs; past the newest, carried on along its
+/// velocity; before the oldest, at the oldest. None with no update.
+fn carry_at(buf: &std::collections::VecDeque<CarrySample>, t: i64) -> Option<([f32; 3], f32)> {
+    let last = buf.back()?;
+    if t >= last.ms {
+        let dt = ((t - last.ms) as f32 * 0.001).min(1.0);
+        return Some(([last.pos[0] + last.vel[0] * dt, last.pos[1] + last.vel[1] * dt, last.pos[2] + last.vel[2] * dt], last.heading));
+    }
+    let first = buf.front()?;
+    if t <= first.ms {
+        return Some((first.pos, first.heading));
+    }
+    let k = buf.iter().position(|b| b.ms > t)?;
+    let (a, b) = (buf[k - 1], buf[k]);
+    let span = (b.ms - a.ms) as f32 * 0.001;
+    let u = (t - a.ms) as f32 * 0.001 / span;
+    let (u2, u3) = (u * u, u * u * u);
+    let (h00, h10, h01, h11) = (2.0 * u3 - 3.0 * u2 + 1.0, u3 - 2.0 * u2 + u, -2.0 * u3 + 3.0 * u2, u3 - u2);
+    let mut pos = [0.0; 3];
+    for i in 0..3 {
+        pos[i] = h00 * a.pos[i] + h10 * span * a.vel[i] + h01 * b.pos[i] + h11 * span * b.vel[i];
+    }
+    let mut turn = (b.heading - a.heading) % std::f32::consts::TAU;
+    if turn > std::f32::consts::PI {
+        turn -= std::f32::consts::TAU;
+    } else if turn < -std::f32::consts::PI {
+        turn += std::f32::consts::TAU;
+    }
+    Some((pos, a.heading + turn * u))
+}
+
+/// How far from a flying vehicle a creature at its speed is carried with it:
+/// the sleigh's team runs out ahead.
+const CARRY_REACH: f32 = 40.0;
+
+#[cfg(test)]
+mod carried {
+    use super::*;
+
+    /// The sleigh's team and riders fly with it; a creature standing by, or
+    /// one at another speed, or far off, is not carried.
+    #[test]
+    fn what_flies_with_the_sleigh() {
+        let movers = vec![([100.0, 80.0, 100.0], [12.0, 0.5, 0.0])];
+        assert!(carried_by(&movers, [101.0, 81.5, 100.5], [12.0, 0.5, 0.0]), "Santa at the reins");
+        assert!(carried_by(&movers, [125.0, 82.0, 103.0], [11.0, 1.2, 2.5]), "the team ahead, turning");
+        assert!(!carried_by(&movers, [101.0, 80.0, 100.0], [0.0, 0.0, 0.0]), "one standing by");
+        assert!(!carried_by(&movers, [101.0, 80.0, 100.0], [-12.0, 0.0, 0.0]), "another way");
+        assert!(!carried_by(&movers, [200.0, 80.0, 100.0], [12.0, 0.5, 0.0]), "far off");
+        assert!(!carried_by(&[], [101.0, 80.0, 100.0], [12.0, 0.5, 0.0]), "no vehicle flying");
+    }
+
+    /// The curve through the updates passes through each, carries on along
+    /// the newest's velocity past it, and keeps a steady speed between two
+    /// updates on a straight line; the heading turns the short way.
+    #[test]
+    fn carried_along_the_updates() {
+        let mut buf = std::collections::VecDeque::new();
+        assert_eq!(carry_at(&buf, 0), None);
+        for k in 0..3 {
+            buf.push_back(CarrySample { ms: 1000 + 100 * k, pos: [2.0 * k as f32, 50.0, 0.0], vel: [20.0, 0.0, 0.0], heading: 6.2 + 0.1 * k as f32 });
+        }
+        let at = |t| carry_at(&buf, t).unwrap();
+        assert_eq!(at(1100).0, [2.0, 50.0, 0.0], "through each update");
+        assert!((at(1150).0[0] - 3.0).abs() < 1e-4, "steady between: {:?}", at(1150));
+        assert!((at(1250).0[0] - 5.0).abs() < 1e-4, "on past the newest");
+        assert_eq!(at(500).0, [0.0, 50.0, 0.0], "before the oldest: there");
+        // 6.4 (past 2 pi) to 0.1: a turn of -0.017 across the wrap, not -6.3 the long way round
+        buf.push_back(CarrySample { ms: 1300, pos: [6.0, 50.0, 0.0], vel: [20.0, 0.0, 0.0], heading: 0.1 });
+        let h = carry_at(&buf, 1250).unwrap().1;
+        let want = 6.4 + (0.1 - 6.4 + std::f32::consts::TAU) / 2.0;
+        assert!((h - want).abs() < 1e-4, "the short way: {h} against {want}");
+    }
 }
 
 #[cfg(test)]
@@ -1117,6 +1297,12 @@ fn tint_of(e: &net::entity::Entity) -> Option<crate::npctint::Tint> {
     e.creature.as_ref().filter(|_| !a_player(e)).and_then(|c| crate::npctint::of(&c.name))
 }
 
+/// The dyes the server says a pet's body wears (`petdye`), by its id and the
+/// body it is drawn in; none for a player's character.
+fn petdye_of(e: &net::entity::Entity) -> Option<crate::petdye::PetDye> {
+    e.creature.as_ref().filter(|_| !a_player(e)).and_then(|_| crate::petdye::of(e.id, e.drawn_model))
+}
+
 /// A creature's model as `Apply` dresses it: the look on its text slots, the
 /// items and helm on their nodes (a player's in a body one of the server's
 /// `races` wears holding items as a race's body does: `racebody`).
@@ -1136,11 +1322,27 @@ fn build_puppet(lib: &Library, g: &mut Gpu, e: &net::entity::Entity, look: Optio
 #[allow(clippy::too_many_arguments)]
 fn build_puppet_in(lib: &Library, g: &mut Gpu, e: &net::entity::Entity, look: Option<vi::cust::Look>, slot: usize, game_ms: i64, era: esf::Era, races: Option<&net::creation::Creation>, jumps: bool) -> Option<Puppet> {
     let textures = render::library_textures(lib);
-    lib.lookup(e.drawn_model as i32).and_then(|r| {
-                    let mut model = lib.build_model(r)?;
+    // a pet's look no zone of this world holds: off the decorations' assets
+    // (`decorlights::pet_asset_model`: the catapult in Odus)
+    let found = lib.lookup(e.drawn_model as i32);
+    let kept = if found.is_none() { crate::decorlights::pet_asset_model(e.drawn_model) } else { None };
+    if found.is_none() && kept.is_none() {
+        return None;
+    }
+    Some(()).and_then(|()| {
+                    let mut model = match found {
+                        Some(r) => lib.build_model(r)?,
+                        None => kept?,
+                    };
+                    // a server's decoration's art drawn lower than its NPC stands
+                    // (`decorlights::sink`: a fir's bare stem in the ground)
+                    crate::decorlights::lower(e.drawn_model, &mut model);
                     let mut anims = AnimScene { time: game_ms, ..Default::default() };
                     let mut rand = Rand(slot as u64 + 1);
-                    let mut sprite = load_csprite(lib, r, &mut anims, &mut AnimCache::new(), &mut rand);
+                    let mut sprite = found.and_then(|r| load_csprite(lib, r, &mut anims, &mut AnimCache::new(), &mut rand));
+                    // a pet in a zone's prop: its wheels and arm parts of a
+                    // skinned model of their own (`petart::rig`)
+                    let prop = if sprite.is_none() && crate::decorlights::pet_art(e.drawn_model).is_some() { crate::petart::rig(&mut model) } else { None };
                     let player = a_player(e);
                     if let Some(cs) = sprite.as_mut() {
                         crate::racebody::grant(cs, e.drawn_model, player, races);
@@ -1175,6 +1377,23 @@ fn build_puppet_in(lib: &Library, g: &mut Gpu, e: &net::entity::Entity, look: Op
                     let tint = tint_of(e);
                     if let Some(t) = tint {
                         crate::npctint::apply(&mut model, t);
+                    }
+                    // and a pet's dyes, each on its area (`petdye`)
+                    let petdye = petdye_of(e);
+                    if let Some(d) = petdye {
+                        if d.rule {
+                            // the rule's areas: its clothing and the rest
+                            crate::petdye::apply_rule(&mut model, d, &|id| lib.lookup(id).is_some());
+                        } else {
+                            crate::petdye::apply(&mut model, d);
+                        }
+                    }
+                    // a gingerbread man's icing (`toys::ice`: the body's aura, while the
+                    // Gingerbread Man's illusion is shown)
+                    if let Some(cs) = &sprite
+                        && crate::toys::iced(&pieces_of(e))
+                    {
+                        crate::toys::ice(&mut model, cs);
                     }
                     let wisp = crate::wisp::is(lib, e.drawn_model, race_look.as_deref());
                     // its auras (`aura`): an NPC's whole body's (its tint's) and
@@ -1211,7 +1430,7 @@ fn build_puppet_in(lib: &Library, g: &mut Gpu, e: &net::entity::Entity, look: Op
                     if !trims.is_empty() {
                         g.renderer.set_trims(g.device, g.queue, &mut gpu, &model, &trims, &textures);
                     }
-                    let mut p = Puppet { id: e.id, model: e.drawn_model, look, sprite, anims, rand, gpu, attached, held, projectile, name_at: None, slot4_at: None, actor_m: Matrix44::identity(), centre: Matrix44::identity(), weapons, trail: Default::default(), first: true, shown: false, era, textures: crate::texpack::generation(), cape: None, race_look, tint, aura, pieces, wisp };
+                    let mut p = Puppet { id: e.id, model: e.drawn_model, look, sprite, anims, rand, gpu, attached, held, projectile, name_at: None, slot4_at: None, actor_m: Matrix44::identity(), centre: Matrix44::identity(), weapons, trail: Default::default(), first: true, shown: false, era, textures: crate::texpack::generation(), cape: None, lights: None, race_look, tint, petdye, aura, pieces, wisp, prop };
                     p.set_casts();
                     Some(p)
                 })
@@ -1241,9 +1460,14 @@ fn wear_cape(lib: &Library, g: &mut Gpu, p: &mut Puppet, want: Option<net::cape:
     p.aura.retain(|w| w.first != 64 * (crate::aura::CAPE + 1));
     let pieces = p.pieces;
     let mut worn = None;
+    let mut lights = None;
     p.cape = want.map(|c| {
         let cs = p.sprite.as_ref();
         let m = cs.and_then(|cs| crate::cape::model(lib, c, p.model, cs));
+        // the String of Lights along it (`toys::cape_lights`)
+        if crate::toys::lights_worn(&pieces) {
+            lights = m.as_ref().and_then(crate::toys::cape_lights);
+        }
         let gpu = m.map(|m| {
             lib.with_view(esf::Era::Frontiers, || {
                 let textures = render::library_textures(lib);
@@ -1267,6 +1491,7 @@ fn wear_cape(lib: &Library, g: &mut Gpu, p: &mut Puppet, want: Option<net::cape:
         (c, gpu)
     });
     p.aura.extend(worn);
+    p.lights = lights;
     p.set_casts();
 }
 
@@ -1347,7 +1572,8 @@ fn attach(lib: &Library, g: &mut Gpu, cs: &CSprite<Ee>, c: &net::entity::Creatur
                 crate::aura::recolor(&mut m, color);
             }
             // its hand's aura's look lent it: an epic's, or an energy skin (`aura::lend_hand`)
-            if let Some(a) = crate::aura::hand_aura(&auras, i) {
+            // (and its second's: `aura::hand_auras`)
+            for (a, _) in crate::aura::hand_auras(&auras, i) {
                 crate::aura::lend_hand(lib, &mut m, &a, id);
             }
             attached.push((node, g.renderer.upload(g.device, g.queue, &m, &[render::IDENTITY], &textures)));
@@ -1357,7 +1583,35 @@ fn attach(lib: &Library, g: &mut Gpu, cs: &CSprite<Ee>, c: &net::entity::Creatur
     // the server's patch's tables (`s2`), retail's without one
     let t = crate::s2::get().cust();
     let mut helm_aura = None;
-    if let Some((node, mut m)) = crate::slotless::helm_on(lib, model, cs, player, c.armor[5], look_of(c).helm_color(&t), &t, true) {
+    // a hat another body has built in (the helm's hat, `hat`): in place of the
+    // helm, and the hair dressed as under one; the helm's other aura (a GM's
+    // shell or particles round the hat, a server that sends the hat apart:
+    // `net::entity::HELM_HAT_AURA`) drawn on it as on a helm
+    // (an NPC's by its name's tint: Santa Claus's Santa Hat, `hat::npc_hat`)
+    let hat = c.colors.and_then(|l| crate::hat::hat_of(&l.auras)).or_else(|| {
+        (!player).then(|| crate::npctint::of(&c.name)).flatten().and_then(|t| crate::hat::npc_hat(&t)).map(|(src, style)| (src, None, style))
+    });
+    if let Some(((node, mut m), style)) = hat.and_then(|(src, hue, style)| crate::hat::hat_on_styled(lib, model, cs, player, src, hue, style).map(|h| (h, style))) {
+        // in the helm's dye (the Equipment Dyer's, a GM's #dye): white, its own
+        // colours (Santa's: red, its band and ball white)
+        crate::hat::dress(&mut m, style, look_of(c).helm_color(&t), look_of(c).trim_color.map(|c| c[5]), lib);
+        // its inside too, in shade (from below it was not there)
+        crate::hat::two_sided(&mut m);
+        let mut gpu = g.renderer.upload(g.device, g.queue, &m, &[render::IDENTITY], &textures);
+        if let Some(a) = c.colors.map(|l| l.auras).filter(|a| a[crate::aura::HELM] != Default::default()) {
+            let (shell, worn) = crate::aura::helm_aura(&a, node);
+            if let Some(s) = &shell {
+                g.renderer.set_shells(g.device, &mut gpu, &m, std::slice::from_ref(s));
+            }
+            let taken = |id: i32| lib.lookup(id).is_some();
+            if let Some(t) = crate::aura::helm_trim(&m, &a, &taken) {
+                g.renderer.set_trims(g.device, g.queue, &mut gpu, &m, std::slice::from_ref(&t), &textures);
+            }
+            helm_aura = worn;
+        }
+        attached.push((node, gpu));
+        helm_worn = true;
+    } else if let Some((node, mut m)) = crate::slotless::helm_on(lib, model, cs, player, c.armor[5], look_of(c).helm_color(&t), &t, true) {
         helm_worn = true;
         let look = look_of(c);
         crate::slotless::helm_trim(lib, &mut m, look.helm_color(&t), look.trim_color.map(|c| c[5]), &t);
@@ -1468,7 +1722,7 @@ fn apply(lib: &Library, g: &mut Gpu, p: &mut Option<Puppet>, e: &net::entity::En
     // a tint on its body come, changed or gone (`npctint`), or a worn
     // piece's aura (`aura::pieces`): made anew
     let r = match p.as_ref() {
-        Some(p) if r != Redo::Build && (p.tint != tint_of(e) || p.pieces != pieces_of(e)) => Redo::Build,
+        Some(p) if r != Redo::Build && (p.tint != tint_of(e) || p.petdye != petdye_of(e) || p.pieces != pieces_of(e)) => Redo::Build,
         _ => r,
     };
     // the art swapped (F9), or a texture pack turned on or off (`texpack`),
@@ -1691,6 +1945,9 @@ pub struct PlateView {
     /// Overlapping Names Show: every plate kept, a plate that meets a
     /// nearer one's included (the game's `RasterDeferred` drops it: Hide)
     pub overlap: bool,
+    /// The storms' fog (near, far; `weather_zones::fog`): a plate fades out
+    /// across it and is gone past it
+    pub fog: Option<(f32, f32)>,
 }
 
 impl PlateView {
@@ -1698,7 +1955,7 @@ impl PlateView {
     /// that meets a nearer one's dropped.
     #[cfg(test)]
     pub fn game(eye: glam::Vec3) -> PlateView {
-        PlateView { eye, distance: crate::settings::NAME_DISTANCE_GAME as f32, scale: 1.0, most: NAME_PLATES_GAME, overlap: false }
+        PlateView { eye, distance: crate::settings::NAME_DISTANCE_GAME as f32, scale: 1.0, most: NAME_PLATES_GAME, overlap: false, fog: None }
     }
 
     /// This frame's for the walker's camera `cam` at `eye` in a window
@@ -1713,6 +1970,7 @@ impl PlateView {
             scale: crate::lod::plate_scale(cam, eye, k),
             most: crate::settings::entity_slots().max(NAME_PLATES_GAME),
             overlap: crate::settings::overlapping_names(),
+            fog: None,
         }
     }
 }
@@ -1738,6 +1996,11 @@ fn labels_by(plates: &[Plate], view: &PlateView, view_proj: glam::Mat4, width: i
     for p in plates {
         let at = glam::Vec3::from(p.at);
         if reach <= (at - view.eye).length_squared() + 1.0 || queued.len() >= view.most {
+            continue;
+        }
+        // faded in a storm's fog, gone past it (`weather_zones::plate_alpha`)
+        let fade = crate::weather_zones::plate_alpha(view.fog, (at - view.eye).length());
+        if fade < 0.01 {
             continue;
         }
         // in doubles, as the models' view-projection is made eye-relative
@@ -1770,16 +2033,16 @@ fn labels_by(plates: &[Plate], view: &PlateView, view_proj: glam::Mat4, width: i
                 (min.0, max.0) = (qx - (tw >> 1), qx - (tw >> 1) + tw);
             }
         }
-        queued.push((clip.w, min, max, ndc, p));
+        queued.push((clip.w, min, max, ndc, p, fade));
     }
     queued.sort_by(|a, b| a.0.total_cmp(&b.0));
     /// A kept plate: its depth, its rect's corners, where it is drawn, what.
-    type Kept<'a> = (f32, (i32, i32), (i32, i32), glam::Vec3, &'a Plate);
+    type Kept<'a> = (f32, (i32, i32), (i32, i32), glam::Vec3, &'a Plate, f32);
     let mut kept: Vec<Kept> = Vec::new();
-    for (w, min, max, ndc, p) in queued {
+    for (w, min, max, ndc, p, fade) in queued {
         let meets = !view.overlap && kept.iter().any(|k| !(min.0 > k.2.0 || max.0 < k.1.0 || min.1 > k.2.1 || max.1 < k.1.1));
         if !meets {
-            kept.push((w, min, max, ndc, p));
+            kept.push((w, min, max, ndc, p, fade));
         }
     }
     if view.overlap {
@@ -1790,18 +2053,21 @@ fn labels_by(plates: &[Plate], view: &PlateView, view_proj: glam::Mat4, width: i
     // PS2's 448 lines is 2 / 448 high)
     let line = 2.0 * height as f32 * view.scale / render::text::SCREEN_H;
     let mut out = Vec::new();
-    for (w, _, _, ndc, p) in kept {
+    for (w, _, _, ndc, p, fade) in kept {
         let up = if p.tag.is_some() { line } else { 0.0 };
-        out.push(render::text::Label { at: [ndc.x, ndc.y + up, ndc.z], color: p.color, text: p.name.clone(), size: 1.0 });
+        let color = [p.color[0], p.color[1], p.color[2], p.color[3] * fade];
+        out.push(render::text::Label { at: [ndc.x, ndc.y + up, ndc.z], color, text: p.name.clone(), size: 1.0 });
         if let Some(t) = &p.tag {
-            out.push(render::text::Label { at: ndc.to_array(), color: p.color, text: t.clone(), size: tag_size(height) });
+            out.push(render::text::Label { at: ndc.to_array(), color, text: t.clone(), size: tag_size(height) });
         }
         // the quest mark over the name: its centre half the name's line and
         // half its own above the name's, and a little more
         if let Some(sign) = p.mark.and_then(net::headmarks::sign) {
             let size = mark_size(w);
             let at = ndc.y + up + line * (0.5 + 0.5 * size + 0.15);
-            out.push(render::text::Label { at: [ndc.x, at, ndc.z], color: MARK_COLOR, text: sign.into(), size });
+            let mut color = MARK_COLOR;
+            color[3] *= fade;
+            out.push(render::text::Label { at: [ndc.x, at, ndc.z], color, text: sign.into(), size });
         }
     }
     out
@@ -2535,6 +2801,8 @@ mod name_plates {
     #[test]
     fn the_walkers_view_of_the_plates() {
         crate::settings::testing::reset(false);
+        // the game's 24 slots (the default is 48 since 2026-11-16)
+        crate::settings::set_client(crate::settings::ClientOptions { entity_slots: NAME_PLATES_GAME as u8, ..crate::settings::client() });
         let mut cam = vi::camera::WalkCamera::<Ee> { camera_mode: 3, target_height: F::new(1.68), ..Default::default() };
         cam.walk.phys.position = Vect3::of(1000.0, 50.0, 2000.0);
         let back = |d: f32| Vect3::of(1000.0, 51.68, 2000.0 - d);
@@ -3222,7 +3490,7 @@ impl Play {
         crate::racelabel::clear();
         // Msg000D reads `m_speed` out of the dump
         let speed = dump.speed;
-        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, stood_sent: false, last_pos: [0.0; 3], send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), autocast: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), aloft_vy: vec![None; MAX_SLOTS], airs: vec![Default::default(); MAX_SLOTS], actors: vec![None; MAX_SLOTS], actor_passes: vec![false; MAX_SLOTS], shortcuts: (false, false), self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, mob_info: None, talk_held: false, mob_shown_at: None, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), links: Default::default(), buffs: Default::default(), link_draft: None, event_no: 0, next_links: None, shift: false, wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_wait_since: None, cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, chat_unsent: 0, reopened: 0, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, rumbles: Vec::new(), glyphs: Default::default(), wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default(), record: Default::default(), raid: Default::default(), meter: Default::default(), merc: Default::default() };
+        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, stood_sent: false, last_pos: [0.0; 3], send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), regional: Default::default(), regional_clock: web_time::Instant::now(), retail_weather: 0, weather_fog: None, abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), autocast: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), aloft_vy: vec![None; MAX_SLOTS], airs: vec![Default::default(); MAX_SLOTS], carried: vec![false; MAX_SLOTS], carry_buf: vec![Default::default(); MAX_SLOTS], actors: vec![None; MAX_SLOTS], actor_passes: vec![false; MAX_SLOTS], shortcuts: (false, false), self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, mob_info: None, talk_held: false, mob_shown_at: None, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), links: Default::default(), buffs: Default::default(), link_draft: None, event_no: 0, next_links: None, shift: false, wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, hc_fall: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), petart: Default::default(), pet_tops: Default::default(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_wait_since: None, cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, chat_unsent: 0, reopened: 0, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, ride: None, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, rumbles: Vec::new(), glyphs: Default::default(), wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default(), record: Default::default(), raid: Default::default(), meter: Default::default(), merc: Default::default(), dyepick: Default::default() };
         p.take_abilities();
         p.npcw_world_entry();
         // world entry: LoadModels and StreamFillCache under the loading screen
@@ -3320,6 +3588,13 @@ impl Play {
         }
     }
 
+    /// The client's own additions the server turns off for the session
+    /// (`settings::qol`, go-eqoa-server's `world.vanilla_ui`), each frame:
+    /// none until it says, and none from a server that never does.
+    fn server_ui(&self) {
+        crate::settings::qol::set_off(self.session.qol_off);
+    }
+
     pub fn frame(&mut self, walker: &mut Walker, lib: &Library, mut g: Gpu, game_ms: i64, game_frame: bool, mut sound: Option<&mut crate::sound::Sound>) -> Option<u32> {
         self.take_modules(sound.as_deref_mut());
         fork_hooks::begin_iteration(self, game_frame);
@@ -3333,11 +3608,21 @@ impl Play {
         let mut new_model = None;
         self.actors_scene(walker);
         let events = self.session.pump();
+        // the player's Hardcore character fell (`net::hardcore`): its words in
+        // the chat and over the death's screen
+        if let Some(f) = self.session.hardcore_fall.take() {
+            for l in hardcore_fall_lines(&f) {
+                self.add_chat(l, [1.0, 0.35, 0.35, 1.0]);
+            }
+            eprintln!("play: Hardcore: fell to {:?} in {:?} at {}; the server ends the connection in {} s", f.killer, f.place, f.at, f.secs);
+            self.hc_fall = Some(f);
+        }
         // capes in their slot while the server's offer is taken (`cape`)
         crate::cape::set_offered(self.session.capes);
         // the pack's and the bank's records, as the server last said before a
         // dump (`inventory::pack_cap`; CLIENT's 40 where none says)
         crate::inventory::set_caps(self.session.item_lists);
+        self.server_ui();
         // a server's races' own options and the looks chosen (`raceopts`): the
         // creatures in a look made again in it (`apply`)
         crate::raceopts::set_options(self.session.race_options.as_ref());
@@ -3348,6 +3633,16 @@ impl Play {
         // whose tint changed made again in it (`apply`)
         if let Some(t) = self.session.npc_tints.take() {
             crate::npctint::set(t);
+        }
+        // the server's decorations (`decorlights`): their lights drawn from
+        // the next frame, their art's zones read by the walk's streamer
+        if let Some(d) = self.session.decor.take() {
+            crate::decorlights::set(d);
+        }
+        // the pets' dyes (`petdye`): the pets whose dyes changed made again in
+        // them (`apply`)
+        if let Some(d) = self.session.pet_dyes.take() {
+            crate::petdye::set(d);
         }
         // the server takes crash reports: this client's kept ones go, each let
         // go at its answer (`crashfile`)
@@ -3391,6 +3686,9 @@ impl Play {
                 }
                 Event::DialogBox { id, text, options } => self.dialog_box(id, &text, &options),
                 Event::Opcode { op: 0x005E, .. } => self.msg_005e(walker),
+                // Msg0777 in the world: the server ended the connection quietly
+                // (a Hardcore character's fall, `net::hardcore`)
+                Event::Opcode { op: 0x0777, .. } => self.msg_0777(),
                 // the live game's duel (`duelplay`): 0x1502 (the feature word
                 // with `liveplay`'s, below)
                 Event::Opcode { op: op @ crate::duel::OP_IN, data } => {
@@ -3408,6 +3706,8 @@ impl Play {
                     self.duel_reset();
                 }
                 Event::Teleport { world, pos, hpr, token } => self.msg_00b2(walker, world, pos, hpr, token, now as i64),
+                // the server's ride on a vehicle (`ride`)
+                Event::Opcode { op: crate::ride::OP_RIDE, data } => self.ride_said(walker, &data),
                 // 0x00F8: `m_speed`, then SetSpeed (a speed buff, a snare)
                 Event::Speed(v) => self.set_speed(v),
                 Event::LevelExp { level, exp } => self.level_exp(level, exp),
@@ -3524,6 +3824,12 @@ impl Play {
                 Event::Opcode { op: net::session::OP_RACE_LABELS_DATA, data } => crate::racelabel::take(&data),
                 // the combat record (`recordplay`)
                 Event::Opcode { op: net::session::OP_COMBAT_RECORD_DATA, data } => self.record_data(&data),
+                // the merc's windows (`mercplay`, `mercwnd`)
+                Event::Opcode { op: op @ (net::mercwin::OP_MERC_WINDOW_STATE | net::mercwin::OP_MERC_WINDOW_RESULT | net::mercwin::OP_MERC_SPELLS_STATE), data } => {
+                    self.merc_win_opcode(op, &data);
+                }
+                // the dyers' colour picker (`dyeplay`)
+                Event::Opcode { op: net::dyepick::OP_DYE_PICKER, data } => self.dyepick_opcode(&data),
                 // the live client's feature word and group search, and the
                 // server's offer of the live auction form (`liveplay`); the
                 // word goes to the duel part's copy too (`duelplay`)
@@ -3795,7 +4101,22 @@ impl Play {
                     crate::s2::set_server_armor(self.session.armor_look);
                     // where it was drawn and its speed, before this update
                     let was = self.entities.slots[slot].as_ref().and_then(|e| Some((e.id, e.actor_pos, e.creature.as_ref()?.velocity)));
+                    // the vehicles flying now (a decoration's art on the move:
+                    // the sleigh on its tour), for `carried_by`
+                    let movers = flying_vehicles(&self.entities.slots);
+                    let mut carry = false;
                     self.entities.channel(slot, &data, self_id, now, UPDATE_RATE, |e| {
+                        // the vehicle itself, or one flying with it: where the
+                        // server puts it, never dropped onto a floor (the
+                        // owner, 2026-11-17: "santa is clipping through the
+                        // sleigh like he is standing on the ground and
+                        // sometimes players are"): the floor under the reins
+                        // was the sleigh's own top, or a roof flown over
+                        carry = crate::decorlights::is_art(e.model) || e.creature.as_ref().is_some_and(|c| carried_by(&movers, e.pos, c.velocity));
+                        if carry {
+                            e.extrapolated = game_ms;
+                            return;
+                        }
                         if walk.as_ref().map(|w| w.0) != Some(e.id) {
                             let mut w = WalkControl::<Ee>::default();
                             w.init(Vect3::default(), Vect3::default(), scene);
@@ -3842,6 +4163,34 @@ impl Play {
                         }
                         e.extrapolated = game_ms;
                     });
+                    self.carried[slot] = carry;
+                    // a flying vehicle and what it carries: each update kept,
+                    // and drawn `CARRY_DELAY` behind along a curve through
+                    // them (the owner, 2026-11-17: "the sleigh ride is still
+                    // not smooth enough"): no correction ever shows, where
+                    // easing each one in still nudged a rider's whole view
+                    let buf = &mut self.carry_buf[slot];
+                    match self.entities.slots[slot].as_mut().filter(|e| carry && was.is_none_or(|w| w.0 == e.id)) {
+                        Some(e) => {
+                            let v = e.creature.as_ref().map_or([0.0; 3], |c| c.velocity);
+                            let sample = CarrySample { ms: game_ms, pos: e.pos, vel: v, heading: e.hpr[0] };
+                            // a jump the size of a teleport, or a long silence: anew
+                            if buf.back().is_some_and(|b| game_ms - b.ms > 2000 || game_ms < b.ms || (0..3).map(|i| (b.pos[i] - e.pos[i]).powi(2)).sum::<f32>() > CARRY_SNAP * CARRY_SNAP) {
+                                buf.clear();
+                            }
+                            // two in one frame: the newer stands for both
+                            if buf.back().is_some_and(|b| b.ms == game_ms) {
+                                buf.pop_back();
+                            }
+                            buf.push_back(sample);
+                            while buf.len() > 8 {
+                                buf.pop_front();
+                            }
+                            e.vel = [0.0; 3];
+                            e.rot = [0.0; 3];
+                        }
+                        None => buf.clear(),
+                    }
                     // a player aloft goes on from where it was drawn though its
                     // speed came unchanged (`jump::keeps_its_blend`)
                     if let Some(e) = self.entities.slots[slot].as_mut()
@@ -3898,12 +4247,24 @@ impl Play {
                     // stamped with the server's hour, which every window shares
                     let hour = self.session.time_of_day().map_or(String::new(), |h| format!(" at hour {:.4}", h.0));
                     eprintln!("play: weather {weather}{}{hour}", if instant { " (instant)" } else { "" });
-                    self.weather.push(Atmos::Weather(weather, instant));
+                    self.retail_weather = weather;
+                    // a rain or snow preview holds the atmosphere until it ends
+                    if self.regional.preview.and_then(|p| p.retail_byte()).is_none() {
+                        self.weather.push(Atmos::Weather(weather, instant));
+                    }
+                }
+                Event::WeatherZones(zones) => {
+                    self.weather_world();
+                    let now = self.regional_ms();
+                    eprintln!("play: regional weather for {} zones", zones.len());
+                    self.regional.take(zones, now);
                 }
                 Event::WorldEntry { self_id, player, dump } => {
                     #[cfg(not(target_arch = "wasm32"))]
                     self.forge_health.reset();
                     eprintln!("play: world entry again as {self_id:#x} at {:?}", player.pos);
+                    // a dump puts the player where it says: off any ride
+                    self.ride = None;
                     // Msg000D in play: EnterWorld, then SetLocation and
                     // SetOrbitAngleBehind at the dump's place (a respawn is
                     // a dump at the bind point), another world's file read
@@ -3971,6 +4332,10 @@ impl Play {
         // Power Bars: the server told what its row says (off, what it sent
         // forgotten and the raid list's power not drawn)
         self.session.agree_power_bars(crate::settings::power_bars());
+        // the regional weather: asked for while Options' Weather is above 0;
+        // another world forgets it and ends a preview
+        self.session.agree_weather(crate::settings::client().weather > 0);
+        self.weather_world();
         // Buff Window: the server told what its row says (off, the game's strip)
         self.session.agree_buffs(crate::settings::buff_window());
         // Quest Markers: the server told what its row says (off, none drawn)
@@ -4069,6 +4434,20 @@ impl Play {
             if !walks {
                 continue;
             }
+            // a decoration's art (a sleigh, a tree: `decorlights`) stands where
+            // the server puts it: never stood on a floor of the scene, which
+            // a zone's sprite (the sled) climbed, step by step, onto its own
+            // top, 600 up in the air; and whatever flies with it (`carried`)
+            if crate::decorlights::is_art(e.model) || self.carried[slot] {
+                // carried on along its velocity (the server flying it: Santa's
+                // sleigh on its tour), never set on a floor
+                let dt = (game_ms - e.extrapolated) as i32 as f32 * 0.001;
+                for i in 0..3 {
+                    e.pos[i] += c.velocity[i] * dt;
+                }
+                e.extrapolated = game_ms;
+                continue;
+            }
             if c.p255 != 0
                 && let Some((_, w)) = self.walks[slot].as_mut()
             {
@@ -4092,6 +4471,9 @@ impl Play {
             e.extrapolated = game_ms;
         }
         self.entities.extrapolate(self_id, now, UPDATE_RATE);
+        self.draw_carried(game_ms);
+        // a rider on its vehicle's deck as the vehicle is drawn (`ride`)
+        self.ride_frame(walker);
         self.admin_hold_glide();
         let clock = self.session.timer();
         self.position_due(&walker.cam.walk.committed, clock);
@@ -4117,6 +4499,9 @@ impl Play {
                 && Some(e.id) == me
                 && e.drawn_model != 0
             {
+                // a dye picked at a dyer, previewed (`dyeplay`)
+                let previewed = dyeplay::preview(&self.dyepick, e);
+                let e = previewed.as_ref().unwrap_or(e);
                 let look = e.creature.as_ref().map(look_of);
                 apply(lib, &mut g, &mut self.self_puppet, e, look, slot, game_ms, self.session.creation.as_ref(), self.session.jumps);
                 let want = cape_of(&self.session, e);
@@ -4143,10 +4528,22 @@ impl Play {
             let Some(p) = self.puppets[slot].as_mut() else { continue };
             wear_cape(lib, &mut g, p, cape_of(&self.session, e));
             let f = F::<Ee>::new;
+            // a pet in a zone's prop (`petart`): at its row's scale, moved by
+            // its rams and a shot's recoil
+            let prop = crate::decorlights::pet_art(e.drawn_model).filter(|_| p.sprite.is_none());
+            let (scale, off) = match &prop {
+                Some(art) => {
+                    let slots = &self.entities.slots;
+                    let me_at = self.self_at.map(|(p, _)| p);
+                    let place = |id: u32| if Some(id) == me { me_at } else { slots.iter().flatten().find(|t| t.id == id).map(|t| t.actor_pos) };
+                    (pet_scale(art, e), self.petart.offset(slot, e.actor_pos, game_ms, place))
+                }
+                None => (if e.scale > 0.0 { e.scale } else { 1.0 }, [0.0; 3]),
+            };
             let actor = Matrix44::transform(
                 &Vect3::new(f(e.actor_hpr[0]), f(e.actor_hpr[1]), F::ZERO),
-                f(if e.scale > 0.0 { e.scale } else { 1.0 }),
-                &Vect3::new(f(e.actor_pos[0]), f(e.actor_pos[1]), f(e.actor_pos[2])),
+                f(scale),
+                &Vect3::new(f(e.actor_pos[0] + off[0]), f(e.actor_pos[1] + off[1]), f(e.actor_pos[2] + off[2])),
             );
             // As the game rasters it: past its off distance not at all
             // (`VIScene::RasterActor`, at the actor's place), and of an LOD
@@ -4248,7 +4645,27 @@ impl Play {
                     p.slot4_at = slot_point(cs, 4, &m);
                     (m.to_cols(), if pose { cs.h.blend.iter().map(|m| m.to_cols()).collect::<Vec<_>>() } else { Vec::new() })
                 }
-                None => (actor.to_cols(), Vec::new()),
+                None => {
+                    // a prop's plate over its top (`petart`)
+                    if prop.is_some() {
+                        p.name_at = self.pet_tops.of(lib, e.drawn_model).map(|(_, top)| [e.actor_pos[0] + off[0], e.actor_pos[1] + top * scale + 0.6, e.actor_pos[2] + off[2]]);
+                    }
+                    // its wheels turned by how far it has rolled, its arm by
+                    // its throw (`petart`)
+                    let palette = match &p.prop {
+                        Some(rig) => {
+                            let fwd = actor.to_cols()[2];
+                            let rolled = self.petart.roll(slot, e.actor_pos, [fwd[0], fwd[1], fwd[2]]) / scale.max(1e-3);
+                            let arm = rig.arm.map_or(0.0, |a| self.petart.arm(slot, game_ms, a.release));
+                            // where a throw would let its boulder go, in the world
+                            let tip = rig.release_tip().map(|t| actor.mul_point(&Vect3::of(t[0], t[1], t[2])).to_array());
+                            self.petart.set_tip(slot, tip);
+                            rig.palette(rolled, arm)
+                        }
+                        None => Vec::new(),
+                    };
+                    (actor.to_cols(), palette)
+                }
             };
             p.actor_m = actor;
             p.centre = glam_to_matrix(matrix);
@@ -4415,11 +4832,25 @@ impl Play {
                     Some(p) => (p.model, p.era, p.sprite.as_ref().is_some_and(|cs| cs.dead)),
                     None => (e.drawn_model, lib.view_for(e.drawn_model as i32), false),
                 };
-                ActorAt { id: e.id, model, era, at: v3(e.actor_pos), hpr: v3(hpr), scale: actor_scale(e.scale), dead }
+                // a pet in a zone's prop at the size it is drawn (`petart`)
+                let scale = crate::decorlights::pet_art(model).map_or(e.scale, |art| pet_scale(&art, e));
+                ActorAt { id: e.id, model, era, at: v3(e.actor_pos), hpr: v3(hpr), scale: actor_scale(scale), dead }
             });
             let (a, made) = place_actor(&mut walker.scene, lib, self.actors[slot], want);
             self.actors[slot] = a;
             let passes = pets_pass && e.is_some_and(|e| passes_as_pet(e, self.pet_id));
+            // the server's walk-ons (`decorlights::walk_on`): a deck walked onto
+            // (its sides passed, its top a floor), a team walked through
+            let walk_on = e.and_then(|e| e.creature.as_ref()).and_then(|c| crate::decorlights::walk_on(&c.name));
+            // and a pet in a zone's prop (`petart`): its mesh, not a capsule,
+            // walked through always (it would hem its owner in)
+            let passes = passes || walk_on == Some(net::decor::WALK_PASS) || e.is_some_and(|e| crate::decorlights::pet_art(e.drawn_model).is_some());
+            if let Some(a) = a {
+                let deck = walk_on == Some(net::decor::WALK_DECK);
+                if (walker.scene.actors[a.actor].flags & vi::world::FLOOR_ONLY != 0) != deck {
+                    walker.scene.set_actor_floor_only(a.actor, deck);
+                }
+            }
             if let (Some(a), Some(c)) = (a, e.and_then(|e| e.creature.as_ref()))
                 && (made || refresh || self.actor_passes[slot] != passes)
             {
@@ -4501,6 +4932,7 @@ impl Play {
             let now = self.entities.slots[slot].as_ref().map(|e| e.id).filter(|&id| Some(id) != me);
             if self.spell_ids[slot].is_some() && self.spell_ids[slot] != now {
                 spells.actor_gone(slot as i32, &mut bodies, game_ms);
+                self.petart.forget(slot);
             }
             self.spell_ids[slot] = now;
         }
@@ -4525,6 +4957,29 @@ impl Play {
                 (c, a, t, ts)
             })
             .collect();
+        // a pet in a zone's prop (`petart`): its swing a ram, its other casts
+        // at another a shot from its arm
+        let chest = |slots: &[Option<net::entity::Entity>], id: u32| {
+            slots.iter().flatten().find(|e| e.id == id).map(|e| [e.actor_pos[0], e.actor_pos[1] + 1.2, e.actor_pos[2]])
+        };
+        for (c, a, _, _) in &casts {
+            let Some(e) = usize::try_from(*a).ok().and_then(|a| self.entities.slots.get(a)).and_then(|e| e.as_ref()) else { continue };
+            let Some(art) = crate::decorlights::pet_art(e.drawn_model) else { continue };
+            if c.target == c.caster {
+                continue;
+            }
+            let k = pet_scale(&art, e);
+            let (length, top) = self.pet_tops.of(lib, e.drawn_model).unwrap_or((4.0, 2.0));
+            let to = if Some(c.target) == me { self.self_at.map(|(p, _)| [p[0], p[1] + 1.2, p[2]]) } else { chest(&self.entities.slots, c.target) };
+            // the boulder leaves the arm's tip at its release (`petart::rig`)
+            let release = self.petart.tip(*a as usize).map(|t| (crate::petart::ARM_UP, t));
+            self.petart.cast(*a as usize, &art, e.actor_pos, length * k, top * k, c.target, to, c.time, game_ms, release);
+        }
+        {
+            let slots = &self.entities.slots;
+            let me_at = self.self_at.map(|(p, _)| [p[0], p[1] + 1.2, p[2]]);
+            self.petart.drawn = self.petart.flying(game_ms, |id| if Some(id) == me { me_at } else { chest(slots, id) });
+        }
         spells.frame(&mut bodies, &casts, if has_self { SELF } else { -1 }, Some(&mut walker.cam.effect), game_ms, &walker.eye, lib, sound);
         self.rumbles.append(&mut spells.rumbles);
     }
@@ -4542,12 +4997,18 @@ impl Play {
         let eye = crate::lod::eye(&walker.cam, &walker.eye.position);
         let textures = render::library_textures(lib);
         let mut used: std::collections::BTreeMap<u32, usize> = Default::default();
-        let all = flying.iter().map(|(id, m)| (id, m, &[][..])).chain(meshes.iter().map(|(id, m, p)| (id, m, &p[..])));
+        let pets = &self.petart.drawn;
+        let all = flying.iter().map(|(id, m)| (id, m, &[][..])).chain(meshes.iter().map(|(id, m, p)| (id, m, &p[..]))).chain(pets.iter().map(|(id, m)| (id, m, &[][..])));
         for (id, m, palette) in all {
             if !crate::lod::within(&m.m[3].xyz(), &eye, crate::lod::OFF_DIST) {
                 continue;
             }
-            let (model, pool) = self.projectiles.entry(*id).or_insert_with(|| (lib.lookup(*id as i32).and_then(|r| lib.build_model(r)), Vec::new()));
+            // (a pet's shot no zone of this world holds: off the assets, tried
+            // again until they are read)
+            if self.projectiles.get(id).is_some_and(|(m, _)| m.is_none()) && crate::decorlights::pet_art_shot(*id) {
+                self.projectiles.remove(id);
+            }
+            let (model, pool) = self.projectiles.entry(*id).or_insert_with(|| (lib.lookup(*id as i32).and_then(|r| lib.build_model(r)).or_else(|| crate::decorlights::asset_built(*id)), Vec::new()));
             let Some(model) = model.as_ref() else { continue };
             let n = used.entry(*id).or_default();
             if *n == pool.len() {
@@ -4647,6 +5108,16 @@ impl Play {
             return;
         }
         if self.buff_key(key, down) {
+            return;
+        }
+        // R2 Channel Switch (Extended > UI > Chat, off by default; the server
+        // owner, 2026-11-18): left and right step the chat channel, and do
+        // nothing else, unless a loot roll's or a ready check's strip is up
+        // (right still gives it the d-pad)
+        if crate::settings::r2_channels() && matches!(key, 136 | 137 | 17 | 18) && !self.rolls_focused() && !self.rolls_up() {
+            if down {
+                self.chat_channel_step(if matches!(key, 136 | 17) { -1 } else { 1 });
+            }
             return;
         }
         // the walk through the item links (`itemlink`), unless a loot roll's
@@ -5016,7 +5487,7 @@ impl Play {
                 let e = e.as_ref().filter(|e| self.in_scene(e))?;
                 let at = self.slot4_of(k).unwrap_or(e.actor_pos);
                 let d2 = (glam::Vec3::from(e.actor_pos) - eye).length_squared();
-                let side = e.creature.as_ref().is_some_and(|c| c.p256 == 3) && !self.is_dueling(e.id);
+                let side = e.creature.as_ref().is_some_and(|c| self.centre_skips_side(c)) && !self.is_dueling(e.id);
                 Some(Seen { id: e.id, at, selectable: e.p18 & 1 != 0, side, d2 })
             })
             .collect();
@@ -5083,6 +5554,8 @@ impl Play {
     /// so that `Respawn` sets the follow orbit down behind the player at the
     /// arrival, not the start menu's framing of the character.
     fn msg_00b2(&mut self, walker: &mut Walker, world: u8, pos: [f32; 3], hpr: [f32; 3], token: u32, now: i64) {
+        // a move of the server's puts the player where it says: off any ride
+        self.ride = None;
         walker.cam.effect.reset();
         walker.cam.effect.end_manual(F::ZERO);
         if self.session.self_id.is_some() {
@@ -5093,6 +5566,53 @@ impl Play {
             }
         }
         self.session.answer_teleport(token);
+    }
+
+    /// [`crate::ride::OP_RIDE`]: on, the walker kept on the vehicle's deck from
+    /// the next frame (`ride_frame`), the camera's manual look ended; off, the
+    /// walker set down where the server put the player.
+    fn ride_said(&mut self, walker: &mut Walker, data: &[u8]) {
+        match crate::ride::read(data) {
+            Some(crate::ride::Said::On(r)) => {
+                eprintln!("play: riding {} at {:?}", r.vehicle, r.at);
+                self.autorun = false;
+                self.following = false;
+                self.ride = Some(r);
+            }
+            Some(crate::ride::Said::Off([x, y, z, h])) => {
+                eprintln!("play: off the ride at ({x:.1}, {y:.1}, {z:.1})");
+                self.ride = None;
+                walker.place([x, y, z], h);
+            }
+            None => eprintln!("play: a ride message of {} bytes not read", data.len()),
+        }
+    }
+
+    /// A rider kept on its vehicle's deck: the vehicle as it is drawn this
+    /// frame (its actor's place and heading), the rider's place on it, the
+    /// walker set there with nothing of its own (no velocity, no fall); its
+    /// heading its own. A vehicle out of view leaves it where it is.
+    fn ride_frame(&mut self, walker: &mut Walker) {
+        let Some(r) = &self.ride else { return };
+        let me = self.self_id32();
+        let Some(v) = self.entities.slots.iter().flatten().find(|e| Some(e.id) != me && e.creature.as_ref().is_some_and(|c| net::npctint::key(&c.name) == r.vehicle)) else { return };
+        let at = crate::ride::place(v.actor_pos, v.actor_hpr[0], r.at);
+        walker.ride_at(at);
+    }
+
+    /// The carried creatures drawn `CARRY_DELAY` behind their newest update,
+    /// on the curve through their updates (`carry_at`).
+    fn draw_carried(&mut self, game_ms: i64) {
+        for (slot, e) in self.entities.slots.iter_mut().enumerate() {
+            let Some(e) = e else { continue };
+            if !self.carried[slot] {
+                continue;
+            }
+            if let Some((pos, heading)) = carry_at(&self.carry_buf[slot], game_ms - CARRY_DELAY) {
+                e.actor_pos = pos;
+                e.actor_hpr[0] = heading;
+            }
+        }
     }
 
     /// `Respawn` done (the loading screen down): each move's token answered,
@@ -5446,8 +5966,8 @@ impl Play {
             // a right click on a bar's ability: its auto turned (`autocast`);
             // anywhere else, the world's as ever
             if matches!(c, Click::Right(..)) {
-                let chat = moved(crate::hudlayout::Piece::Chat);
-                let bars_at = if self.hud_menus.stacked { [f[0] - side - chat[0], f[1] - up - chat[1]] } else { [f[0] - side - menus[0], f[1] + up - menus[1]] };
+                let stacked = moved(crate::hudlayout::Piece::SpellBars);
+                let bars_at = if self.hud_menus.stacked { [f[0] - side - stacked[0], f[1] - up - stacked[1]] } else { [f[0] - side - menus[0], f[1] + up - menus[1]] };
                 return crate::hud::fork_hud::hud_menu_visible(&self.hud_menus) && self.auto_point(bars_at);
             }
             // the compass opens the map, with the Map on (the touch screen's
@@ -5456,9 +5976,11 @@ impl Play {
                 self.map.show();
                 return true;
             }
-            // the stacked bars (ticket 1913) are in the chat box's place
+            // the stacked bars (ticket 1913) where they were put, a piece of
+            // their own (petition 5229)
             let chat = moved(crate::hudlayout::Piece::Chat);
-            let bars_at = if self.hud_menus.stacked { [f[0] - side - chat[0], f[1] - up - chat[1]] } else { [f[0] - side - menus[0], f[1] + up - menus[1]] };
+            let stacked = moved(crate::hudlayout::Piece::SpellBars);
+            let bars_at = if self.hud_menus.stacked { [f[0] - side - stacked[0], f[1] - up - stacked[1]] } else { [f[0] - side - menus[0], f[1] + up - menus[1]] };
             if crate::hud::fork_hud::hud_menu_visible(&self.hud_menus) && let Some(k) = self.hud_menus.point(bars_at) {
                 // the pad key it stands for in S2's record, let go at once
                 self.note_hud_key(k, true);
@@ -5689,6 +6211,12 @@ impl Play {
         }
         if self.record_owns() {
             return self.record_point(f);
+        }
+        if self.merc_win_owns() {
+            return self.merc_win_point(f);
+        }
+        if self.dyepick_owns() {
+            return self.dyepick_point(f);
         }
         // Shift+click on an item in the inventory: linked in the chat line
         // (`itemlink`)
@@ -5940,6 +6468,8 @@ impl Play {
             "/alarm" => self.alarm_command(&rest),
             // the DPS meter's (`dpsmeter`), the client's own
             "/dps" => self.dps_command(&rest),
+            // a local look at the regional weather (`weather_zones`), never sent
+            "/weatherpreview" => self.weather_preview_command(&rest),
             // the chat tabs' (`chat`, ticket 1951), the client's own
             "/tab" => self.tab_command(&rest),
             "/tabname" => self.tabname_command(&rest),
@@ -6225,6 +6755,23 @@ impl Play {
         self.cam_saved = crate::camstyle::save(&walker.cam);
     }
 
+    /// `Msg0777` in the world: a quiet disconnect (no notice), back to the server
+    /// list (`Msg0777Done(2)`, as a logout goes) with the login kept; what the
+    /// server sends a Hardcore character's client once it has fallen
+    /// (`net::hardcore`). Nothing is sent: the server has let the connection go.
+    fn msg_0777(&mut self) {
+        let text = match self.hc_fall.as_ref() {
+            Some(_) => "Your Hardcore character has fallen. Its journey is over.".to_string(),
+            None => "Disconnected.".to_string(),
+        };
+        eprintln!("play: 0x0777 (Msg0777): {text}");
+        #[cfg(target_arch = "wasm32")]
+        if !self.booted {
+            crate::web::disconnected(&text);
+        }
+        self.quit = true;
+    }
+
     /// Quit answered yes (`m_p2EC28`, `Process`'s LOGOUT): 0x09B0 to the
     /// server, sent now, then `Disconnect(9, 1)`: in a page its login screen
     /// again, saying word 820 ("Logged out."), as the console goes back to
@@ -6434,7 +6981,7 @@ impl Play {
             casting: casting((a, b), self.session.timer()),
             // the window's (`mode_locks`) and the client's other holds (the
             // start menu's framing, the manual camera, a server's search)
-            move_ok: self.locks.0 && mode_locks(self.mode).0,
+            move_ok: self.locks.0 && mode_locks(self.mode).0 && self.ride.is_none(),
             look_ok: self.locks.1 && mode_locks(self.mode).1,
             rooted: self.rooted,
             // IsTimedOut (8 s with nothing arriving) is not applied:
@@ -6446,10 +6993,13 @@ impl Play {
             keys: [0.0; 8],
             // the mouse steering the body: the viewer's (`Mouse::steer`)
             steer: false,
+            // the view the walk keeps: the viewer's (`Mouse::walk_view`)
+            walk_view: None,
             // `IsModal`: the manual camera
             modal: self.mode == 38,
             // the server's word (`Session::flying`, `walker`)
-            flying: self.session.flying,
+            // and a ride's (`ride`): held on the deck, no fall between frames
+            flying: self.session.flying || self.ride.is_some(),
             noclip: self.session.noclip,
             // the server's offer (`Session::jumps`), and a report standing sent
             // since its last move (none while one is not done)
@@ -6521,6 +7071,14 @@ impl Play {
         }
         if self.record_owns() {
             self.record_key(key, down);
+            return true;
+        }
+        if self.merc_win_owns() {
+            self.merc_win_key(key, down);
+            return true;
+        }
+        if self.dyepick_owns() {
+            self.dyepick_key(key, down);
             return true;
         }
         if self.start.is_some() {
@@ -6753,6 +7311,29 @@ impl Play {
         }
     }
 
+    /// R2 Channel Switch's step (`dir` -1 back, 1 on): the next channel plain
+    /// text may go to, in the quick chat's order, Say, Group (in a group of
+    /// two or more), Shout, Guild (in a guild), round; set as the quick
+    /// chat's entries set it (0x000E, its "Chat Mode" word in the box).
+    fn chat_channel_step(&mut self, dir: i32) {
+        let mut ways = vec![0u8];
+        if self.group.in_group && self.group.count() >= 2 {
+            ways.push(2);
+        }
+        ways.push(3);
+        if crate::guild::Cmds::can_member(&self.guild) == 0 {
+            ways.push(4);
+        }
+        let n = ways.len() as i32;
+        let i = match ways.iter().position(|&c| c == self.channel) {
+            Some(i) => (i as i32 + dir).rem_euclid(n),
+            None if dir > 0 => 0,
+            None => n - 1,
+        };
+        self.cues.push(crate::sound::Cue::Ui(11));
+        self.group_changed(ways[i as usize]);
+    }
+
     /// `Reset`: every other invitation refused (0x0624, 2).
     fn refuse_invites(&mut self) {
         for i in std::mem::take(&mut self.group.invites) {
@@ -6919,6 +7500,9 @@ impl Play {
                     }
                 }
                 ItemOut::Back => {}
+                // Give to Merc (`mercwnd::with_give`, `mercplay`)
+                ItemOut::Custom(crate::mercwnd::MSG_GIVE, i) => self.merc_give(i),
+                ItemOut::Custom(..) => {}
             }
         }
     }
@@ -7007,6 +7591,8 @@ impl Play {
         let bank_tables = crate::live::features().auction(self.dump.bank.p78cc);
         // and its first entry, TEST, while the GM's channel is enabled
         let test = self.admin.part.test_entry();
+        // Give to Merc on the items not worn while the merc's windows are offered (`mercwnd`)
+        let give_on = self.merc_give_on();
         let mut actions = Vec::new();
         let Some(s) = self.start.as_mut() else { return actions };
         let attack_words = s.attack_words.clone();
@@ -7027,6 +7613,7 @@ impl Play {
             link,
         );
         // Hide Look / Show Look on a worn item where the server offers it (`hidelook`)
+        let built = crate::mercwnd::with_give(built, inv, give_on);
         self.items.set_built(crate::hidelook::with_rows(built, inv, &self.session.hide_look));
         self.items.set_gear(self.gear.view(inv, &vui.words, vui.language));
         let info = crate::infotext::Info {
@@ -8510,11 +9097,10 @@ impl Play {
     /// The live client's `UseGearSet` (0x012C3418): 0x0022 with the set
     /// (4 bare hands).
     fn use_gear_set(&mut self, set: i64) {
-        if (0..=crate::gear::BARE_HANDS).contains(&set) {
-            eprintln!("play: weapon set {set} taken up (0x0022)");
-            let mut w = net::stream::Writer::op(0x0022);
-            w.u8(set as u8);
-            self.session.send(&w.data);
+        let back = crate::settings::weapon_swap_back();
+        if let Some(data) = crate::gear::use_message(set, back) {
+            eprintln!("play: weapon set {set} taken up (0x0022{})", if back { ", swap back" } else { "" });
+            self.session.send(&data);
         }
     }
 
@@ -9825,6 +10411,8 @@ impl Play {
             self.run_class_mastery(vui, &mut r);
             self.run_factions(vui, &mut r);
             self.run_record(vui, &mut r);
+            self.run_merc_windows(vui, &mut r);
+            self.run_dyepick(vui, &mut r);
             self.run_npcw(vui, &mut r);
             self.run_duel(vui, &mut r);
             self.run_bank(vui, &mut r);
@@ -9930,13 +10518,14 @@ impl Play {
                     }
                 };
                 // Stacked Spell Bars (ticket 1913): the first two bars in two
-                // rows above the chat box, moving with it, no name bar
+                // rows above the chat box, no name bar; a piece of their own
+                // to move (petition 5229), not the chat box's
                 self.hud_menus.stacked = self.stacked_bars();
                 if self.hud_menus.stacked {
                     let (anchor, vertical) = (r.ui.anchor, r.ui.vertical);
                     r.ui.anchor = Anchor::Right;
                     r.ui.vertical = Vertical::Bottom;
-                    let m = crate::hudlayout::begin(r.ui, crate::hudlayout::Piece::Chat);
+                    let m = crate::hudlayout::begin(r.ui, crate::hudlayout::Piece::SpellBars);
                     let [left, top] = crate::chat::WndChat::full_top_left(vui, &r);
                     if crate::hud::fork_hud::hud_menu_visible(&self.hud_menus) { self.hud_menus.draw_stacked(vui, &mut r, top, left, bars); }
                     crate::hudlayout::end(r.ui, m);
@@ -9972,6 +10561,15 @@ impl Play {
             {
                 let (x0, y0, x1, y1) = (-2000.0, -1.0, 2640.0, 449.0);
                 r.ui.push_whole(render::ui::Quad { tex, blend: 3, pos: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], uv: [[0.5, 0.5]; 4], color: [0.0, 0.0, 0.0, a], clip: None });
+            }
+            // a Hardcore character's fall (`net::hardcore`), over the black:
+            // its lines in the middle, the first in red
+            if let Some(f) = self.hc_fall.as_ref() {
+                r.ui.anchor = Anchor::Middle;
+                for (i, l) in hardcore_fall_lines(f).iter().enumerate() {
+                    let c = if i == 0 { [1.0, 0.3, 0.3, 1.0] } else { [0.9, 0.9, 0.9, 1.0] };
+                    vui.draw_centered_string_ex(&mut r, &crate::ui::wide(l), 320, 190 + 24 * i as i32, c, 0, true);
+                }
             }
             r.ui.end();
             self.hud = Some((vui_o, assets, hud_o));
@@ -10119,6 +10717,10 @@ impl Play {
     pub fn hud_press(&mut self, at: [f32; 2], size: (u32, u32)) -> bool {
         use crate::hudlayout::{Beyond, Button, Press};
         let f = render::ui::frame_from_window(size, at);
+        // the dyers' colour picker up: every press is its (`dyeplay`)
+        if self.dyepick_owns() {
+            return self.dyepick_press(f);
+        }
         if !self.hud_moving() {
             // a raid list's row held to move it (`raidplay`, petition 1687)
             return self.raid_drag_press(f);
@@ -10139,6 +10741,9 @@ impl Play {
     /// The pointer at window pixels `at` while a piece is dragged: it goes
     /// with it. False with none dragged.
     pub fn hud_drag(&mut self, at: [f32; 2], size: (u32, u32)) -> bool {
+        if self.dyepick_drag(render::ui::frame_from_window(size, at)) {
+            return true;
+        }
         if !crate::hudlayout::dragging() {
             return self.raid_drag_move(render::ui::frame_from_window(size, at));
         }
@@ -10148,7 +10753,7 @@ impl Play {
 
     /// The press let go: a dragged piece stays, kept. False with none.
     pub fn hud_release(&mut self) -> bool {
-        crate::hudlayout::release() || self.raid_drag_release()
+        self.dyepick_release() || crate::hudlayout::release() || self.raid_drag_release()
     }
 
     /// The meter cleared, and the server told to drop the fight under way.
@@ -10245,6 +10850,54 @@ impl Play {
             }
         };
         self.add_chat(line, [1.0; 4]);
+    }
+
+    /// The regional weather's clock: ms since this `Play` began.
+    fn regional_ms(&self) -> i64 {
+        self.regional_clock.elapsed().as_millis() as i64
+    }
+
+    /// The regional weather at (x, z) in the player's world now (a preview's
+    /// in its place), before Options' Weather.
+    pub fn weather_sample(&self, x: f32, z: f32) -> crate::weather_zones::Sample {
+        self.regional.sample(self.world_id(), x, z, self.regional_ms())
+    }
+
+    /// `/weatherpreview rain|snow|sand|whiteout|clear [light|moderate|heavy]`
+    /// and `/weatherpreview off`: the client's own look at a weather, which
+    /// stands in for the server's until off or another world. A rain or snow
+    /// preview sets the game's atmosphere too.
+    fn weather_preview_command(&mut self, arg: &str) {
+        match crate::weather_zones::Preview::parse(arg) {
+            Some(Some(p)) => {
+                self.regional.preview = Some(p);
+                if let Some(b) = p.retail_byte() {
+                    self.weather.push(Atmos::Weather(b, true));
+                } else {
+                    self.weather.push(Atmos::Weather(self.retail_weather, true));
+                }
+                let line = format!("Weather preview (on this client only): {} at {}. /weatherpreview off ends it.", arg.trim(), p.strength);
+                self.add_chat(line, [1.0; 4]);
+            }
+            Some(None) => self.end_weather_preview("The weather preview is off."),
+            None => self.add_chat("Usage: /weatherpreview rain|snow|sand|whiteout|clear [light|moderate|heavy], or off (on this client only).".to_string(), [1.0; 4]),
+        }
+    }
+
+    /// The regional weather kept for the player's world: another forgets
+    /// what was kept and ends a preview.
+    fn weather_world(&mut self) {
+        if self.regional.set_world(self.world_id()) {
+            self.end_weather_preview("The weather preview ended: another world.");
+        }
+    }
+
+    /// The preview ended: the server's weather back, its byte too.
+    fn end_weather_preview(&mut self, line: &str) {
+        if self.regional.preview.take().is_some_and(|p| p.retail_byte().is_some()) {
+            self.weather.push(Atmos::Weather(self.retail_weather, true));
+        }
+        self.add_chat(line.to_string(), [1.0; 4]);
     }
 
     fn dps_command(&mut self, arg: &str) {
@@ -10488,8 +11141,9 @@ impl Play {
                     out.push(InHand { key: (holder, hand, item, k), world: Matrix44::mul(&e.member, &at), def: e.def, how: How::Sprite(e.flags), drawn, tint });
                 }
                 // its hand's aura's particles (`aura::hand_emitters`): an epic's, lent
-                if let Some(a) = crate::aura::hand_aura(&p.pieces, hand) {
-                    out.extend(lib.with_view(p.era, || crate::aura::hand_emitters(lib, holder, hand, item, &at, &a, drawn)));
+                // (and its second's: `aura::hand_auras`)
+                for (a, off) in crate::aura::hand_auras(&p.pieces, hand) {
+                    out.extend(lib.with_view(p.era, || crate::aura::hand_emitters_at(lib, holder, hand, item, &at, &a, drawn, off)));
                 }
             }
             let player = holder == crate::spells::SELF;
@@ -10517,6 +11171,118 @@ impl Play {
             add(crate::spells::SELF, p, cs, &glam_to_matrix(matrix), Some(self.self_shown));
         }
         out
+    }
+
+    /// The decorations' lights this frame (`decorlights`): on the creatures
+    /// drawn whose names a string hangs on, and in the player's world, seen
+    /// from `eye`, at the game's `ms`.
+    pub fn decor_batches(&self, eye: [f32; 3], ms: i64) -> Vec<render::billboard::Batch> {
+        // the art the looks and the pets' looks draw, read once
+        // (`decorlights::poll_assets`)
+        crate::decorlights::poll_assets();
+        if !crate::decorlights::any() {
+            return Vec::new();
+        }
+        let holders = self.decor_holders();
+        crate::decorlights::batches(&holders, self.player.world, eye, ms)
+    }
+
+    /// The decorations' model bulbs this frame (`decorlights::globes`), drawn
+    /// as they are (a bulb is its own light).
+    pub fn decor_globes(&self, eye: [f32; 3], ms: i64) -> Vec<render::billboard::Strips> {
+        if !crate::decorlights::any() {
+            return Vec::new();
+        }
+        let holders = self.decor_holders();
+        crate::decorlights::globes(&holders, self.player.world, eye, ms)
+    }
+
+    /// The decorations' cords this frame (`decorlights::cords`), unlit.
+    pub fn decor_cords(&self, eye: [f32; 3]) -> Vec<render::billboard::Strips> {
+        if !crate::decorlights::any() {
+            return Vec::new();
+        }
+        let holders = self.decor_holders();
+        crate::decorlights::cords(&holders, self.player.world, eye)
+    }
+
+    /// The decorations' presents this frame (`decorlights::presents`), unlit.
+    pub fn decor_presents(&self, eye: [f32; 3]) -> Vec<render::billboard::Strips> {
+        if !crate::decorlights::any() {
+            return Vec::new();
+        }
+        let holders = self.decor_holders();
+        crate::decorlights::presents(&holders, self.player.world, eye)
+    }
+
+    /// The Strings of Lights worn this frame (`toys::placed`): each drawn
+    /// character's along its cape, skinned where its body is now, the
+    /// player's own on its walker's pose (`matrix`, as `in_hand` takes it).
+    pub fn worn_lights(&self, walker: &Walker, matrix: [[f32; 4]; 4]) -> net::decor::Decor {
+        let world = self.player.world as u8;
+        let mut strings = Vec::new();
+        for p in self.puppets.iter().flatten() {
+            if let (Some(l), Some(cs), true) = (&p.lights, &p.sprite, p.shown) {
+                strings.push(crate::toys::placed(l, cs, &p.centre, world));
+            }
+        }
+        if let (Some(p), Some(cs), true) = (&self.self_puppet, walker.sprite.as_ref(), self.self_shown)
+            && let Some(l) = &p.lights
+        {
+            strings.push(crate::toys::placed(l, cs, &glam_to_matrix(matrix), world));
+        }
+        net::decor::Decor { strings, ..Default::default() }
+    }
+
+    /// The Strings of Lights' bulbs this frame (`worn_lights`), as the
+    /// decorations' are drawn.
+    pub fn worn_light_batches(&self, walker: &Walker, matrix: [[f32; 4]; 4], eye: [f32; 3], ms: i64) -> Vec<render::billboard::Batch> {
+        let d = self.worn_lights(walker, matrix);
+        if d.strings.is_empty() {
+            return Vec::new();
+        }
+        crate::decorlights::batches_in(&d, self.player.world, eye, ms)
+    }
+
+    /// The Strings of Lights' cords this frame, unlit.
+    pub fn worn_light_cords(&self, walker: &Walker, matrix: [[f32; 4]; 4], eye: [f32; 3]) -> Vec<render::billboard::Strips> {
+        let d = self.worn_lights(walker, matrix);
+        if d.strings.is_empty() {
+            return Vec::new();
+        }
+        crate::decorlights::cords_in(&d, self.player.world, eye)
+    }
+
+    /// The Strings of Lights' glass this frame (`toys::glass`), unlit.
+    pub fn worn_light_glass(&self, walker: &Walker, matrix: [[f32; 4]; 4], ms: i64) -> Vec<render::billboard::Strips> {
+        let d = self.worn_lights(walker, matrix);
+        if d.strings.is_empty() {
+            return Vec::new();
+        }
+        crate::toys::glass(&d, ms)
+    }
+
+    /// The creatures drawn a string may hang on (`decorlights::Holder`).
+    fn decor_holders(&self) -> Vec<crate::decorlights::Holder<'_>> {
+        let boned = crate::decorlights::boned_keys();
+        let mut holders = Vec::new();
+        for (slot, e) in self.entities.slots.iter().enumerate() {
+            let (Some(e), Some(Some(p))) = (e.as_ref(), self.puppets.get(slot)) else { continue };
+            let Some(c) = e.creature.as_ref().filter(|_| !a_player(e)) else { continue };
+            // the body's bones as drawn, for a string riding them (a red nose)
+            let bones = p.sprite.as_ref().filter(|_| !boned.is_empty() && boned.contains(&net::npctint::key(&c.name))).map(|cs| crate::decorlights::Bones {
+                drawn: cs.h.nodes.iter().map(|n| glam::Mat4::from_cols_array_2d(&Matrix44::mul(&n.world, &p.centre).to_cols())).collect(),
+                still: c.velocity.iter().all(|v| v.abs() < 0.05),
+            });
+            holders.push(crate::decorlights::Holder { name: &c.name, at: e.actor_pos, heading: e.actor_hpr[0], scale: if e.scale > 0.0 { e.scale } else { 1.0 }, bones });
+        }
+        holders
+    }
+
+    /// The zones of the player's world whose art a decoration wears
+    /// (`decorlights::art_zones`), for the walk's streamer to read.
+    pub fn decor_zones(&self) -> Vec<usize> {
+        crate::decorlights::art_zones(self.player.world)
     }
 
     pub fn has_self(&self) -> bool {
@@ -12051,6 +12817,37 @@ mod commands {
         assert_eq!(p.target_level(true), None, "no target");
     }
 
+    /// The game's own UI (go-eqoa-server's 0x7EA0): what the session was told
+    /// is off is off each frame, the target's level with it; a session told
+    /// nothing (any other server) turns nothing off; out of the world nothing
+    /// stays off.
+    #[test]
+    fn the_server_turns_the_additions_off_for_its_session() {
+        use crate::settings::qol;
+        crate::settings::testing::reset(false);
+        let mut p = play();
+        let creature = net::entity::Creature { level: 32, ..Default::default() };
+        p.entities.slots[2] = Some(net::entity::Entity { id: 0x22, kind: net::entity::TYPE_CREATURE, creature: Some(creature), ..Default::default() });
+        p.target = 0x22;
+        p.session.con_level_offer = true;
+        p.session.expansion = 2;
+        crate::settings::set_client(crate::settings::ClientOptions { ability_bars: 4, ..crate::settings::client() });
+        p.server_ui();
+        assert!(!qol::off(qol::MAP) && crate::settings::map(), "nothing said: the map");
+        assert_eq!(p.ability_bars(), 4, "and four bars");
+        assert_eq!(p.target_level(crate::settings::client().target_level), Some(32), "and the level");
+        p.session.qol_off = 0xFFF;
+        p.server_ui();
+        assert_eq!(p.ability_bars(), 2, "the game's two bars");
+        assert!(qol::off(qol::MAP) && !crate::settings::map() && !crate::settings::quest_tracker(), "told: none (the map off by default)");
+        assert_eq!(p.target_level(crate::settings::client().target_level), None, "nor the level");
+        assert_eq!(crate::trainer::stat_text(343, 435), "343", "the stat's value alone");
+        drop(p);
+        assert!(!qol::off(qol::MAP) && crate::settings::map(), "out of the world: back");
+        assert_eq!(crate::settings::ability_bars(), 4, "the four bars chosen");
+        assert_eq!(crate::trainer::stat_text(343, 435), "343/435");
+    }
+
     /// The choice made the target: a change stops the attack and drops the
     /// target's info (and asks the server, 0x0010), none too; the same
     /// again changes nothing.
@@ -12235,7 +13032,7 @@ mod commands {
             out
         };
         asked(&mut p);
-        crate::settings::set_client(crate::settings::ClientOptions { entity_slots: 128, entity_view: crate::settings::ENTITY_VIEW_GAME, ..Default::default() });
+        crate::settings::set_client(crate::settings::ClientOptions { entity_slots: 128, ..Default::default() });
 
         p.agree_entity_view();
         assert!(asked(&mut p).is_empty(), "the control: no offer, nothing sent");
@@ -12244,7 +13041,7 @@ mod commands {
 
         p.session.entity_view_offer = Some((204, 1000));
         p.agree_entity_view();
-        assert_eq!(asked(&mut p), [vec![0x00, 0x7E, 128, 0, 0, 0, 100, 0, 0, 0]], "128 within the game's 100");
+        assert_eq!(asked(&mut p), [vec![0x00, 0x7E, 128, 0, 0, 0, 200, 0, 0, 0]], "128 within the default 200");
         assert_eq!(p.entities.limit, 128);
         assert_eq!(p.options_wnd.server_note.as_deref(), Some("This server: 204 within 1000"));
         p.agree_entity_view();
@@ -12934,6 +13731,55 @@ mod commands {
         assert_eq!((p.channel, last_line(&p)), (0, "(word 595)"), "Say takes it back");
     }
 
+    /// R2 Channel Switch (the server owner, 2026-11-18): off, as by default,
+    /// R2 held with left and right changes no channel (the controls: R2 alone
+    /// opens and closes the history as ever); on, right steps Say, Shout,
+    /// Guild (in a guild), Say, left back, each said in the box (words 595+),
+    /// and R2 let go is the game's; a loot roll's strip up keeps right.
+    #[test]
+    fn r2_with_left_and_right_steps_the_channel_when_on() {
+        crate::settings::testing::reset(false);
+        let mut p = play();
+        let r2 = |p: &mut Play, down: bool| {
+            if down {
+                p.chat_history_key(99, true);
+            } else {
+                p.chat_history_key(143, false);
+            }
+        };
+        let tap = |p: &mut Play, k: i32| {
+            p.window_key(k, true);
+            p.window_key(k, false);
+        };
+        // off: R2 alone opens the history and lets it go
+        r2(&mut p, true);
+        assert_eq!(p.mode, 33, "R2: the history");
+        tap(&mut p, 137);
+        tap(&mut p, 136);
+        assert_eq!(p.channel, 0, "off: no channel stepped");
+        r2(&mut p, false);
+        assert_eq!(p.mode, 0, "R2 let go");
+        // on
+        crate::settings::set_client(crate::settings::ClientOptions { r2_channels: true, ..crate::settings::client() });
+        p.guild.in_guild = true;
+        r2(&mut p, true);
+        tap(&mut p, 137);
+        assert_eq!((p.channel, last_line(&p)), (3, "(word 598)"), "right: Shout (no group)");
+        tap(&mut p, 137);
+        assert_eq!((p.channel, last_line(&p)), (4, "(word 599)"), "right: Guild");
+        tap(&mut p, 137);
+        assert_eq!((p.channel, last_line(&p)), (0, "(word 595)"), "right: round to Say");
+        tap(&mut p, 136);
+        assert_eq!(p.channel, 4, "left: back to Guild");
+        assert_eq!(p.mode, 33, "the history still held");
+        r2(&mut p, false);
+        assert_eq!(p.mode, 0, "R2 let go as ever");
+        // with R2 not held the d-pad is play's: no channel
+        p.window_key(137, true);
+        assert_eq!(p.channel, 4);
+        crate::settings::testing::reset(false);
+    }
+
     /// The run speed is the server's, as `UpdateGame` hands `m_speed` to
     /// the walk each frame: the dump's at world entry (Sandstorm's
     /// 8.833333), then 0x00F8's `SetSpeed` (Spirit of the Wolf's 11.483333
@@ -13079,21 +13925,22 @@ mod commands {
         assert_eq!((p.target, last_line(&p)), (0x300, "(word 838)"));
     }
 
-    /// Hide UI (`hideui`): a click on the compass opens the map only while
-    /// the HUD is shown; hidden, no HUD button is there and the click is the
-    /// world's. The control: shown, the same click opens the map.
+    /// Hide UI (`hideui`): a click on the quick menu's title bar turns to the
+    /// next menu only while the HUD is shown; hidden, no HUD button is there
+    /// and the click is the world's. The control: shown, the same click
+    /// turns the menu.
     #[test]
     fn hidden_the_huds_buttons_take_no_click() {
         let mut p = play();
-        p.hud = Some((crate::ui::Vui::new(Default::default(), Default::default(), Vec::new()), crate::ui::UiAssets::default(), crate::hud::Hud::new()));
-        let compass = crate::mouse::Click::Target(39.0, 54.0);
+        // the title bar (430..592, 25..53 of the frame) in a 4:3 window
+        let title = crate::mouse::Click::Target(510.0, 42.0);
         crate::hideui::toggle();
         assert!(crate::hideui::hidden());
-        assert!(!p.point(compass, (640, 448), false), "hidden: the world's click");
-        assert!(!p.map.open);
+        assert!(!p.point(title, (640, 480), false), "hidden: the world's click");
+        assert_eq!(p.hud_menus.sel, 0);
         crate::hideui::toggle();
-        assert!(p.point(compass, (640, 448), false), "the control: shown, the HUD's");
-        assert!(p.map.open, "and the compass opens the map");
+        assert!(p.point(title, (640, 480), false), "the control: shown, the HUD's");
+        assert_ne!(p.hud_menus.sel, 0, "and the title bar turns to the next menu");
     }
 
     /// What shows the UI again (`Play::wants_ui`): a mode of the game's but
@@ -13277,9 +14124,6 @@ mod commands {
         assert_eq!(crate::racelabel::long("Lagerbottoms"), None);
     }
 
-    /// What shows the UI again (`Play::wants_ui`): a mode of the game's but
-    /// the manual camera's, the map, the target's details, a line typed; and
-    /// a world entry. The control: play alone wants none.
     #[test]
     fn a_window_up_shows_the_ui_again() {
         let mut p = play();
@@ -13306,6 +14150,32 @@ mod commands {
         let _ = play();
         assert!(!crate::hideui::hidden(), "a world entry shows it");
     }
-
 }
 
+/// A Hardcore character's fall as its player is told (`net::hardcore`): the
+/// first line, then what took it and where (each left out that is empty), then
+/// that it is over.
+pub fn hardcore_fall_lines(f: &net::hardcore::FallNotice) -> Vec<String> {
+    let mut out = vec!["You have fallen.".to_string()];
+    match (f.killer.is_empty(), f.place.is_empty()) {
+        (false, false) => out.push(format!("Slain by {} in {}.", f.killer, f.place)),
+        (false, true) => out.push(format!("Slain by {}.", f.killer)),
+        (true, false) => out.push(format!("In {}.", f.place)),
+        (true, true) => {}
+    }
+    out.push("This Hardcore character's journey is over.".to_string());
+    out
+}
+
+#[cfg(test)]
+mod hardcore_tests {
+    use super::*;
+
+    #[test]
+    fn the_fall_reads() {
+        let f = net::hardcore::FallNotice { at: 0, killer: "a Zek sentry".into(), place: "Tallon's fortress".into(), secs: 12 };
+        assert_eq!(hardcore_fall_lines(&f), ["You have fallen.", "Slain by a Zek sentry in Tallon's fortress.", "This Hardcore character's journey is over."]);
+        let none = net::hardcore::FallNotice { killer: String::new(), place: String::new(), ..f };
+        assert_eq!(hardcore_fall_lines(&none), ["You have fallen.", "This Hardcore character's journey is over."], "nothing known: no middle line");
+    }
+}

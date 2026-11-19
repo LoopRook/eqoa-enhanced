@@ -128,14 +128,21 @@ end
 
 -- One message line, colored by type. The All tab carries the type prefix,
 -- the filtered tabs do not need it.
-local function DrawMessage(message, config, with_prefix)
+local function DrawMessage(message, config, with_prefix, text_colored)
     local color = ColorFor(config, message.type_name)
     local line = message.text
-    if with_prefix then
-        line = string.format("[%s] %s", message.type_name, line)
+    -- EQOA Enhanced perf: Build the whole display line in one concatenation.
+    if with_prefix and config.show_timestamps then
+        line = message.time .. " [" .. message.type_name .. "] " .. line
+    elseif with_prefix then
+        line = "[" .. message.type_name .. "] " .. line
+    elseif config.show_timestamps then
+        line = message.time .. " " .. line
     end
-    if config.show_timestamps then
-        line = string.format("%s %s", message.time, line)
+    -- EQOA Enhanced perf: Draw each colored line with one ImGui call.
+    if text_colored then
+        text_colored(color[1], color[2], color[3], color[4], line)
+        return
     end
     ImGui.PushStyleColor(ImGuiCol.Text, color[1], color[2], color[3], color[4])
     ImGui.TextWrapped(line)
@@ -165,11 +172,15 @@ local function DrawMessageList(state, config, opts, filter, with_prefix, input_h
     ImGui.BeginChild("messages", 0, -input_h)
     -- A child window keeps its own font scale, so the parent's is reapplied.
     ImGui.SetWindowFontScale(opts.font_scale or 1)
+    -- EQOA Enhanced perf: Set the wrap position once for the whole child.
+    local text_colored = ImGui.PushTextWrapPos and ImGui.PopTextWrapPos and ImGui.TextColored
+    if text_colored then ImGui.PushTextWrapPos(0) end
     for _, message in ipairs(state.messages) do
         if filter == nil or filter(message) then
-            DrawMessage(message, config, with_prefix)
+            DrawMessage(message, config, with_prefix, text_colored)
         end
     end
+    if text_colored then ImGui.PopTextWrapPos() end
     if history_active then
         -- R2/C held: the game reports the lines it scrolled this frame. One
         -- step is one (wrapped) line; positive is back/up. Older hosts or

@@ -27,6 +27,7 @@ pub(crate) struct Session {
     pending: Vec<String>,
     start: Instant,
     pub(crate) addon: String,
+    pub(crate) capabilities: Option<Vec<String>>,
     vm: u64,
     phase: String,
     tokens: f64,
@@ -52,6 +53,7 @@ impl Session {
             pending: Vec::new(),
             start: Instant::now(),
             addon: String::new(),
+            capabilities: None,
             vm: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             phase: "lua".into(),
             tokens: 32.0,
@@ -67,7 +69,7 @@ impl Session {
             ("actions", "assist target_target toggle_stats_box", 3),
             (
                 "actions",
-                "status cancel batch stop_batch batch_status target cycle_target assist interact attack cast use_hotbar use_item equip destroy swap_items quick_slot weapon_set prepare_weapon_set assign_ability unmemorize_ability unmemorize_all arrange_ability loot loot_all buy sell bank_move bank_money chat command move look autorun follow stop camera open_window close_window select_row activate_row dialog_answer input_text drop_quest mastery_share mastery_browse mastery_buy mastery_refund buttons menu_command",
+                "status cancel batch stop_batch batch_status target cycle_target assist interact attack cast use_hotbar use_item equip destroy swap_items quick_slot weapon_set prepare_weapon_set assign_ability unmemorize_ability unmemorize_all arrange_ability open_loot talk loot loot_all buy sell bank_move bank_money chat command move look autorun follow stop camera open_window close_window select_row activate_row dialog_answer input_text drop_quest mastery_share mastery_browse mastery_buy mastery_refund buttons menu_command",
                 4,
             ),
             ("bank", "get", 3),
@@ -125,7 +127,7 @@ impl Session {
             ("text", "localized", 2),
             ("textures", "load rgba release", 2),
             ("windows", "open", 3),
-            ("windows", "get find get_window format_hint parse_hint", 4),
+            ("windows", "get find get_window format_hint parse_hint takeover release taken", 4),
         ] {
             s.describe(
                 &format!("eqoa.{module}"),
@@ -257,11 +259,32 @@ pub(crate) fn describe(
         .describe(path, status, round, reason);
 }
 pub(crate) fn status(lua: &Lua, path: &str) -> Option<&'static str> {
-    session(lua)
-        .borrow()
-        .descriptors
-        .get(path)
-        .map(|d| d.status)
+    session(lua).borrow().descriptors.get(path).map(|d| d.status)
+}
+pub(crate) fn capability_grants(caps: &[String], cap: &str) -> bool {
+    caps.iter()
+        .any(|c| c == cap || (cap.starts_with("eqoa.actions.") && c == "eqoa.actions.*"))
+}
+pub(crate) fn require_capability(
+    lua: &Lua,
+    symbol: &str,
+    cap: &str,
+) -> std::result::Result<(), (&'static str, String)> {
+    let s_ref = session(lua);
+    let s = s_ref.borrow();
+    let Some(caps) = s.capabilities.as_ref() else {
+        return Err((
+            "not_declared",
+            format!("{symbol} requires a 'capabilities' list declaring '{cap}' in mod.json"),
+        ));
+    };
+    if capability_grants(caps, cap) {
+        return Ok(());
+    }
+    Err((
+        "permission_denied",
+        format!("{symbol} requires capability '{cap}' in mod.json"),
+    ))
 }
 pub(crate) fn annotate_host(host: &Host) -> Result<()> {
     let lua = &host.lua;
@@ -321,6 +344,37 @@ pub(crate) fn annotate_host(host: &Host) -> Result<()> {
             "unsupported",
             None,
             "the native client has no matching pointer/config payload",
+        );
+    }
+    // Temporary hand list until Part C derives this metadata from bindings.
+    for path in [
+        "frontiers_forge.quest",
+        "frontiers_forge.quest.new",
+        "frontiers_forge.quest.GetName",
+        "frontiers_forge.cave",
+        "frontiers_forge.cave.IsRegionZero",
+        "frontiers_forge.cave.Alloc",
+        "frontiers_forge.cave.Reserve",
+        "frontiers_forge.cave.Get",
+        "frontiers_forge.cave.Free",
+        "frontiers_forge.cave.Release",
+        "frontiers_forge.cave.Info",
+    ] {
+        describe(
+            lua,
+            path,
+            "unsupported",
+            None,
+            "raw memory is excluded; use eqoa.quests for native quest records",
+        );
+    }
+    for path in ["eqoa.icons.SurfaceInfo.source_format"] {
+        describe(
+            lua,
+            path,
+            "unsupported",
+            None,
+            "icon provider retains decoded RGBA pixels without original source format",
         );
     }
     for path in [
@@ -732,7 +786,6 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
                 symbol.as_str(),
                 "eqoa.client.get"
                     | "eqoa.client.display"
-                    | "eqoa.client.time"
                     | "eqoa.player.get"
                     | "eqoa.player.stats"
                     | "eqoa.actions.assist"
@@ -842,7 +895,11 @@ fn register_descriptor(lua: &Lua, module: &str, name: &str, blocked: bool) -> Re
 pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
     lua.set_app_data(Rc::new(RefCell::new(Session::new())));
-    session(lua).borrow_mut().addon = host.addon_id();
+    let s_ref = session(lua);
+    let mut s = s_ref.borrow_mut();
+    s.addon = host.addon_id();
+    s.capabilities = host.requested_capabilities().map(<[String]>::to_vec);
+    drop(s);
     let root: Table = lua.globals().get("eqoa").unwrap_or(lua.create_table()?);
     lua.set_named_registry_value("eqoa_root", root.clone())?;
     root.set("api", "eqoa/1")?;
@@ -928,6 +985,26 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             Ok(t)
         })?,
     )?;
+    bind(
+        lua,
+        "fonts",
+        "game",
+        lua.create_function(|lua, _: MultiValue| {
+            error(
+                lua,
+                "eqoa.fonts.game",
+                "unsupported",
+                "game bitmap font cannot be represented by the existing ImGui font service",
+            )
+        })?,
+    )?;
+    describe(
+        lua,
+        "eqoa.fonts.game",
+        "unsupported",
+        None,
+        "game bitmap font cannot be represented by the existing ImGui font service",
+    );
     bind(lua,"client","get",lua.create_function(|lua,()| record(lua,"eqoa.client.Client",&json!({"in_world":false,"phase":"pregame","generation":0,"tick":0,"frame":0,"time":0})))?)?;
     bind(
         lua,
@@ -959,17 +1036,25 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua,
         "hud",
         "hidden_by",
-        lua.create_function(|lua, _: Value| lua.create_table())?,
+        lua.create_function(|lua, _: Value| {
+            error(
+                lua,
+                "eqoa.hud.hidden_by",
+                "unavailable",
+                "no visibility lease on this host",
+            )
+        })?,
     )?;
     bind(
         lua,
         "input",
         "get",
         lua.create_function(|lua, ()| {
-            record(
+            error(
                 lua,
-                "eqoa.input.InputState",
-                &json!({"focused":false,"pad":null,"text_capture":false}),
+                "eqoa.input.get",
+                "unavailable",
+                "native input service is not installed on this host",
             )
         })?,
     )?;
@@ -1179,7 +1264,7 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.entities.Entity",
-            "ref id name level position actor_position hp_fraction power kind world_id entity_type is_creature corpse search_flags class_code target_id status_flags poisoned diseased disposition disposition_name",
+            "ref id name level position actor_position hp_fraction power kind world_id entity_type is_creature corpse search_flags npc_flags class_code target_id status_flags poisoned diseased disposition disposition_name",
         ),
         (
             "eqoa.group.Group",

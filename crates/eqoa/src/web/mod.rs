@@ -1035,7 +1035,7 @@ pub fn lose_device() {
 /// `remake`), the game going on.
 #[wasm_bindgen]
 pub fn gpu_threw(what: String) {
-    crate::gpulost::mark(&crate::gpulost::threw_why(&what));
+    crate::gpulost::browser_threw_call(&what);
 }
 
 /// Files every scene loads after its own (main.rs's `SHARED`).
@@ -1224,6 +1224,8 @@ pub async fn boot(file: web_sys::File, opts: JsValue) -> Result<(), JsValue> {
         let disc = WebDisc::open(file).await?;
         crate::stream::set_source_factory(disc.zone_sources());
         crate::stream::set_world_opener(disc.world_opener());
+        // a decoration's art off any world's file (`decorlights`)
+        crate::decorlights::set_asset_reader(disc.asset_reader());
         // the 2002 disc's art (`era`, F9): its reader and its ask
         hooks_2002();
         // a server's own worlds, built off this disc into the origin's

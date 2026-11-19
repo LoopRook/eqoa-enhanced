@@ -474,6 +474,9 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
             Ok(installed.get() && super::native_events::active(lua))
         })?,
     )?;
+    // Pinned chat.lua:567-569: suspended means wanted but detached outside the
+    // game. Native delivery uses a consumer lease, never an emulator patch/code
+    // cave that must be detached and restored; it cannot enter that state.
     chat_mod.set(
         "IsSendHookSuspended",
         lua.create_function(|_, ()| Ok(false))?,
@@ -555,6 +558,7 @@ mod tests {
             resource_dirs: vec![],
             api: Some("eqoa/1".to_string()),
             entry_mode: Default::default(),
+            capabilities_declared: true,
             requested_capabilities: vec![],
             extensions: Default::default(),
             initially_enabled: true,

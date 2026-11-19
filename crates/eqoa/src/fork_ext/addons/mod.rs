@@ -1,6 +1,8 @@
 // Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 //! Native-only, explicitly opted-in Forge feasibility host.
 mod bridge;
+#[path = "../modtools.rs"]
+pub mod modtools;
 mod capture;
 pub(crate) mod game_health;
 mod runtime;
@@ -27,6 +29,7 @@ mod record_raw;
 pub(crate) mod action_broker;
 pub(crate) mod actions;
 pub(crate) mod window_actions;
+pub(crate) mod window_takeover;
 pub(crate) mod gesture;
 mod async_json;
 pub(crate) mod bit;
@@ -63,6 +66,24 @@ pub(crate) mod input;
 mod items_forge;
 mod json_save;
 pub(crate) mod manager;
+
+/// Runs a test's body on its own thread with a 16 MiB stack. The GPU addon harnesses hold a `Play`
+/// (about 110 KB), a `Manager` and more by value (`Bv` about 170 KB, `Rm` about 190 KB), and a debug
+/// build copies them several times while building one, so these tests sit near the 2 MiB default
+/// test-thread stack; CI's build went over it (2026-11-19, STATUS_STACK_OVERFLOW, which aborts the
+/// whole test binary). A panic in the body fails the test as before.
+#[cfg(test)]
+pub(crate) fn big_stack(body: fn()) {
+    let joined = std::thread::Builder::new()
+        .name(std::thread::current().name().unwrap_or("big-stack test").to_owned())
+        .stack_size(16 << 20)
+        .spawn(body)
+        .expect("spawn the test's thread")
+        .join();
+    if let Err(panic) = joined {
+        std::panic::resume_unwind(panic);
+    }
+}
 pub(crate) mod map_views;
 pub(crate) mod named_profiles;
 pub(crate) mod native;

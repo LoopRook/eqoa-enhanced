@@ -251,6 +251,15 @@ fn create_base_host() -> Result<BaseHost> {
                     Some((p["x"].as_f64()?, p["y"].as_f64()?, p["z"].as_f64()?))
                 })
             });
+            // Pinned camera.lua:6-15 defines an x/y/z table, no absent-state case.
+            if pos.is_none() {
+                super::native::diagnose(
+                    lua,
+                    "frontiers_forge.camera.GetCoordinates",
+                    "unavailable",
+                    "native camera state is unavailable",
+                );
+            }
             let (x, y, z) = pos.unwrap_or((0.0, 0.0, 0.0));
             let t = lua.create_table()?;
             t.set("x", x)?;
@@ -326,6 +335,20 @@ fn create_base_host() -> Result<BaseHost> {
                 c.borrow().view.player["fighting"]
                     .as_bool()
                     .unwrap_or(false)
+            }))
+        })?,
+    )?;
+    // Pinned util.lua:400-403 GetWorldId: native world identity; nil outside a world.
+    util.set(
+        "GetWorldId",
+        lua.create_function(|_, ()| {
+            Ok(super::native_core::CORE.with(|c| {
+                let c = c.borrow();
+                if c.view.in_world {
+                    c.view.world_id
+                } else {
+                    None
+                }
             }))
         })?,
     )?;
@@ -451,6 +474,19 @@ impl Host {
             .as_ref()
             .is_some_and(|a| a.entry_mode == super::discovery::EntryMode::Once)
     }
+    pub(crate) fn requested_capabilities(&self) -> Option<&[String]> {
+        self.addon
+            .as_ref()
+            .and_then(super::discovery::DiscoveredAddon::declared_capabilities)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_capabilities(caps: &[&str]) -> Result<Self> {
+        let host = Self::new()?;
+        super::native::session(&host.lua).borrow_mut().capabilities =
+            Some(caps.iter().map(|s| (*s).to_string()).collect());
+        Ok(host)
+    }
     pub fn drain_logs(&self) -> Result<Vec<String>> {
         let messages: Table = self.lua.named_registry_value("forge_log")?;
         let mut output = messages
@@ -530,6 +566,7 @@ impl Host {
         )?;
         super::file_io::install(&host, addon, None)?;
         super::native::install(&host)?;
+        super::bit::install_native(&host.lua)?;
         Ok(host)
     }
 
@@ -582,6 +619,7 @@ impl Host {
         super::weapon_sets::install(&host)?;
         super::chat_history::install(&host)?;
         super::native::install(&host)?;
+        super::bit::install_native(&host.lua)?;
         Ok(host)
     }
 

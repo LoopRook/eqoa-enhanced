@@ -14,6 +14,27 @@ newest first ("12:41 Rusty Sword x1, from a decaying skeleton"; the corpse is na
 the corpse you asked to loot); the wheel scrolls it. Moving, selling,
 looting and banking stay in the game's windows.
 
+Buttons (this version): **Look at corpse** only shows the nearest corpse's items;
+**Take all** and **Take all but junk** take them. Mark items as junk from an item's
+menu; **Sell junk** sells them at a merchant. **Auto-loot** is a choice under the
+loot log, **Off**, **Everything** or **Everything but junk**, kept for each
+character (the junk marks are shared: they are per item type). The mod's own opens never show the game's corpse, shop or bank window. A
+button for a merchant or banker that is beyond the reach the server last answered at
+is greyed out ("too far from the banker"); the reach is learned from real answers
+(two silences at a distance grey it, an answer clears it) and a greyed button still
+tries on a second click. One more than 40 units away shows nothing at all.
+
+Auto-loot opens a corpse of a creature you hit once you are out of combat (the game's
+combat flag, auto-attack on a live creature, or a hostile within 30 units that has you
+targeted; your pet, group members such as a mercenary, and merchants or bankers do not
+count). It opens corpses within the server's loot reach, which it learns from the server's
+answers (it starts at 7 units; "Out of range." only means walk closer). A corpse you opened
+yourself (the attack key on a dead target loots it) is taken from that window. A corpse the
+server does not answer is asked again 2 units closer or after 5 seconds, three tries in all.
+With Auto-loot on the mod looks around four times a second, not on every creature update.
+Every decision is a line in the game's log (`eqoa.log`), starting
+`addon eqoa_bag_viewer: [info] auto-loot:` with the corpse id and the reason.
+
 It uses only the public `eqoa/1` API (`eqoa.inventory`, `eqoa.bank`, `eqoa.items`,
 `eqoa.icons`, the `inventory.changed`, `bank.changed` and `loot.changed` events)
 and is the worked example for the items API. While the window is closed it does
