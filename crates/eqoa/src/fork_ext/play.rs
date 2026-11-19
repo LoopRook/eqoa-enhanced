@@ -880,11 +880,11 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-impl Drop for Play {
-    fn drop(&mut self) {
-        net::fork_record::drain(&mut self.session);
-    }
+/// Called from upstream's `impl Drop for Play`: the session recorder writes
+/// what is still queued before the world goes.
+pub(super) fn dropped(_play: &mut Play) {
+    #[cfg(not(target_arch = "wasm32"))]
+    net::fork_record::drain(&mut _play.session);
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -137,5 +137,6 @@ runner's stale-binary guard. Three files needed hand resolution.
 
 - `crates/net/src/lib.rs`: kept develop's `fork_record` module and upstream's `hardcore` module, in alphabetical order.
 - `crates/eqoa/src/fork_ext/report_viewer.rs`: kept the sync's input order (an [OG] pointer gate first, then the report, then addons), its `addon_event` and upstream's mercenary and dye-picker keyboard ownership; kept develop's `report_key` and the per-frame scripted-input step. The ownership rule is now `native_owns_keys`, and scripted keys follow it in `scripted_input.rs`: when a native window owns the keyboard the key reaches the game, and addons still receive its release.
+- `crates/eqoa/src/play.rs` (a compile conflict Git did not flag): upstream added `impl Drop for Play` to restore server-restricted options when Play ends. Develop's session recorder had its own `Drop` in `fork_ext/play.rs`. Upstream's `Drop` keeps its body and calls the new `fork_hooks::dropped(self)`, which drains the recorder. The new hook is recorded as `session recorder drop` in `fork-footprint.json`. The play.rs diff measures +80/-40, within its unchanged budget.
 - `FORK-UPDATE-NOTES.md`: kept the sync entry and develop's Bag Viewer, Wereoxxs and recording entries.
 

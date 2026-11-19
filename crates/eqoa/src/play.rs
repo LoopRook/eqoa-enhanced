@@ -221,6 +221,7 @@ fn mark_size(w: f32) -> f32 {
 impl Drop for Play {
     fn drop(&mut self) {
         crate::settings::qol::set_off(0);
+        fork_hooks::dropped(self);
     }
 }
 
