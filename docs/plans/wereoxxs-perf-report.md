@@ -88,3 +88,74 @@ The paired run reduced addon time by 53.3%. The busy All and tell tab captures m
 The browser check, fork footprint, path audit and all 20 packaging tests passed. The native release build is queued behind an empty shared Cargo lock directory. The gate runner treats a tokenless lock as a manual hold.
 
 The suites reported skips for Windows symlink privileges, optional pinned Forge fixtures and reviewed goldens, and supplementary game-data fixtures including the 2002 disc, client image, world data and savestates. The decomp comparison also skipped. The Wereoxxs benchmark and its paired picture comparisons ran on the GPU, and the bundled Wereoxxs picture test passed against the original capture in the focused run.
+
+## Follow-up with a recorded play session
+
+`measure_wereoxxs_recorded_session` reads the recording parts in place and queues the
+incoming messages in an in-memory DRDP endpoint. `Play::frame` handles them through the
+real session dispatcher. The fixture also restores the target ID from each outgoing
+position message. It runs Wereoxxs and the shared resources with a stand-in scene.
+The optional saved profile supplies the original panel settings and ImGui layout.
+
+Set `EQOA_WEREOXXS_RECORDINGS` to the ordered list of parts joined by the OS path
+separator. Set `EQOA_WEREOXXS_SAVED_PROFILE` to the saved profile JSON and
+`EQOA_WEREOXXS_SIZE` to the original window dimensions in `WIDTHxHEIGHT` form.
+`EQOA_WEREOXXS_REFERENCE_ENTRY` can replace the bundled entry in the fixture's scratch
+package. Set `EQOA_WEREOXXS_CAPTURE=1` for SHA-256 hashes of the GPU RGBA readbacks.
+In a separate run, `EQOA_WEREOXXS_PROFILE=1` enables the `os.clock` probes around the
+panels, Forge updates and font requests. The fixture fixes the chat timestamps for
+both versions.
+
+The recorded profile had only chat and the ability bars enabled in Wereoxxs. Chat used
+44 px Merriweather Sans. The release profile showed that `UiForge.LoadFont` accounted for
+8.509 to 11.733 ms per frame across the three samples, including the sample with an
+empty scrollback. The whole `DrawChat` call took 8.807 to 12.150 ms. Ability bars took
+0.632 to 0.833 ms. Combat and chat updates each stayed below 0.04 ms. Target, player,
+group, casting, compass and meter panels were off in the saved profile.
+
+The font bank already reused the loaded handle. The host checked the addon's resource
+mounts and walked the Windows filesystem before it reached that cache. Wereoxxs
+requested the same handle every frame, so those checks were charged to Lua in
+`EQOA_PERF`.
+
+Wereoxxs now holds one custom font handle per window and requests a new handle when
+the face or size changes. Cleanup clears the handles before the addon starts again.
+In the synthetic GPU budget test, the original requested the same font eight times
+in eight frames and failed the one-request limit. The revised entry passed, including
+the checks that each font size and face change makes one fresh request.
+
+The paired release test used the same executable and swapped only the Lua entry.
+The timing pass ran without the Lua probes. Each row is a mean across the sampled
+frames in that interval. This run used the standard Windows temporary directory.
+
+| Recording interval | Frames | Chat rows at capture | Original ms/frame | Revised ms/frame | Reduction |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 41–43 s | 57 | 0 | 11.150 | 2.144 | 80.8% |
+| 183–185 s | 60 | 13 | 11.901 | 1.586 | 86.7% |
+| 525–527 s | 60 | 34 | 12.432 | 2.093 | 83.2% |
+| Weighted mean | 177 | | 11.839 | 1.938 | 83.6% |
+
+All three nonblank GPU readbacks had matching RGBA hashes. A pair run in a separate,
+more deeply nested scratch directory also matched all three readbacks and measured
+18.718 to 1.270 ms per frame. In the separate profiled pass, the revised `DrawChat`
+took 0.018 to 0.233 ms per frame. The replay isolates
+the addon from terrain rendering and the other enabled mods. It uses the recorder's
+message timing and target IDs with a fixture camera and a fixed ImGui time step.
+The owner's full-client run remains the reference for actual gameplay timing.
+
+### Release validation
+
+`python tools/run_gates.py --release --lock-wait 120 --filter wereoxxs_custom_font_load_budget`
+passed against `6de5814f` with the local Frontiers disc configured.
+
+| Suite | Passed | Failed | Ignored | Skip messages |
+| --- | ---: | ---: | ---: | ---: |
+| Focused font budget | 1 | 0 | 0 | 0 |
+| Addons | 570 | 0 | 25 | 11 |
+| Full client | 2,466 | 0 | 30 | 51 |
+
+The browser check, fork footprint, path audit, all 20 packaging tests, and native
+release build passed. The skips covered Windows symlink privileges, optional
+pinned Forge fixtures and reviewed goldens, and supplementary game data including
+the 2002 disc, client image, server art and savestates. The decomp comparison also
+skipped. The private replay and its GPU checks ran separately from this suite.

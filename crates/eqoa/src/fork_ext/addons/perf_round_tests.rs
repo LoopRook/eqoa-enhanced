@@ -61,6 +61,14 @@ const WEREOXXS_PANELS: &[&str] = &[
 
 /// Instruments a scratch entry function. Keep these probes outside the main timing pass.
 fn wereoxxs_profile(rm: &mut Rm, samples: usize) {
+    wereoxxs_install_profile(rm);
+    for tick in 0..samples {
+        wereoxxs_busy_frame(rm, tick + samples);
+    }
+    wereoxxs_print_profile(rm, samples);
+}
+
+fn wereoxxs_install_profile(rm: &mut Rm) {
     let path = rm._root.0.join("wereoxxs_ui/wereoxxs_ui.lua");
     let source = fs::read_to_string(path).unwrap().replace("\r\n", "\n");
     let (definitions, frame) = source.rsplit_once("\nApplyDpadRotation()\n").unwrap();
@@ -74,8 +82,15 @@ fn wereoxxs_profile(rm: &mut Rm, samples: usize) {
             &format!("then local start = os.clock(); {call}; profile_add('{label}', start) end"),
         );
     }
-    for call in ["Combat.Update()", "AbilityList.Update()", "Chat.Update()"] {
-        let label = call.strip_suffix("()").unwrap();
+    for call in [
+        "Combat.Update()",
+        "AbilityList.Update()",
+        "Chat.Update()",
+        "ApplyGameUiState(paused)",
+        "solo_meter:Update(now_ms, combat_totals)",
+        "PumpEnterKey(now_ms, paused)",
+    ] {
+        let label = call.split_once('(').unwrap().0;
         assert!(frame.contains(call));
         frame = frame.replace(
             call,
@@ -96,10 +111,25 @@ fn wereoxxs_profile(rm: &mut Rm, samples: usize) {
     l.globals()
         .set("profile_ms", l.create_table().unwrap())
         .unwrap();
+    l.load(
+        r#"
+        local load_font = UiForge.LoadFont
+        UiForge.LoadFont = function(...)
+            local start = os.clock()
+            local font = load_font(...)
+            profile_ms["UiForge.LoadFont"] = (profile_ms["UiForge.LoadFont"] or 0)
+                + (os.clock() - start) * 1000
+            return font
+        end
+    "#,
+    )
+    .exec()
+    .unwrap();
     rm.manager.entries[0].instance.as_mut().unwrap().function = profiled;
-    for tick in 0..samples {
-        wereoxxs_busy_frame(rm, tick + samples);
-    }
+}
+
+fn wereoxxs_print_profile(rm: &Rm, samples: usize) {
+    let l = lua(&rm.manager, WEREOXXS);
     let rows: Table = l.globals().get("profile_ms").unwrap();
     for row in rows.pairs::<String, f64>() {
         let (name, ms) = row.unwrap();
@@ -108,6 +138,170 @@ fn wereoxxs_profile(rm: &mut Rm, samples: usize) {
             ms / samples as f64
         );
     }
+}
+
+#[test]
+fn measure_wereoxxs_recorded_session() {
+    use super::super::addon_perf;
+    use crate::fork_ext::session_replay;
+
+    let Some(paths) = std::env::var_os("EQOA_WEREOXXS_RECORDINGS") else {
+        eprintln!("SKIP Wereoxxs recording replay: set EQOA_WEREOXXS_RECORDINGS");
+        return;
+    };
+    let parts: Vec<_> = std::env::split_paths(&paths)
+        .map(|path| fs::read(path).expect("read recording part"))
+        .collect();
+    let rows: Vec<_> = parts
+        .iter()
+        .flat_map(|part| session_replay::rows(part).expect("decode recording part"))
+        .collect();
+    assert!(rows.windows(2).all(|pair| pair[0].micros <= pair[1].micros));
+    let intervals = [(41, 43), (183, 185), (525, 527)];
+    let first_us = rows.first().expect("recording has rows").micros;
+    let last_us = rows.last().unwrap().micros;
+    assert!(
+        first_us <= intervals[0].0 * 1_000_000 && last_us >= intervals[2].1 * 1_000_000,
+        "the recording must cover all three sample intervals"
+    );
+
+    let profile: Option<serde_json::Value> = std::env::var_os("EQOA_WEREOXXS_SAVED_PROFILE")
+        .map(|path| serde_json::from_slice(&fs::read(path).unwrap()).unwrap());
+    let size = std::env::var("EQOA_WEREOXXS_SIZE").map_or(RM_SIZE, |size| {
+        let (width, height) = size.split_once('x').expect("use WIDTHxHEIGHT");
+        (width.parse().unwrap(), height.parse().unwrap())
+    });
+    let Some(mut rm) = Rm::sized(|p| matches!(p, WEREOXXS | "resources"), 0, size, 1) else {
+        eprintln!("SKIP Wereoxxs recording replay: no GPU adapter");
+        return;
+    };
+    let reference = std::env::var_os("EQOA_WEREOXXS_REFERENCE_ENTRY");
+    if let Some(path) = reference {
+        fs::copy(path, rm._root.0.join("wereoxxs_ui/wereoxxs_ui.lua")).unwrap();
+    }
+    addon_perf::force_for_test(true);
+    rm.play = crate::play::Play::replay_ui_fixture();
+    rm.play.map.mini.up = false;
+    let lib = esf::Library::new();
+    let mut renderer = render::Renderer::new(&rm.gpu.device, &rm.gpu.queue, render::TARGET_FORMAT);
+    if let Some(p) = &profile {
+        rm.gpu
+            .context
+            .load_ini_settings(p["layout"].as_str().unwrap());
+    }
+    rm.manager.queue(Command::Enable(WEREOXXS.into(), true));
+    rm.frames(3);
+    assert_eq!(
+        rm.manager.entries[0].status,
+        Status::Enabled,
+        "{:?}",
+        rm.manager.diagnostics()
+    );
+    let l = lua(&rm.manager, WEREOXXS);
+    l.load("os.date = function() return '12:34' end")
+        .exec()
+        .unwrap();
+    if let Some(p) = &profile {
+        let entry = &rm.manager.entries[0];
+        let saved = super::super::profile::decode(&l, &p["addons"][&entry.key]).unwrap();
+        assert!(
+            matches!(saved, Value::Table(_)),
+            "the profile has no Wereoxxs settings"
+        );
+        Manager::invoke(entry.instance.as_ref().unwrap(), 3, saved, false).unwrap();
+    } else {
+        l.load(
+            "for _, key in ipairs({'bars','casting','player','target','group','compass','meter','chat'}) do
+                 windows[key] = true
+             end",
+        ).exec().unwrap();
+    }
+    let profiling = std::env::var_os("EQOA_WEREOXXS_PROFILE").is_some();
+    if profiling {
+        wereoxxs_install_profile(&mut rm);
+    }
+
+    let mut rows = rows.iter().peekable();
+    let mut frame_us = first_us;
+    let mut frames = 0;
+    let mut interval = 0;
+    while let Some(&(start, end)) = intervals.get(interval) {
+        if frame_us >= end * 1_000_000 {
+            assert!(frames >= 30);
+            let messages: usize = l.load("return #chat_state.messages").eval().unwrap();
+            let host = &rm.manager.entries[0].instance.as_ref().unwrap().host;
+            let snapshot = host.snapshot.get();
+            assert!(snapshot.in_game && snapshot.abilities.ability_count > 0);
+            eprintln!(
+                "wereoxxs replay {start}-{end}s: {frames} frames, {messages} chat rows, {} abilities, {} effects, {:.3} ms/frame",
+                snapshot.abilities.ability_count,
+                snapshot.effects.count,
+                addon_perf::peek_addon_ms(WEREOXXS),
+            );
+            for line in addon_perf::take_report() {
+                eprintln!("wereoxxs replay {line}");
+            }
+            if profiling {
+                wereoxxs_print_profile(&rm, frames);
+            }
+            if std::env::var_os("EQOA_WEREOXXS_CAPTURE").is_some() {
+                use sha2::{Digest, Sha256};
+                let pixels = rm_pixels(&rm.gpu, &rm.target.as_ref().unwrap().0);
+                assert!(pixels.chunks_exact(4).any(|rgba| rgba != &pixels[..4]));
+                eprintln!(
+                    "wereoxxs replay {start}-{end}s GPU RGBA SHA-256 {:x}",
+                    Sha256::digest(pixels)
+                );
+            }
+            interval += 1;
+            frames = 0;
+            continue;
+        }
+        while rows.peek().is_some_and(|row| row.micros <= frame_us) {
+            let row = rows.next().unwrap();
+            if row.sent && row.ty == 0x40 && row.bytes.len() == 41 {
+                rm.play
+                    .replay_ui_target(u32::from_le_bytes(row.bytes[37..41].try_into().unwrap()));
+            } else {
+                rm.play.enqueue_replay_ui_row(row);
+            }
+        }
+        rm.play.frame(
+            &mut rm.walker,
+            &lib,
+            crate::play::Gpu {
+                renderer: &mut renderer,
+                device: &rm.gpu.device,
+                queue: &rm.gpu.queue,
+            },
+            (frame_us / 1_000) as i64,
+            true,
+            None,
+        );
+        rm.play.prepare_replay_ui_frame();
+        let measuring = frame_us >= start * 1_000_000;
+        if measuring {
+            if frames == 0 {
+                addon_perf::take_report();
+                if profiling {
+                    l.globals()
+                        .set("profile_ms", l.create_table().unwrap())
+                        .unwrap();
+                }
+            }
+            frames += 1;
+        }
+        rm.frame();
+        frame_us += if measuring { 33_333 } else { 250_000 };
+    }
+    assert_eq!(
+        rm.manager.entries[0].status,
+        Status::Enabled,
+        "{:?}",
+        rm.manager.diagnostics()
+    );
+    rm.manager.shutdown();
+    addon_perf::force_for_test(false);
 }
 
 fn wereoxxs_busy_frame(rm: &mut Rm, tick: usize) {
@@ -119,6 +313,60 @@ fn wereoxxs_busy_frame(rm: &mut Rm, tick: usize) {
         super::super::native_core::observe_text(&line, [0.5, 0.75, 1.0, 1.0]);
     }
     rm.frame();
+}
+
+#[test]
+fn wereoxxs_custom_font_load_budget() {
+    let Some(mut rm) = Rm::with(|p| matches!(p, WEREOXXS | "resources"), 0) else {
+        return;
+    };
+    if let Some(path) = std::env::var_os("EQOA_WEREOXXS_REFERENCE_ENTRY") {
+        fs::copy(path, rm._root.0.join("wereoxxs_ui/wereoxxs_ui.lua")).unwrap();
+    }
+    rm.manager.queue(Command::Enable(WEREOXXS.into(), true));
+    rm.frames(3);
+    assert_eq!(
+        rm.manager.entries[0].status,
+        Status::Enabled,
+        "{:?}",
+        rm.manager.diagnostics()
+    );
+    let l = lua(&rm.manager, WEREOXXS);
+    l.load(
+        r#"
+        local load = UiForge.LoadFont
+        font_loads = 0
+        UiForge.LoadFont = function(...)
+            font_loads = font_loads + 1
+            return load(...)
+        end
+        windows.chat = true
+        font_configs.chat.font = "Merriweather Sans"
+        font_configs.chat.size = 44
+    "#,
+    )
+    .exec()
+    .unwrap();
+    rm.frames(8);
+    let loads = l.globals().get::<u32>("font_loads").unwrap();
+    assert_eq!(
+        loads, 1,
+        "eight frames at one font size use one font request"
+    );
+
+    l.load("font_configs.chat.size = 28").exec().unwrap();
+    rm.frames(4);
+    assert_eq!(l.globals().get::<u32>("font_loads").unwrap(), 2);
+    l.load("font_configs.chat.font = 'Cinzel'").exec().unwrap();
+    rm.frames(4);
+    assert_eq!(l.globals().get::<u32>("font_loads").unwrap(), 3);
+    assert_eq!(
+        rm.manager.entries[0].status,
+        Status::Enabled,
+        "{:?}",
+        rm.manager.diagnostics()
+    );
+    rm.manager.shutdown();
 }
 
 #[test]
