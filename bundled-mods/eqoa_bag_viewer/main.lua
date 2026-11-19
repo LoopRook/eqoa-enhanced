@@ -5,6 +5,7 @@ local B = require("bags")
 
 -- Sizes are in HUD frame pixels (640x448), scaled as the HUD is.
 local W, PAD, SLOT, GAP, LINE, LOG_LINES = 318, 8, 36, 2, 12, 5
+local wmemo, wmemo_k, wmemo_n = {}, nil, 0
 local tokens, escape, tab_hits, slot_hits, menu_hits, action_hits, log_rect, grid_rect = {}, nil, {}, {}, {}, {}, nil, nil
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
@@ -43,9 +44,6 @@ local function open()
     if B.char_dirty then B.sync_character() end
     B.scan_reset()
     listen("render", draw)
-    -- creatures arriving or leaving are rare; the look at the zone is dropped for them (see bags.lua `scan_zone`)
-    listen("entity.added", function(e) B.note_entity_event("added", e.data) end)
-    listen("entity.removed", function(e) B.note_entity_event("removed", e.data) end)
     listen("inventory.changed", B.dirty)
     listen("bank.changed", function(e) B.on_bank_changed(e.data) end)
     listen("loot.changed", function(e) B.on_loot_changed(e.data) end)
@@ -215,6 +213,15 @@ function draw()
     ui.Begin("eqoa_bag_viewer_layer", nil, flags)
     ui.SetWindowFontScale(k * 11 / 13)
     local dl = ui.GetWindowDrawList()
+    if wmemo_k ~= k or wmemo_n > 400 then wmemo, wmemo_n, wmemo_k = {}, 0, k end
+    local function tw(value)
+        local w = wmemo[value]
+        if w == nil then
+            w = ui.CalcTextSize(value)
+            wmemo[value], wmemo_n = w, wmemo_n + 1
+        end
+        return w
+    end
     local c = {
         text = ui.GetColorU32(.91, .91, .91, 1), muted = ui.GetColorU32(.6, .6, .6, 1),
         surface = ui.GetColorU32(.067, .067, .067, .96), raised = ui.GetColorU32(.11, .11, .11, 1),
@@ -229,7 +236,7 @@ function draw()
     local function frame(x, y, w, h, color) dl:AddRect(at(x, y), at(x + w, y + h), color) end
     local function text(x, y, value, color, maxw)
         value = tostring(value)
-        while maxw and #value > 0 and ui.CalcTextSize(value) > maxw * k do
+        while maxw and #value > 0 and tw(value) > maxw * k do
             value = value:match("^(.*)[%z\1-\127\194-\244][\128-\191]*$") or ""
         end
         dl:AddText(at(x, y), color or c.text, value)
@@ -243,11 +250,11 @@ function draw()
     B.tab_hits = tab_hits
     local tx = PAD
     for _, t in ipairs(B.visible_tabs()) do
-        local tw = ui.CalcTextSize(t.label) / k + 8
+        local tabw = tw(t.label) / k + 8
         text(tx + 4, 25, t.label, B.tab == t.idx and c.text or c.muted)
-        if B.tab == t.idx then fill(tx, 39, tw, 2, c.red) end
-        tab_hits[#tab_hits + 1] = {x = x0 + tx * k, y = y0 + 22 * k, w = tw * k, h = 19 * k, tab = t.idx}
-        tx = tx + tw + 2
+        if B.tab == t.idx then fill(tx, 39, tabw, 2, c.red) end
+        tab_hits[#tab_hits + 1] = {x = x0 + tx * k, y = y0 + 22 * k, w = tabw * k, h = 19 * k, tab = t.idx}
+        tx = tx + tabw + 2
     end
 
     local p = eqoa.input.pointer()
@@ -261,7 +268,8 @@ function draw()
         local slot = row_offset + idx
         local col, row = (idx - 1) % B.COLUMNS, math.floor((idx - 1) / B.COLUMNS)
         local sx, sy = PAD + col * (SLOT + GAP), gy + row * (SLOT + GAP)
-        fill(sx, sy, SLOT, SLOT, c.raised)
+        local p0, p1 = at(sx, sy), at(sx + SLOT, sy + SLOT)
+        dl:AddRectFilled(p0, p1, c.raised)
         local entry = grid.items[slot]
         local border = c.border
         if entry then
@@ -279,7 +287,7 @@ function draw()
             end
             if it.quantity > 1 then
                 local label = tostring(it.quantity)
-                local lw = ui.CalcTextSize(label) / k
+                local lw = tw(label) / k
                 text(sx + SLOT - lw - 2, sy + SLOT - 13, label, c.shadow)
                 text(sx + SLOT - lw - 3, sy + SLOT - 14, label, c.white)
             end
@@ -291,7 +299,7 @@ function draw()
                 over, border = entry, c.white
             end
         end
-        frame(sx, sy, SLOT, SLOT, border)
+        dl:AddRect(p0, p1, border)
     end
     local total_rows = grid.total_rows or grid.rows
     if total_rows > grid.rows then
@@ -338,7 +346,7 @@ function draw()
     local seg_x = PAD
     for _, m in ipairs(B.AUTO_MODES) do
         local on = B.auto_mode == m.key
-        local bw = ui.CalcTextSize(m.label) / k + 12
+        local bw = tw(m.label) / k + 12
         fill(seg_x, bar_y, bw, 16, on and c.menu_hl or c.raised)
         frame(seg_x, bar_y, bw, 16, on and c.worn or c.border)
         text(seg_x + 6, bar_y + 2, m.label, on and c.text or c.muted)

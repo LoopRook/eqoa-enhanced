@@ -45,14 +45,14 @@ local function dist_sq(a, b)
     return dx * dx + dy * dy + dz * dz
 end
 
--- One look at the zone's creatures answers every per-frame question (the nearest corpse, merchant and banker, the
--- corpses to loot, a live hostile with the player targeted). `eqoa.entities.list()` hands over a record for every
--- creature in the zone, so asking it per question, per frame, cost the Bags window 7-10 ms a frame in a busy zone
--- (owner log 2026-11-18). The look is kept for SCAN_TTL seconds (distances only drift by a step in that time) and
--- is dropped at once when a creature is added, removed, or turns into a corpse, changes its npc flags or its target
--- (`note_entity_event`), so a button never waits for a corpse that is already there.
-local SCAN_TTL = 0.5
-local scan_at, scan_data = nil, nil
+-- One look at the zone's creatures answers every per-frame question (the nearest corpse, merchant and banker, a live
+-- hostile with the player targeted). `eqoa.entities.list()` hands over a record for every creature in the zone, so
+-- asking it per question, per frame, cost the Bags window 7-10 ms a frame in a busy zone (owner log 2026-11-18). The
+-- look is kept SCAN_TTL seconds (distances only drift by a step in that time). It is marked stale when a creature turns
+-- into a corpse or starts or stops targeting the player (`note_entity_event`, heard only while Auto-loot is on), and
+-- then asked again at most once every SCAN_MIN seconds, so a crowded zone never makes it one look per frame.
+local SCAN_TTL, SCAN_MIN = 0.5, 0.25
+local scan_at, scan_data, scan_dirty, scan_pid = nil, nil, false, nil
 
 local function has_bit(val, b)
     return val ~= nil and math.floor(val / b) % 2 == 1
@@ -60,9 +60,12 @@ end
 
 local function scan_zone()
     local now = os.clock()
-    if scan_data and scan_at and now - scan_at < SCAN_TTL and now >= scan_at then return scan_data end
+    if scan_data and scan_at and now >= scan_at then
+        local age = now - scan_at
+        if age < SCAN_TTL and not (scan_dirty and age >= SCAN_MIN) then return scan_data end
+    end
     local data = {corpses = {}, nearest = {}}
-    scan_data, scan_at = data, now
+    scan_data, scan_at, scan_dirty = data, now, false
     local list = eqoa.entities and eqoa.entities.list and eqoa.entities.list()
     if not list then
         data.none = true
@@ -71,6 +74,7 @@ local function scan_zone()
     local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
     local ppos = pl and pl.position
     local pid = pl and pl.id
+    scan_pid = pid
     local nearest = data.nearest
     local function consider(kind, e, d2)
         local cur = nearest[kind]
@@ -99,21 +103,19 @@ local function scan_zone()
 end
 
 function M.scan_reset()
-    scan_at, scan_data = nil, nil
+    scan_at, scan_data, scan_dirty = nil, nil, false
 end
 
--- Drops the look when a change that matters to it arrives (the always-on auto-loot handlers and the open window
--- both pass every creature event through here; it costs a few field comparisons).
+-- A creature event of the auto-loot handlers: marks the look stale when the creature became a corpse or started or
+-- stopped targeting the player (what the corpse list and the fight check read). Everything else waits for the TTL.
 function M.note_entity_event(kind, d)
-    if not scan_data then return end
-    if kind ~= "changed" then M.scan_reset() return end
+    if not scan_data or kind ~= "changed" then return end
     local before, after = d and d.before, d and d.after
-    if not (before and after)
-        or before.corpse ~= after.corpse
-        or before.target_id ~= after.target_id
-        or before.npc_flags ~= after.npc_flags
+    if not (before and after) then return end
+    if before.corpse ~= after.corpse
+        or (scan_pid ~= nil and (before.target_id == scan_pid) ~= (after.target_id == scan_pid))
     then
-        M.scan_reset()
+        scan_dirty = true
     end
 end
 
@@ -1121,7 +1123,7 @@ function M.on_entity_changed(d)
     if after.corpse then
         if after.kind ~= "player" and after.kind ~= "pet" and M.engaged_recently(after.id) then
             M.eligible_corpses = M.eligible_corpses or {}
-            M.eligible_corpses[after.id] = true
+            M.eligible_corpses[after.id] = after
         end
     elseif after.id == M.tracked_target_id then
         M.tracked_target_pos = after.actor_position or after.position
@@ -1129,7 +1131,7 @@ function M.on_entity_changed(d)
 end
 
 function M.on_entity_removed(d)
-    M.note_entity_event("removed", d)
+    if d and d.before and M.eligible_corpses then M.eligible_corpses[d.before.id] = nil end
     if d and d.before and not d.before.corpse and M.engaged_recently(d.before.id) then
         M.recently_dead = {
             id = d.before.id,
@@ -1140,7 +1142,6 @@ function M.on_entity_removed(d)
 end
 
 function M.on_entity_added(d)
-    M.note_entity_event("added", d)
     local after = d and d.after
     if not after or not after.corpse then return end
     if after.kind == "player" or after.kind == "pet" then return end
@@ -1148,11 +1149,11 @@ function M.on_entity_added(d)
         local d2 = dist_sq(M.recently_dead.pos, after.actor_position or after.position)
         if d2 ~= nil and d2 <= 36.0 then
             M.eligible_corpses = M.eligible_corpses or {}
-            M.eligible_corpses[after.id] = true
+            M.eligible_corpses[after.id] = after
         end
     elseif M.engaged_recently(after.id) then
         M.eligible_corpses = M.eligible_corpses or {}
-        M.eligible_corpses[after.id] = true
+        M.eligible_corpses[after.id] = after
     end
 end
 
@@ -1167,13 +1168,11 @@ function M.tick_auto_loot()
     if M.batch_id or M.pending_open or M.last_req or loot_batch_active() then return end
     -- never while fighting: it waits (the corpse stays eligible) and runs when the fight is over
     if M.in_combat() then return end
-    local data = scan_zone()
-    if data.none then return end
     local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
     local ppos = pl and pl.position
     local best, best_d2 = nil, nil
-    for _, e in ipairs(data.corpses) do
-        if M.eligible_corpses[e.id] and not (M.auto_looted and M.auto_looted[e.id]) then
+    for id, e in pairs(M.eligible_corpses) do
+        if not (M.auto_looted and M.auto_looted[id]) then
             local d2 = dist_sq(ppos, e.actor_position or e.position)
             if (d2 == nil or d2 <= 225.0) and (not best or (d2 or 0) < (best_d2 or 0)) then
                 best, best_d2 = e, d2 or 0

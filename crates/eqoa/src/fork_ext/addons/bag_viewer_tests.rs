@@ -2572,7 +2572,7 @@ fn round65_fix_bag_viewer_auto_loot_waits_while_in_combat() {
     bv.play.bags_creature(9202, 0, 77);
     bv.play.bags_target_sync(9201);
     bv.play.bags_combat_hit(77, 9201, -12);
-    bv.frames(1);
+    bv_look_again(&mut bv); // the look at the zone is a quarter second old at most
     let before = bv.play.bags_sends_lost();
     bv.play.bags_entity_die(9201);
     bv.frames(2);
@@ -2580,8 +2580,11 @@ fn round65_fix_bag_viewer_auto_loot_waits_while_in_combat() {
     assert_eq!(bv.play.bags_sends_lost(), before, "M1: no auto-loot while a live hostile has you targeted");
     assert_eq!(bv.play.target, 9201, "M1: the target is not touched during combat");
 
-    // the scout stops (dies): out of combat, the held-back corpse is taken now
+    // the scout stops (dies): out of combat, the held-back corpse is taken now (the next creature update, a quarter
+    // second on, asks again)
     bv.play.bags_entity_die(9202);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    bv.eval::<bool>("(function() require('bags').tick_auto_loot() return true end)()");
     bv.frames(2);
     bv.play.bags_broker_tick();
     assert!(bv.play.bags_sends_lost() > before, "M1: auto-loot goes on once the fight is over");
@@ -2591,7 +2594,7 @@ fn round65_fix_bag_viewer_auto_loot_waits_while_in_combat() {
     bv.play.bags_target_sync(9203);
     bv.play.bags_auto_attack(true);
     bv.play.bags_combat_hit(77, 9203, -12);
-    bv.frames(1);
+    bv_look_again(&mut bv);
     let before2 = bv.play.bags_sends_lost();
     bv.play.bags_entity_die(9203);
     bv.frames(2);
@@ -2920,11 +2923,21 @@ fn bv_churn(bv: &mut Bv, tick: usize) {
 /// owner's log shows in a crowded zone)
 /// and returns what the Bag Viewer cost.
 fn bv_cost(bv: &mut Bv, n: usize) -> BvCost {
+    bv_cost_with(bv, n, &mut |_, _| {})
+}
+
+/// The release-build budgets of the Bag Viewer's cost a frame, ms (the report's numbers; before the fixes about 60 open).
+const RELEASE_OPEN_MS: f64 = 6.0;
+const RELEASE_AUTO_ON_MS: f64 = 3.0;
+
+/// `bv_cost` with something more happening each frame (`extra`, given the frame number).
+fn bv_cost_with(bv: &mut Bv, n: usize, extra: &mut dyn FnMut(&mut Bv, usize)) -> BvCost {
     use super::super::addon_perf;
     // every creature is touched once before the count starts: the API reports one it has not seen as added, and
     // each such event (rightly) drops the Bag Viewer's look at the zone
     for tick in 0..25 {
         bv_churn(bv, tick);
+        extra(bv, tick);
         bv.frame();
     }
     addon_perf::force_for_test(true);
@@ -2932,6 +2945,7 @@ fn bv_cost(bv: &mut Bv, n: usize) -> BvCost {
     let started = std::time::Instant::now();
     for tick in 25..25 + n {
         bv_churn(bv, tick);
+        extra(bv, tick);
         bv.frame();
     }
     let secs = started.elapsed().as_secs_f64();
@@ -3004,7 +3018,7 @@ fn round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame() {
     assert!(open.lists_per_s <= 3.0, "the open window asks for the zone's creature list {:.1} times a second", open.lists_per_s);
     assert!(open.mod_ms < list_ms, "the open Bags window costs {:.3} ms a frame; one look at the zone is {list_ms:.3} ms", open.mod_ms);
     if !cfg!(debug_assertions) {
-        assert!(open.mod_ms < 6.0, "the open Bags window costs {:.3} ms a frame (budget 6.0; before the fix about 60)", open.mod_ms);
+        assert!(open.mod_ms < RELEASE_OPEN_MS, "the open Bags window costs {:.3} ms a frame (budget {RELEASE_OPEN_MS}; before the fixes about 60)", open.mod_ms);
         assert!(closed.mod_ms < 0.2, "the closed Bag Viewer costs {:.3} ms a frame (budget 0.2)", closed.mod_ms);
     }
     bv.clean();
@@ -3705,6 +3719,41 @@ fn round65_fix4_m3_a_greyed_button_still_allows_one_try() {
     bv.frames(2);
     let (_, _, label) = bv.action_hit("Sell junk").unwrap();
     assert!(label.starts_with("Sell junk (1 item)"), "an answer clears the grey: {label}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---- Round 6.5 fix round 4, review M4: rescans capped, Auto-loot ON in a crowded zone, the window's drawing ------------
+
+/// Auto-loot ON in a crowded zone, window closed, a corpse of yours held back by a fight, and a hostile that starts and
+/// stops targeting you every frame (each flip makes the fight check stale): the zone is looked at no more than once
+/// every quarter second, and the mod's per-frame cost stays small.
+#[test]
+fn round65_fix4_m4_auto_loot_on_in_a_crowded_zone_scans_at_most_four_times_a_second() {
+    let Some(mut bv) = bv_busy_scene() else { return };
+    bv.play.bags_self_id(77);
+    bv.frames(4);
+    bv_auto(&bv, "non_junk");
+    bv.frames(2);
+    bv.play.bags_spawn_npc(9700, "a hostile", 0, 1, [5.0, 0.0, 0.0]);
+    bv.frames(2);
+    // a corpse of yours waits for the fight to end
+    assert!(bv.eval::<bool>("(function() require('bags').eligible_corpses = {[9001] = {id = 9001, position = {x = 3, y = 0, z = 0}}} return true end)()"));
+    let mut flip = false;
+    let cost = bv_cost_with(&mut bv, 120, &mut |bv, _| {
+        flip = !flip;
+        bv.play.bags_creature(9700, 0, if flip { 77 } else { u32::MAX });
+    });
+    eprintln!("R65P auto-loot on, crowded: {:.3} ms/frame, {:.2} list calls/s", cost.mod_ms, cost.lists_per_s);
+    for l in &cost.lines {
+        eprintln!("R65P     {l}");
+    }
+    assert!(cost.lists_per_s <= 5.0, "a flip every frame made {:.1} looks at the zone a second (cap: one every 0.25 s)", cost.lists_per_s);
+    assert!(cost.lists_per_s > 0.5, "the fight check still looks at the zone ({:.2} a second)", cost.lists_per_s);
+    if !cfg!(debug_assertions) {
+        assert!(cost.mod_ms < RELEASE_AUTO_ON_MS, "Auto-loot on in a crowded zone costs {:.3} ms a frame (budget {RELEASE_AUTO_ON_MS})", cost.mod_ms);
+    }
     bv.clean();
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
