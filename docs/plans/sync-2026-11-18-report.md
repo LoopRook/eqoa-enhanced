@@ -17,6 +17,7 @@ hunks in six files required manual resolution.
 
 - `Cargo.lock` ? Enhanced added `mlua` and upstream added `memmap2`. Kept both dependencies for addon scripting and the new texture cache.
 - `crates/eqoa/Cargo.toml` ? Retained Enhanced's Lua manifest entries and upstream's `Win32_UI_WindowsAndMessaging` feature so Windows can release the clipped pointer on focus loss.
+  Opus review follow-up restored the direct `Win32_System_Com` feature for `CoTaskMemFree` alongside `Win32_UI_WindowsAndMessaging`. The footprint passed at +7/-1 and the optimized Windows gate passed using the cached build.
 - `crates/eqoa/src/main.rs` ? Kept Enhanced's `fork_ext` module and upstream's `texcache` module so both compile into the client.
 - `crates/eqoa/src/options.rs` ? Extended Enhanced's category lookup to upstream's two server restriction notices so they apply to the active page, including Enhanced.
 - `crates/eqoa/src/play.rs` ? Kept upstream's independent Stacked Spell Bars position for drawing and both click paths, retained the fork's hide and click guards, and accepted upstream's Hardcore fall formatter and test.
