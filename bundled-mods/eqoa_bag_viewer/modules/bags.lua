@@ -8,6 +8,9 @@ local M = {
     junk_ids = {}, junk_loaded = false,
     -- Auto-loot: "off", "all" (everything) or "non_junk" (everything but the items marked as junk); saved with the junk marks
     auto_mode = "off",
+    -- the Auto-loot choice of each character (the junk marks stay shared: they are per item type); `character` is whose
+    -- choice `auto_mode` is, `char_dirty` that the character may have changed (a new world, a login)
+    auto_by_char = {}, character = nil, char_dirty = true,
     -- how far the server answered a merchant or a banker (kept per session; see `note_range`)
     range = {merchant = {}, bank = {}},
     batch_id = nil, batch_kind = nil, batch_verb = nil, batch_total = 0,
@@ -487,22 +490,25 @@ end
 
 function M.load_junk()
     M.junk_ids = {}
-    M.auto_mode = "off"
+    M.auto_by_char = {}
     if eqoa and eqoa.files and eqoa.files.read then
         local data = eqoa.files.read(JUNK_FILE)
         if type(data) == "string" then
             for line in data:gmatch("[^\r\n]+") do
-                local mode = line:match("^auto=(%a[%w_]*)$")
-                if mode then
-                    if auto_mode_valid(mode) then M.auto_mode = mode end
+                local who, mode = line:match("^auto:([^=]+)=(%a[%w_]*)$")
+                if who then
+                    if auto_mode_valid(mode) then M.auto_by_char[who] = mode end
                 elseif line:match("^%d+$") then
                     M.junk_ids[line] = true
                 end
-                -- anything else (a retired "grey=" line of an older version) is ignored
+                -- anything else (a retired "grey=" line, an un-keyed "auto=" line) is ignored
             end
         end
     end
     M.junk_loaded = true
+    M.character = nil
+    M.char_dirty = true
+    M.sync_character()
 end
 
 function M.save_junk()
@@ -512,9 +518,36 @@ function M.save_junk()
         if v then ids[#ids + 1] = k end
     end
     table.sort(ids)
-    local lines = {"auto=" .. M.auto_mode}
+    local who = {}
+    for name, mode in pairs(M.auto_by_char) do
+        if mode ~= "off" then who[#who + 1] = name end
+    end
+    table.sort(who)
+    local lines = {}
+    for _, name in ipairs(who) do lines[#lines + 1] = "auto:" .. name .. "=" .. M.auto_by_char[name] end
     for _, k in ipairs(ids) do lines[#lines + 1] = k end
     eqoa.files.write(JUNK_FILE, table.concat(lines, "\n") .. "\n")
+end
+
+-- The Auto-loot choice belongs to the character in the world: when it changes (a login, another world) the choice of
+-- the new one is read back. Nil until the game says who the character is.
+function M.sync_character()
+    local pl = eqoa and eqoa.player and eqoa.player.get and eqoa.player.get()
+    local name = pl and pl.name
+    if type(name) ~= "string" or name == "" then return false end
+    M.char_dirty = false
+    if name == M.character then return false end
+    M.character = name
+    local mode = M.auto_by_char[name] or "off"
+    if mode ~= M.auto_mode then
+        M.auto_mode = mode
+        M.eligible_corpses = {}
+        M.auto_looted = {}
+        M.scan_reset()
+        if M.on_auto_mode then M.on_auto_mode(mode) end
+        M.dirty()
+    end
+    return true
 end
 
 function M.auto_explain()
@@ -526,7 +559,14 @@ end
 
 function M.set_auto_mode(mode)
     if not auto_mode_valid(mode) then return false end
+    if not M.character then M.sync_character() end
+    if not M.character then
+        M.result = {text = "Auto-loot: waiting for your character", ok = false}
+        M.dirty()
+        return false
+    end
     M.auto_mode = mode
+    M.auto_by_char[M.character] = mode
     -- corpses held for the old choice are not looted under the new one
     M.eligible_corpses = {}
     M.auto_looted = {}

@@ -3311,7 +3311,7 @@ fn round65_fix4_item3_auto_loot_choice_buttons_explanation_and_saved() {
     assert_eq!(super::super::options::get_toggle(BV, "auto_loot"), None, "the old on/off option is gone");
     // kept: written with the junk marks, read back after a reload
     let saved: String = bv.eval("eqoa.files.read('junk.cfg')");
-    assert!(saved.lines().next() == Some("auto=non_junk"), "{saved:?}");
+    assert!(saved.lines().next() == Some("auto:Wereoxx=non_junk"), "{saved:?}");
     bv.manager.queue(Command::Enable(BV.into(), false));
     bv.frames(2);
     bv.manager.queue(Command::Enable(BV.into(), true));
@@ -3586,4 +3586,53 @@ fn round65_fix4_h1_list_after_the_last_batch_take_stays_hidden() {
 #[test]
 fn round65_fix4_h1_list_after_a_single_menu_take_stays_hidden() {
     r65fix4_last_take_relist(true);
+}
+
+// ---- Round 6.5 fix round 4, review M2: the Auto-loot choice is per character ----------------------------------------
+
+/// The choice is kept per character (the junk file keeps one line for each); a login as another character reads that
+/// character's choice; a reload of the mod keeps both. The junk marks stay shared: they are per item type, in the same file.
+#[test]
+fn round65_fix4_m2_auto_loot_choice_is_per_character() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    bv.open();
+    bv.frames(3);
+    assert_eq!(bv.eval::<String>("require('bags').character"), "Wereoxx");
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "off", "nothing chosen yet");
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['900008'] = true require('bags').save_junk() return true end)()"));
+    bv_auto(&bv, "all");
+    let saved: String = bv.eval("eqoa.files.read('junk.cfg')");
+    assert!(saved.lines().any(|l| l == "auto:Wereoxx=all"), "{saved:?}");
+
+    // another character enters the world: the choice is theirs (off), the first one's is kept
+    bv.play.bags_set_name("Aldara");
+    bv.play.bags_zone();
+    bv.frames(3);
+    assert_eq!(bv.eval::<String>("require('bags').character"), "Aldara");
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "off", "a new character starts with Auto-loot off");
+    assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"), "the junk marks are shared");
+    bv_auto(&bv, "non_junk");
+    let saved: String = bv.eval("eqoa.files.read('junk.cfg')");
+    assert!(saved.lines().any(|l| l == "auto:Wereoxx=all") && saved.lines().any(|l| l == "auto:Aldara=non_junk"), "{saved:?}");
+
+    // back to the first character
+    bv.play.bags_set_name("Wereoxx");
+    bv.play.bags_zone();
+    bv.frames(3);
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "all");
+
+    // a reload of the mod: each character still has theirs
+    bv.manager.queue(Command::Enable(BV.into(), false));
+    bv.frames(2);
+    bv.manager.queue(Command::Enable(BV.into(), true));
+    bv.frames(3);
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "all");
+    bv.play.bags_set_name("Aldara");
+    bv.play.bags_zone();
+    bv.frames(3);
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "non_junk");
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
 }

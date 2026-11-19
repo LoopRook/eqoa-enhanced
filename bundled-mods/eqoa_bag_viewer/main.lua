@@ -40,6 +40,7 @@ local function open()
     if B.open then return end
     if not B.junk_loaded then B.load_junk() end
     B.open, B.grid, B.menu = true, nil, nil
+    if B.char_dirty then B.sync_character() end
     B.scan_reset()
     listen("render", draw)
     -- creatures arriving or leaving are rare; the look at the zone is dropped for them (see bags.lua `scan_zone`)
@@ -155,7 +156,12 @@ end)
 eqoa.events.on("batch.result", function(e)
     if not B.open then B.on_batch_result(e.data) end
 end)
-eqoa.events.on("state.reset", function() B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); B.dirty() end)
+eqoa.events.on("state.reset", function() B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); B.char_dirty = true; B.dirty() end)
+-- the character is read once the world is up (and again after a new world or login): the Auto-loot choice is per character
+eqoa.events.on("player.changed", function(e)
+    local after = e.data and e.data.after
+    if B.char_dirty or (after and after.name and after.name ~= B.character) then B.sync_character() end
+end)
 eqoa.events.on("disabling", function()
     auto_listeners(false)
     close()

@@ -1633,6 +1633,10 @@ impl Play {
     pub(crate) fn bags_player_at(&mut self, pos: [f32; 3]) {
         self.self_at = Some((pos, None));
     }
+    /// The character in the world is called `name` (a login as another character).
+    pub(crate) fn bags_set_name(&mut self, name: &str) {
+        self.player.name = name.into();
+    }
     /// Where the test put the player (the origin until it did).
     pub(crate) fn bags_player_pos(&self) -> [f32; 3] {
         self.self_at.map_or([0.0; 3], |(p, _)| p)
