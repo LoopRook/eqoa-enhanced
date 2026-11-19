@@ -10,7 +10,8 @@ local M = {
     auto_mode = "off",
     -- the Auto-loot choice of each character (the junk marks stay shared: they are per item type); `character` is whose
     -- choice `auto_mode` is, `char_dirty` that the character may have changed (a new world, a login)
-    auto_by_char = {}, character = nil, char_dirty = true,
+    auto_by_char = {}, character = nil, char_dirty = true, char_checked = 0,
+    scan_count = 0, -- looks at the zone taken (for the tests)
     -- how far the server answered a merchant or a banker (kept per session; see `note_range`)
     range = {merchant = {}, bank = {}},
     -- a greyed button the player clicked once: the second click (within 10 s, about the same distance) is let through
@@ -68,6 +69,7 @@ local function scan_zone()
         if age < SCAN_TTL and not (scan_dirty and age >= SCAN_MIN) then return scan_data end
     end
     local data = {corpses = {}, nearest = {}}
+    M.scan_count = M.scan_count + 1
     scan_data, scan_at, scan_dirty = data, now, false
     local list = eqoa.entities and eqoa.entities.list and eqoa.entities.list()
     if not list then

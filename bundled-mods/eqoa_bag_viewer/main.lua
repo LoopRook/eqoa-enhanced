@@ -157,8 +157,13 @@ end)
 eqoa.events.on("state.reset", function() B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); B.char_dirty = true; B.dirty() end)
 -- the character is read once the world is up (and again after a new world or login): the Auto-loot choice is per character
 eqoa.events.on("player.changed", function(e)
+    -- asked on a new world or login, when the update names another character, and once a second besides
     local after = e.data and e.data.after
-    if B.char_dirty or (after and after.name and after.name ~= B.character) then B.sync_character() end
+    local now = os.clock()
+    if B.char_dirty or now - B.char_checked >= 1.0 or (after and after.name and after.name ~= B.character) then
+        B.char_checked = now
+        B.sync_character()
+    end
 end)
 eqoa.events.on("disabling", function()
     auto_listeners(false)

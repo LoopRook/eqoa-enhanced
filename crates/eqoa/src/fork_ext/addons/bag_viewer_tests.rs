@@ -2900,6 +2900,8 @@ struct BvCost {
     mod_ms: f64,
     /// `eqoa.entities.list` calls a second of wall time
     lists_per_s: f64,
+    /// wall seconds the frames took
+    secs: f64,
     lines: Vec<String>,
 }
 
@@ -2961,7 +2963,7 @@ fn bv_cost_with(bv: &mut Bv, n: usize, extra: &mut dyn FnMut(&mut Bv, usize)) ->
         .find(|l| l.starts_with("addon-api:") && l.contains(BV))
         .and_then(|l| bv_num_after(l, "entities.list "))
         .unwrap_or(0.0);
-    BvCost { mod_ms, lists_per_s: per_frame * n as f64 / secs, lines }
+    BvCost { mod_ms, lists_per_s: per_frame * n as f64 / secs, secs, lines }
 }
 
 /// What one `eqoa.entities.list()` of the busy zone costs here, in ms (the least of a few: the unit the window's
@@ -3585,6 +3587,8 @@ fn r65fix4_last_take_relist(single: bool) {
     bv.frames(2);
     bv.play.bags_broker_tick();
     bv.frames(2);
+    bv.play.bags_broker_tick(); // the session of a single take ends in this tick, its close is sent in the next
+    bv.frames(2);
     assert_eq!(bv.play.mode, 0);
     let log = super::super::window_takeover::take_log_for_test();
     assert!(!log.iter().any(|l| l.contains("left to the game")), "nothing left to the game: {log:#?}");
@@ -3634,7 +3638,8 @@ fn round65_fix4_m2_auto_loot_choice_is_per_character() {
     // another character enters the world: the choice is theirs (off), the first one's is kept
     bv.play.bags_set_name("Aldara");
     bv.play.bags_zone();
-    bv.play.bags_player(0, 0, 51); // the new character's first player update
+    bv.eval::<bool>("(function() require('bags').char_checked = -100 return true end)()");
+    bv.play.bags_player_at([51.0, 0.0, 0.0]); // the new character's first player update
     bv.frames(3);
     assert_eq!(bv.eval::<String>("require('bags').character"), "Aldara");
     assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "off", "a new character starts with Auto-loot off");
@@ -3646,7 +3651,8 @@ fn round65_fix4_m2_auto_loot_choice_is_per_character() {
     // back to the first character
     bv.play.bags_set_name("Wereoxx");
     bv.play.bags_zone();
-    bv.play.bags_player(0, 0, 52);
+    bv.eval::<bool>("(function() require('bags').char_checked = -100 return true end)()");
+    bv.play.bags_player_at([52.0, 0.0, 0.0]);
     bv.frames(3);
     assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "all");
 
@@ -3658,7 +3664,8 @@ fn round65_fix4_m2_auto_loot_choice_is_per_character() {
     assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "all");
     bv.play.bags_set_name("Aldara");
     bv.play.bags_zone();
-    bv.play.bags_player(0, 0, 53);
+    bv.eval::<bool>("(function() require('bags').char_checked = -100 return true end)()");
+    bv.play.bags_player_at([53.0, 0.0, 0.0]);
     bv.frames(3);
     assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "non_junk");
     bv.clean();
@@ -3744,6 +3751,7 @@ fn round65_fix4_m4_auto_loot_on_in_a_crowded_zone_scans_at_most_four_times_a_sec
     // a corpse of yours waits for the fight to end
     assert!(bv.eval::<bool>("(function() require('bags').eligible_corpses = {[9001] = {id = 9001, position = {x = 3, y = 0, z = 0}}} return true end)()"));
     let mut flip = false;
+    let scans_before: u32 = bv.eval("require('bags').scan_count");
     let cost = bv_cost_with(&mut bv, 120, &mut |bv, _| {
         flip = !flip;
         bv.play.bags_creature(9700, 0, if flip { 77 } else { u32::MAX });
@@ -3752,8 +3760,12 @@ fn round65_fix4_m4_auto_loot_on_in_a_crowded_zone_scans_at_most_four_times_a_sec
     for l in &cost.lines {
         eprintln!("R65P     {l}");
     }
-    assert!(cost.lists_per_s <= 5.0, "a flip every frame made {:.1} looks at the zone a second (cap: one every 0.25 s)", cost.lists_per_s);
-    assert!(cost.lists_per_s > 0.5, "the fight check still looks at the zone ({:.2} a second)", cost.lists_per_s);
+    let scans = bv.eval::<u32>("require('bags').scan_count") - scans_before;
+    let per_s = scans as f64 / (cost.secs + 0.001);
+    let state: String = bv.eval("(function() local b = require('bags') return tostring(b.auto_mode) .. ' elig=' .. tostring(next(b.eligible_corpses or {})) .. ' batch=' .. tostring(b.batch_id) .. ' open=' .. tostring(b.pending_open) .. ' last=' .. tostring(b.last_req) .. ' char=' .. tostring(b.character) end)()");
+    eprintln!("R65P scans: {scans} in {:.1} s ({per_s:.2} a second); {state}", cost.secs);
+    assert!(per_s <= 4.5, "a flip every frame made {per_s:.1} looks at the zone a second (cap: one every 0.25 s)");
+    assert!(per_s > 0.5, "the fight check still looks at the zone ({per_s:.2} a second): {state}");
     if !cfg!(debug_assertions) {
         assert!(cost.mod_ms < RELEASE_AUTO_ON_MS, "Auto-loot on in a crowded zone costs {:.3} ms a frame (budget {RELEASE_AUTO_ON_MS})", cost.mod_ms);
     }
