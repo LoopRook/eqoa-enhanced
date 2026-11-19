@@ -29,6 +29,8 @@
     "eqoa.entities.list",
     "eqoa.entities.find",
     "eqoa.player.get",
+    "eqoa.group.get",
+    "eqoa.log.write",
     "eqoa.target.get",
     "eqoa.files.read",
     "eqoa.files.write",

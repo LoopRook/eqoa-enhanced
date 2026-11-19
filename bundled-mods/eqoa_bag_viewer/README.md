@@ -24,6 +24,14 @@ is greyed out ("too far from the banker"); the reach is learned from real answer
 (two silences at a distance grey it, an answer clears it) and a greyed button still
 tries on a second click. One more than 40 units away shows nothing at all.
 
+Auto-loot opens a corpse of a creature you hit, within 15 units, once you are out of
+combat (the game's combat flag, auto-attack, or a hostile within 30 units that has
+you targeted; your pet, group members such as a mercenary, and merchants or bankers
+do not count). A corpse the server does not open ("Out of range." or no answer) is
+asked again when you come 2 units closer or after 5 seconds, three tries in all.
+Every decision is a line in the game's log (`eqoa.log`), starting
+`addon eqoa_bag_viewer: [info] auto-loot:` with the corpse id and the reason.
+
 It uses only the public `eqoa/1` API (`eqoa.inventory`, `eqoa.bank`, `eqoa.items`,
 `eqoa.icons`, the `inventory.changed`, `bank.changed` and `loot.changed` events)
 and is the worked example for the items API. While the window is closed it does
