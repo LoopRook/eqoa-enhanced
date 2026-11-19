@@ -69,6 +69,18 @@ class LocalSceneTests(unittest.TestCase):
             log = "\n".join(line for line in bag if line != missing)
             self.assertFalse(all(scene_checks(log, "bag-viewer", True).values()))
 
+    def test_auto_loot_requires_its_mode_and_not_your_kill_lines(self):
+        bag = [*SCENE[:4], BAG_KEY, R65_OPEN, R65_HIDDEN, BAG_TAKE.replace("650", "750"), MEAT, R65_CLOSE, BAG_LOOT]
+        mode = "addon eqoa_bag_viewer: [info] auto-loot: mode Everything but junk for Lsgm"
+        skipped = ("addon eqoa_bag_viewer: [info] auto-loot: corpse 0x1234: fire bat: skipped, "
+                   "not your kill (you did not hit it)")
+        full = [WORLD, mode, *bag[1:4], skipped, *bag[4:]]
+        self.assertTrue(all(scene_checks("\n".join(full), "bag-viewer", True, True).values()))
+        for missing in (mode, skipped):
+            log = "\n".join(line for line in full if line != missing)
+            self.assertFalse(all(scene_checks(log, "bag-viewer", True, True).values()))
+        self.assertNotIn("Auto-loot mode logged", scene_checks("\n".join(full), "bag-viewer", True))
+
 
 if __name__ == "__main__":
     unittest.main()
