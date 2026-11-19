@@ -199,6 +199,9 @@ fn native_bundled_arpg_and_modern_scripts_load_save_load_and_disable_unchanged()
 }
 #[test]
 fn native_bundled_hearts_once_mode_draws_and_releases_its_health_claim() {
+    super::big_stack(native_bundled_hearts_once_mode_draws_and_releases_its_health_claim_body)
+}
+fn native_bundled_hearts_once_mode_draws_and_releases_its_health_claim_body() {
     use super::native_core::{CORE, Core, View};
     CORE.with(|c| {
         let mut core = Core::default();
