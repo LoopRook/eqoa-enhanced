@@ -396,8 +396,10 @@ function draw()
         local far = B.too_far("bank")
         if far then
             ctx_btn(PAD, W - 2 * PAD, "Open bank: " .. far, c.muted, c.border, function()
-                B.result = {text = "Open bank: " .. far, ok = false}
-                B.dirty()
+                B.open_talk_npc("bank", "Open bank", function()
+                    B.result = {text = "Bank ready", ok = true}
+                    B.dirty()
+                end)
             end)
         else
             ctx_btn(PAD, W - 2 * PAD, "Open bank", c.text, c.worn, function()
@@ -411,10 +413,7 @@ function draw()
         local _, cnt = B.junk_sell_list()
         local far = B.too_far("merchant")
         if far then
-            ctx_btn(PAD, W - 2 * PAD, "Sell junk: " .. far, c.muted, c.border, function()
-                B.result = {text = "Sell junk: " .. far, ok = false}
-                B.dirty()
-            end)
+            ctx_btn(PAD, W - 2 * PAD, "Sell junk: " .. far, c.muted, c.border, B.start_sell_junk)
         else
             local lbl = string.format("Sell junk (%d %s)", cnt, cnt == 1 and "item" or "items")
             ctx_btn(PAD, W - 2 * PAD, lbl, cnt > 0 and c.text or c.muted, cnt > 0 and c.junk or c.border, B.start_sell_junk)

@@ -3426,7 +3426,7 @@ fn round65_fix4_item6_out_of_range_buttons_grey_out_and_the_reach_is_learned() {
     bv.play.bags_broker_tick();
     bv.frames(2);
 
-    // at 9 units (inside the default reach) the merchant says nothing: 9 and farther are too far from now on
+    // at 9 units (inside the default reach) the merchant says nothing, once: one miss greys nothing
     bv.play.bags_player_at([21.0, 0.0, 0.0]);
     bv_look_again(&mut bv);
     let (x, y, label) = bv.action_hit("Sell junk").unwrap();
@@ -3437,8 +3437,19 @@ fn round65_fix4_item6_out_of_range_buttons_grey_out_and_the_reach_is_learned() {
     }
     bv.frames(2);
     assert!(bv.result_text().unwrap().0.contains("did not answer"));
+    let fail: Option<f64> = bv.eval("require('bags').range.merchant.fail");
+    assert_eq!(fail, None, "one silence is not yet 'too far'");
+    bv_look_again(&mut bv);
+    let (x, y, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.starts_with("Sell junk (1 item)"), "after one miss: {label}");
+    // the second silence at the same distance: 9 and farther are too far from now on
+    bv.click((x, y));
+    for _ in 0..330 {
+        bv.play.bags_broker_tick();
+    }
+    bv.frames(2);
     let fail: f64 = bv.eval("require('bags').range.merchant.fail");
-    assert!((fail - 9.0).abs() < 0.01, "silence at 9 units: {fail}");
+    assert!((fail - 9.0).abs() < 0.01, "two silences at 9 units: {fail}");
     bv_look_again(&mut bv);
     let (_, _, label) = bv.action_hit("Sell junk").unwrap();
     assert!(label.contains("too far from the merchant"), "9 units is now known to be too far: {label}");
@@ -3634,5 +3645,67 @@ fn round65_fix4_m2_auto_loot_choice_is_per_character() {
     bv.frames(3);
     assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "non_junk");
     bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---- Round 6.5 fix round 4, review M3: one unanswered request does not grey a button for the session ----------------
+
+/// Silence is weaker evidence than an answer: one miss greys nothing, two misses grey the nearer distance, a miss closer
+/// than the farthest answer drops the old answers and greys at once, and an answer always clears the doubt.
+#[test]
+fn round65_fix4_m3_note_range_needs_two_misses_and_an_answer_clears() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    let eval = |lua: &str| bv.eval::<Option<f64>>(&format!("(function() local b = require('bags') b.range.merchant = {{}} {lua} end)()"));
+    assert_eq!(eval("b.note_range('merchant', 9, false) return b.range.merchant.fail"), None, "one miss greys nothing");
+    assert_eq!(eval("b.note_range('merchant', 9, false) b.note_range('merchant', 12, false) return b.range.merchant.fail"), Some(9.0), "two misses grey the nearer one");
+    assert_eq!(eval("b.note_range('merchant', 9, false) b.note_range('merchant', 12, false) b.note_range('merchant', 6, true) return b.range.merchant.fail"), None, "an answer clears the misses");
+    assert_eq!(eval("b.note_range('merchant', 12, true) b.note_range('merchant', 15, false) return b.range.merchant.fail"), None, "one miss past the farthest answer greys nothing");
+    assert_eq!(eval("b.note_range('merchant', 12, true) b.note_range('merchant', 5, false) return b.range.merchant.fail"), Some(5.0), "a miss closer than the farthest answer greys at once");
+    assert_eq!(eval("b.note_range('merchant', 12, true) b.note_range('merchant', 5, false) return b.range.merchant.ok"), None, "and the old answer no longer counts");
+}
+
+/// A greyed button still allows one try: the first click says why and asks to click again, the second goes out; an
+/// answer to it clears the grey.
+#[test]
+fn round65_fix4_m3_a_greyed_button_still_allows_one_try() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [20.0, 0.0, 0.0]);
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['900008'] = true return true end)()"));
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(1));
+    bv.frames(2);
+    let (x, y, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.contains("too far from the merchant"), "{label}");
+    let sends = bv.play.bags_sends_lost();
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends, "the first click only says why");
+    let (text, _) = bv.result_text().unwrap();
+    assert!(text.contains("too far from the merchant") && text.contains("click again"), "{text}");
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends, "the second click tries anyway");
+    // the merchant answers (the server's reach is longer than guessed): the grey is gone for good
+    bv.play.bags_merchant_packet(9002);
+    bv.frames(2);
+    let ok: f64 = bv.eval("require('bags').range.merchant.ok");
+    assert!((ok - 20.0).abs() < 0.01, "{ok}");
+    bv.play.bags_close_merchant();
+    bv.play.bags_broker_tick();
+    bv.eval::<bool>("(function() require('bags').scan_reset() return true end)()");
+    bv.frames(2);
+    let (_, _, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.starts_with("Sell junk (1 item)"), "an answer clears the grey: {label}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
 }

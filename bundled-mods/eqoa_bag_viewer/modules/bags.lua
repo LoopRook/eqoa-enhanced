@@ -13,6 +13,8 @@ local M = {
     auto_by_char = {}, character = nil, char_dirty = true,
     -- how far the server answered a merchant or a banker (kept per session; see `note_range`)
     range = {merchant = {}, bank = {}},
+    -- a greyed button the player clicked once: the second click (within 10 s, about the same distance) is let through
+    try_anyway = {},
     batch_id = nil, batch_kind = nil, batch_verb = nil, batch_total = 0,
     corpse_tab_kept = false,
     action_hits = {},
@@ -137,14 +139,31 @@ end
 M.DEFAULT_REACH = 10.0
 local TOO_FAR = {merchant = "too far from the merchant", bank = "too far from the banker"}
 
+-- An answer at `dist` always clears the doubt (`fail`, the misses). Silence is weaker evidence than an answer: one
+-- unanswered request (lag, a busy server) greys nothing; two misses grey the smallest distance missed. A miss closer
+-- than the farthest answer is different: the reach has changed, the old answers no longer count and it greys at once.
 function M.note_range(kind, dist, answered)
     local r = M.range[kind]
     if not r or type(dist) ~= "number" then return end
     if answered then
         if not r.ok or dist > r.ok then r.ok = dist end
-        if r.fail and r.fail <= r.ok then r.fail = nil end
-    elseif not (r.ok and dist <= r.ok) then
-        if not r.fail or dist < r.fail then r.fail = dist end
+        r.fail, r.misses = nil, {}
+        M.try_anyway[kind] = nil
+        return
+    end
+    M.try_anyway[kind] = nil
+    if r.ok and dist <= r.ok then
+        r.ok, r.fail, r.misses = nil, dist, {dist}
+        return
+    end
+    r.misses = r.misses or {}
+    r.misses[#r.misses + 1] = dist
+    if #r.misses >= 2 then
+        local low = r.misses[1]
+        for _, d in ipairs(r.misses) do
+            if d < low then low = d end
+        end
+        r.fail = low
     end
 end
 
@@ -170,6 +189,25 @@ function M.too_far(kind)
     local dist = M.npc_distance(kind)
     if dist == nil or M.within_reach(kind, dist) then return nil end
     return TOO_FAR[kind]
+end
+
+-- Called when a button that is greyed for being too far is clicked: the first click says why and asks to click again, the
+-- second (within 10 s, standing about where they stood) goes through, so the mod's guess never keeps a try from the
+-- player. Returns true when the click is held back.
+function M.far_gate(kind, verb)
+    local far = M.too_far(kind)
+    if not far then return false end
+    local dist = M.npc_distance(kind)
+    local now = os.clock()
+    local t = M.try_anyway[kind]
+    if t and now <= t.until and dist and math.abs(t.dist - dist) < 2 then
+        t.until = now + 10
+        return false
+    end
+    M.try_anyway[kind] = {dist = dist or 0, until = now + 10}
+    M.result = {text = verb .. ": " .. far .. " (click again to try anyway)", ok = false}
+    M.dirty()
+    return true
 end
 
 -- A window of `kind` that the player opened by hand answers from where they stand: that is a real answer too.
@@ -642,12 +680,7 @@ end
 
 function M.open_talk_npc(talk_kind, verb, after_fn)
     local dist = M.npc_distance(talk_kind, true)
-    local far = dist ~= nil and not M.within_reach(talk_kind, dist) and TOO_FAR[talk_kind] or nil
-    if far then
-        M.result = {text = verb .. ": " .. far, ok = false}
-        M.dirty()
-        return nil, {message = far}
-    end
+    if M.far_gate(talk_kind, verb) then return nil, {message = TOO_FAR[talk_kind]} end
     if not M.ensure_takeover(talk_kind) then return nil, {message = "window busy"} end
     local req, err = eqoa.actions.talk(nil, {kind = talk_kind})
     if not req then
@@ -820,8 +853,8 @@ end
 -- Build the click menu for one stack (never includes Destroy; refused entries carry the game's reason).
 function M.build_menu(it, fx, fy)
     local rows = {}
-    local function add(label, enabled, reason, run, local_only)
-        rows[#rows + 1] = {label = label, enabled = enabled, reason = reason, run = run, local_only = local_only}
+    local function add(label, enabled, reason, run, local_only, far_kind)
+        rows[#rows + 1] = {label = label, enabled = enabled, reason = reason, run = run, local_only = local_only, far_kind = far_kind}
     end
     local loot = eqoa.loot.get()
     local bank = eqoa.bank.get()
@@ -857,12 +890,12 @@ function M.build_menu(it, fx, fy)
         end
         if it.quantity > 1 then
             add("Withdraw 1", can_bank, not can_bank and no_bank or nil,
-                function() return bank_move_or_open(1) end)
+                function() return bank_move_or_open(1) end, nil, bank_far and "bank" or nil)
             add("Withdraw stack (" .. it.quantity .. ")", can_bank, not can_bank and no_bank or nil,
-                function() return bank_move_or_open(it.quantity) end)
+                function() return bank_move_or_open(it.quantity) end, nil, bank_far and "bank" or nil)
         else
             add("Withdraw", can_bank, not can_bank and no_bank or nil,
-                function() return bank_move_or_open(1) end)
+                function() return bank_move_or_open(1) end, nil, bank_far and "bank" or nil)
         end
     else
         local can = eqoa.items.can_use(it.ref)
@@ -911,8 +944,9 @@ function M.build_menu(it, fx, fy)
 
         local near_bank = M.nearby_npc("bank") ~= nil
         if bank_open or near_bank then
-            local dep_deny = it.equipped and "cannot deposit an equipped item"
-                or (not bank_open and M.too_far("bank")) or nil
+            local dep_far = not bank_open and M.too_far("bank") or nil
+            local dep_deny = it.equipped and "cannot deposit an equipped item" or dep_far or nil
+            local dep_far_kind = (not it.equipped and dep_far) and "bank" or nil
             local function dep_move_or_open(qty)
                 if bank_open then
                     return eqoa.actions.bank_move("inventory", it.ref, qty)
@@ -923,12 +957,12 @@ function M.build_menu(it, fx, fy)
             end
             if (it.quantity or 1) > 1 then
                 add("Deposit 1", dep_deny == nil, dep_deny,
-                    function() return dep_move_or_open(1) end)
+                    function() return dep_move_or_open(1) end, nil, dep_far_kind)
                 add("Deposit stack (" .. it.quantity .. ")", dep_deny == nil, dep_deny,
-                    function() return dep_move_or_open(it.quantity) end)
+                    function() return dep_move_or_open(it.quantity) end, nil, dep_far_kind)
             else
                 add("Deposit", dep_deny == nil, dep_deny,
-                    function() return dep_move_or_open(1) end)
+                    function() return dep_move_or_open(1) end, nil, dep_far_kind)
             end
         end
     end
@@ -964,6 +998,12 @@ function M.trigger_menu(row)
     if not row then return end
     if row.local_only and row.enabled and row.run then
         row.run()
+        return
+    end
+    if not row.enabled and row.far_kind and row.run then
+        -- greyed for being too far: the second click tries anyway
+        if M.far_gate(row.far_kind, row.label) then return end
+        M.run_single(row.label, row.run)
         return
     end
     if not row.enabled or not row.run then
