@@ -25,6 +25,33 @@ impl Play {
     pub(crate) fn bundled_ui_walker() -> crate::walker::Walker {
         perf_review_walker()
     }
+    pub(crate) fn fill_bundled_ui_combat_panels(&mut self) {
+        let mut id = 6;
+        for def in &mut self.hud_menus.defs[1..3] {
+            for entry in &mut def.entries {
+                let mut ability = self.abilities[&1].clone();
+                ability.id = id;
+                ability.display_index = id - 1;
+                ability.name = format!("Ability {id}");
+                self.abilities.insert(id, ability);
+                entry.msg = 0x8060000;
+                entry.id = id as _;
+                id += 1;
+            }
+            def.count = def.entries.len() as _;
+        }
+        for index in 2..8 {
+            self.effects.icon[index] = 0x4001 + index as u32;
+            self.effects.name[index] = format!("Effect {index}").encode_utf16().collect();
+        }
+        self.effects.count = 8;
+        for index in 2..5 {
+            let mut member = self.group.members[0].clone();
+            member.id += index;
+            member.name = format!("Group Member {index}");
+            self.group.members.push(member);
+        }
+    }
     pub(crate) fn bundled_ui_fixture() -> Self {
         let mut p = ready();
         super::api_capture::updates::inactive();

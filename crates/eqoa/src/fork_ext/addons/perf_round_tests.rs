@@ -47,6 +47,247 @@ impl Rm {
     }
 }
 
+const WEREOXXS: &str = "wereoxxs_ui";
+const WEREOXXS_PANELS: &[&str] = &[
+    "DrawAbilityBarWindows(now_ms)",
+    "DrawCastingBar(now_ms)",
+    "DrawPlayerFrame(now_ms)",
+    "DrawTargetFrame(now_ms)",
+    "DrawGroupFrames(now_ms)",
+    "DrawCompass()",
+    "DrawMeter(now_ms)",
+    "DrawChat()",
+];
+
+/// Instruments a scratch entry function. Keep these probes outside the main timing pass.
+fn wereoxxs_profile(rm: &mut Rm, samples: usize) {
+    let path = rm._root.0.join("wereoxxs_ui/wereoxxs_ui.lua");
+    let source = fs::read_to_string(path).unwrap().replace("\r\n", "\n");
+    let (definitions, frame) = source.rsplit_once("\nApplyDpadRotation()\n").unwrap();
+    let mut frame = frame.to_owned();
+    for call in WEREOXXS_PANELS {
+        let label = call.split_once('(').unwrap().0;
+        let statement = format!("then {call} end");
+        assert!(frame.contains(&statement));
+        frame = frame.replace(
+            &statement,
+            &format!("then local start = os.clock(); {call}; profile_add('{label}', start) end"),
+        );
+    }
+    for call in ["Combat.Update()", "AbilityList.Update()", "Chat.Update()"] {
+        let label = call.strip_suffix("()").unwrap();
+        assert!(frame.contains(call));
+        frame = frame.replace(
+            call,
+            &format!("do local start = os.clock(); {call}; profile_add('{label}', start) end"),
+        );
+    }
+    let l = lua(&rm.manager, WEREOXXS);
+    let profiled = l
+        .load(format!(
+            "{definitions}\n\
+             local function profile_add(label, start)\n\
+                 profile_ms[label] = (profile_ms[label] or 0) + (os.clock() - start) * 1000\n\
+             end\n\
+             ApplyDpadRotation()\n{frame}"
+        ))
+        .into_function()
+        .unwrap();
+    l.globals()
+        .set("profile_ms", l.create_table().unwrap())
+        .unwrap();
+    rm.manager.entries[0].instance.as_mut().unwrap().function = profiled;
+    for tick in 0..samples {
+        wereoxxs_busy_frame(rm, tick + samples);
+    }
+    let rows: Table = l.globals().get("profile_ms").unwrap();
+    for row in rows.pairs::<String, f64>() {
+        let (name, ms) = row.unwrap();
+        eprintln!(
+            "wereoxxs profile {name}: {:.3} ms/frame",
+            ms / samples as f64
+        );
+    }
+}
+
+fn wereoxxs_busy_frame(rm: &mut Rm, tick: usize) {
+    rm.walk_creatures(tick);
+    if tick.is_multiple_of(4) {
+        let line = format!(
+            "Party traffic {tick}: moving towards the camp while the healer recovers power."
+        );
+        super::super::native_core::observe_text(&line, [0.5, 0.75, 1.0, 1.0]);
+    }
+    rm.frame();
+}
+
+#[test]
+fn wereoxxs_busy_zone_frame_cost() {
+    let reference = std::env::var_os("EQOA_WEREOXXS_REFERENCE_CHAT").map(PathBuf::from);
+    let before = reference
+        .as_deref()
+        .and_then(|path| wereoxxs_run_busy_zone(Some(path), true));
+    let after = wereoxxs_run_busy_zone(None, before.is_some());
+    if let Some(before) = before {
+        let after = after.expect("the bundled UI must render when the original rendered");
+        assert!(
+            before == after,
+            "the busy-zone picture differs from the original"
+        );
+        eprintln!("wereoxxs busy-zone picture matches the original byte for byte");
+    }
+}
+
+fn wereoxxs_run_busy_zone(reference_chat: Option<&Path>, capture: bool) -> Option<Vec<u8>> {
+    use super::super::{
+        addon_perf,
+        chat::{MSG_TYPE_GUILD, MSG_TYPE_PARTY, MSG_TYPE_SAY, MSG_TYPE_SHOUT, MSG_TYPE_TELL},
+        host::Host,
+        native_core,
+    };
+
+    addon_perf::force_for_test(true);
+    let Some(mut rm) = Rm::with(|p| matches!(p, WEREOXXS | "resources"), 200) else {
+        addon_perf::force_for_test(false);
+        return None;
+    };
+    let label = if let Some(path) = reference_chat {
+        fs::copy(path, rm._root.0.join("wereoxxs_ui/modules/chat_window.lua")).unwrap();
+        "original"
+    } else {
+        "bundled"
+    };
+    rm.play.fill_bundled_ui_combat_panels();
+    rm.manager.queue(Command::Enable(WEREOXXS.into(), true));
+    rm.frames(3);
+    let l = lua(&rm.manager, WEREOXXS);
+    l.load("os.date = function() return '12:34' end")
+        .exec()
+        .unwrap();
+    let kinds = [
+        MSG_TYPE_SAY,
+        MSG_TYPE_PARTY,
+        MSG_TYPE_GUILD,
+        MSG_TYPE_SHOUT,
+        MSG_TYPE_TELL,
+    ];
+    for index in 0..2000 {
+        let kind = kinds[index % kinds.len()];
+        let prefix = if kind == MSG_TYPE_TELL {
+            "Scout tells you, "
+        } else {
+            ""
+        };
+        let text = format!(
+            "{prefix}Chat line {index}: moving towards the camp while the healer recovers power."
+        );
+        native_core::observe_text(&text, [f32::from_bits(kind), 0.75, 1.0, 1.0]);
+        if (index + 1).is_multiple_of(250) {
+            rm.frame();
+        }
+    }
+    l.load(r#"
+        assert(#chat_state.messages == 2000)
+        for _, key in ipairs({'bars','casting','player','target','group','compass','meter','chat'}) do
+            windows[key] = true
+        end
+    "#).exec().unwrap();
+    rm.frames(8);
+
+    const SAMPLES: usize = 40;
+    let mut instructions = 0;
+    let mut peak_instructions = 0;
+    addon_perf::take_report();
+    for tick in 0..SAMPLES {
+        wereoxxs_busy_frame(&mut rm, tick);
+        let instance = rm.manager.entries[0].instance.as_ref().unwrap();
+        let used = Host::INSTRUCTION_BUDGET - instance.host.instructions_remaining();
+        instructions += used;
+        peak_instructions = peak_instructions.max(used);
+    }
+    assert_eq!(
+        rm.manager.entries[0].status,
+        Status::Enabled,
+        "{:?}",
+        rm.manager.diagnostics()
+    );
+    let snapshot = rm.manager.entries[0]
+        .instance
+        .as_ref()
+        .unwrap()
+        .host
+        .snapshot
+        .get();
+    assert_eq!(snapshot.abilities.ability_count, 14);
+    for (bar, count) in snapshot.abilities.bars.iter().zip([5, 5, 4]) {
+        assert_eq!(bar.slot_count, count);
+    }
+    assert_eq!(snapshot.group.member_count, 5);
+    assert_eq!(snapshot.effects.count, 8);
+    assert!(l.load("return chat_state.messages[#chat_state.messages].text:find('Party traffic', 1, true) ~= nil").eval::<bool>().unwrap(), "live chat reached the warmed scrollback");
+    eprintln!(
+        "wereoxxs busy zone ({label}): {:.3} ms/frame; {} Lua instructions/frame, peak {peak_instructions}",
+        addon_perf::peek_addon_ms(WEREOXXS),
+        instructions as usize / SAMPLES,
+    );
+    for line in addon_perf::take_report() {
+        eprintln!("wereoxxs busy zone ({label}): {line}");
+    }
+    // An instruction budget keeps the regression independent of machine load.
+    const PEAK_INSTRUCTION_BUDGET: u32 = 110_000;
+    if reference_chat.is_some() {
+        assert!(
+            peak_instructions > PEAK_INSTRUCTION_BUDGET,
+            "the original chat must exceed the budget"
+        );
+        eprintln!("wereoxxs original exceeded the {PEAK_INSTRUCTION_BUDGET} instruction budget");
+    } else {
+        assert!(
+            peak_instructions <= PEAK_INSTRUCTION_BUDGET,
+            "wereoxxs used {peak_instructions} instructions in one frame (budget {PEAK_INSTRUCTION_BUDGET})"
+        );
+    }
+    if std::env::var_os("EQOA_WEREOXXS_PROFILE").is_some() {
+        wereoxxs_profile(&mut rm, SAMPLES);
+        assert_eq!(
+            rm.manager.entries[0].status,
+            Status::Enabled,
+            "{:?}",
+            rm.manager.diagnostics()
+        );
+    }
+    addon_perf::force_for_test(false);
+    let pixels = capture.then(|| {
+        let mut normal = rm_pixels(&rm.gpu, &rm.target.as_ref().unwrap().0);
+        l.load(
+            r#"
+            chat_config.show_timestamps = false
+            chat_config.color_tell = {0.4, 1, 0.6, 1}
+            local begin = ImGui.BeginTabItem
+            ImGui.BeginTabItem = function(name)
+                if name == 'Scout' then
+                    local _, draw = begin(name, true, ImGuiTabItemFlags.SetSelected)
+                    return draw
+                end
+                return begin(name)
+            end
+        "#,
+        )
+        .exec()
+        .unwrap();
+        let target = rm.frames(4);
+        let filtered = rm_pixels(&rm.gpu, &target);
+        assert!(
+            filtered != normal,
+            "the selected tell tab must change the picture"
+        );
+        normal.extend(filtered);
+        normal
+    });
+    rm.manager.shutdown();
+    pixels
+}
+
 /// A journal in which "Test Rat" (the creature in the busy world) has `spawns` known spawns
 /// scattered round the player, in the player's world.
 fn perf_journal(world: i64, me: [f32; 3], spawns: usize) -> serde_json::Value {

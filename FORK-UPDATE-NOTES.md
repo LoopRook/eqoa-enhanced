@@ -4,6 +4,8 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- Wereoxxs UI draws long chat histories with less work each frame.
+
 - Owner test launchers now save local gameplay recordings alongside the log. The owner test summary lists each recording's size, duration and message counts.
 
 - Third-party Forge mods that call camera.GetCoordinates before a camera exists, or icon.GetTexture on a host without a texture service, now show a diagnostic instead of a silent empty result.
