@@ -52,6 +52,9 @@ end
 -- into a corpse or starts or stops targeting the player (`note_entity_event`, heard only while Auto-loot is on), and
 -- then asked again at most once every SCAN_MIN seconds, so a crowded zone never makes it one look per frame.
 local SCAN_TTL, SCAN_MIN = 0.5, 0.25
+-- A merchant or banker farther than this is not "nearby" at all: no Sell junk or bank row for one at the other end of a
+-- city (the "too far" line is for one within sight that the server may not answer yet).
+M.NPC_SHOWN_WITHIN = 40.0
 local scan_at, scan_data, scan_dirty, scan_pid = nil, nil, false, nil
 
 local function has_bit(val, b)
@@ -92,9 +95,11 @@ local function scan_zone()
                 local merchant, bank = has_bit(flags, 1), has_bit(flags, 2)
                 if merchant or bank or has_bit(flags, 128) or has_bit(flags, 8) then
                     local d2 = dist_sq(ppos, e.actor_position or e.position) or 0
-                    consider("any", e, d2)
-                    if merchant then consider("merchant", e, d2) end
-                    if bank then consider("bank", e, d2) end
+                    if d2 <= M.NPC_SHOWN_WITHIN * M.NPC_SHOWN_WITHIN then
+                        consider("any", e, d2)
+                        if merchant then consider("merchant", e, d2) end
+                        if bank then consider("bank", e, d2) end
+                    end
                 end
             end
         end

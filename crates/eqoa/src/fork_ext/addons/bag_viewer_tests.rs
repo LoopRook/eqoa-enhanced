@@ -3758,3 +3758,37 @@ fn round65_fix4_m4_auto_loot_on_in_a_crowded_zone_scans_at_most_four_times_a_sec
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
 }
+
+// ---- Round 6.5 fix round 4, review L5: a merchant or banker across the city shows nothing, not a "too far" line ----------
+
+#[test]
+fn round65_fix4_l5_a_merchant_or_banker_far_away_shows_no_button_and_no_row() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [60.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9003, "Banker Dan", 0x80 | 2, 1, [0.0, 0.0, 60.0]);
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['900008'] = true return true end)()"));
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(1));
+    bv.frames(2);
+    assert!(bv.action_hit("Sell junk").is_none(), "no Sell junk line for a merchant 60 units away");
+    bv.click(bv.slot(2));
+    bv.frames(2);
+    assert!(bv.menu_row("Deposit").is_none(), "no Deposit row for a banker 60 units away");
+    bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
+    bv.frames(1);
+    // within sight (30 units) the greyed line is there
+    bv.play.bags_player_at([30.0, 0.0, 0.0]);
+    bv_look_again(&mut bv);
+    let (_, _, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.contains("too far from the merchant"), "{label}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
