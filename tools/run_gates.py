@@ -2,6 +2,7 @@
 # Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 """Run workspace gates in order and generate a short summary report."""
 import argparse
+import datetime
 import json
 import os
 from pathlib import Path
@@ -452,6 +453,191 @@ class CargoLock:
         self.release()
 
 
+# ---------------------------------------------------------------------------
+# Shared-target stale-binary guard.
+#
+# Every worktree builds into ONE CARGO_TARGET_DIR. Cargo's fingerprint for the eqoa unit is the same
+# for all worktrees and its dep-info paths are package-relative, so cargo only compares this
+# worktree's source mtimes with the time of the LAST build, whichever worktree made it. If another
+# worktree built after this one's last edit, cargo prints "Finished in 0.87s" and runs THAT
+# worktree's binary: a gate can pass on someone else's code.
+#
+# The guard, run while holding the cargo lock: (1) touches every workspace crate's root source file
+# (and build.rs) so cargo sees this worktree as newer than any shared artifact, unless the marker
+# proves this worktree was the last builder; (2) after the build, requires the tested executable to
+# be newer than that touch; (3) records the tested executable and its mtime in the summary.
+# ---------------------------------------------------------------------------
+
+GUARD_MARKER_NAME = "last-build.json"
+GUARD_TOLERANCE_SECONDS = 1.0
+# target-dir sub-paths whose deps/*.d files change on every cargo build of any worktree
+ARTIFACT_PROFILE_DIRS = (
+    ("debug",),
+    ("release",),
+    ("wasm32-unknown-unknown", "debug"),
+    ("wasm32-unknown-unknown", "release"),
+)
+RUNNING_EXE_RE = re.compile(r"^\s*Running\s+.*\(([^()]+)\)\s*$", re.MULTILINE)
+
+
+class StaleBinaryError(RuntimeError):
+    """The executable cargo ran was not rebuilt from this worktree's sources."""
+
+
+def _norm_root(root):
+    return os.path.normcase(str(Path(root).resolve()))
+
+
+def workspace_root_sources(root):
+    """Root source files of every workspace crate under crates/: main.rs, lib.rs and build.rs."""
+    crates = Path(root) / "crates"
+    found = []
+    if not crates.is_dir():
+        return found
+    for crate in sorted(p for p in crates.iterdir() if p.is_dir()):
+        for rel in (("src", "main.rs"), ("src", "lib.rs"), ("build.rs",)):
+            candidate = crate.joinpath(*rel)
+            if candidate.is_file():
+                found.append(candidate)
+    return found
+
+
+def touch_workspace_sources(root, now=None):
+    """Set the mtime of every workspace crate root file to `now`; return (now, files)."""
+    if now is None:
+        now = time.time()
+    files = workspace_root_sources(root)
+    for path in files:
+        os.utime(path, (now, now))
+    return now, files
+
+
+def newest_artifact_mtime(target_dir):
+    """Newest mtime of any cargo dep-info file in the shared target dir (0.0 when none)."""
+    newest = 0.0
+    for parts in ARTIFACT_PROFILE_DIRS:
+        deps = Path(target_dir).joinpath(*parts, "deps")
+        try:
+            entries = list(os.scandir(deps))
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.name.endswith(".d"):
+                try:
+                    newest = max(newest, entry.stat().st_mtime)
+                except OSError:
+                    pass
+    return newest
+
+
+def read_guard_marker(path):
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def guard_needs_touch(marker, root, artifact_stamp):
+    """True unless the marker proves this worktree built last and nothing was built since."""
+    if not marker:
+        return True
+    try:
+        if marker.get("root") != _norm_root(root):
+            return True
+        return float(artifact_stamp) > float(marker["stamp"]) + 1e-6
+    except (KeyError, TypeError, ValueError):
+        return True
+
+
+def parse_test_exes(text, root=None):
+    """Executables cargo test reports on its `Running ... (path)` lines, in order, de-duplicated."""
+    exes = []
+    for match in RUNNING_EXE_RE.finditer(text):
+        path = Path(match.group(1).strip())
+        if root is not None and not path.is_absolute():
+            path = Path(root) / path
+        if path not in exes:
+            exes.append(path)
+    return exes
+
+
+def check_exe_fresh(exe, touched_at, tolerance=GUARD_TOLERANCE_SECONDS):
+    """(fresh, mtime): fresh when the executable was written no earlier than the touch."""
+    try:
+        mtime = Path(exe).stat().st_mtime
+    except OSError:
+        return False, None
+    return mtime >= touched_at - tolerance, mtime
+
+
+def describe_exe(exe, mtime):
+    if mtime is None:
+        return f"{exe} (missing)"
+    stamp = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+    return f"{exe} (modified {stamp})"
+
+
+class SharedTargetGuard:
+    """Use inside the CargoLock: begin() before cargo, verify() on the executables, end() after."""
+
+    def __init__(self, root, target_dir):
+        self.root = Path(root).resolve()
+        self.target_dir = Path(target_dir)
+        self.marker_path = self.target_dir / "gates" / GUARD_MARKER_NAME
+        self.touched_at = None
+        self.touched_now = False
+
+    def begin(self, force=False):
+        marker = read_guard_marker(self.marker_path)
+        stamp = newest_artifact_mtime(self.target_dir)
+        if force or guard_needs_touch(marker, self.root, stamp):
+            self.touched_at, _ = touch_workspace_sources(self.root)
+            self.touched_now = True
+        else:
+            self.touched_at = float(marker["touched_at"])
+            self.touched_now = False
+        return self.touched_at
+
+    def verify(self, exes):
+        """Return [(exe, mtime)]; raise StaleBinaryError when none or any was not rebuilt."""
+        if not exes:
+            raise StaleBinaryError("could not identify the executable cargo ran; cannot prove it is this worktree's")
+        results = []
+        stale = []
+        for exe in exes:
+            fresh, mtime = check_exe_fresh(exe, self.touched_at)
+            results.append((exe, mtime))
+            if not fresh:
+                stale.append(describe_exe(exe, mtime))
+        if stale:
+            touched = datetime.datetime.fromtimestamp(self.touched_at).strftime("%Y-%m-%d %H:%M:%S")
+            raise StaleBinaryError(
+                f"executable not rebuilt after this worktree's sources were marked new ({touched}): "
+                + "; ".join(stale)
+                + ". Cargo reused an artifact from another worktree; do not trust this result."
+            )
+        return results
+
+    def end(self):
+        self.marker_path.parent.mkdir(parents=True, exist_ok=True)
+        self.marker_path.write_text(
+            json.dumps(
+                {
+                    "root": _norm_root(self.root),
+                    "touched_at": self.touched_at,
+                    "stamp": newest_artifact_mtime(self.target_dir),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+
+def _release_exe_path(cargo_target_dir):
+    name = "eqoa.exe" if sys.platform == "win32" else "eqoa"
+    return Path(cargo_target_dir) / "release" / name
+
+
 def build_steps(*, root, filters=None, extra_skips=None, release=False):
     root = Path(root)
     steps = []
@@ -640,10 +826,14 @@ def run_gates(
             start_time = time.time()
             combined_output = ""
             step_passed = False
+            tested_exes = []
+            stale_error = None
 
             try:
                 if is_cargo:
                     with CargoLock(lock_dir=lock_dir, wait_minutes=lock_wait):
+                        guard = SharedTargetGuard(root, cargo_target_dir)
+                        guard.begin()
                         returncode, combined_output = run_subprocess_tree(
                             cmd,
                             cwd=root,
@@ -654,6 +844,17 @@ def run_gates(
                             progress_interval=progress_interval,
                         )
                         step_passed = (returncode == 0)
+                        if step_passed and (is_test or name == "release"):
+                            try:
+                                if is_test:
+                                    tested_exes = guard.verify(parse_test_exes(combined_output, root))
+                                else:
+                                    tested_exes = guard.verify([_release_exe_path(cargo_target_dir)])
+                            except StaleBinaryError as exc:
+                                step_passed = False
+                                stale_error = str(exc)
+                                combined_output += f"\nSTALE BINARY CHECK FAILED: {exc}\n"
+                        guard.end()
                 else:
                     returncode, combined_output = run_subprocess_tree(
                         cmd,
@@ -683,7 +884,7 @@ def run_gates(
 
             exe_path = None
             if name == "release" and step_passed:
-                candidate = cargo_target_dir / "release" / "eqoa.exe"
+                candidate = _release_exe_path(cargo_target_dir)
                 if candidate.is_file():
                     exe_path = candidate
                 else:
@@ -698,6 +899,8 @@ def run_gates(
                 "is_test": is_test,
                 "parsed": parsed_data,
                 "exe_path": exe_path,
+                "tested_exes": tested_exes,
+                "stale_error": stale_error,
                 "log_path": log_path,
             })
     finally:
@@ -711,6 +914,10 @@ def run_gates(
         summary_lines.append(f"- **{r['name']}**: {status_str} ({dur_str})")
         if r["exe_path"]:
             summary_lines.append(f"  - Executable: `{r['exe_path']}`")
+        for exe, mtime in r["tested_exes"]:
+            summary_lines.append(f"  - Tested executable: `{describe_exe(exe, mtime)}`")
+        if r["stale_error"]:
+            summary_lines.append(f"  - **STALE BINARY**: {r['stale_error']}")
         if r["is_test"] and r["parsed"]:
             p = r["parsed"]
             if p["found_test_results"]:

@@ -76,6 +76,32 @@ python tools/run_gates.py [options]
 
 While waiting for the Cargo build lock, `Waiting for cargo lock` messages include the holder PID from its token file when one is present. While any step runs, a flushed progress line is printed every 60 seconds showing the step name, elapsed minutes, and—for `cargo test` steps—the number of `test ... ok/FAILED/ignored` lines seen so far; full child output continues to be written to each step's log file.
 
+### Shared target directory: stale-binary guard
+
+All worktrees build into one `CARGO_TARGET_DIR`. Cargo's fingerprint for the `eqoa` unit is
+the same in every worktree, so cargo only compares this worktree's source mtimes with the time
+of the last build by *any* worktree. If another worktree built after your last edit, `cargo test`
+prints `Finished ... in 0.87s` and runs the other worktree's binary, so a gate can pass on code
+that is not yours. Never trust a "Finished in under a second" test run; use `run_gates.py`.
+
+Inside the cargo lock, before each cargo step, `run_gates.py` therefore:
+
+1. Touches every workspace crate's root source (`crates/*/src/main.rs`, `lib.rs`, `build.rs`) so
+   cargo sees this worktree as newer than any shared artifact. It skips the touch only when
+   `<target>/gates/last-build.json` shows this worktree built last and no cargo dep-info file in
+   the target dir is newer than that record (so consecutive steps of one run do not rebuild).
+2. After a test or release step, parses the `Running ... (path)` lines (or the release exe path)
+   and requires every executable to be newer than the touch. Otherwise the step FAILS with
+   `STALE BINARY CHECK FAILED` in its log and a `**STALE BINARY**` line in the summary. A test
+   step that reports no executable also fails.
+3. Lists each tested executable with its modification time in the summary
+   (`Tested executable: ...`).
+
+`make_owner_test_package.py --build` always touches (it also reruns `build.rs`, so the stamped
+`EQOA_BUILD_COMMIT` comes from this tree) and refuses a release exe that was not rebuilt.
+
+The cost: the first cargo step after another worktree built recompiles the workspace crates.
+
 ---
 
 ## 2. Bundled Mod Manifest Updater (`tools/update_bundled_manifest.py`)
@@ -213,3 +239,55 @@ build if the executable in the shared Cargo directory is from another branch.
 - Separate steps with semicolons. `EQOA_KEYS` remains the pregame script, and
   `EQOA_PLAY_KEYS` and `EQOA_CLICKS` remain direct game scripts. `playshot` keeps
   its original `EQOA_MOUSE` path.
+
+In the Bag Viewer probe, the scratch profile enabled the addon and a scratch copy of its
+Lua opened the Corpse tab when loot arrived. The screenshots before and after a click on
+**Take all** both showed three items, and the client logged no loot request. `play` uses
+`EQOA_CLICKS` to call the native game's click handler directly. `EQOA_MOUSE` is read by
+the separate shot path. The addon receives pointer events through the window event handler.
+
+---
+
+## 5. CI Branch Gates (`tools/ci_gates.py`, `.github/workflows/branch-gates.yml`)
+
+Runs the long test gates on GitHub's free Windows runners, so the owner's PC (one build slot,
+about 40 minutes for a full run) stays free. Use it for full runs when the PC's build slot is
+busy; disc tests, GPU tests and the release build stay on the PC.
+
+```bash
+python tools/ci_gates.py push <local-branch>      # pushes it as ci/<branch> to looprook, prints the run URL
+python tools/ci_gates.py status <local-branch>    # waits, then prints pass/fail per gate, SKIPs, failing tests
+python tools/ci_gates.py cleanup <local-branch>   # deletes the remote ci/<branch>
+python tools/ci_gates.py cleanup --merged         # deletes every remote ci/* already merged into develop
+```
+
+`status` exits 0 only when every gate passed (`--no-wait` prints the current state; `--timeout`
+and `--poll` set the wait). `cleanup --dry-run` shows what would be deleted.
+
+**Safety.** The tool writes only `refs/heads/ci/*`: it builds the destination itself and refuses
+every other ref (tags, `develop`, `enhanced`, `master`, refspecs, odd characters) before it runs
+git. The push is forced, but only on a `ci/` ref. The workflow starts on `ci/**` pushes (and
+`workflow_dispatch` with a `ref` input), has a read-only token, no secrets, no release, no tag
+and no push, and a newer push to the same `ci/` branch cancels the older run. Delete each `ci/`
+branch when its work merges (work branches may sit on the public repository only for CI).
+
+**What runs in CI** (two parallel jobs on `windows-2022`, toolchain 1.99.1, no disc):
+
+| Job | Gate | Same as |
+|---|---|---|
+| tests | `addons`: `fork_ext::addons::` tests | `run_gates.py` addons |
+| tests | `full`: whole workspace, `--test-threads=1`, skipping the GPU-bound upstream AO test | `enhanced-dev.yml` |
+| checks | `wasm`: `cargo check` for `wasm32-unknown-unknown` | `run_gates.py` wasm |
+| checks | `footprint`, `paths`, `player-release` | `run_gates.py` |
+| checks | `tools`: the Python tool tests | `enhanced-dev.yml` |
+
+Each gate runs even when an earlier one failed. The job summary and the `gate-summary-*`
+artifact (kept 7 days) give pass/fail/ignored counts, the number of `SKIP` lines and the
+failing test names. Cargo output is cached with `Swatinem/rust-cache`; a cache belongs to its
+`ci/` branch, so the first run of a new branch is cold and repeat pushes are warm.
+
+**What still needs the owner's PC.** Tests that need the owner's Frontiers disc (about 200 skip
+in CI and are counted as SKIP), GPU and window tests, anything needing the local server or a
+live play session (`local_scene.py`), the optimized zero-addon allocation gate and the release
+build for owner test packages (`enhanced-dev.yml` still runs both when `develop` is pushed), and
+the oracle tests (not on this machine at all).

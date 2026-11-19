@@ -116,6 +116,13 @@ build repository was retired on 2026-11-07 (docs/PRIVATE-BUILDS.md).
 Never use the upstream dev channel or force-move a published version tag. Read
 docs/RELEASING.md before publishing; the original hygiene pass itself made no release.
 
+## Shared build directory
+
+All worktrees share one `CARGO_TARGET_DIR`, so a plain `cargo test` can silently run another
+worktree's binary. Run gates through `python tools/run_gates.py` (it forces a rebuild of this
+worktree and fails on a stale binary; see docs/DEV-TOOLS.md). Never trust a `cargo test` that says
+`Finished` in under a second.
+
 ## Handoff references
 
 - docs/FORK-HYGIENE-STATUS.md: execution record, validation and remaining decisions.

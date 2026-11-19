@@ -335,3 +335,10 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
   bank/loot session (the mod's bank action then stalls until the picker closes; a loot request made in modes 61/63 is
   refused by upstream with 0x0016 and the pending open must be cleared). `report_viewer.rs:61` keeps keys from addons only for
   `merc_win_owns() || dyepick_owns()`: a "not plain play" rule (mode not 0/38) would survive future upstream windows.
+
+## Small tooling and Wereoxxs follow-ups (2026-11-19)
+
+- **Status:** Small, not scheduled. run_gates: an empty `cargo-build.lock` directory (no token) with no cargo/rustc running
+  blocked every build for ~1.5 h on 11-19; treat it as stale after a few minutes. Wereoxxs perf test: SKIP line when no GPU
+  is counted only through the manager's prerequisite line; the 110k instruction budget is ~6 steps above the measured peak
+  (tight); the old-Forge-host fallback path in chat_window.lua is untested.
