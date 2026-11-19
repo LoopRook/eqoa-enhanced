@@ -1,5 +1,103 @@
 # Round 6.5 Report: Capabilities, Standalone Window Takeover, `open_loot`/`talk`, and Bag Viewer Auto-Loot
 
+## Fix round 6, 2026-11-19 (base `d221531e`, develop merged as `7d3ad618`): owner live tests of fix round 5
+
+Owner logs: `r65-retest4` (copy in the lead's folder) and the newer test folder log, lines 980-1146. Fix round 5's log lines
+explained every case. Commits are LoopRook's on `feat/eqoa-api-r6.5`; nothing pushed or merged. No Rust or upstream file
+changed this round (footprint **4 of 6**, PASS); every fix is in the bundled Bag Viewer, with tests in
+`bag_viewer_tests.rs`. Develop merged first (the run_gates stale-binary guard and the Wereoxxs speed-up); one conflict in
+`FORK-UPDATE-NOTES.md`, both sides kept.
+
+### 1. A corpse the player opened burned Auto-loot's tries
+
+- How it opened: the only native loot request (0x0015) is `Play::attack_press` on a corpse target (`play.rs:5801`). The
+  ant died during the fight, its corpse stayed the target, and the player's attack key looted it: "You receive 2 tunar"
+  and `0x0018 in mode 0` with no `takeover:` line, the game's corpse window up (mode 1). Auto-loot's three opens were then
+  refused inside the client before anything was sent ("cannot open corpse right now": `open_loot` needs mode 0 or 38,
+  `fork_ext/play.rs:1514`), and it gave up.
+- Fix (`bags.lua` `tick_auto_loot`): when a corpse session is open (`eqoa.loot.get()`, the game's window or a hidden one)
+  and its `source.entity_id` is the corpse Auto-loot wants, Auto-loot takes from it (Take all, or Take all but junk per
+  the mode) and logs "it is open already ...: taking from it". Another corpse open: it waits ("waiting: another corpse
+  (0x..) is open; looting this one once it closes"). A client-side refusal (`not_ready`, `busy`) is not a try: it waits 5 s.
+- Tests: `round65_fix6_item1_auto_loot_takes_from_the_corpse_the_player_opened` (the owner's sequence: fight, death, the
+  player's own attack key, the fight ends), `round65_fix6_item1_another_open_corpse_makes_auto_loot_wait_not_fail`.
+
+### A. The server's loot reach is short
+
+- The server opened corpses at 3 and 6 units and said "Out of range." at 11, 12, 13 and 15; Auto-loot tried within 15 and
+  gave up after three refusals. Now (`M.note_loot_reach`, `M.loot_reach_now`): the reach starts at 7 units and is learned
+  from answers (the farthest that opened, the nearest refused; a refusal is a firm answer). "Out of range." (or 0x0085's
+  "too far") records the refusal and means walk closer: never a try, never a give-up. Log: "waiting: walk closer (12 units;
+  server reach ~7 units)", "the server said "Out of range." at 11 units: waiting until you are closer (server reach ~10
+  units)". Only real failures (no answer, other refusals) count as tries.
+- Tests: `round65_fix6_item_a_loot_reach_starts_short_and_says_walk_closer` (a kill at 12 waits; at 6 it opens),
+  `round65_fix6_item_a_four_refusals_in_a_row_still_loot_when_closer` (refusals at the owner's 15, 13, 12, 11 in a row,
+  then it opens from 6; learned reach 10.5).
+
+### B. Auto-attack left on after a kill
+
+- Corpses waited "in combat (auto-attack is on)" long after the kill: the game leaves auto-attack on after its target dies.
+  Auto-attack now counts only while the target is a live creature that can be fought (not a corpse, not nothing, not
+  friendly, not a pet, group member or service NPC). The game's own fighting flag is unchanged.
+- Test: `round65_fix_bag_viewer_auto_loot_waits_while_in_combat` now ends with the owner's case: auto-attack on against a
+  second live rat holds Auto-loot back; when that rat dies with auto-attack still on, the corpses are looted. (The old
+  assertion "no auto-loot while auto-attack is on" with a dead target is the behaviour the owner asked to change.)
+
+### 2. Frame cost with Auto-loot on
+
+- Owner log: 2.2-4.3 ms a frame in the mod, `player.get` 6-25 times and 53-70 event deliveries a frame (vs about 2 and
+  0.5 ms with Auto-loot off). Auto-loot listened to `entity.changed/added/removed`, `player.changed` and `target.changed`,
+  and every delivery re-ran the decision (each asking for the player again).
+- Now Auto-loot hears only `combat.hit` (your hits) and `render`, and polls every 0.25 s (`M.auto_poll`): the player once,
+  the creatures you hit through `eqoa.entities.find`, and the zone list only while a corpse waits or a creature you hit has
+  just vanished (its corpse may be a new entity), otherwise every 2 s. The character check on `player.changed` (from fix
+  round 4) is the one other always-on listener.
+- Test `round65_fix6_item2_auto_loot_on_in_a_crowd_is_cheap` (700 creatures, 35 updates a frame, the player walking,
+  auto-attack flipping and a hit every frame, window closed): at most 3 deliveries and 1 `player.get` a frame, and under
+  0.5 ms a frame in a release build. Measured here (debug build): **0.34 ms a frame, 3.0 deliveries, 0.00 `player.get`**;
+  the fix 5 package: **38 deliveries a frame** (fails). The fix 4 crowd test (`..._m4_...`) keeps its hostile on the
+  player every frame: with polling, a moment without it let Auto-loot open the corpse, after which nothing waited (3.1
+  looks at the zone a second while the corpse waits).
+- The tests poll every frame (`Bv::enable` sets `AUTO_POLL_SECS = 0`); the crowd scenes keep the real 0.25 s.
+
+### 3. Map Search "shared file owner is missing or disabled" at startup
+
+Not caused by round 6.5: `exchange.rs` and Map Search are the same as on develop, and the error is the exchange's own
+(`exchange.rs:42`), not a capability refusal. A shared file is readable only from a VM whose event bus is primed (its first
+frame entry); entries run in id order (Journal before Map Search), so the Journal was not running yet when Map Search's
+entry asked (a load-order race at startup). Map Search already retries, so only the diagnostic shows. Written to
+`docs/backlog.md` with a proposed fix (first read at the first render; a `not_yet` answer for an owner enabled but not yet
+running).
+
+### 4. "Sell junk: too far from the merchant" within 40 units only
+
+Confirmed a Bag Viewer display rule, no hook: the zone scan lists a merchant or banker only within `NPC_SHOWN_WITHIN` (40
+units, `bags.lua` scan), and `too_far` greys its button beyond the reach learned from answers (`within_reach`, default
+10). Beyond 40 units there is no row at all, so the line disappears.
+
+### Controls
+
+All of this round's fixes are Lua: every new or changed test was run against the fix round 5 package
+(`EQOA_R5B_TEST_SOURCE` = `git show HEAD:` copy): 6 of 6 fail where they should (item 1: tries burned / no wait; A:
+asked from 12 at once, gave up; B: "auto-attack left on after the kill is not a fight"; 2: "38.0 event deliveries a
+frame"). The fixed package: `round65` + `round6_` tests 73 passed, 0 failed.
+
+### Gates
+
+Final tree (`965e2794`), `python tools/run_gates.py --release` (develop's copy, with the stale-binary guard):
+**ALL GATES PASSED**. addons 568 passed, 0 failed, 25 ignored; full 2465 passed, 0 failed, 30 ignored (the usual skips:
+no `run/client.bin`, no 2002 disc, no live S2/savestates, symlink privilege, `EQOA_FORGE_SPIKE`,
+`EQOA_BUNDLED_UI_GOLDENS`, mod-api without an adapter; the oracle tests skip here); wasm, footprint, paths,
+player-release and release PASS. `update_bundled_manifest.py --check` up to date.
+
+Commits: `84efe656` (Bag Viewer fixes and tests), `4f9c2d0a` (backlog: Map Search), `965e2794` (README and update notes),
+this report; develop merge `7d3ad618`.
+
+### Not tested here
+
+The real server's reach (only the owner's numbers), real fights with auto-attack and the game's fighting flag, and the
+frame time in the owner's crowd (the test's release budget runs only in a release build; the gates are debug builds).
+
 ## Fix round 5, 2026-11-18 (base `838e48d0`, develop merged as `d12944fb`): Auto-loot stopped for good
 
 Owner live test (r65-retest3 log): "auto-loot doesn't seem to work; I may have triggered something by trying to loot".
