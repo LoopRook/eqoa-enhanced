@@ -142,3 +142,20 @@ took 0.018 to 0.233 ms per frame. The replay isolates
 the addon from terrain rendering and the other enabled mods. It uses the recorder's
 message timing and target IDs with a fixture camera and a fixed ImGui time step.
 The owner's full-client run remains the reference for actual gameplay timing.
+
+### Release validation
+
+`python tools/run_gates.py --release --lock-wait 120 --filter wereoxxs_custom_font_load_budget`
+passed against `6de5814f` with the local Frontiers disc configured.
+
+| Suite | Passed | Failed | Ignored | Skip messages |
+| --- | ---: | ---: | ---: | ---: |
+| Focused font budget | 1 | 0 | 0 | 0 |
+| Addons | 570 | 0 | 25 | 11 |
+| Full client | 2,466 | 0 | 30 | 51 |
+
+The browser check, fork footprint, path audit, all 20 packaging tests, and native
+release build passed. The skips covered Windows symlink privileges, optional
+pinned Forge fixtures and reviewed goldens, and supplementary game data including
+the 2002 disc, client image, server art and savestates. The decomp comparison also
+skipped. The private replay and its GPU checks ran separately from this suite.
