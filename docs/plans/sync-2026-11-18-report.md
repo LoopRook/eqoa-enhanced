@@ -140,3 +140,30 @@ runner's stale-binary guard. Three files needed hand resolution.
 - `crates/eqoa/src/play.rs` (a compile conflict Git did not flag): upstream added `impl Drop for Play` to restore server-restricted options when Play ends. Develop's session recorder had its own `Drop` in `fork_ext/play.rs`. Upstream's `Drop` keeps its body and calls the new `fork_hooks::dropped(self)`, which drains the recorder. The new hook is recorded as `session recorder drop` in `fork-footprint.json`. The play.rs diff measures +80/-40, within its unchanged budget.
 - `FORK-UPDATE-NOTES.md`: kept the sync entry and develop's Bag Viewer, Wereoxxs and recording entries.
 
+### Test stack and gates after the develop merge
+
+CI run 44582748614 aborted the addons and full gates. Test
+`round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame`
+overflowed the 2 MiB default test-thread stack (STATUS_STACK_OVERFLOW). The
+GPU addon test harnesses hold `Play` (about 110 KB), `Manager` and other
+state by value: `Bv` is about 170 KB and `Rm` about 190 KB. A debug build
+copies them while it builds one, so every test using them runs close to the
+limit. With a 1 MiB test stack, 51 addon tests overflowed. They now run
+their bodies through the test-only `fork_ext::addons::big_stack`, a 16 MiB
+thread. At 1 MiB, 568 addon tests then passed with no overflow. No game
+code changed.
+
+- CI on `8f8ef6ac`: every gate passed. Addons: 568 passed, 25 ignored,
+  16 SKIP. Full: 3,159 passed, 37 ignored, 377 SKIP. Tools: 199 passed. The
+  tools job's `unittest: error` lines come from argparse rejection tests in
+  `tools/test_ci_gates.py`, not from failures.
+- Local `run_gates.py --release` on `8f8ef6ac`: full, wasm, footprint,
+  paths, player release and the optimized Windows build passed (full: 2,599
+  passed, 31 ignored). The addons gate reported 566 passed and two failed
+  timing thresholds, under heavier load (16 ms a frame against 8 ms in the
+  same run's full gate). One run had 3.42 creature-list calls a second
+  against a limit of 3.0. The other measured 5.57 ms against a 5 ms
+  debug-build limit. Both tests passed in the full gate and in CI. A
+  rerun of the addons gate alone passed all 568 tests, with 25 ignored
+  and 10 SKIP.
+
