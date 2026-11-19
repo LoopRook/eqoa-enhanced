@@ -92,9 +92,12 @@ pub fn lit(
         point: None,
         clear: Vec3::new(0.18, 0.2, 0.24),
         sky_view_proj: None,
+        sky_fog: 0.0,
+        storm_fog: false,
         lights: None,
     };
     let mut sky = None;
+    let mut storm_far = None;
     if let Some((b, at, w)) = &blend {
         let at = vi::vect::Vect3::of(at.x, at.y, at.z);
         let flags = w.env_flags(&at);
@@ -107,8 +110,46 @@ pub fn lit(
         } else {
             crate::fog::distances(crate::settings::fog(), fog.near.0, fog.far.0).map(|(n, f)| (n, f, color))
         };
-        let c = tod.sky(hour, o, b);
+        // a server's regional weather (`weather_zones`, board entry #1550):
+        // the storms' fog, never farther than the fog it replaces, its colour
+        // moved to by the weather's intensity, the sun dimmed; under a roof
+        // nearer fog is kept off and the far is four times; none in a liquid
+        let storm = weather.as_deref().filter(|_| flags & 0xF == 0).and_then(|w| crate::weather_zones::fog(&w.regional, hour_now).map(|f| (f, w.roof)));
+        if let Some((f, roof)) = storm {
+            let (mut near, mut far) = (f.near, f.far);
+            if roof {
+                near = near.max(6.0);
+                far *= 4.0;
+            }
+            let wc = Vec3::from(f.color);
+            v.fog = Some(match v.fog {
+                Some((n, fa, c)) => (n.min(near), fa.min(far), c.lerp(wc, f.intensity)),
+                None => (near, far, wc),
+            });
+            // the far plane in to the storm's fog (`fog::set_storm_far`)
+            storm_far = v.fog.map(|(_, fa, _)| fa);
+            // and measured from the eye, per fragment (`View::storm_fog`)
+            v.storm_fog = true;
+            v.sun *= 1.0 - 0.8 * f.intensity;
+            // the sky into the storm too: its horizon is not the world's,
+            // past the far plane, and the distance fog leaves it be
+            v.sky_fog = f.sky;
+        }
+        let mut c = tod.sky(hour, o, b);
+        // the sky (the dome's colour and the clear) toward the storm's by its
+        // sand and whiteout
+        if let Some((f, _)) = storm {
+            for i in 0..3 {
+                c[i] = (c[i] as f32 + (f.color[i] * 255.0 - c[i] as f32) * f.sky).round().clamp(0.0, 255.0) as u8;
+            }
+        }
         v.clear = Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32) / 255.0;
+        // in a storm, past the far plane its fog pulled in (a wall left out)
+        // is fog, not sky: the clear is the fog's colour (the dome, drawn over
+        // it, is all fog low: `render::storm_sky_share`)
+        if let (Some(_), Some((_, _, fc))) = (storm, v.fog) {
+            v.clear = fc;
+        }
         // the sky through a far plane of its own: the world's is the fog's
         v.sky_view_proj = Some(crate::fog::with_far(proj, crate::fog::SKY_FAR) * rot);
         if let Some(wx) = weather {
@@ -117,11 +158,13 @@ pub fn lit(
             sky = Some(crate::sky::SkyFrame {
                 plane: a.p618,
                 lights: a.p618 == 0 && a.overcast != 0,
+                storm: storm.map_or(0.0, |(f, _)| f.sky),
                 rot: vi::atmosphere::SkyRotations { sun: a.sky_rot, corona: a.corona_rot, moon: a.moon_rot },
                 pals: (0..5).map(|k| a.pals.get(&k).cloned().unwrap_or_default()).collect(),
             });
         }
     }
+    crate::fog::set_storm_far(storm_far);
     (v, sky)
 }
 
@@ -150,6 +193,16 @@ impl Source {
                 let mut m = lib.with_view(lib.view_for(id), || lib.build_model(lib.lookup(id).unwrap_or(r))).unwrap_or_default();
                 if let Some(t) = tint {
                     crate::npctint::apply(&mut m, *t);
+                }
+                // `EQOA_PROP_POSE=<arm radians>,<rolled>[,<dye 1>,<dye 2>]`: a pet
+                // prop's parts posed (`petart::posed`), and dyed in its two
+                // areas (`petart::dye`, RRGGBBAA; the catapult's)
+                if let Ok(v) = std::env::var("EQOA_PROP_POSE") {
+                    let w: Vec<&str> = v.split(',').map(str::trim).collect();
+                    let num = |i: usize| w.get(i).and_then(|t| t.parse::<f32>().ok()).unwrap_or(0.0);
+                    let hex = |i: usize| w.get(i).and_then(|t| u32::from_str_radix(t, 16).ok()).unwrap_or(0);
+                    crate::petart::dye(&mut m, [hex(2), hex(3)], crate::petart::CATAPULT_IRON);
+                    crate::petart::posed(&mut m, num(1), num(0));
                 }
                 scene::model(id, m)
             }
@@ -322,6 +375,19 @@ fn report(renderer: &Renderer) {
     }
 }
 
+/// `EQOA_GPU_REPORT`: what the renderer keeps on the GPU (its textures,
+/// a pack's among them, the particles' and strips' buffers) and, where the
+/// backend keeps one (Vulkan, DX12), the device's own allocator's count.
+pub fn gpu_report(renderer: &Renderer, device: &wgpu::Device) -> String {
+    let mb = |b: u64| b as f64 / (1 << 20) as f64;
+    let (n, bytes, pn, pbytes) = renderer.texture_memory();
+    let mut s = format!("gpu: {n} textures {:.1} MB (a pack's larger: {pn}, {:.1} MB), billboard buffers {:.1} MB", mb(bytes), mb(pbytes), mb(renderer.billboard_memory()));
+    if let Some(r) = device.generate_allocator_report() {
+        s += &format!(", device allocated {:.1} MB reserved {:.1} MB in {} blocks", mb(r.total_allocated_bytes), mb(r.total_reserved_bytes), r.blocks.len());
+    }
+    s
+}
+
 /// A scripted walk for `shot`: hold `controls` for `ms` of game time.
 #[derive(Clone, Copy, Debug)]
 pub struct Script {
@@ -354,7 +420,7 @@ pub fn shot_with(
 ) -> Result<(), Error> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&render::packed::device_descriptor(&adapter)))?;
     let mut renderer = Renderer::new(&device, &queue, render::TARGET_FORMAT);
     // Dynamic Lighting (kept only under `$EQOA_CONFIG` for a shot), before
     // a zone is uploaded
@@ -457,6 +523,11 @@ pub fn shot_with(
         // no server, as though one had offered it and the walk stood
         let jump_at: Vec<i64> = std::env::var("EQOA_JUMP").map(|s| s.split(';').filter_map(|ms| ms.trim().parse().ok()).collect()).unwrap_or_default();
         let walk = walk_script();
+        // `EQOA_FIRST_PERSON`: the walk seen in first person (P's
+        // `InitCameraStyle` from the orbit), as a player sees it so
+        if std::env::var_os("EQOA_FIRST_PERSON").is_some() {
+            crate::camstyle::cycle(&mut walker.cam, false, None, &mut walker.scene);
+        }
         // `EQOA_FRAME_MS=n`: frames of n ms instead of 16 (a display's rate:
         // 6 is about 165 a second, 33 the console's 30)
         let frame_ms: i64 = std::env::var("EQOA_FRAME_MS").ok().and_then(|v| v.parse().ok()).filter(|&v: &i64| v > 0).unwrap_or(16);
@@ -532,6 +603,7 @@ pub fn shot_with(
                 if let Some(p) = play.as_mut() {
                     p.pad_mode(console.mode());
                     p.fishing_pad(console.sticks());
+                    p.dyepick_pad(console.sticks());
                     for (k, down) in keys {
                         eprintln!("pad key {k} {}", if down { "down" } else { "up" });
                         p.set_key(k, down, &mut walker, aspect);
@@ -706,9 +778,10 @@ pub fn shot_with(
                         }
                     }
                 }
-                // both mouse buttons: run forward (`Mouse::running`)
+                // both mouse buttons: run forward, the keys' and the sticks'
+                // walk left out (`Mouse::running`, `mouse::both_run`)
                 if mouse.running() {
-                    sticks[3] = -1.0;
+                    crate::mouse::both_run(&mut sticks);
                 }
             } else {
                 // a window up: the wheel and a finger's drag are its up and down
@@ -720,6 +793,9 @@ pub fn shot_with(
             }
             let mut client = play.as_ref().filter(|p| !p.is_dead()).map(|p| p.control_client()).unwrap_or_default();
             client.steer = look_free && mouse.steer(walker.cam.camera_mode);
+            // the view the walk keeps while the left button looks round on
+            // the move (`Mouse::walk_view`)
+            client.walk_view = mouse.walk_view().filter(|_| look_free);
             if play.is_none() && !jump_at.is_empty() {
                 (client.jumps, client.stood_sent) = (true, true);
             }
@@ -749,6 +825,12 @@ pub fn shot_with(
             last_view = Some(proj * v);
             // the zones it walks toward, read as the game's loader reads them
             streamer.fetch(Vec3::from(walker.cam.walk.phys.position.to_array()), &walker.scene, lib);
+            // and those whose art a server's decoration wears (`decorlights`)
+            if let Some(p) = play.as_ref() {
+                for z in p.decor_zones() {
+                    streamer.want(z, &walker.scene, lib);
+                }
+            }
             if let Some(first) = streamer.install(lib, &mut walker.scene) {
                 parts.add_from(&walker.scene, first);
             }
@@ -1150,6 +1232,10 @@ pub fn shot_with(
             if let Some(p) = play.as_ref() {
                 let held = held_fx.get_or_insert_with(|| crate::particles::Held::new(t));
                 batches.extend(held.frame(lib, &p.in_hand(lib, &walker, self_m), &walker.eye.position, t));
+                // a server's decorations' lights (`decorlights`)
+                batches.extend(p.decor_batches(walker.eye_position().to_array(), t));
+                // the Strings of Lights worn (`toys`)
+                batches.extend(p.worn_light_batches(&walker, self_m, walker.eye_position().to_array(), t));
             }
             // the weapon trails (VITrailFxRender) after them
             if let Some(p) = play.as_mut() {
@@ -1164,9 +1250,14 @@ pub fn shot_with(
             }
             // the atmosphere every frame; the last frame's lights and render
             // are the shot's
-            weather.frame(&mut walker.scene, None, &walker.eye, t, game_hour(play.as_ref(), Instant::now()));
+            let e = walker.cam.walk.phys.position;
+            weather.set_regional(play.as_ref().map(|p| p.weather_sample(e.x.0, e.z.0)), t);
+            if let Some(p) = play.as_mut() {
+                p.weather_fog = crate::weather_zones::fog(&weather.regional, game_hour(Some(&*p), Instant::now())).map(|f| (f.near, f.far));
+            }
+            weather.frame(&mut walker.scene, None, &walker.eye, &e, t, game_hour(play.as_ref(), Instant::now()));
             // the effect volumes, stepped as the scene rasters them
-            if let Some(fx) = fx.as_mut().filter(|_| crate::settings::client().environment) {
+            if let Some(fx) = fx.as_mut().filter(|_| crate::settings::client().environment > 0) {
                 fx.stream(Vec3::from(walker.cam.walk.phys.position.to_array()), &walker.scene, lib);
                 let cam = crate::fx::camera(walker.eye.position, walker.eye.direction);
                 fx.lod_eye = Some(crate::lod::eye(&walker.cam, &walker.eye.position));
@@ -1181,7 +1272,9 @@ pub fn shot_with(
             }
         }
         if script.ms == 0 {
-            weather.frame(&mut walker.scene, None, &walker.eye, 0, game_hour(play.as_ref(), Instant::now()));
+            weather.set_regional(None, 0);
+            let at = walker.cam.walk.phys.position;
+            weather.frame(&mut walker.scene, None, &walker.eye, &at, 0, game_hour(play.as_ref(), Instant::now()));
         }
         eprintln!("{}", parts.describe());
         eprintln!("{}", weather.describe());
@@ -1310,11 +1403,30 @@ pub fn shot_with(
         // the last frame's bolts lit by the shot's lights, its trails unlit
         // after them (`spells::light_bolts`)
         crate::spells::light_bolts(&mut shot_bolts, &view, fx.as_ref().map_or(Vec3::ZERO, |f| f.raster_normal()));
+        // a server's decorations' cords (`decorlights`), lit as matte wire
+        if let Some(p) = play.as_ref() {
+            let mut cords = p.decor_cords(walker.eye_position().to_array());
+            let (pose, _) = walker.pose();
+            let eye = walker.eye_position().to_array();
+            cords.extend(p.worn_light_cords(&walker, pose, eye));
+            cords.extend(p.decor_presents(walker.eye_position().to_array()));
+            crate::decorlights::light_cords(&mut cords, &view);
+            // the model bulbs, unlit: a bulb is its own light
+            cords.extend(p.decor_globes(walker.eye_position().to_array(), t));
+            // and the Strings of Lights' glass (`toys::glass`)
+            cords.extend(p.worn_light_glass(&walker, pose, t));
+            // with the world, before the name plates (`draw_decor`)
+            renderer.decor = cords;
+        }
         renderer.strips = shot_bolts;
         renderer.strips.append(&mut shot_trails);
+        // the sandstorm's dust (`sanddust`), in the storm's colour
+        if let Some(f) = crate::weather_zones::fog(&weather.regional, shot_hour) {
+            renderer.strips.extend(weather.dust_strips(shot_eye, f.color));
+        }
         // the volumes as the shot's camera sees them (the walk's clock does
         // not move: nothing steps again)
-        if let Some(fx) = fx.as_mut().filter(|_| crate::settings::client().environment) {
+        if let Some(fx) = fx.as_mut().filter(|_| crate::settings::client().environment > 0) {
             fx.stream(Vec3::from(walker.cam.walk.phys.position.to_array()), &walker.scene, lib);
             let cam = crate::fx::camera(vi::vect::Vect3::of(shot_eye.x, shot_eye.y, shot_eye.z), shot_dir);
             fx.lod_eye = Some(shot_lod_eye);
@@ -1324,7 +1436,7 @@ pub fn shot_with(
         }
         // the flora at the shot's camera: a swatch grows the same plants
         // whenever it is made, so the walk's frames need not have grown it
-        if crate::settings::client().flora {
+        if crate::settings::client().flora > 0 {
             let fl = flora.insert(crate::flora::Flora::new());
             let drawn = fl.frame(&mut walker.scene, &vi::vect::Vect3::of(shot_eye.x, shot_eye.y, shot_eye.z), view.view_proj);
             fl.upload(&mut renderer, &device, &queue, lib, &walker.scene, &drawn);
@@ -1359,6 +1471,7 @@ pub fn shot_with(
                 // the walker's camera's (`PlateView::of`), or from the offset's
                 // eye at the game's size
                 let mut pv = crate::play::PlateView::of(&walker.cam, &walker.eye.position, (w, h));
+                pv.fog = p.weather_fog;
                 if shot_override {
                     (pv.eye, pv.scale) = (shot_eye, 1.0);
                 }
@@ -1396,7 +1509,7 @@ pub fn shot_with(
             .chain(streamed.iter().flat_map(|s| s.draws()))
             .chain(flora.iter().flat_map(|f| f.draws()))
             .chain(play.iter().flat_map(|p| p.models()).map(render::Draw::Model))
-            .chain(fx.iter().filter(|_| crate::settings::client().environment).flat_map(|f| f.models()).map(render::Draw::Model))
+            .chain(fx.iter().filter(|_| crate::settings::client().environment > 0).flat_map(|f| f.models()).map(render::Draw::Model))
             .collect(),
     };
     let textures = render::library_textures(lib);
@@ -1430,6 +1543,9 @@ pub fn shot_with(
     enc.write_header()?.write_image_data(&rgba)?;
     eprintln!("{out}: {} ({cam:?})", s.summary);
     report(&renderer);
+    if std::env::var_os("EQOA_GPU_REPORT").is_some() {
+        eprintln!("{}", gpu_report(&renderer, &device));
+    }
     crate::texpack::flush();
     Ok(())
 }
@@ -1498,6 +1614,27 @@ fn write_png(path: &str, w: u32, h: u32, rgba: &[u8]) -> Result<(), Error> {
     enc.set_depth(png::BitDepth::Eight);
     enc.write_header()?.write_image_data(rgba)?;
     Ok(())
+}
+
+/// A mercenary's windows' keys on the keyboard (`mercplay`): its spell book
+/// (mode 62) as the player's spell book (mode 5) takes them, the arrows
+/// left and right its tabs and Page Up and Down the description's lines;
+/// its inventory (mode 61) as the start menu's item menu does.
+pub(crate) fn merc_key_of(key: &Key, mode: i32) -> Option<i32> {
+    use crate::startmenu::keys as K;
+    let spells = mode == 62; // mercplay::SPELLS_MODE
+    match key {
+        Key::Named(NamedKey::ArrowUp) => Some(K::UP),
+        Key::Named(NamedKey::ArrowDown) => Some(K::DOWN),
+        Key::Named(NamedKey::ArrowLeft) => Some(K::LEFT),
+        Key::Named(NamedKey::ArrowRight) => Some(K::RIGHT),
+        Key::Named(NamedKey::PageUp) if spells => Some(142),
+        Key::Named(NamedKey::PageDown) if spells => Some(143),
+        Key::Named(NamedKey::Enter) => Some(K::CROSS),
+        Key::Character(c) if c.eq_ignore_ascii_case("e") => Some(K::CROSS),
+        Key::Named(NamedKey::Escape) | Key::Named(NamedKey::Backspace) => Some(K::ESCAPE),
+        _ => None,
+    }
 }
 
 /// The corpse, merchant and trade windows' keys (modes 1, 10, 15, 16) on
@@ -2119,6 +2256,14 @@ impl Perf {
                 self.drawn.1,
                 phases.join(", ")
             ));
+            // a texture pack's memory with it (`texpack`)
+            if let Some(p) = crate::texpack::pack() {
+                let (m, s) = (render::pack_memory(), p.stats());
+                crate::say(&format!(
+                    "perf: pack textures {} MB ({} of them, {} let go), memory {} MB ({} files, {} BCn, {} MB mapped), {} cached, {} decoded, {} queued",
+                    m.used >> 20, m.textures, m.evicted, s.ram_used >> 20, s.ram_files, s.compressed, s.ram_shared >> 20, s.cached, s.decoded, s.queued
+                ));
+            }
         }
         self.restart(Instant::now());
     }
@@ -2962,8 +3107,7 @@ impl App {
             crate::say(&line);
         }
         self.let_go_keys(el);
-        self.mouse.release_all();
-        self.grab_pointer(false);
+        self.let_go_pointer();
         // a finger down as the focus goes: its lift is no tap
         self.taps.forget();
         if let Some(p) = self.play.as_mut() {
@@ -3115,6 +3259,7 @@ impl App {
         if let (Some(p), Some(w)) = (self.play.as_mut(), self.walker.as_mut()) {
             p.pad_mode(self.console.mode());
             p.fishing_pad(self.console.sticks());
+            p.dyepick_pad(self.console.sticks());
             for (k, down) in keys {
                 p.set_key(k, down, w, aspect);
             }
@@ -3198,10 +3343,6 @@ impl App {
             self.run_hold.apply(&mut a);
             return a;
         }
-        // both mouse buttons: run forward (`Mouse::running`)
-        if free && self.mouse.running() {
-            a[3] = -1.0;
-        }
         for (i, a) in a.iter_mut().enumerate() {
             let (m, t) = if i < 2 { (look[i], feel[i]) } else { (0.0, 0.0) };
             for v in [pad[i], m, t] {
@@ -3209,6 +3350,11 @@ impl App {
                     *a = v;
                 }
             }
+        }
+        // both mouse buttons: run forward, the keys' and the sticks' walk
+        // left out (`Mouse::running`, `mouse::both_run`)
+        if free && self.mouse.running() {
+            crate::mouse::both_run(&mut a);
         }
         // a stick that ran runs until it comes back well under the threshold
         self.run_hold.apply(&mut a);
@@ -3222,11 +3368,14 @@ impl App {
     /// ends itself on Escape.
     fn grab_pointer(&mut self, frame: bool) {
         let dead = self.play.as_ref().is_some_and(|p| p.is_dead());
-        let free = self.walker.is_some() && !dead && self.play.as_ref().is_none_or(|p| p.look_free() || p.aiming()) && !crate::update::offer_shown();
+        // natively, never taken by a window not in front (a press seen
+        // while another window has the focus would hold the cursor there)
+        let front = cfg!(target_arch = "wasm32") || self.pads.focused;
+        let free = front && self.walker.is_some() && !dead && self.play.as_ref().is_none_or(|p| p.look_free() || p.aiming()) && !crate::update::offer_shown();
         let Some(g) = &self.gfx else { return };
         #[cfg(target_arch = "wasm32")]
         if frame && self.mouse.lock_seen(crate::web::pointer_locked(), Instant::now()) {
-            crate::mouse::give_pointer(&g.window, self.mouse.home());
+            crate::mouse::give_pointer(&g.window, Some(self.mouse.home()));
         }
         let _ = frame;
         match self.mouse.grab_change(free) {
@@ -3234,9 +3383,71 @@ impl App {
                 let grab = crate::mouse::take_pointer(&g.window).unwrap_or(crate::mouse::Grab::Refused);
                 self.mouse.set_grab(grab);
             }
-            Some(false) => crate::mouse::give_pointer(&g.window, self.mouse.home()),
+            Some(false) => crate::mouse::give_pointer(&g.window, Some(self.mouse.home())),
             None => {}
         }
+    }
+
+    /// The focus gone (or the window minimised or covered): the mouse's
+    /// holds let go and a held pointer given back where it is, not put home
+    /// into this window (`Mouse::lose_focus`). Given back even when the
+    /// mouse thought it free: on Windows a clip left by a grab the window
+    /// no longer knows of would hold the cursor in it (`mouse::unclip`).
+    fn let_go_pointer(&mut self) {
+        let held = self.mouse.lose_focus();
+        if let Some(g) = &self.gfx {
+            if held || cfg!(windows) {
+                crate::mouse::give_pointer(&g.window, None);
+            }
+        }
+    }
+
+    /// Whether `event`, the mouse's or a finger's, does nothing: in the world
+    /// of a server that says so for the session (`settings::qol::NO_MOUSE`,
+    /// `NO_TOUCH`: go-eqoa-server's [OG] accounts; the owner, 2026-11-18:
+    /// "only use the most basic upgrades like FPS, widescreen, no
+    /// touchscreen, no mouse"), the keyboard and the controllers play. A
+    /// button's press or release lets go of what the mouse held and gives
+    /// the pointer back. A finger is `finger`'s (`touch_shut`). Before the
+    /// world (the login, character select), out of it, and on the update's
+    /// question, both work as ever.
+    fn pointer_shut(&mut self, event: &WindowEvent) -> bool {
+        use crate::settings::qol;
+        if self.play.is_none() {
+            return false;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if crate::update::offer_shown() {
+            return false;
+        }
+        match event {
+            WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. } | WindowEvent::CursorMoved { .. } if qol::off(qol::NO_MOUSE) => {
+                if matches!(event, WindowEvent::MouseInput { .. }) {
+                    self.mouse.release_all();
+                    self.mouse.discard();
+                    self.grab_pointer(false);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether a finger does nothing (`settings::qol::NO_TOUCH`, an [OG]
+    /// account's world; `pointer_shut`'s rule): the touch pad hidden and every
+    /// finger let go.
+    fn touch_shut(&mut self) -> bool {
+        use crate::settings::qol;
+        if self.play.is_none() || !qol::off(qol::NO_TOUCH) {
+            return false;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if crate::update::offer_shown() {
+            return false;
+        }
+        self.touch.hide();
+        self.fingers.clear();
+        true
     }
 
     /// A finger's event (`WindowEvent::Touch`, or `EQOA_TOUCHES`'s) at
@@ -3249,6 +3460,9 @@ impl App {
     /// there does.
     fn finger(&mut self, id: u64, phase: crate::touch::Phase, at: [f32; 2], size: (u32, u32)) {
         use crate::touch::Phase;
+        if self.touch_shut() {
+            return;
+        }
         let p = render::ui::frame_from_window(size, at);
         #[cfg(not(target_arch = "wasm32"))]
         if crate::report::is_open_local() { crate::report::click(p); return; }
@@ -3363,7 +3577,7 @@ impl App {
             }
         }
         if let Some(h) = self.host.as_mut() {
-            h.click(p);
+            h.tap(p);
         }
     }
 
@@ -3597,7 +3811,7 @@ impl App {
         let instance = self.instance.clone().ok_or("no instance")?;
         if g.surface.is_none() && g.offscreen.is_some() {
             let adapter = pollster::block_on(instance.request_adapter(&Default::default())).map_err(|e| format!("adapter: {e}"))?;
-            let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).map_err(|e| format!("device: {e}"))?;
+            let (device, queue) = pollster::block_on(adapter.request_device(&render::packed::device_descriptor(&adapter))).map_err(|e| format!("device: {e}"))?;
             let info = adapter.get_info();
             crate::say(&format!("graphics: a new device on {} ({:?}), offscreen", info.name, info.backend));
             return Ok((None, g.config.clone(), device, queue, render::fog16::supported(&adapter), Vec::new()));
@@ -3606,7 +3820,7 @@ impl App {
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { compatible_surface: Some(&surface), ..Default::default() })).map_err(|e| format!("adapter: {e}"))?;
         let info = adapter.get_info();
         crate::bugnote::set_graphics(&info.name, &format!("{:?}", info.backend));
-        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).map_err(|e| format!("device: {e}"))?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&render::packed::device_descriptor(&adapter))).map_err(|e| format!("device: {e}"))?;
         let size = g.window.inner_size();
         let mut config = surface.get_default_config(&adapter, size.width.max(1), size.height.max(1)).ok_or("the surface cannot be configured")?;
         config.format = config.format.remove_srgb_suffix();
@@ -3750,7 +3964,7 @@ impl App {
             let size = (g.config.width, g.config.height);
             for c in taps {
                 let (x, y) = c.at();
-                h.click(render::ui::frame_from_window(size, [x as f32, y as f32]));
+                h.tap(render::ui::frame_from_window(size, [x as f32, y as f32]));
             }
             if look_y != 0.0 {
                 let dy = render::ui::frame_from_window(size, [0.0, look_y])[1] - render::ui::frame_from_window(size, [0.0, 0.0])[1];
@@ -3894,6 +4108,7 @@ impl App {
                 t.plates.clear();
             }
             g.renderer.strips.clear();
+            g.renderer.decor.clear();
             g.renderer.set_overlay(&g.device, &g.queue, glam::Mat4::IDENTITY, &[], &|_| None);
             g.window.request_redraw();
         }
@@ -4141,6 +4356,41 @@ impl App {
                 }
                 return;
             }
+        }
+        // The dyers' colour picker (`dyeplay`), while it is up: the arrows
+        // (the d-pad), Enter (OK on its buttons, a swatch taken), Escape
+        // (Cancel), Tab (a row down), Page Up and Page Down (L1, R1: by ten),
+        // and hex digits, '#' and Backspace (the colour typed). Every key is
+        // its while it is up; held arrows repeat in the picker, not here.
+        if let Some(p) = self.play.as_mut()
+            && p.typing.is_none()
+            && p.dyepick_owns()
+        {
+            let down = event.state == ElementState::Pressed;
+            let k = match &event.logical_key {
+                Key::Named(NamedKey::ArrowUp) => Some(19),
+                Key::Named(NamedKey::ArrowDown) => Some(20),
+                Key::Named(NamedKey::ArrowLeft) => Some(17),
+                Key::Named(NamedKey::ArrowRight) => Some(18),
+                Key::Named(NamedKey::Enter) => Some(13),
+                Key::Named(NamedKey::Escape) => Some(27),
+                Key::Named(NamedKey::Tab) => Some(9),
+                Key::Named(NamedKey::PageUp) => Some(140),
+                Key::Named(NamedKey::PageDown) => Some(142),
+                _ => None,
+            };
+            if let Some(k) = k {
+                if !(down && event.repeat) {
+                    p.dyepick_key(k, down);
+                }
+            } else if down && matches!(&event.logical_key, Key::Named(NamedKey::Backspace)) {
+                p.dyepick_char('\u{8}');
+            } else if down && let Some(t) = &event.text {
+                for c in t.chars().filter(|c| c.is_ascii_hexdigit() || *c == '#') {
+                    p.dyepick_char(c);
+                }
+            }
+            return;
         }
         // A server's player search (`searchwnd`), while it is up: the
         // arrows, Enter or E (X: Search, a tell), Escape or Backspace
@@ -4455,6 +4705,23 @@ impl App {
                 && !(down && event.repeat)
             {
                 p.fishing_key(k, down);
+            }
+            return;
+        }
+        // A mercenary's windows (`mercplay`: its inventory, mode 61, and its
+        // spell book over the player's, 62): the keys the player's own item
+        // menu and spell book take on the keyboard (petition 2342: the
+        // arrows did nothing in the merc's spell menu; only the pad's d-pad
+        // and the pointer reached it).
+        if let Some(p) = self.play.as_mut()
+            && p.typing.is_none()
+            && p.merc_win_owns()
+        {
+            let down = event.state == ElementState::Pressed;
+            if let Some(k) = merc_key_of(&event.logical_key, p.mode)
+                && !(down && event.repeat)
+            {
+                p.merc_win_key(k, down);
             }
             return;
         }
@@ -4849,6 +5116,10 @@ impl App {
                 Key::Named(NamedKey::ArrowRight) if p.mode == 33 && p.rolls_up() => Some(18),
                 Key::Named(NamedKey::ArrowLeft) if p.mode == 33 && p.rolls_focused() => Some(17),
                 Key::Named(NamedKey::Enter) if p.mode == 33 && p.rolls_focused() => Some(13),
+                // R2 Channel Switch on (Extended > UI > Chat): left and right
+                // step the chat channel, as the d-pad's with R2 held
+                Key::Named(NamedKey::ArrowLeft) if p.mode == 33 && crate::settings::r2_channels() => Some(17),
+                Key::Named(NamedKey::ArrowRight) if p.mode == 33 && crate::settings::r2_channels() => Some(18),
                 // the item links (`itemlink`): left walks up through them, right
                 // back down and Enter opens the one lit while one is
                 Key::Named(NamedKey::ArrowLeft) if p.links_walkable() => Some(17),
@@ -5050,7 +5321,7 @@ impl ApplicationHandler for App {
             let info = adapter.get_info();
             eprintln!("offscreen {w}x{h} on {:?}", info.name);
             crate::bugnote::set_graphics(&info.name, &format!("{:?}", info.backend));
-            let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).expect("device");
+            let (device, queue) = pollster::block_on(adapter.request_device(&render::packed::device_descriptor(&adapter))).expect("device");
             let ps2_sums = render::fog16::supported(&adapter);
             self.instance = Some(instance);
             let config = wgpu::SurfaceConfiguration {
@@ -5104,7 +5375,7 @@ impl ApplicationHandler for App {
                 crate::gpustart::step(&format!("{} draws without the graphics card (software): the game will be slow; the graphics card's driver may need installing or updating", info.name));
             }
         }
-        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).expect("device");
+        let (device, queue) = pollster::block_on(adapter.request_device(&render::packed::device_descriptor(&adapter))).expect("device");
         let size = window.inner_size();
         let mut config = surface.get_default_config(&adapter, size.width.max(1), size.height.max(1)).expect("surface config");
         // The bytes go out as the GS's do: no sRGB encode (render::TARGET_FORMAT).
@@ -5185,7 +5456,10 @@ impl ApplicationHandler for App {
         }
         self.stall.enter(Instant::now());
         let what = if let winit::event::DeviceEvent::MouseMotion { delta } = event {
-            self.mouse.motion(delta.0, delta.1);
+            // none in an [OG] account's world (`pointer_shut`)
+            if !(self.play.is_some() && crate::settings::qol::off(crate::settings::qol::NO_MOUSE)) {
+                self.mouse.motion(delta.0, delta.1);
+            }
             "the mouse's motion"
         } else {
             "a device's event"
@@ -5204,18 +5478,6 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         #[cfg(not(target_arch = "wasm32"))]
         if fork_report::event(self, el, &event) { return; }
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(g) = &mut self.gfx
-            && g.forge_runtime.event(&g.window, &event, crate::fork_ext::is_plain_play(self.play.as_mut()))
-        {
-            // Keep physical pointer bookkeeping current without routing an
-            // addon-owned hover/drag into gameplay or the native map.
-            if let WindowEvent::CursorMoved { position, .. } = &event {
-                self.cursor = (position.x, position.y);
-                self.mouse.moved(position.x, position.y);
-            }
-            return;
-        }
         let what = crate::stall::event_name(&event);
         self.stall.enter(Instant::now());
         self.handle_window_event(el, id, event);
@@ -5667,6 +5929,10 @@ impl App {
             self.key_input(el, k, *is_synthetic);
             return;
         }
+        // an [OG] account's world: no mouse, no touch (`pointer_shut`)
+        if self.pointer_shut(&event) {
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => el.exit(),
             _ if self.leaving() => self.leave_play(el),
@@ -5678,7 +5944,13 @@ impl App {
             }
             // minimised (Windows sends a size of nothing): no frame comes, and
             // the time until one does is no stall
-            WindowEvent::Resized(s) if s.width == 0 || s.height == 0 => self.stall.away(),
+            WindowEvent::Resized(s) if s.width == 0 || s.height == 0 => {
+                // minimised: the pointer is no longer this window's
+                self.let_go_pointer();
+                self.stall.away()
+            }
+            // covered or minimised (Windows, macOS): as minimised
+            WindowEvent::Occluded(true) => self.let_go_pointer(),
             // the surface takes the new size as the next frame drawn begins
             // (`Gfx::resize`: in a page, configured here it was painted blank)
             WindowEvent::Resized(s) if s.width > 0 && s.height > 0 => {
@@ -5764,13 +6036,15 @@ impl App {
             WindowEvent::Focused(false) => self.focus_lost(el),
             WindowEvent::CursorLeft { .. } => {
                 self.mouse.release_all();
+                if let Some(h) = self.host.as_mut() {
+                    h.release();
+                }
                 self.grab_pointer(false);
                 if let Some(p) = self.play.as_mut() {
                     p.chat_let_go();
                     p.hud_release();
                     p.map.let_go();
                     p.map.mini_hover(None);
-                    p.chat_let_go();
                 }
             }
             WindowEvent::MouseInput { state, button, .. } if matches!(button, MouseButton::Left | MouseButton::Right) => {
@@ -5815,6 +6089,11 @@ impl App {
                     self.grab_pointer(false);
                 } else if button == MouseButton::Left {
                     self.drag = down.then_some(self.cursor);
+                    // before the world: what the press took let go (character
+                    // select's scroll bar thumb)
+                    if !down && let Some(h) = self.host.as_mut() {
+                        h.release();
+                    }
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -5822,6 +6101,15 @@ impl App {
                 // the update's question's list dragged (`update`)
                 #[cfg(not(target_arch = "wasm32"))]
                 if self.offer_drag() {
+                    return;
+                }
+                // before the world, the left button down: what its press took
+                // dragged (character select's scroll bar thumb)
+                if self.walker.is_none()
+                    && let (Some(h), Some(g)) = (self.host.as_mut(), self.gfx.as_ref())
+                    && h.drag_to(render::ui::frame_from_window((g.config.width, g.config.height), [position.x as f32, position.y as f32]))
+                {
+                    g.window.request_redraw();
                     return;
                 }
                 // a HUD piece dragged (`hudlayout`): nothing else's move
@@ -6102,6 +6390,13 @@ impl App {
                     }
                 }
                 self.fly();
+                // The zones whose art a server's decoration wears (`decorlights`),
+                // asked for wherever the player is.
+                if let (Some(s), Some(w), Some(p)) = (self.streamer.as_mut(), self.walker.as_ref(), self.play.as_ref()) {
+                    for z in p.decor_zones() {
+                        s.want(z, &w.scene, &self.lib);
+                    }
+                }
                 // Zones whose bytes have come: into the library and the collision world.
                 if let (Some(s), Some(w)) = (self.streamer.as_mut(), self.walker.as_mut())
                     && let Some(first) = s.install(&mut self.lib, &mut w.scene)
@@ -6113,6 +6408,10 @@ impl App {
                 // the controllers (XInput, HID, gilrs) and the windows they
                 // are shared with (`multibox`), and the touch pad's clicks
                 self.poll_pad(el);
+                // an [OG] account's world: no touch pad (`touch_shut`)
+                if self.touch.shown {
+                    self.touch_shut();
+                }
                 for c in self.touch.take_clicks() {
                     self.click(c, true);
                 }
@@ -6138,6 +6437,9 @@ impl App {
                 // the mouse steering the body (`controls::Client::steer`)
                 let look_free = !self.play.as_ref().is_some_and(|p| p.is_dead()) && self.play.as_ref().is_none_or(|p| p.look_free());
                 let steer = look_free && self.walker.as_ref().is_some_and(|w| self.mouse.steer(w.cam.camera_mode));
+                // the view the walk keeps while the left button looks round
+                // on the move (`Mouse::walk_view`)
+                let walk_view = self.mouse.walk_view().filter(|_| look_free);
                 let game_keys = self.game_keys();
                 let now = self.clock.elapsed().as_millis() as i64;
                 let Some(g) = &mut self.gfx else { return };
@@ -6184,6 +6486,7 @@ impl App {
                     let mut client = play.as_ref().filter(|p| !p.is_dead()).map(|p| p.control_client()).unwrap_or_default();
                     client.keys = game_keys;
                     client.steer = steer;
+                    client.walk_view = walk_view;
                     // a frame come late while following (`follow_catch_up`)
                     if let Some(p) = play.as_mut() {
                         client = follow_catch_up(w, p, sticks, now, client);
@@ -6378,7 +6681,15 @@ impl App {
                     g.set_title(title(play.as_ref().map(|p| p.player.name.as_str())));
                     mark(perf, 5);
                     if let Some(wx) = weather.as_mut() {
-                        wx.frame(&mut w.scene, sound.as_mut(), &w.eye, now, game_hour(play.as_ref(), clock));
+                        // the server's regional weather where the character stands
+                        // (`weather_zones`), as the server sends its byte: not at the
+                        // camera, which a turn swings across a square's edge
+                        let e = w.cam.walk.phys.position;
+                        wx.set_regional(play.as_ref().map(|p| p.weather_sample(e.x.0, e.z.0)), now);
+                        if let Some(p) = play.as_mut() {
+                            p.weather_fog = crate::weather_zones::fog(&wx.regional, game_hour(Some(&*p), clock)).map(|f| (f.near, f.far));
+                        }
+                        wx.frame(&mut w.scene, sound.as_mut(), &w.eye, &e, now, game_hour(play.as_ref(), clock));
                     }
                     mark(perf, 6);
                     let (proj, v) = w.view(g.config.width as f32 / g.config.height as f32);
@@ -6397,6 +6708,10 @@ impl App {
                     if let Some(p) = play.as_ref() {
                         let held = held_fx.get_or_insert_with(|| crate::particles::Held::new(now));
                         batches.extend(held.frame(lib, &p.in_hand(lib, w, m), &w.eye.position, now));
+                        // a server's decorations' lights (`decorlights`)
+                        batches.extend(p.decor_batches(w.eye_position().to_array(), now));
+                        // the Strings of Lights worn (`toys`)
+                        batches.extend(p.worn_light_batches(w, m, w.eye_position().to_array(), now));
                     }
                     mark(perf, 7);
                     let hour_now = game_hour(play.as_ref(), clock);
@@ -6434,6 +6749,25 @@ impl App {
                     if let Some(p) = play.as_mut() {
                         g.renderer.strips.append(&mut p.trail_strips);
                     }
+                    // the sandstorm's dust (`sanddust`), in the storm's colour
+                    if let Some(wx) = weather.as_ref()
+                        && let Some(f) = crate::weather_zones::fog(&wx.regional, hour_now)
+                    {
+                        g.renderer.strips.extend(wx.dust_strips(w.eye_position(), f.color));
+                    }
+                    // a server's decorations' cords (`decorlights`), lit as matte wire
+                    if let Some(p) = play.as_ref() {
+                        let mut cords = p.decor_cords(w.eye_position().to_array());
+                        cords.extend(p.worn_light_cords(w, m, w.eye_position().to_array()));
+                        cords.extend(p.decor_presents(w.eye_position().to_array()));
+                        crate::decorlights::light_cords(&mut cords, &lights.0);
+                        // the model bulbs, unlit: a bulb is its own light
+                        cords.extend(p.decor_globes(w.eye_position().to_array(), now));
+                        // and the Strings of Lights' glass (`toys::glass`)
+                        cords.extend(p.worn_light_glass(w, m, now));
+                        // with the world, before the name plates (`draw_decor`)
+                        g.renderer.decor = cords;
+                    }
                     // the characters' blob shadows (`VIScene::RenderShadows`,
                     // `shadows`): drawn after the particle system's batches,
                     // which these are, before the weather's; none with the
@@ -6470,7 +6804,7 @@ impl App {
                     // the effect volumes (`VIScene::Render`'s deferred actors);
                     // none with the options' Environment off
                     if let Some(fx) = fx.as_mut().filter(|_| !unseen) {
-                        if crate::settings::client().environment {
+                        if crate::settings::client().environment > 0 {
                             fx.stream(Vec3::from(w.cam.walk.phys.position.to_array()), &w.scene, lib);
                             let cam = crate::fx::camera(w.eye.position, w.eye.direction);
                             fx.lod_eye = Some(crate::lod::eye(&w.cam, &w.eye.position));
@@ -6485,7 +6819,7 @@ impl App {
                     // camera, Render after the rooms' deferred list); none
                     // with the options' Flora off
                     if let Some(fl) = flora.as_mut().filter(|_| !unseen) {
-                        if crate::settings::client().flora {
+                        if crate::settings::client().flora > 0 {
                             let drawn = fl.frame(&mut w.scene, &w.eye.position, proj * v);
                             fl.upload(&mut g.renderer, &g.device, &g.queue, lib, &w.scene, &drawn);
                         } else {
@@ -6588,7 +6922,8 @@ impl App {
                     }
                     let plates = p.plates();
                     if let Some(t) = g.renderer.text.as_mut() {
-                        let pv = crate::play::PlateView::of(&w.cam, &w.eye.position, (g.config.width, g.config.height));
+                        let mut pv = crate::play::PlateView::of(&w.cam, &w.eye.position, (g.config.width, g.config.height));
+                        pv.fog = p.weather_fog;
                         t.plates = crate::play::labels(&plates, &pv, view.view_proj, t);
                         t.plate_scale = pv.scale;
                         t.labels = crate::play::chat_labels(p, t, (g.config.width, g.config.height));
@@ -6619,7 +6954,7 @@ impl App {
                         .chain(self.streamer.iter().flat_map(|s| s.draws()))
                         .chain(self.flora.iter().flat_map(|f| f.draws()))
                         .chain(self.play.iter().flat_map(|p| p.models()).map(render::Draw::Model))
-                        .chain(self.fx.iter().filter(|_| crate::settings::client().environment).flat_map(|f| f.models()).map(render::Draw::Model))
+                        .chain(self.fx.iter().filter(|_| crate::settings::client().environment > 0).flat_map(|f| f.models()).map(render::Draw::Model))
                         .collect(),
                 };
                 // the options' Brightness: the scene through its curve (none
@@ -6632,6 +6967,9 @@ impl App {
                 render::ui::set_text_filter(crate::settings::client().text);
                 render::ui::set_hud_filter(crate::settings::client().hud);
                 render::set_mipmaps(crate::settings::client().mipmaps);
+                // its Texture Pack Memory: a pack's budget from the next
+                // texture made (`render::packmem`)
+                render::set_pack_memory(u64::from(crate::settings::client().pack_memory));
                 g.renderer.scale.set(crate::settings::client().render_scale as u32);
                 let f = g.renderer.scale.targets(&g.device, &target, &g.depth, (g.config.width, g.config.height));
                 // the ground fog a PS2 frame keeps reads the frame: a target
@@ -6658,6 +6996,13 @@ impl App {
                     let mut rot = v;
                     rot.w_axis = glam::Vec4::W;
                     g.renderer.draw_sky_billboards(&g.device, &g.queue, &mut enc, st, &f.depth, rot, p, &self.sky_batches, &textures);
+                }
+                // a server's decorations' cords and presents, solid, with the
+                // world: before the effect volumes and the name plates, which
+                // they painted over when drawn after them
+                match bb_view {
+                    Some((v, p)) => g.renderer.draw_decor(&g.device, &g.queue, &mut enc, st, &f.depth, v, p, &textures),
+                    None => g.renderer.decor.clear(),
                 }
                 // the effect volumes' fans, then the particles over them,
                 // all in the scene (the Brightness curve takes them too)
@@ -6756,6 +7101,26 @@ mod tests {
         };
         assert_eq!(frames(true), 2);
         assert_eq!(frames(false), 5, "the control: every frame counted");
+    }
+
+    /// A mercenary's windows on the keyboard (petition 2342): the arrows are
+    /// the d-pad's codes in both (the spell book scrolled with the pad
+    /// alone before), Enter and E ✕, Escape and Backspace △; Page Up and
+    /// Down the spell book's description lines, nothing in the inventory.
+    #[test]
+    fn a_mercs_windows_take_the_arrows() {
+        for mode in [61, 62] {
+            let k = |key: Key| merc_key_of(&key, mode);
+            assert_eq!(
+                [k(Key::Named(NamedKey::ArrowUp)), k(Key::Named(NamedKey::ArrowDown)), k(Key::Named(NamedKey::ArrowLeft)), k(Key::Named(NamedKey::ArrowRight))],
+                [Some(138), Some(139), Some(136), Some(137)],
+                "mode {mode}"
+            );
+            assert_eq!((k(Key::Named(NamedKey::Enter)), k(Key::Character("E".into()))), (Some(134), Some(134)));
+            assert_eq!((k(Key::Named(NamedKey::Escape)), k(Key::Named(NamedKey::Backspace))), (Some(27), Some(27)));
+        }
+        assert_eq!(merc_key_of(&Key::Named(NamedKey::PageDown), 62), Some(143));
+        assert_eq!(merc_key_of(&Key::Named(NamedKey::PageDown), 61), None);
     }
 
     /// The corpse, merchant and trade windows' keys: the attack's key (G,

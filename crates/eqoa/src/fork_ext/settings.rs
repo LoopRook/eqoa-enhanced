@@ -750,11 +750,11 @@ mod tests {
                 assert!(kept.starts_with(old.as_bytes()));
             }
             assert_eq!(ClientOptions::from_text(&fresh.to_text()), fresh);
-            // Marker present: a later upstream-default file stays at 24/100.
+            // Marker present: a later file uses the current stock defaults.
             super::super::testing::put("client.opt", b"");
             super::super::CLIENT.with(|c| c.set(None));
             let later = super::super::client();
-            assert_eq!((later.entity_slots, later.entity_view), (24, 100));
+            assert_eq!((later.entity_slots, later.entity_view), (48, 200));
         }
         super::super::testing::reset(false);
     }

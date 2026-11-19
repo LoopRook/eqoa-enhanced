@@ -13,6 +13,14 @@
 //!
 //! What differs from the game: the Lavastorm's fireballs ride a particle
 //! system of their own rather than the scene's.
+//!
+//! Not the game's: a server's regional weather (`weather_zones`, board entry
+//! #1550), sampled at the camera each frame into `regional` (Options' Weather
+//! applied): the sand's blowing dust (`sanddust`, drawn as strips),
+//! the roof over the eye and a wall upwind (probed every 100 ms), and the
+//! wind's bed on the sound. Its fog is `viewer::lit`'s.
+//! `EQOA_WEATHER_PREVIEW=kind[,strength]` (as `/weatherpreview`'s words, a
+//! comma for the space) previews one with no server, for shots.
 
 use crate::sky::Sprites;
 use esf::Library;
@@ -104,6 +112,18 @@ pub struct Weather {
     offset: i64,
     /// `CalcOutdoorsIntensity`'s probe
     pub outdoors: vi::world::Outdoors<Ee>,
+    /// The server's regional weather at the camera this frame, through
+    /// Options' Weather (`weather_zones`; `set_regional`)
+    pub regional: crate::weather_zones::Sample,
+    /// `EQOA_WEATHER_PREVIEW`'s, standing in when no server's is given
+    preview: Option<crate::weather_zones::Preview>,
+    /// a roof within 120 over the eye, and a wall within 8 upwind of it,
+    /// probed every 100 ms while there is regional weather
+    pub roof: bool,
+    pub upwind_wall: bool,
+    /// the sandstorm's blowing dust (`sanddust`)
+    pub dust: crate::sanddust::Dust,
+    probed: Option<i64>,
 }
 
 impl Weather {
@@ -161,7 +181,29 @@ impl Weather {
         if models.is_none() {
             atm.initialised = false;
         }
-        let mut w = Weather { atm, rand, sys, tex: MATERIALS.map(|m| id(m.0)), first: true, sounds_attached: false, silent_handles: 0, flash: None, last: time, offset: 0, outdoors: Default::default() };
+        let preview = std::env::var("EQOA_WEATHER_PREVIEW").ok().and_then(|v| crate::weather_zones::Preview::parse(&v.replace(',', " "))).flatten();
+        let mut w = Weather {
+            atm,
+            rand,
+            sys,
+            tex: MATERIALS.map(|m| id(m.0)),
+            first: true,
+            sounds_attached: false,
+            silent_handles: 0,
+            flash: None,
+            last: time,
+            offset: 0,
+            outdoors: Default::default(),
+            regional: Default::default(),
+            preview,
+            roof: false,
+            upwind_wall: false,
+            dust: Default::default(),
+            probed: None,
+        };
+        if let Some(b) = preview.and_then(|p| p.retail_byte()) {
+            w.atm.set_weather(atmosphere::weather_from_wire(b), true);
+        }
         if let Ok(v) = std::env::var("EQOA_WEATHER") {
             let mut it = v.split(',');
             let t = it.next().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
@@ -169,6 +211,14 @@ impl Weather {
             w.atm.set_weather(t, !fade);
         }
         w
+    }
+
+    /// This frame's regional weather: the server's sample at the camera
+    /// (`Play::weather_sample`), else `EQOA_WEATHER_PREVIEW`'s, else none;
+    /// through Options' Weather.
+    pub fn set_regional(&mut self, server: Option<crate::weather_zones::Sample>, now_ms: i64) {
+        let s = server.or_else(|| self.preview.map(|p| p.sample(now_ms))).unwrap_or_default();
+        self.regional = s.scaled(crate::settings::client().weather);
     }
 
     /// A weather byte off the wire (`VIClient::SetWeather`).
@@ -224,25 +274,37 @@ impl Weather {
             a.p1198.0,
             a.pf48.0
         ) + &format!(", dome {:?}", a.pals.get(&a.sky_sprite).and_then(|p| p.first()).map(|m| m.used().iter().map(|l| (l.texture, l.blend, l.color)).collect::<Vec<_>>()))
+            + &format!(", dust {} grains {} wisps, ground {:?}", self.dust.grain_count, self.dust.wisp_count, self.dust.ground)
     }
 
     /// One frame, before the lights: `SetSky` for the camera's terrain
     /// profiles, then `Update` (the clock, the sky's rotations, the weather
     /// field, the transitions and the rain's and thunder's voices). Leaves
     /// the weather's intensity on `sound` for its track (`SetSoundTrack`).
-    pub fn frame(&mut self, world: &mut World<Ee>, sound: Option<&mut crate::sound::Sound>, eye: &vi::camera::Eye<Ee>, time: i64, hour: f32) {
+    /// `at` is the character's place (its feet): the sky's profiles, how
+    /// much it is outdoors, the roof, the upwind wall and the dust's ground
+    /// are all judged from its head, not the camera's place, which a turn
+    /// swings under a tree or an awning; the drops still fall round the eye.
+    pub fn frame(&mut self, world: &mut World<Ee>, sound: Option<&mut crate::sound::Sound>, eye: &vi::camera::Eye<Ee>, at: &Vect3<Ee>, time: i64, hour: f32) {
         if time + self.offset < self.last {
             self.offset = self.last - time;
         }
         let time = time + self.offset;
         self.last = time;
+        // the character's head: where the weather is judged from, not the
+        // camera (the owner, 2026-11-17: "the weather effects are using the
+        // camera position instead of the player model position"): a camera
+        // swung under an awning, through a wall or across a profile's edge
+        // changed the sky, the rain's strength and the wind for a player who
+        // had not moved
+        let head = Vect3::new(at.x, at.y + F::new(JUDGED_AT), at.z);
         if let Some(g) = &world.grid {
-            let b = g.profile_blend(&eye.position);
+            let b = g.profile_blend(&head);
             self.atm.set_sky(&b, self.first);
             self.first = false;
         }
         // CalcOutdoorsIntensity, ahead of the atmosphere's Update
-        let o = self.outdoors.update(world, &eye.position, time);
+        let o = self.outdoors.update(world, &head, time);
         let mut sound = sound;
         if !self.sounds_attached
             && let Some(s) = sound.as_deref()
@@ -251,13 +313,47 @@ impl Weather {
             self.atm.p118c = s.sound_named("lightning_far02");
             self.sounds_attached = true;
         }
+        // the regional weather's roof and wall, every 100 ms while there is any
+        let r = self.regional;
+        if r.intensity() <= 0.0 {
+            (self.roof, self.upwind_wall, self.probed, self.dust.ground) = (false, false, None, None);
+        } else if self.probed.is_none_or(|t| time - t >= 100 || time < t) {
+            self.probed = Some(time);
+            // the roof over the character, from a little over its feet: probed
+            // over the camera, a third-person camera swung under a palm, an
+            // awning or an arch as it turned and the storm's fog went out to
+            // four times its distance (heavy snow 100 to 400: clear), and came
+            // back as it swung out (the owner, 2026-11-16: "when players rotate
+            // camera the fog will not be seen so looks clear")
+            let mut up = CollRay::default();
+            let head = Vect3::new(at.x, at.y + F::new(1.0), at.z);
+            up.init(head, Vect3::new(at.x, at.y + F::new(121.0), at.z));
+            self.roof = atmosphere::Scene::collide_ray(&mut Rays(world), &mut up);
+            let p = head;
+            // the ground under the character, which the dust skims
+            let mut down = CollRay::default();
+            down.init(p, Vect3::new(p.x, p.y - F::new(200.0), p.z));
+            self.dust.ground = atmosphere::Scene::collide_ray(&mut Rays(world), &mut down).then(|| down.hit_point().y.0);
+            let len = r.wind[0].hypot(r.wind[1]);
+            self.upwind_wall = len > 0.01 && {
+                let mut side = CollRay::default();
+                side.init(p, Vect3::new(p.x - F::new(r.wind[0] / len * 8.0), p.y, p.z - F::new(r.wind[1] / len * 8.0)));
+                atmosphere::Scene::collide_ray(&mut Rays(world), &mut side)
+            };
+        }
         if let Some(s) = sound.as_deref_mut() {
             s.weather = self.atm.intensity;
             s.outdoors = o;
+            // the wind bed is ambience: by the Music Volume (`sound::AMBIENCE_CLASS`)
+            let volume = s.dev.sound_class_volume(crate::sound::AMBIENCE_CLASS);
+            s.set_wind(crate::weather_zones::wind_target(&r, volume, self.roof || self.upwind_wall));
         }
         let cam = camera(eye);
         let mut voices = Voices(sound, &mut self.silent_handles);
         self.atm.update(&mut Rays(world), &mut voices, &mut self.sys, &cam, time, F::new(hour), o, &mut self.rand);
+        // the sand's drops on the sampled sand and wind (none at 0)
+        let (e, d) = (eye.position, eye.direction);
+        self.dust.update([e.x.0, e.y.0, e.z.0], [d.x.0, d.y.0, d.z.0], r.sand, r.wind, time);
     }
 
     /// The lights' half (`SetupTimeOfDayLights`' `GetLightning`): the flash,
@@ -284,25 +380,83 @@ impl Weather {
         self.atm.render_sky(&cam, &mut sky, &mut self.rand);
         let mut world = Raster::default();
         self.atm.render_weather(&cam, &mut world);
-        let mut out = self.batches(&world);
+        let mut out = self.batches(&world, crate::settings::client().weather);
         for (id, bbs) in self.sys.render(time) {
             let def = self.sys.emitter(id).def;
             let Some(d) = self.sys.defs[def].as_ref() else { continue };
             out.push(Batch { texture: d.texture as i32, blend: d.blend.clamp(0, 4) as usize, ztest: d.ztest, zwrite: d.zwrite, quads: quads(&bbs) });
         }
-        (self.batches(&sky), out)
+        let mut sky = self.batches(&sky, crate::settings::SHARE_FULL);
+        storm_stars(&mut sky, self.tex[3], &self.regional);
+        (sky, out)
     }
 
-    fn batches(&self, r: &Raster<Ee>) -> Vec<Batch> {
+    /// The sandstorm's dust as strips seen from `eye`, in `color` (the
+    /// storm's fog colour): for the renderer's strips, after the frame's own.
+    pub fn dust_strips(&self, eye: glam::Vec3, color: [f32; 3]) -> Vec<render::billboard::Strips> {
+        self.dust.strips(eye.to_array(), color, self.tex[1])
+    }
+
+    /// The raster's runs as batches, through the options' Weather at `share`
+    /// (`weathered`).
+    fn batches(&self, r: &Raster<Ee>, share: u8) -> Vec<Batch> {
         r.runs
             .iter()
             .filter(|(_, b)| !b.is_empty())
             .map(|(m, bbs)| {
-                let k = (*m).clamp(0, 4) as usize;
-                Batch { texture: self.tex[k], blend: MATERIALS[k].1, ztest: MATERIALS[k].2, zwrite: false, quads: quads(bbs) }
+                let k = (*m).clamp(0, MATERIALS.len() as i32 - 1) as usize;
+                Batch { texture: self.tex[k], blend: MATERIALS[k].1, ztest: MATERIALS[k].2, zwrite: false, quads: weathered(quads(bbs), k, share) }
             })
+            .filter(|b| !b.quads.is_empty())
             .collect()
     }
+}
+
+/// A run of material `k`'s billboards (`MATERIALS`) as the options' Weather
+/// draws it at `share`: of the rain's and the snow's drops (0, 1) that share,
+/// each by its place in the run, which is its particle's (`RenderWeather`
+/// draws every particle, in order, at every frame); the splashes (2) that much
+/// as bright (an added blend); the stars and the lightning (3, 4), and every
+/// run at all of it, as they are: the game's.
+fn weathered(mut q: Vec<Quad>, k: usize, share: u8) -> Vec<Quad> {
+    if share >= crate::settings::SHARE_FULL {
+        return q;
+    }
+    match k {
+        0 | 1 => {
+            let mut at = 0u64;
+            q.retain(|_| {
+                at += 1;
+                crate::settings::share_keeps(at, share)
+            });
+        }
+        2 => q.iter_mut().for_each(|b| b.color[3] *= share as f32 / crate::settings::SHARE_FULL as f32),
+        _ => {}
+    }
+    q
+}
+
+/// The stars (`star`, material 3) through a storm: each faded by the share
+/// of the storm's colour the sky takes where it stands (`render::
+/// storm_sky_share`: all of it low, the storm's share overhead), so none show
+/// through a heavy one (the owner, 2026-11-17: "i can see the stars through
+/// the sandstorm"); the atmosphere draws them under a sandstorm as on a clear
+/// night (its retail byte is 0). They are placed round the eye.
+fn storm_stars(sky: &mut Vec<Batch>, star: i32, regional: &crate::weather_zones::Sample) {
+    if regional.intensity() <= 0.0 {
+        return;
+    }
+    let s = crate::weather_zones::sky_share(regional);
+    for b in sky.iter_mut().filter(|b| b.texture == star) {
+        b.quads.retain_mut(|q| {
+            let [x, y, z] = q.center;
+            let len = (x * x + y * y + z * z).sqrt();
+            let keep = 1.0 - render::storm_sky_share(s, if len > 0.0 { y / len } else { 1.0 });
+            q.color = q.color.map(|c| c * keep);
+            keep > 0.0
+        });
+    }
+    sky.retain(|b| !b.quads.is_empty());
 }
 
 fn quads(bbs: &[Billboard<Ee>]) -> Vec<Quad> {
@@ -315,6 +469,9 @@ fn quads(bbs: &[Billboard<Ee>]) -> Vec<Quad> {
 /// frustum's near plane (normal out of the frustum, 0.3 ahead of the eye,
 /// as the client's projection has it). The view matrix only places the sky
 /// sprites, which `sky.rs` places itself.
+/// How far over a character's feet the weather is judged from (its head).
+const JUDGED_AT: f32 = 1.5;
+
 fn camera(eye: &vi::camera::Eye<Ee>) -> Camera<Ee> {
     let mut d = eye.direction;
     d.normalize();
@@ -349,6 +506,57 @@ mod tests {
         crate::stream::fill(&mut lib, w, 25275.0, 15766.0, &mut src);
         let world = World::load(&lib, w)?;
         Some((lib, world))
+    }
+
+    /// The stars through a storm (`storm_stars`): none low (where the storm's
+    /// far plane left a wall out) whatever the storm, overhead faded by its
+    /// share, none at heavy; the control: no storm, every star as it was, and
+    /// another texture's billboards (the lightning) untouched.
+    #[test]
+    fn a_storm_hides_its_stars() {
+        let star = |x: f32, y: f32| Quad { center: [x, y, 0.0], half: [0.5, 0.5], frame: 0, color: [1.0; 4] };
+        let sky = || vec![
+            Batch { texture: 7, blend: 1, ztest: false, zwrite: false, quads: vec![star(100.0, 5.0), star(10.0, 100.0)] },
+            Batch { texture: 9, blend: 1, ztest: false, zwrite: false, quads: vec![star(100.0, 5.0)] },
+        ];
+        let run = |r: crate::weather_zones::Sample| {
+            let mut b = sky();
+            storm_stars(&mut b, 7, &r);
+            b
+        };
+        let clear = run(Default::default());
+        assert_eq!((clear[0].quads.len(), clear[0].quads[1].color), (2, [1.0; 4]), "the control: no storm");
+        let moderate = run(crate::weather_zones::Sample { sand: 0.5, ..Default::default() });
+        assert_eq!(moderate[0].quads.len(), 1, "the low star gone");
+        assert!((moderate[0].quads[0].color[3] - 0.5).abs() < 1e-3, "overhead at half: {:?}", moderate[0].quads[0].color);
+        assert_eq!(moderate[1].quads.len(), 1, "the lightning's left be");
+        let heavy = run(crate::weather_zones::Sample { sand: 1.0, ..Default::default() });
+        assert_eq!((heavy.len(), heavy[0].texture), (1, 9), "a heavy storm: no stars");
+    }
+
+    /// Weather at all of it is every billboard as the raster gave it; below,
+    /// fewer drops of rain and of snow (the same ones at each frame: by their
+    /// place) and fainter splashes; the stars and the lightning kept whole.
+    /// The control: a drop list at half is not the whole list.
+    #[test]
+    fn weather_keeps_its_share_of_the_drops() {
+        let drops: Vec<Quad> = (0..1000).map(|k| Quad { center: [k as f32, 0.0, 0.0], half: [0.1, 0.4], frame: 0, color: [1.0, 1.0, 1.0, 0.5] }).collect();
+        let xs = |v: &[Quad]| v.iter().map(|q| q.center[0].to_bits()).collect::<Vec<_>>();
+        for k in 0..5 {
+            let w = weathered(drops.clone(), k, 100);
+            assert_eq!((xs(&w), w.iter().map(|q| q.color[3]).collect::<Vec<_>>()), (xs(&drops), vec![0.5; 1000]), "material {k} at all of it");
+        }
+        for k in [0, 1] {
+            let half = weathered(drops.clone(), k, 50);
+            assert!(half.len() > 400 && half.len() < 600, "the control: {}", half.len());
+            assert_eq!(xs(&half), xs(&weathered(drops.clone(), k, 50)), "the same drops each frame");
+            assert!(weathered(drops.clone(), k, 0).is_empty(), "none at 0");
+        }
+        let splash = weathered(drops.clone(), 2, 30);
+        assert_eq!((splash.len(), splash[0].color[3]), (1000, 0.5 * 0.3), "the splashes fainter");
+        for k in [3, 4] {
+            assert_eq!(xs(&weathered(drops.clone(), k, 0)), xs(&drops), "the sky's own, kept");
+        }
     }
 
     fn eye() -> Eye<Ee> {

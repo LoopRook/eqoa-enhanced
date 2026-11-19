@@ -278,17 +278,22 @@ pub(super) fn step(app: &mut App, el: &ActiveEventLoop) {
                 ) {
                     continue;
                 }
+                // The window-key rule (`addon_event`): a native window that
+                // owns the keyboard gets the key; the addons still see its
+                // release so a key held across the change lets go.
+                let native = super::native_owns_keys(app);
                 let plain_play = crate::fork_ext::is_plain_play(app.play.as_mut());
-                let consumed = app.gfx.as_mut().is_some_and(|g| {
-                    g.forge_runtime.scripted_key(
-                        id,
-                        &key.logical_key,
-                        key.text.as_deref(),
-                        key.state,
-                        plain_play,
-                    )
-                });
-                if !consumed {
+                let consumed = (!native || !key.state.is_pressed())
+                    && app.gfx.as_mut().is_some_and(|g| {
+                        g.forge_runtime.scripted_key(
+                            id,
+                            &key.logical_key,
+                            key.text.as_deref(),
+                            key.state,
+                            plain_play,
+                        )
+                    });
+                if !consumed || native {
                     app.key_input(el, key, false);
                 }
             }

@@ -16,6 +16,11 @@ fn claims_key(open: bool, key: &Key, play: Option<&crate::play::Play>) -> bool {
 }
 
 pub(super) fn event(app: &mut App, el: &ActiveEventLoop, event: &WindowEvent) -> bool {
+    let pointer_shut = app.pointer_shut(event);
+    (!pointer_shut && report_event(app, el, event)) || addon_event(app, event, pointer_shut)
+}
+
+fn report_event(app: &mut App, el: &ActiveEventLoop, event: &WindowEvent) -> bool {
     match event {
         WindowEvent::RedrawRequested => {
             scripted_input::step(app, el);
@@ -42,6 +47,44 @@ pub(super) fn event(app: &mut App, el: &ActiveEventLoop, event: &WindowEvent) ->
         }
         _ => false,
     }
+}
+
+/// Whether a native game window (a mercenary's inventory or spells, the dye
+/// picker) owns the keyboard: its keys go to the game, not to addons. Window
+/// keys and scripted keys (`scripted_input::step`) both ask this.
+fn native_owns_keys(app: &App) -> bool {
+    app.play
+        .as_ref()
+        .is_some_and(|p| p.typing.is_none() && (p.merc_win_owns() || p.dyepick_owns()))
+}
+
+fn addon_event(app: &mut App, event: &WindowEvent, pointer_shut: bool) -> bool {
+    let native_key =
+        matches!(event, WindowEvent::KeyboardInput { .. }) && native_owns_keys(app);
+    let release = match event {
+        WindowEvent::KeyboardInput { event, .. } => event.state == ElementState::Released,
+        WindowEvent::MouseInput { state, .. } => *state == ElementState::Released,
+        _ => false,
+    };
+    // A release still clears any ownership acquired before focus changed.
+    if (pointer_shut || native_key) && !release {
+        return pointer_shut;
+    }
+    let Some(g) = &mut app.gfx else {
+        return pointer_shut;
+    };
+    let plain_play = crate::fork_ext::is_plain_play(app.play.as_mut());
+    let consumed = g.forge_runtime.event(&g.window, event, plain_play);
+    if !consumed || pointer_shut || native_key {
+        return pointer_shut;
+    }
+    // Keep physical pointer bookkeeping current without routing an
+    // addon-owned hover or drag into gameplay or the native map.
+    if let WindowEvent::CursorMoved { position, .. } = event {
+        app.cursor = (position.x, position.y);
+        app.mouse.moved(position.x, position.y);
+    }
+    true
 }
 
 fn report_key(

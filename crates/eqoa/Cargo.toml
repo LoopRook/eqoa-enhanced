@@ -40,6 +40,7 @@ glam = "0.34.1"
 png = "0.18.1"
 # A texture pack's DDS files (`texpack`): BC1, BC2, BC3 and BC7, as PCSX2 reads them
 bcdec_rs = "0.2.1"
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 cpal = "0.16"
 
 # The gamepads natively (SDL's layout, force feedback); a page reads the
@@ -55,6 +56,11 @@ gilrs = "0.11.2"
 # names.
 ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
 sha2 = "0.10.9"
+# Texture packs' cache (`texcache`): a PNG's levels compressed to BC3 for a
+# card that draws BCn (texpresso, pure Rust, libsquish's range fit), and the
+# cache's files mapped read-only so that every client open shares one copy.
+texpresso = "2.0.2"
+memmap2 = "0.9.11"
 
 # The disc image's picker (`discs::settle`): the desktop's own file dialog,
 # Windows' common dialog, a Mac's open panel, on Linux the XDG desktop portal
@@ -96,7 +102,7 @@ objc2-core-foundation = { version = "0.3.2", default-features = false, features 
 objc2-io-kit = { version = "0.3.2", default-features = false, features = ["std", "libc", "hid"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Devices_DeviceAndDriverInstallation", "Win32_Devices_HumanInterfaceDevice", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Input_XboxController"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Devices_DeviceAndDriverInstallation", "Win32_Devices_HumanInterfaceDevice", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Input_XboxController", "Win32_UI_WindowsAndMessaging"] }
 
 # The browser build (`web/build.sh`): the page hands over the player's disc
 # image and the login; sockets go through a WebSocket relay; wgpu falls back

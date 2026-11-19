@@ -307,6 +307,9 @@ fn bv_png(pixels: &[u8], size: (u32, u32), name: &str) {
 
 #[test]
 fn round5b_off_by_default_loads_clean_has_an_unbound_controls_row_and_its_key_opens_and_closes_it() {
+    big_stack(round5b_off_by_default_loads_clean_has_an_unbound_controls_row_and_its_key_opens_and_closes_it_body)
+}
+fn round5b_off_by_default_loads_clean_has_an_unbound_controls_row_and_its_key_opens_and_closes_it_body() {
     use winit::keyboard::{Key, NamedKey};
     let Some(mut bv) = Bv::new() else { return };
     // off: the package is there, nothing runs, no Controls row yet
@@ -346,6 +349,9 @@ fn round5b_off_by_default_loads_clean_has_an_unbound_controls_row_and_its_key_op
 
 #[test]
 fn round5b_the_grid_shows_the_pack_as_the_dump_gave_it_and_follows_its_changes() {
+    big_stack(round5b_the_grid_shows_the_pack_as_the_dump_gave_it_and_follows_its_changes_body)
+}
+fn round5b_the_grid_shows_the_pack_as_the_dump_gave_it_and_follows_its_changes_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.enable();
     bv.open();
@@ -383,6 +389,9 @@ fn round5b_the_grid_shows_the_pack_as_the_dump_gave_it_and_follows_its_changes()
 
 #[test]
 fn round5b_equipment_follows_the_games_own_tab_and_the_bank_reads_away_from_a_banker() {
+    big_stack(round5b_equipment_follows_the_games_own_tab_and_the_bank_reads_away_from_a_banker_body)
+}
+fn round5b_equipment_follows_the_games_own_tab_and_the_bank_reads_away_from_a_banker_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.enable();
     bv.open();
@@ -414,6 +423,9 @@ fn round5b_equipment_follows_the_games_own_tab_and_the_bank_reads_away_from_a_ba
 
 #[test]
 fn round5b_the_card_has_the_items_fields_and_the_red_line_only_when_the_character_cannot_use_it() {
+    big_stack(round5b_the_card_has_the_items_fields_and_the_red_line_only_when_the_character_cannot_use_it_body)
+}
+fn round5b_the_card_has_the_items_fields_and_the_red_line_only_when_the_character_cannot_use_it_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.enable();
     bv.open();
@@ -446,6 +458,9 @@ fn round5b_the_card_has_the_items_fields_and_the_red_line_only_when_the_characte
 
 #[test]
 fn round5b_the_loot_log_is_fed_by_pickups_newest_first_and_keeps_fifty() {
+    big_stack(round5b_the_loot_log_is_fed_by_pickups_newest_first_and_keeps_fifty_body)
+}
+fn round5b_the_loot_log_is_fed_by_pickups_newest_first_and_keeps_fifty_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.enable();
     // the window stays closed: the log is the one thing that listens
@@ -514,6 +529,9 @@ fn round5b_the_loot_log_is_fed_by_pickups_newest_first_and_keeps_fifty() {
 
 #[test]
 fn round5b_a_closed_window_does_no_work_and_an_open_one_rebuilds_only_on_change() {
+    big_stack(round5b_a_closed_window_does_no_work_and_an_open_one_rebuilds_only_on_change_body)
+}
+fn round5b_a_closed_window_does_no_work_and_an_open_one_rebuilds_only_on_change_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.enable();
     bv.bind_k();
@@ -540,6 +558,9 @@ fn round5b_a_closed_window_does_no_work_and_an_open_one_rebuilds_only_on_change(
 
 #[test]
 fn round5b_the_window_follows_the_ui_scale_and_stays_on_screen() {
+    big_stack(round5b_the_window_follows_the_ui_scale_and_stays_on_screen_body)
+}
+fn round5b_the_window_follows_the_ui_scale_and_stays_on_screen_body() {
     let mut sizes = Vec::new();
     for win in [(640, 480), (1024, 768), (1600, 900), (320, 240)] {
         let Some(mut bv) = Bv::sized(win) else { return };
@@ -560,6 +581,9 @@ fn round5b_the_window_follows_the_ui_scale_and_stays_on_screen() {
 
 #[test]
 fn round5b_picture_the_window_is_drawn_where_it_says_and_closed_it_is_not() {
+    big_stack(round5b_picture_the_window_is_drawn_where_it_says_and_closed_it_is_not_body)
+}
+fn round5b_picture_the_window_is_drawn_where_it_says_and_closed_it_is_not_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.enable();
     let closed = bv.frames(3);
@@ -621,6 +645,9 @@ fn round5b_picture_the_window_is_drawn_where_it_says_and_closed_it_is_not() {
 
 #[test]
 fn round5b_every_stack_has_the_tabs_the_games_item_page_gives_it_and_each_tab_lists_exactly_those() {
+    big_stack(round5b_every_stack_has_the_tabs_the_games_item_page_gives_it_and_each_tab_lists_exactly_those_body)
+}
+fn round5b_every_stack_has_the_tabs_the_games_item_page_gives_it_and_each_tab_lists_exactly_those_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.enable();
     bv.open();
@@ -693,6 +720,9 @@ fn bv_disc_icons(count: usize) -> Option<Vec<u32>> {
 
 #[test]
 fn round5b_captures_for_the_owner_draw_the_discs_own_item_art_and_the_corpse_in_the_log() {
+    big_stack(round5b_captures_for_the_owner_draw_the_discs_own_item_art_and_the_corpse_in_the_log_body)
+}
+fn round5b_captures_for_the_owner_draw_the_discs_own_item_art_and_the_corpse_in_the_log_body() {
     let Some(mut bv) = Bv::new() else { return };
     // the real art: no stand-in provider, the live cache the disc fills
     super::super::icons::set_custom_icon_provider(None);
@@ -813,6 +843,9 @@ impl Bv {
 
 #[test]
 fn round6b_bag_viewer_bags_menu_actions_greyed_reasons_no_destroy_and_no_unclicked_actions() {
+    big_stack(round6b_bag_viewer_bags_menu_actions_greyed_reasons_no_destroy_and_no_unclicked_actions_body)
+}
+fn round6b_bag_viewer_bags_menu_actions_greyed_reasons_no_destroy_and_no_unclicked_actions_body() {
     super::super::action_broker::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();
@@ -908,6 +941,9 @@ fn round6b_bag_viewer_bags_menu_actions_greyed_reasons_no_destroy_and_no_unclick
 
 #[test]
 fn round6b_bag_viewer_merchant_bank_and_corpse_menus_and_captures() {
+    big_stack(round6b_bag_viewer_merchant_bank_and_corpse_menus_and_captures_body)
+}
+fn round6b_bag_viewer_merchant_bank_and_corpse_menus_and_captures_body() {
     super::super::action_broker::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();
@@ -1017,6 +1053,9 @@ fn round6b_bag_viewer_merchant_bank_and_corpse_menus_and_captures() {
 
 #[test]
 fn round6c_bag_viewer_junk_marks_and_auto_loot_choice_persist_across_reload_and_no_unclicked_actions() {
+    big_stack(round6c_bag_viewer_junk_marks_and_auto_loot_choice_persist_across_reload_and_no_unclicked_actions_body)
+}
+fn round6c_bag_viewer_junk_marks_and_auto_loot_choice_persist_across_reload_and_no_unclicked_actions_body() {
     super::super::action_broker::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();
@@ -1089,6 +1128,9 @@ fn round6c_bag_viewer_junk_marks_and_auto_loot_choice_persist_across_reload_and_
 
 #[test]
 fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot() {
+    big_stack(round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_body)
+}
+fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_body() {
     super::super::action_broker::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();
@@ -1265,6 +1307,9 @@ fn bv_test_surface_container(surfaces: &[(i32, [u8; 4])]) -> esf::Container {
 
 #[test]
 fn round6_item4_lazy_icons_load_without_native_windows_and_zero_per_frame_requests() {
+    big_stack(round6_item4_lazy_icons_load_without_native_windows_and_zero_per_frame_requests_body)
+}
+fn round6_item4_lazy_icons_load_without_native_windows_and_zero_per_frame_requests_body() {
     let Some(mut bv) = Bv::new() else { return };
     super::super::icons::set_custom_icon_provider(None);
     super::super::icons::reset_test_counters();
@@ -1366,6 +1411,9 @@ fn round6_item4_lazy_icons_load_without_native_windows_and_zero_per_frame_reques
 
 #[test]
 fn round6_l2_failed_icon_retries_after_items_change_and_not_per_frame() {
+    big_stack(round6_l2_failed_icon_retries_after_items_change_and_not_per_frame_body)
+}
+fn round6_l2_failed_icon_retries_after_items_change_and_not_per_frame_body() {
     let Some(mut bv) = Bv::new() else { return };
     super::super::icons::set_custom_icon_provider(None);
     super::super::icons::reset_test_counters();
@@ -1418,6 +1466,9 @@ fn round6_l2_failed_icon_retries_after_items_change_and_not_per_frame() {
 
 #[test]
 fn round6_item1_stale_corpse_grid_and_loot_batch_and_log() {
+    big_stack(round6_item1_stale_corpse_grid_and_loot_batch_and_log_body)
+}
+fn round6_item1_stale_corpse_grid_and_loot_batch_and_log_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_target_corpse(5001, "a decaying skeleton");
     bv.play.bags_corpse(&bv_corpse());
@@ -1504,6 +1555,9 @@ fn round6_item1_stale_corpse_grid_and_loot_batch_and_log() {
 
 #[test]
 fn round6_item5_window_fits_hud_and_scrolls_100_slot_pack() {
+    big_stack(round6_item5_window_fits_hud_and_scrolls_100_slot_pack_body)
+}
+fn round6_item5_window_fits_hud_and_scrolls_100_slot_pack_body() {
     use winit::event::{DeviceId, MouseScrollDelta, TouchPhase, WindowEvent};
     let Some(mut bv) = Bv::new() else { return };
     crate::inventory::with_caps([100, 40], || {
@@ -1603,6 +1657,9 @@ fn round6_item5_window_fits_hud_and_scrolls_100_slot_pack() {
 
 #[test]
 fn round6_item6_take_all_button_on_corpse_tab() {
+    big_stack(round6_item6_take_all_button_on_corpse_tab_body)
+}
+fn round6_item6_take_all_button_on_corpse_tab_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.play.session.conn = Some(usize::MAX);
     bv.play.bags_target_corpse(5001, "a decaying skeleton");
@@ -1662,6 +1719,9 @@ fn round6_item6_take_all_button_on_corpse_tab() {
 
 #[test]
 fn round6_m1_loot_all_ignores_unrelated_inv_add_before_close() {
+    big_stack(round6_m1_loot_all_ignores_unrelated_inv_add_before_close_body)
+}
+fn round6_m1_loot_all_ignores_unrelated_inv_add_before_close_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();
     bv.play.bags_target_corpse(5011, "a skeleton");
@@ -1714,6 +1774,9 @@ fn round6_m1_loot_all_ignores_unrelated_inv_add_before_close() {
 
 #[test]
 fn round6_m2_loot_open_without_close_diffs_with_inv_add() {
+    big_stack(round6_m2_loot_open_without_close_diffs_with_inv_add_body)
+}
+fn round6_m2_loot_open_without_close_diffs_with_inv_add_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.enable();
     // Corpse 5013 open: native take + InvAdd, NO 0x0016 LootClose ever arrives before smaller same-corpse 0x0018.
@@ -1747,6 +1810,9 @@ fn round6_m2_loot_open_without_close_diffs_with_inv_add() {
 
 #[test]
 fn round6_m4_reopen_stops_immediately_on_map_or_camera_open() {
+    big_stack(round6_m4_reopen_stops_immediately_on_map_or_camera_open_body)
+}
+fn round6_m4_reopen_stops_immediately_on_map_or_camera_open_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();
     bv.enable();
@@ -1828,6 +1894,9 @@ fn round6_m4_reopen_stops_immediately_on_map_or_camera_open() {
 
 #[test]
 fn round6_l1_loot_batch_keeps_corpse_tab_across_close_and_summary() {
+    big_stack(round6_l1_loot_batch_keeps_corpse_tab_across_close_and_summary_body)
+}
+fn round6_l1_loot_batch_keeps_corpse_tab_across_close_and_summary_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();
     bv.play.bags_target_corpse(5021, "a skeleton");
@@ -1888,6 +1957,9 @@ fn round6_l1_loot_batch_keeps_corpse_tab_across_close_and_summary() {
 
 #[test]
 fn session_recording_replays_round6_close_and_smaller_reopen() {
+    big_stack(session_recording_replays_round6_close_and_smaller_reopen_body)
+}
+fn session_recording_replays_round6_close_and_smaller_reopen_body() {
     let fixture: Vec<u8> = include_str!("round6_loot_recording.hex")
         .split_whitespace()
         .flat_map(|line| line.as_bytes().chunks_exact(2))
@@ -1934,6 +2006,9 @@ fn session_recording_replays_round6_close_and_smaller_reopen() {
 
 #[test]
 fn round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls() {
+    big_stack(round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls_body)
+}
+fn round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();
     let corpse_initial = serde_json::json!([
@@ -2227,6 +2302,9 @@ fn round6_sandstorm_loot_log_and_batch_reopen_with_negative_controls() {
 
 #[test]
 fn round6_sandstorm_duplicate_item_id_stacks_and_partial_take() {
+    big_stack(round6_sandstorm_duplicate_item_id_stacks_and_partial_take_body)
+}
+fn round6_sandstorm_duplicate_item_id_stacks_and_partial_take_body() {
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();
     bv.play.bags_target_corpse(5031, "a decaying skeleton");
@@ -2339,6 +2417,9 @@ fn round6_sandstorm_duplicate_item_id_stacks_and_partial_take() {
 
 #[test]
 fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refusal() {
+    big_stack(round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refusal_body)
+}
+fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refusal_body() {
     super::super::action_broker::reset_all_for_test();
     super::super::window_takeover::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
@@ -2488,6 +2569,9 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
 
 #[test]
 fn round65_bag_viewer_auto_loot_option_takes_all_but_junk_on_killed_target() {
+    big_stack(round65_bag_viewer_auto_loot_option_takes_all_but_junk_on_killed_target_body)
+}
+fn round65_bag_viewer_auto_loot_option_takes_all_but_junk_on_killed_target_body() {
     super::super::action_broker::reset_all_for_test();
     super::super::window_takeover::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
@@ -2557,6 +2641,9 @@ fn round65_bag_viewer_auto_loot_option_takes_all_but_junk_on_killed_target() {
 /// L6: Auto-loot's "my kill" signal is that you hit the creature, not that it was merely targeted.
 #[test]
 fn round65_fix_bag_viewer_auto_loot_only_corpses_of_creatures_you_hit() {
+    big_stack(round65_fix_bag_viewer_auto_loot_only_corpses_of_creatures_you_hit_body)
+}
+fn round65_fix_bag_viewer_auto_loot_only_corpses_of_creatures_you_hit_body() {
     super::super::action_broker::reset_all_for_test();
     super::super::window_takeover::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
@@ -2616,6 +2703,9 @@ fn round65_fix_bag_viewer_auto_loot_only_corpses_of_creatures_you_hit() {
 /// and goes on when the fight is over.
 #[test]
 fn round65_fix_bag_viewer_auto_loot_waits_while_in_combat() {
+    big_stack(round65_fix_bag_viewer_auto_loot_waits_while_in_combat_body)
+}
+fn round65_fix_bag_viewer_auto_loot_waits_while_in_combat_body() {
     super::super::action_broker::reset_all_for_test();
     super::super::window_takeover::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
@@ -2686,6 +2776,9 @@ fn round65_fix_bag_viewer_auto_loot_waits_while_in_combat() {
 /// nobody uses.
 #[test]
 fn round65_fix_bag_viewer_loot_tab_keeps_hidden_session_alive() {
+    big_stack(round65_fix_bag_viewer_loot_tab_keeps_hidden_session_alive_body)
+}
+fn round65_fix_bag_viewer_loot_tab_keeps_hidden_session_alive_body() {
     super::super::action_broker::reset_all_for_test();
     super::super::window_takeover::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
@@ -2721,6 +2814,9 @@ fn round65_fix_bag_viewer_loot_tab_keeps_hidden_session_alive() {
 /// L7: the manifest declares exactly the actions the Lua calls.
 #[test]
 fn round65_fix_bag_viewer_manifest_declares_exactly_the_actions_it_uses() {
+    big_stack(round65_fix_bag_viewer_manifest_declares_exactly_the_actions_it_uses_body)
+}
+fn round65_fix_bag_viewer_manifest_declares_exactly_the_actions_it_uses_body() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods/eqoa_bag_viewer");
     let mut used = std::collections::BTreeSet::new();
     for file in ["main.lua", "modules/bags.lua"] {
@@ -2754,11 +2850,17 @@ fn round65_fix_bag_viewer_manifest_declares_exactly_the_actions_it_uses() {
 /// server never answered) must not turn the mod's open into a native window.
 #[test]
 fn round65_fix2_open_corpse_shows_items_hidden_even_with_stale_loot_requests() {
+    big_stack(round65_fix2_open_corpse_shows_items_hidden_even_with_stale_loot_requests_body)
+}
+fn round65_fix2_open_corpse_shows_items_hidden_even_with_stale_loot_requests_body() {
     r65fix2_open_corpse(true);
 }
 
 #[test]
 fn round65_fix2_open_button_only_displays_never_takes() {
+    big_stack(round65_fix2_open_button_only_displays_never_takes_body)
+}
+fn round65_fix2_open_button_only_displays_never_takes_body() {
     r65fix2_open_corpse(false);
 }
 
@@ -2839,6 +2941,9 @@ fn r65fix2_open_corpse(stale: bool) {
 /// not stay on "Opening merchant...".
 #[test]
 fn round65_fix2_unanswered_merchant_talk_fails_visibly() {
+    big_stack(round65_fix2_unanswered_merchant_talk_fails_visibly_body)
+}
+fn round65_fix2_unanswered_merchant_talk_fails_visibly_body() {
     super::super::action_broker::reset_all_for_test();
     super::super::window_takeover::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
@@ -2888,6 +2993,9 @@ fn round65_fix2_unanswered_merchant_talk_fails_visibly() {
 /// open and for a bank action.
 #[test]
 fn round65_fix2_unanswered_bank_requests_fail_visibly() {
+    big_stack(round65_fix2_unanswered_bank_requests_fail_visibly_body)
+}
+fn round65_fix2_unanswered_bank_requests_fail_visibly_body() {
     super::super::action_broker::reset_all_for_test();
     super::super::window_takeover::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
@@ -3082,6 +3190,9 @@ fn bv_busy_scene() -> Option<Bv> {
 /// than one list call does (counted so in any build; in a release build it must also be under 6 ms a frame, closed under 0.2).
 #[test]
 fn round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame() {
+    big_stack(round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame_body)
+}
+fn round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame_body() {
     let Some(mut bv) = bv_busy_scene() else { return };
     bv.frames(4);
     let list_ms = bv_list_ms(&bv);
@@ -3109,6 +3220,9 @@ fn round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame() {
 /// zone, not scan 700 creatures per call.
 #[test]
 fn round65_fix4_item1_waiting_auto_loot_shares_one_scan_of_the_zone() {
+    big_stack(round65_fix4_item1_waiting_auto_loot_shares_one_scan_of_the_zone_body)
+}
+fn round65_fix4_item1_waiting_auto_loot_shares_one_scan_of_the_zone_body() {
     let Some(mut bv) = bv_busy_scene() else { return };
     bv.frames(4);
     bv_auto(&bv, "non_junk");
@@ -3236,27 +3350,42 @@ fn r65fix4_hidden_batch(auto_loot: bool, relist: bool) {
 
 #[test]
 fn round65_fix4_item2_take_all_but_junk_relists_stay_hidden() {
+    big_stack(round65_fix4_item2_take_all_but_junk_relists_stay_hidden_body)
+}
+fn round65_fix4_item2_take_all_but_junk_relists_stay_hidden_body() {
     r65fix4_hidden_batch(false, true);
 }
 
 #[test]
 fn round65_fix4_item2_take_all_but_junk_reopens_asked_by_the_broker_stay_hidden() {
+    big_stack(round65_fix4_item2_take_all_but_junk_reopens_asked_by_the_broker_stay_hidden_body)
+}
+fn round65_fix4_item2_take_all_but_junk_reopens_asked_by_the_broker_stay_hidden_body() {
     r65fix4_hidden_batch(false, false);
 }
 
 #[test]
 fn round65_fix4_item2_auto_loot_relists_stay_hidden() {
+    big_stack(round65_fix4_item2_auto_loot_relists_stay_hidden_body)
+}
+fn round65_fix4_item2_auto_loot_relists_stay_hidden_body() {
     r65fix4_hidden_batch(true, true);
 }
 
 #[test]
 fn round65_fix4_item2_auto_loot_reopens_asked_by_the_broker_stay_hidden() {
+    big_stack(round65_fix4_item2_auto_loot_reopens_asked_by_the_broker_stay_hidden_body)
+}
+fn round65_fix4_item2_auto_loot_reopens_asked_by_the_broker_stay_hidden_body() {
     r65fix4_hidden_batch(true, false);
 }
 
 /// A corpse the player clicks themselves while a hidden session is up is still theirs: the game's window shows.
 #[test]
 fn round65_fix4_item2_a_players_own_click_on_the_corpse_still_shows_the_game_window() {
+    big_stack(round65_fix4_item2_a_players_own_click_on_the_corpse_still_shows_the_game_window_body)
+}
+fn round65_fix4_item2_a_players_own_click_on_the_corpse_still_shows_the_game_window_body() {
     super::super::action_broker::reset_all_for_test();
     super::super::window_takeover::reset_all_for_test();
     crate::fork_ext::loot_source::clear();
@@ -3336,6 +3465,9 @@ fn r65fix4_auto_list(bv: &mut Bv) {
 /// Off: a kill is left alone.
 #[test]
 fn round65_fix4_item3_auto_loot_off_leaves_the_corpse_alone() {
+    big_stack(round65_fix4_item3_auto_loot_off_leaves_the_corpse_alone_body)
+}
+fn round65_fix4_item3_auto_loot_off_leaves_the_corpse_alone_body() {
     let Some(mut bv) = r65fix4_auto_kill("off") else { return };
     let sends = bv.play.bags_sends_lost();
     bv.play.bags_broker_tick();
@@ -3349,6 +3481,9 @@ fn round65_fix4_item3_auto_loot_off_leaves_the_corpse_alone() {
 /// Everything: the corpse's junk goes too (one Take all).
 #[test]
 fn round65_fix4_item3_auto_loot_everything_takes_the_junk_too() {
+    big_stack(round65_fix4_item3_auto_loot_everything_takes_the_junk_too_body)
+}
+fn round65_fix4_item3_auto_loot_everything_takes_the_junk_too_body() {
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
     r65fix4_auto_list(&mut bv);
     let sends = bv.play.bags_sends_lost();
@@ -3366,6 +3501,9 @@ fn round65_fix4_item3_auto_loot_everything_takes_the_junk_too() {
 /// Everything but junk: the marked junk stays on the corpse.
 #[test]
 fn round65_fix4_item3_auto_loot_everything_but_junk_leaves_the_junk() {
+    big_stack(round65_fix4_item3_auto_loot_everything_but_junk_leaves_the_junk_body)
+}
+fn round65_fix4_item3_auto_loot_everything_but_junk_leaves_the_junk_body() {
     let Some(mut bv) = r65fix4_auto_kill("non_junk") else { return };
     r65fix4_auto_list(&mut bv);
     bv.play.bags_broker_tick(); // takes Sapphire only
@@ -3382,6 +3520,9 @@ fn round65_fix4_item3_auto_loot_everything_but_junk_leaves_the_junk() {
 /// the old on/off option (the Options page no longer lists one).
 #[test]
 fn round65_fix4_item3_auto_loot_choice_buttons_explanation_and_saved() {
+    big_stack(round65_fix4_item3_auto_loot_choice_buttons_explanation_and_saved_body)
+}
+fn round65_fix4_item3_auto_loot_choice_buttons_explanation_and_saved_body() {
     super::super::action_broker::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
     bv.enable();
@@ -3418,6 +3559,9 @@ fn round65_fix4_item3_auto_loot_choice_buttons_explanation_and_saved() {
 /// Item 4: the buttons say what they do: Look only shows, Take takes.
 #[test]
 fn round65_fix4_item4_look_and_take_labels() {
+    big_stack(round65_fix4_item4_look_and_take_labels_body)
+}
+fn round65_fix4_item4_look_and_take_labels_body() {
     super::super::action_broker::reset_all_for_test();
     super::super::window_takeover::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
@@ -3444,6 +3588,9 @@ fn round65_fix4_item4_look_and_take_labels() {
 /// is ignored and not written back.
 #[test]
 fn round65_fix4_item5_no_grey_items_option() {
+    big_stack(round65_fix4_item5_no_grey_items_option_body)
+}
+fn round65_fix4_item5_no_grey_items_option_body() {
     super::super::action_broker::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
     bv.enable();
@@ -3474,6 +3621,9 @@ fn bv_look_again(bv: &mut Bv) {
 /// (and farther) too far; until known, a conservative default decides. The player's own windows are never blocked.
 #[test]
 fn round65_fix4_item6_out_of_range_buttons_grey_out_and_the_reach_is_learned() {
+    big_stack(round65_fix4_item6_out_of_range_buttons_grey_out_and_the_reach_is_learned_body)
+}
+fn round65_fix4_item6_out_of_range_buttons_grey_out_and_the_reach_is_learned_body() {
     super::super::action_broker::reset_all_for_test();
     super::super::window_takeover::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
@@ -3573,6 +3723,9 @@ fn round65_fix4_item6_out_of_range_buttons_grey_out_and_the_reach_is_learned() {
 /// real answer (the reach is learned from it), and an open bank is never blocked.
 #[test]
 fn round65_fix4_item6_bank_rows_follow_the_reach_and_native_opens_teach_it() {
+    big_stack(round65_fix4_item6_bank_rows_follow_the_reach_and_native_opens_teach_it_body)
+}
+fn round65_fix4_item6_bank_rows_follow_the_reach_and_native_opens_teach_it_body() {
     super::super::action_broker::reset_all_for_test();
     super::super::window_takeover::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
@@ -3692,11 +3845,17 @@ fn r65fix4_last_take_relist(single: bool) {
 
 #[test]
 fn round65_fix4_h1_list_after_the_last_batch_take_stays_hidden() {
+    big_stack(round65_fix4_h1_list_after_the_last_batch_take_stays_hidden_body)
+}
+fn round65_fix4_h1_list_after_the_last_batch_take_stays_hidden_body() {
     r65fix4_last_take_relist(false);
 }
 
 #[test]
 fn round65_fix4_h1_list_after_a_single_menu_take_stays_hidden() {
+    big_stack(round65_fix4_h1_list_after_a_single_menu_take_stays_hidden_body)
+}
+fn round65_fix4_h1_list_after_a_single_menu_take_stays_hidden_body() {
     r65fix4_last_take_relist(true);
 }
 
@@ -3706,6 +3865,9 @@ fn round65_fix4_h1_list_after_a_single_menu_take_stays_hidden() {
 /// character's choice; a reload of the mod keeps both. The junk marks stay shared: they are per item type, in the same file.
 #[test]
 fn round65_fix4_m2_auto_loot_choice_is_per_character() {
+    big_stack(round65_fix4_m2_auto_loot_choice_is_per_character_body)
+}
+fn round65_fix4_m2_auto_loot_choice_is_per_character_body() {
     super::super::action_broker::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
     bv.enable();
@@ -3762,6 +3924,9 @@ fn round65_fix4_m2_auto_loot_choice_is_per_character() {
 /// than the farthest answer drops the old answers and greys at once, and an answer always clears the doubt.
 #[test]
 fn round65_fix4_m3_note_range_needs_two_misses_and_an_answer_clears() {
+    big_stack(round65_fix4_m3_note_range_needs_two_misses_and_an_answer_clears_body)
+}
+fn round65_fix4_m3_note_range_needs_two_misses_and_an_answer_clears_body() {
     super::super::action_broker::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
     bv.enable();
@@ -3778,6 +3943,9 @@ fn round65_fix4_m3_note_range_needs_two_misses_and_an_answer_clears() {
 /// answer to it clears the grey.
 #[test]
 fn round65_fix4_m3_a_greyed_button_still_allows_one_try() {
+    big_stack(round65_fix4_m3_a_greyed_button_still_allows_one_try_body)
+}
+fn round65_fix4_m3_a_greyed_button_still_allows_one_try_body() {
     super::super::action_broker::reset_all_for_test();
     super::super::window_takeover::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
@@ -3825,6 +3993,9 @@ fn round65_fix4_m3_a_greyed_button_still_allows_one_try() {
 /// every quarter second, and the mod's per-frame cost stays small.
 #[test]
 fn round65_fix4_m4_auto_loot_on_in_a_crowded_zone_scans_at_most_four_times_a_second() {
+    big_stack(round65_fix4_m4_auto_loot_on_in_a_crowded_zone_scans_at_most_four_times_a_second_body)
+}
+fn round65_fix4_m4_auto_loot_on_in_a_crowded_zone_scans_at_most_four_times_a_second_body() {
     let Some(mut bv) = bv_busy_scene() else { return };
     bv.play.bags_self_id(77);
     bv.frames(4);
@@ -3865,6 +4036,9 @@ fn round65_fix4_m4_auto_loot_on_in_a_crowded_zone_scans_at_most_four_times_a_sec
 
 #[test]
 fn round65_fix4_l5_a_merchant_or_banker_far_away_shows_no_button_and_no_row() {
+    big_stack(round65_fix4_l5_a_merchant_or_banker_far_away_shows_no_button_and_no_row_body)
+}
+fn round65_fix4_l5_a_merchant_or_banker_far_away_shows_no_button_and_no_row_body() {
     super::super::action_broker::reset_all_for_test();
     super::super::window_takeover::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
@@ -3919,6 +4093,9 @@ fn r65fix5_asked(log: &[String], id: u32) -> bool {
 /// auto-looted.
 #[test]
 fn round65_fix5_auto_loot_keeps_going_after_the_owners_sequence() {
+    big_stack(round65_fix5_auto_loot_keeps_going_after_the_owners_sequence_body)
+}
+fn round65_fix5_auto_loot_keeps_going_after_the_owners_sequence_body() {
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
     // B's retry (fix round 5) is not part of this sequence: only coming closer to it would ask again; the reach is
     // the 15 units of that round (fix round 6 starts at 7 and learns it)
@@ -4004,6 +4181,9 @@ fn round65_fix5_auto_loot_keeps_going_after_the_owners_sequence() {
 /// is a fight: Auto-loot goes on.
 #[test]
 fn round65_fix5_a_friendly_or_distant_npc_targeting_you_is_not_a_fight() {
+    big_stack(round65_fix5_a_friendly_or_distant_npc_targeting_you_is_not_a_fight_body)
+}
+fn round65_fix5_a_friendly_or_distant_npc_targeting_you_is_not_a_fight_body() {
     for who in ["mercenary", "merchant", "far creature"] {
         let Some(mut bv) = r65fix4_auto_kill("all") else { return };
         // the first kill's corpse is taken
@@ -4067,6 +4247,9 @@ fn r65fix5_first_taken(bv: &mut Bv) {
 /// still), at most three times in all, and each step is in the log.
 #[test]
 fn round65_fix5_item3_unanswered_corpse_is_retried_when_closer_at_most_three_times() {
+    big_stack(round65_fix5_item3_unanswered_corpse_is_retried_when_closer_at_most_three_times_body)
+}
+fn round65_fix5_item3_unanswered_corpse_is_retried_when_closer_at_most_three_times_body() {
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
     r65fix5_first_taken(&mut bv);
     // fix round 5's 15-unit reach (fix round 6 starts at 7 and learns it)
@@ -4119,6 +4302,9 @@ fn round65_fix5_item3_unanswered_corpse_is_retried_when_closer_at_most_three_tim
 /// line says so, and the corpse is asked again from closer.
 #[test]
 fn round65_fix5_item3_out_of_range_ends_the_open_at_once_and_is_retried() {
+    big_stack(round65_fix5_item3_out_of_range_ends_the_open_at_once_and_is_retried_body)
+}
+fn round65_fix5_item3_out_of_range_ends_the_open_at_once_and_is_retried_body() {
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
     r65fix5_first_taken(&mut bv);
     // fix round 5's 15-unit reach (fix round 6 starts at 7 and learns it)
@@ -4158,6 +4344,9 @@ fn round65_fix5_item3_out_of_range_ends_the_open_at_once_and_is_retried() {
 /// The mod's open ends as refused at once, nothing waits, nothing loops, and Auto-loot asks again later.
 #[test]
 fn round65_fix5_item4_a_list_the_game_turns_away_ends_the_open() {
+    big_stack(round65_fix5_item4_a_list_the_game_turns_away_ends_the_open_body)
+}
+fn round65_fix5_item4_a_list_the_game_turns_away_ends_the_open_body() {
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
     r65fix5_first_taken(&mut bv);
     bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 1e9 return true end)()");
@@ -4201,6 +4390,9 @@ fn round65_fix5_item4_a_list_the_game_turns_away_ends_the_open() {
 /// and the reason; none of them is an Addon Manager diagnostic.
 #[test]
 fn round65_fix5_item2_auto_loot_decisions_are_in_the_game_log() {
+    big_stack(round65_fix5_item2_auto_loot_decisions_are_in_the_game_log_body)
+}
+fn round65_fix5_item2_auto_loot_decisions_are_in_the_game_log_body() {
     let _ = super::take_mod_log_for_test();
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
     r65fix5_first_taken(&mut bv);
@@ -4259,6 +4451,9 @@ fn round65_fix5_item2_auto_loot_decisions_are_in_the_game_log() {
 /// it takes from that session (no open of its own), and says so.
 #[test]
 fn round65_fix6_item1_auto_loot_takes_from_the_corpse_the_player_opened() {
+    big_stack(round65_fix6_item1_auto_loot_takes_from_the_corpse_the_player_opened_body)
+}
+fn round65_fix6_item1_auto_loot_takes_from_the_corpse_the_player_opened_body() {
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
     r65fix5_first_taken(&mut bv);
     let _ = super::super::window_takeover::take_log_for_test();
@@ -4303,6 +4498,9 @@ fn round65_fix6_item1_auto_loot_takes_from_the_corpse_the_player_opened() {
 /// opened once that window closes.
 #[test]
 fn round65_fix6_item1_another_open_corpse_makes_auto_loot_wait_not_fail() {
+    big_stack(round65_fix6_item1_another_open_corpse_makes_auto_loot_wait_not_fail_body)
+}
+fn round65_fix6_item1_another_open_corpse_makes_auto_loot_wait_not_fail_body() {
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
     r65fix5_first_taken(&mut bv);
     let _ = super::super::window_takeover::take_log_for_test();
@@ -4335,6 +4533,9 @@ fn round65_fix6_item1_another_open_corpse_makes_auto_loot_wait_not_fail() {
 /// answers: a kill 12 units off waits ("walk closer"), and opens once the player is within reach.
 #[test]
 fn round65_fix6_item_a_loot_reach_starts_short_and_says_walk_closer() {
+    big_stack(round65_fix6_item_a_loot_reach_starts_short_and_says_walk_closer_body)
+}
+fn round65_fix6_item_a_loot_reach_starts_short_and_says_walk_closer_body() {
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
     r65fix5_first_taken(&mut bv);
     let _ = super::super::window_takeover::take_log_for_test();
@@ -4360,6 +4561,9 @@ fn round65_fix6_item_a_loot_reach_starts_short_and_says_walk_closer() {
 /// opens when the player comes within the learned reach.
 #[test]
 fn round65_fix6_item_a_four_refusals_in_a_row_still_loot_when_closer() {
+    big_stack(round65_fix6_item_a_four_refusals_in_a_row_still_loot_when_closer_body)
+}
+fn round65_fix6_item_a_four_refusals_in_a_row_still_loot_when_closer_body() {
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
     r65fix5_first_taken(&mut bv);
     bv.eval::<bool>("(function() local b = require('bags') b.AUTO_RETRY_SECS = 1e9 b.LOOT_DEFAULT_REACH = 16 return true end)()");
@@ -4398,6 +4602,9 @@ fn round65_fix6_item_a_four_refusals_in_a_row_still_loot_when_closer() {
 /// deliveries and one `player.get` a frame, and (release build) under 0.5 ms a frame.
 #[test]
 fn round65_fix6_item2_auto_loot_on_in_a_crowd_is_cheap() {
+    big_stack(round65_fix6_item2_auto_loot_on_in_a_crowd_is_cheap_body)
+}
+fn round65_fix6_item2_auto_loot_on_in_a_crowd_is_cheap_body() {
     let Some(mut bv) = bv_busy_scene() else { return };
     bv.play.bags_self_id(77);
     bv.frames(4);

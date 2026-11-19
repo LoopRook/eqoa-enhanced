@@ -325,7 +325,11 @@ pub fn install(lib: &mut Library, file: usize, zi: usize, bytes: Vec<u8>) -> Res
     if bytes.len() != len || bytes.len() < 12 || u16::from_le_bytes([bytes[0], bytes[1]]) != esf::zone::ZONE {
         return Err(format!("zone {zi}: {} bytes that are not its record", bytes.len()));
     }
-    lib.add_zone(file, zi, Container::parse_records(bytes)).map(|_| ()).ok_or_else(|| format!("zone {zi}: not added"))
+    let f = lib.add_zone(file, zi, Container::parse_records(bytes)).ok_or_else(|| format!("zone {zi}: not added"))?;
+    // its textures' stand-ins queued before the zone is drawn (900 in, it
+    // comes in at 1,050: `PREFETCH`)
+    crate::texpack::prefetch(lib.file(f), lib.era_of(f));
+    Ok(())
 }
 
 /// Each zone's bounds, out of the world base's proxies.
@@ -491,6 +495,22 @@ impl Streamer {
                 src.request(k, off, len);
                 self.requested.insert(k);
             }
+        }
+    }
+
+    /// Asks for zone `zi` now, wherever the player is, when it is neither in
+    /// nor asked for: a zone whose art a server's decoration wears
+    /// (`decorlights`), read as it would be were the player walking there (it
+    /// joins the library and the collision world, and is drawn only once the
+    /// player is within the inner radius of it, as any zone is).
+    pub fn want(&mut self, zi: usize, world: &World<Ee>, lib: &Library) {
+        let Some(src) = self.source.as_mut() else { return };
+        if world.loaded.get(zi).copied().unwrap_or(true) || self.requested.contains(&zi) {
+            return;
+        }
+        if let Some((off, len)) = lib.zone_range(self.file, zi) {
+            src.request(zi, off, len);
+            self.requested.insert(zi);
         }
     }
 

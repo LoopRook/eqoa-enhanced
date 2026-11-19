@@ -357,6 +357,9 @@ fn rm_pixels(gpu: &Gpu, target: &wgpu::Texture) -> Vec<u8> {
 
 #[test]
 fn round_minimap_hides_stock_blocks_its_clicks_and_returns_when_off() {
+    big_stack(round_minimap_hides_stock_blocks_its_clicks_and_returns_when_off_body)
+}
+fn round_minimap_hides_stock_blocks_its_clicks_and_returns_when_off_body() {
     let Some(mut rm) = Rm::new(false) else { return };
     // stock minimap: its rectangle takes clicks while no mod holds it
     let inside = {
@@ -396,6 +399,9 @@ fn rm_is_picture(p: [u8; 4]) -> bool {
 
 #[test]
 fn round_minimap_circle_follows_move_hud_and_clips_to_a_circle() {
+    big_stack(round_minimap_circle_follows_move_hud_and_clips_to_a_circle_body)
+}
+fn round_minimap_circle_follows_move_hud_and_clips_to_a_circle_body() {
     use crate::hudlayout::{self, Beyond, Piece};
     let Some(mut rm) = Rm::new(false) else { return };
     rm.frames(4);
@@ -453,6 +459,9 @@ fn rm_png(pixels: &[u8], name: &str) {
 
 #[test]
 fn round_minimap_dot_card_wheel_zoom_and_n_toggle() {
+    big_stack(round_minimap_dot_card_wheel_zoom_and_n_toggle_body)
+}
+fn round_minimap_dot_card_wheel_zoom_and_n_toggle_body() {
     let Some(mut rm) = Rm::new(false) else { return };
     rm.frames(4);
     // Test Rat stands 40 east, 30 south of the player
@@ -511,6 +520,9 @@ fn rm_wheel(steps: f32) {
 
 #[test]
 fn round_minimap_rim_arrow_only_where_the_circle_crops_the_square_mark() {
+    big_stack(round_minimap_rim_arrow_only_where_the_circle_crops_the_square_mark_body)
+}
+fn round_minimap_rim_arrow_only_where_the_circle_crops_the_square_mark_body() {
     let Some(mut rm) = Rm::new(false) else { return };
     let world = rm.play.player.world as i32;
     rm.frames(4);
@@ -541,6 +553,9 @@ fn round_minimap_rim_arrow_only_where_the_circle_crops_the_square_mark() {
 
 #[test]
 fn round_minimap_carries_the_search_button_and_box_when_the_search_mod_is_on() {
+    big_stack(round_minimap_carries_the_search_button_and_box_when_the_search_mod_is_on_body)
+}
+fn round_minimap_carries_the_search_button_and_box_when_the_search_mod_is_on_body() {
     use winit::keyboard::{Key, NamedKey};
     let Some(mut rm) = Rm::new(true) else { return };
     rm.frames(4);
@@ -560,6 +575,9 @@ fn round_minimap_carries_the_search_button_and_box_when_the_search_mod_is_on() {
 /// now, the nearest dot wins (the lower id on a tie), and the card says what kind it is.
 #[test]
 fn round_minimap_hover_follows_this_frames_creatures_and_picks_the_nearest_dot() {
+    big_stack(round_minimap_hover_follows_this_frames_creatures_and_picks_the_nearest_dot_body)
+}
+fn round_minimap_hover_follows_this_frames_creatures_and_picks_the_nearest_dot_body() {
     let Some(mut rm) = Rm::new(false) else { return };
     rm.frames(4);
     let me = rm.me;
@@ -631,6 +649,9 @@ fn round_minimap_hover_follows_this_frames_creatures_and_picks_the_nearest_dot()
 /// other side when the near side has no room), long names wrapped.
 #[test]
 fn round_minimap_card_stays_inside_the_window_wherever_the_minimap_is_moved() {
+    big_stack(round_minimap_card_stays_inside_the_window_wherever_the_minimap_is_moved_body)
+}
+fn round_minimap_card_stays_inside_the_window_wherever_the_minimap_is_moved_body() {
     use crate::hudlayout::{self, Beyond, Piece};
     let Some(mut rm) = Rm::new(false) else { return };
     let long = "A Very Long Server Provided Creature Name That Would Never Fit Beside A Minimap Without Wrapping Onto Several Lines Of Text";
@@ -672,6 +693,9 @@ fn round_minimap_card_stays_inside_the_window_wherever_the_minimap_is_moved() {
 /// topmost of overlapping marks, quest steps on the rim and only where the circle shows them.
 #[test]
 fn round_minimap_marker_hover_follows_what_the_minimap_draws() {
+    big_stack(round_minimap_marker_hover_follows_what_the_minimap_draws_body)
+}
+fn round_minimap_marker_hover_follows_what_the_minimap_draws_body() {
     use net::session::QuestMark;
     let Some(mut rm) = Rm::new(false) else { return };
     let world = rm.play.player.world as i32;
@@ -742,6 +766,9 @@ fn round_minimap_marker_hover_follows_what_the_minimap_draws() {
 /// as terrain does.
 #[test]
 fn round_minimap_stays_in_window_coordinates_at_aspects_and_render_scales() {
+    big_stack(round_minimap_stays_in_window_coordinates_at_aspects_and_render_scales_body)
+}
+fn round_minimap_stays_in_window_coordinates_at_aspects_and_render_scales_body() {
     let combos: [((u32, u32), u32, [f32; 4]); 6] = [
         ((1024, 768), 1, RM_GREEN),
         ((1024, 768), 2, RM_ORANGE),
@@ -798,6 +825,9 @@ fn round_minimap_stays_in_window_coordinates_at_aspects_and_render_scales() {
 /// group's orange as on the stock minimap, whichever corner.
 #[test]
 fn round_minimap_rim_arrows_keep_the_waypoint_colours() {
+    big_stack(round_minimap_rim_arrows_keep_the_waypoint_colours_body)
+}
+fn round_minimap_rim_arrows_keep_the_waypoint_colours_body() {
     let Some(mut rm) = Rm::new(false) else { return };
     let world = rm.play.player.world as i32;
     rm.frames(4);
@@ -847,6 +877,9 @@ fn rm_claims(rm: &Rm, at: [f32; 2]) -> bool {
 /// configuration, 300 by default); the recorded numbers come from `--release`.
 #[test]
 fn round4c_frame_time_with_all_map_mods_in_a_busy_world() {
+    big_stack(round4c_frame_time_with_all_map_mods_in_a_busy_world_body)
+}
+fn round4c_frame_time_with_all_map_mods_in_a_busy_world_body() {
     use std::time::Instant;
     // the disc's own HUD art when `$EQOA_ISO` is set (the frame, the font): the real minimap chrome
     let real_art = crate::map::extension::use_real_ui(true);
@@ -948,6 +981,9 @@ fn rm_frame_free(rm: &Rm, pixels: &[u8], width: u32, scale: u32, note: &str) -> 
 /// square minimap, whose frame the same check must find.
 #[test]
 fn round_minimap_shows_no_square_frame_inside_the_circle_with_the_discs_art() {
+    big_stack(round_minimap_shows_no_square_frame_inside_the_circle_with_the_discs_art_body)
+}
+fn round_minimap_shows_no_square_frame_inside_the_circle_with_the_discs_art_body() {
     if !crate::map::extension::use_real_ui(true) {
         return;
     }
@@ -981,6 +1017,9 @@ fn round_minimap_shows_no_square_frame_inside_the_circle_with_the_discs_art() {
 /// private indoor state: not covered here.
 #[test]
 fn round_minimap_wheel_reaches_both_ends_of_upstreams_zoom_in_whole_steps() {
+    big_stack(round_minimap_wheel_reaches_both_ends_of_upstreams_zoom_in_whole_steps_body)
+}
+fn round_minimap_wheel_reaches_both_ends_of_upstreams_zoom_in_whole_steps_body() {
     use crate::map::mini::SCALE_LIMITS;
     let Some(mut rm) = Rm::new(false) else { return };
     rm.frames(4);
@@ -1085,6 +1124,9 @@ fn rm_session(packages: &[&str]) -> Vec<String> {
 /// Every bundled mod, alone, runs that session with the Manager recording nothing.
 #[test]
 fn every_bundled_mod_runs_a_play_session_with_zero_manager_diagnostics() {
+    big_stack(every_bundled_mod_runs_a_play_session_with_zero_manager_diagnostics_body)
+}
+fn every_bundled_mod_runs_a_play_session_with_zero_manager_diagnostics_body() {
     let mut packages: Vec<&str> = crate::fork_ext::bundled::EMBEDDED_FILES.iter().map(|f| f.package).collect();
     packages.sort();
     packages.dedup();
@@ -1113,6 +1155,9 @@ fn every_bundled_mod_runs_a_play_session_with_zero_manager_diagnostics() {
 /// recorded by the same Manager, so the gate above would have failed on it.
 #[test]
 fn the_zero_diagnostics_gate_fails_on_a_deliberately_bad_call() {
+    big_stack(the_zero_diagnostics_gate_fails_on_a_deliberately_bad_call_body)
+}
+fn the_zero_diagnostics_gate_fails_on_a_deliberately_bad_call_body() {
     let Some(mut rm) = Rm::new(false) else { return };
     rm.frames(4);
     assert!(rm.manager.diagnostics().is_empty(), "clean first: {:?}", rm.manager.diagnostics());
@@ -1132,6 +1177,9 @@ fn the_zero_diagnostics_gate_fails_on_a_deliberately_bad_call() {
 /// not these at a window where the HUD scale is not one.
 #[test]
 fn round_minimap_search_button_and_box_keep_the_native_sizes_at_every_scale() {
+    big_stack(round_minimap_search_button_and_box_keep_the_native_sizes_at_every_scale_body)
+}
+fn round_minimap_search_button_and_box_keep_the_native_sizes_at_every_scale_body() {
     use winit::keyboard::{Key, NamedKey};
     for (win, scale) in [((640u32, 480u32), 1u32), ((1024, 768), 1), ((1024, 768), 2), ((1920, 1080), 1)] {
         let Some(mut rm) = Rm::sized(|p| p == "eqoa_round_minimap" || p == "eqoa_map_search", 0, win, scale) else { return };
@@ -1162,6 +1210,9 @@ fn round_minimap_search_button_and_box_keep_the_native_sizes_at_every_scale() {
 /// with spaces wraps whole and needs no ellipsis.
 #[test]
 fn round_minimap_card_cuts_a_single_oversized_word_with_an_ellipsis() {
+    big_stack(round_minimap_card_cuts_a_single_oversized_word_with_an_ellipsis_body)
+}
+fn round_minimap_card_cuts_a_single_oversized_word_with_an_ellipsis_body() {
     let Some(mut rm) = Rm::new(false) else { return };
     let word = "Supercalifragilisticexpialidocious".repeat(8);
     rm.put(rm_creature(3003, &word, [rm.me[0] + 40.0, rm.me[1], rm.me[2] + 30.0], 0, 7));
@@ -1190,6 +1241,9 @@ fn round_minimap_card_cuts_a_single_oversized_word_with_an_ellipsis() {
 /// circle follows the moved stock rectangle, the picture is there and no longer at the old place.
 #[test]
 fn round_minimap_follows_move_hud_at_render_scales_two_and_four() {
+    big_stack(round_minimap_follows_move_hud_at_render_scales_two_and_four_body)
+}
+fn round_minimap_follows_move_hud_at_render_scales_two_and_four_body() {
     use crate::hudlayout::{self, Beyond, Piece};
     for (win, scale) in [((1024u32, 768u32), 2u32), ((640, 480), 4), ((1024, 768), 4)] {
         let Some(mut rm) = Rm::sized(|p| p == "eqoa_round_minimap", 0, win, scale) else { return };
@@ -1231,6 +1285,9 @@ fn rm_is_picture_of(p: [u8; 4], color: [f32; 4]) -> bool {
 /// `EQOA_PERF`) nothing is timed or stored.
 #[test]
 fn addon_perf_line_splits_each_addons_lua_from_its_native_calls() {
+    big_stack(addon_perf_line_splits_each_addons_lua_from_its_native_calls_body)
+}
+fn addon_perf_line_splits_each_addons_lua_from_its_native_calls_body() {
     super::super::addon_perf::force_for_test(false);
     let Some(mut rm) = Rm::with(|p| p == "eqoa_round_minimap" || p == "eqoa_creature_journal", 50) else { return };
     rm.frames(8);

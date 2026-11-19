@@ -1066,6 +1066,8 @@ mod tests {
     include!("round_minimap_manager_tests.rs");
     include!("bag_viewer_tests.rs");
     include!("perf_round_tests.rs");
+
+    use super::super::big_stack;
     use super::*;
     use dear_imgui_rs::Context;
     use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo};
@@ -1761,6 +1763,9 @@ mod tests {
 
     #[test]
     fn forge_manager_health_pending_cleanup_pause_reload_and_coherent_snapshot() {
+        big_stack(forge_manager_health_pending_cleanup_pause_reload_and_coherent_snapshot_body)
+    }
+    fn forge_manager_health_pending_cleanup_pause_reload_and_coherent_snapshot_body() {
         let Some(mut gpu) = Gpu::new() else { return };
         let scripts = Scratch::new();
         let config = Scratch::new();
@@ -2600,6 +2605,9 @@ mod tests {
 
     #[test]
     fn round6b_frame_mode_and_forge_widget_click_grants_one_gesture_via_manager() {
+        big_stack(round6b_frame_mode_and_forge_widget_click_grants_one_gesture_via_manager_body)
+    }
+    fn round6b_frame_mode_and_forge_widget_click_grants_one_gesture_via_manager_body() {
         super::super::action_broker::reset_all_for_test();
         super::super::native_core::CORE.with(|c| {
             let mut core = super::super::native_core::Core::default();

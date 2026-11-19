@@ -66,6 +66,24 @@ pub(crate) mod input;
 mod items_forge;
 mod json_save;
 pub(crate) mod manager;
+
+/// Runs a test's body on its own thread with a 16 MiB stack. The GPU addon harnesses hold a `Play`
+/// (about 110 KB), a `Manager` and more by value (`Bv` about 170 KB, `Rm` about 190 KB), and a debug
+/// build copies them several times while building one, so these tests sit near the 2 MiB default
+/// test-thread stack; CI's build went over it (2026-11-19, STATUS_STACK_OVERFLOW, which aborts the
+/// whole test binary). A panic in the body fails the test as before.
+#[cfg(test)]
+pub(crate) fn big_stack(body: fn()) {
+    let joined = std::thread::Builder::new()
+        .name(std::thread::current().name().unwrap_or("big-stack test").to_owned())
+        .stack_size(16 << 20)
+        .spawn(body)
+        .expect("spawn the test's thread")
+        .join();
+    if let Err(panic) = joined {
+        std::panic::resume_unwind(panic);
+    }
+}
 pub(crate) mod map_views;
 pub(crate) mod named_profiles;
 pub(crate) mod native;

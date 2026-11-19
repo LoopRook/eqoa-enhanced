@@ -880,11 +880,11 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-impl Drop for Play {
-    fn drop(&mut self) {
-        net::fork_record::drain(&mut self.session);
-    }
+/// Called from upstream's `impl Drop for Play`: the session recorder writes
+/// what is still queued before the world goes.
+pub(super) fn dropped(_play: &mut Play) {
+    #[cfg(not(target_arch = "wasm32"))]
+    net::fork_record::drain(&mut _play.session);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -4289,6 +4289,27 @@ mod tests {
         );
         crate::fork_ext::chat_history::reset();
     }
+    /// Hide UI (`hideui`): a click on the compass opens the map only while
+    /// the HUD is shown; hidden, no HUD button is there and the click is the
+    /// world's. The control: shown, the same click opens the map.
+    #[test]
+    fn a_hidden_hud_does_not_open_the_map_from_the_compass() {
+        let mut p = super::super::commands::play();
+        p.hud = Some((
+            crate::ui::Vui::new(Default::default(), Default::default(), Vec::new()),
+            crate::ui::UiAssets::default(),
+            crate::hud::Hud::new(),
+        ));
+        let compass = crate::mouse::Click::Target(39.0, 54.0);
+        crate::hideui::toggle();
+        assert!(crate::hideui::hidden());
+        assert!(!p.point(compass, (640, 448), false), "hidden: the world's click");
+        assert!(!p.map.open);
+        crate::hideui::toggle();
+        assert!(p.point(compass, (640, 448), false), "the control: shown, the HUD's");
+        assert!(p.map.open, "and the compass opens the map");
+    }
+
     pub(super) fn play() -> Play {
         play_as("test")
     }
@@ -4393,6 +4414,7 @@ mod tests {
         p.session.quest_progress.push(net::session::TrackedQuest {
             name: "Wrong tracker title".into(),
             goals: vec![],
+            ability: false,
         });
         let journal = p.forge_snapshot(None).journal;
         assert_eq!(journal.count, 2);

@@ -454,3 +454,14 @@ of the intended changes and were rewritten (with controls); after the follow-up 
 suites pass (494, 0 SKIP); Python tools 101 passed. 50 SKIP messages in the full run (no oracle).
 Footprint PASS at reviewed base a76d8d2 (session.rs +207 to +110; play.rs +92/-51). The script's
 console output is now UTF-8 (it crashed printing U+2715).
+
+## Sync 2026-11-18 (133 commits to 35e2a43)
+
+Merge 90d7b143 on sync/2026-11-18 plus input follow-ups f18386df and
+59ed299a. Brings mercenary keyboard controls, Hardcore characters, the
+texture cache, [OG] account restrictions, and independent stacked spell
+bar placement. Six files needed hand resolution. The only footprint
+increase is options.rs, measured at +20/-12.
+
+See [the sync report](plans/sync-2026-11-18-report.md) for the resolutions,
+upstream instructions, Round 6.5 interactions, validation, and play-test list.
