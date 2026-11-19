@@ -26,6 +26,34 @@ use mlua::{Function, Value};
 use render::wgpu;
 use std::{cell::RefCell, collections::VecDeque, path::PathBuf, rc::Rc};
 
+/// A line a mod wrote with `eqoa.log.write`. Every one goes to the game's log (eqoa.log, as `addon <id>: [level]
+/// text`). "info" and "debug" are the mod's own record of what it did, not a problem: they stop there and stay out of
+/// the Mods & Addons diagnostics (returns true). "warn" and "error" go on to the diagnostics as well.
+fn mod_log_line(id: &str, message: &str) -> bool {
+    let Some(rest) = message.strip_prefix("eqoa/1 [") else {
+        return false;
+    };
+    let Some((level, text)) = rest.split_once("] ") else {
+        return false;
+    };
+    let line = format!("addon {id}: [{level}] {text}");
+    crate::say(&line);
+    #[cfg(test)]
+    MOD_LOG.with(|l| l.borrow_mut().push(line));
+    matches!(level, "info" | "debug")
+}
+
+#[cfg(test)]
+thread_local! {
+    static MOD_LOG: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The `eqoa.log.write` lines that reached the game's log on this thread since the last call.
+#[cfg(test)]
+pub(crate) fn take_mod_log_for_test() -> Vec<String> {
+    MOD_LOG.with(|l| std::mem::take(&mut *l.borrow_mut()))
+}
+
 const MAX_INSTANCES: usize = 16;
 const MAX_DIAGNOSTICS: usize = 128;
 #[path = "manager_profiles.rs"]
@@ -341,6 +369,9 @@ impl Manager {
                     self.diagnostic(Some(&entry.metadata.id), "imgui", message);
                 }
                 for message in i.host.drain_logs().unwrap_or_default() {
+                    if mod_log_line(&entry.metadata.id, &message) {
+                        continue;
+                    }
                     self.diagnostic(Some(&entry.metadata.id), "lua", message);
                 }
                 let messages = i.textures.borrow_mut().drain_diagnostics();
