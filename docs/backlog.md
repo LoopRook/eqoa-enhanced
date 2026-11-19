@@ -327,3 +327,11 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
 - **Status:** Small, not scheduled. `EQOA_MOD_KEYS` alone leaves `input::from_device()` true (`input.rs:518` lists the upstream
   script variables); count it as scripted fork-side without editing input.rs. The bag-viewer scene clicks fixed pixels
   (fails closed if the layout moves); add a negative control for a missing loot receipt in tools/test_local_scene.py.
+
+## Window takeover and upstream's keyboard-owning windows (sync review 2026-11-18)
+
+- **Status:** For round 6.5 / window replacement. Upstream's mercenary windows and dye picker only open from modes 0, 7, 9
+  (`mercplay.rs:142`, `dyeplay.rs:255`); a hidden takeover session leaves mode 0, so they can open while a mod holds a hidden
+  bank/loot session (the mod's bank action then stalls until the picker closes; a loot request made in modes 61/63 is
+  refused by upstream with 0x0016 and the pending open must be cleared). `report_viewer.rs:61` keeps keys from addons only for
+  `merc_win_owns() || dyepick_owns()`: a "not plain play" rule (mode not 0/38) would survive future upstream windows.
