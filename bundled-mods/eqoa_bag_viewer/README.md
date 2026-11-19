@@ -17,10 +17,12 @@ looting and banking stay in the game's windows.
 Buttons (this version): **Look at corpse** only shows the nearest corpse's items;
 **Take all** and **Take all but junk** take them. Mark items as junk from an item's
 menu; **Sell junk** sells them at a merchant. **Auto-loot** is a choice under the
-loot log, **Off**, **Everything** or **Everything but junk**, saved with the junk
-marks. The mod's own opens never show the game's corpse, shop or bank window. A
+loot log, **Off**, **Everything** or **Everything but junk**, kept for each
+character (the junk marks are shared: they are per item type). The mod's own opens never show the game's corpse, shop or bank window. A
 button for a merchant or banker that is beyond the reach the server last answered at
-is greyed out ("too far from the banker"); the reach is learned from real answers.
+is greyed out ("too far from the banker"); the reach is learned from real answers
+(two silences at a distance grey it, an answer clears it) and a greyed button still
+tries on a second click. One more than 40 units away shows nothing at all.
 
 It uses only the public `eqoa/1` API (`eqoa.inventory`, `eqoa.bank`, `eqoa.items`,
 `eqoa.icons`, the `inventory.changed`, `bank.changed` and `loot.changed` events)
