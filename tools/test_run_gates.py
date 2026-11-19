@@ -561,6 +561,7 @@ class TestSharedTargetGuard(unittest.TestCase):
         self.assertEqual(again.begin(), first)  # nothing built since: no re-touch, no needless rebuild
         self.assertFalse(again.touched_now)
 
+        time.sleep(0.05)  # coarse Windows clock: keep touches on distinct stamps
         self._dep_info(time.time() + 60)  # another worktree builds
         third = run_gates.SharedTargetGuard(self.root, self.target)
         self.assertGreater(third.begin(), first)
@@ -568,6 +569,7 @@ class TestSharedTargetGuard(unittest.TestCase):
 
         # The owner package builder forces a touch even when the marker says this worktree built last.
         third.end()
+        time.sleep(0.05)  # Windows runners tick time.time() at ~15 ms; two touches can share a stamp
         forced = run_gates.SharedTargetGuard(self.root, self.target)
         self.assertGreater(forced.begin(force=True), third.touched_at)
         self.assertTrue(forced.touched_now)
