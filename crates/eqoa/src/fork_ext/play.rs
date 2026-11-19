@@ -74,7 +74,8 @@ pub(crate) enum BrokerReply {
     MasterLoot(bool),
     InvAdd { item_id: i64 },
     InvTook { sound: u8, in_shop: bool },
-    LootOpen,
+    LootOpen { mode_before: i32 },
+    OpenLootRefused { code: &'static str, reason: String },
     MerchantOpen,
     BankOpen,
     LootOne { confirmed_key: Option<u32> },
@@ -139,7 +140,13 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
                 sound: *sound,
                 in_shop: play.npcw.shop.id.is_some() && *sound != 0,
             }),
-            net::session::Event::Opcode { op: 0x0018, .. } => Some(BrokerReply::LootOpen),
+            net::session::Event::Opcode { op: 0x0018, .. } => Some(BrokerReply::LootOpen { mode_before: play.mode }),
+            // the live server's answer to a corpse asked for from too far (no 0x0085; owner log 2026-11-18)
+            net::session::Event::Chat(text, _)
+                if text.trim() == "Out of range." && crate::fork_ext::addons::action_broker::open_loot_in_flight() =>
+            {
+                Some(BrokerReply::OpenLootRefused { code: "out_of_range", reason: text.trim().to_string() })
+            }
             net::session::Event::Opcode { op: 0x00B7, .. } => Some(BrokerReply::MerchantOpen),
             net::session::Event::Opcode { op: 0x124D, .. } => Some(BrokerReply::BankOpen),
             net::session::Event::Opcode { op: 0x0019, data } => {
@@ -322,7 +329,29 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
                 state_changed,
             );
         }
-        Some(BrokerReply::LootOpen) => {
+        Some(BrokerReply::OpenLootRefused { code, reason }) => {
+            tlog!("takeover: the server refused the corpse open: {reason}");
+            crate::fork_ext::addons::window_takeover::clear_pending_open(
+                crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
+            );
+            crate::fork_ext::addons::action_broker::resolve_server_open_loot_refused(code, &reason);
+        }
+        // the game turns a corpse's list away when another of its windows is up (`npcw` 0x0018 outside mode 0
+        // answers 0x0016): the open is refused at once, never left waiting (upstream's mercenary windows and dye
+        // picker, modes 61 to 63, are such windows)
+        Some(BrokerReply::LootOpen { mode_before })
+            if mode_before != 0 && crate::fork_ext::addons::action_broker::open_loot_in_flight() =>
+        {
+            tlog!("takeover: corpse list turned away by the game (mode {mode_before}: another window is up); the open is refused");
+            crate::fork_ext::addons::window_takeover::clear_pending_open(
+                crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
+            );
+            crate::fork_ext::addons::action_broker::resolve_server_open_loot_refused(
+                "busy",
+                "another game window was open; the corpse was closed",
+            );
+        }
+        Some(BrokerReply::LootOpen { .. }) => {
             crate::fork_ext::addons::window_takeover::touch_hidden_session(
                 crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
             );

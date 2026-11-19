@@ -2389,6 +2389,54 @@ pub(crate) fn resolve_server_loot_blocked(reason: Option<&str>) {
     resolve_server_loot_all(Some(false), Some(text), false);
 }
 
+/// A corpse open that did not happen: the server said so in chat ("Out of range."), or the game turned the corpse's list
+/// away itself (another window was up, so it answered with 0x0016). The waiting `open_loot` requests and a batch's
+/// re-ask of its corpse end as refused with `reason` at once, never left to the 10 s timeout. Takes in flight are not
+/// touched (they have their own answers).
+pub(crate) fn resolve_server_open_loot_refused(code: &'static str, reason: &str) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        let now_tick = b.tick;
+        for vm_state in b.vms.values_mut() {
+            if vm_state
+                .active_batch
+                .as_ref()
+                .is_some_and(|batch| batch.corpse_reopen.as_ref().is_some_and(|r| r.asked))
+            {
+                let step = vm_state.active_batch.as_ref().map(|batch| batch.current_step);
+                vm_state.finish_batch(
+                    "refused",
+                    Some(false),
+                    Some(code),
+                    Some(reason.to_string()),
+                    now_tick,
+                    step,
+                    true,
+                );
+            }
+        }
+        b.resolve_matching(|inflight| {
+            (inflight.native_sent && matches!(inflight.matcher, ServerMatcher::OpenLoot { .. }))
+                .then(|| (Some(false), Some(code), Some(reason.to_string())))
+        });
+    });
+}
+
+/// An `open_loot` request is waiting for the server's answer.
+pub(crate) fn open_loot_in_flight() -> bool {
+    BROKER.with(|b| {
+        b.borrow().vms.values().any(|v| {
+            v.in_flight
+                .values()
+                .any(|f| f.native_sent && matches!(f.matcher, ServerMatcher::OpenLoot { .. }))
+                || v
+                    .active_batch
+                    .as_ref()
+                    .is_some_and(|batch| batch.corpse_reopen.as_ref().is_some_and(|r| r.asked))
+        })
+    })
+}
+
 pub(crate) fn resolve_server_talk_open(opened: TalkKind, opened_npc_id: Option<u32>) {
     BROKER.with(|b| {
         b.borrow_mut().resolve_matching(|inflight| {
