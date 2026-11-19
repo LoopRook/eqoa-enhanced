@@ -24,11 +24,14 @@ is greyed out ("too far from the banker"); the reach is learned from real answer
 (two silences at a distance grey it, an answer clears it) and a greyed button still
 tries on a second click. One more than 40 units away shows nothing at all.
 
-Auto-loot opens a corpse of a creature you hit, within 15 units, once you are out of
-combat (the game's combat flag, auto-attack, or a hostile within 30 units that has
-you targeted; your pet, group members such as a mercenary, and merchants or bankers
-do not count). A corpse the server does not open ("Out of range." or no answer) is
-asked again when you come 2 units closer or after 5 seconds, three tries in all.
+Auto-loot opens a corpse of a creature you hit once you are out of combat (the game's
+combat flag, auto-attack on a live creature, or a hostile within 30 units that has you
+targeted; your pet, group members such as a mercenary, and merchants or bankers do not
+count). It opens corpses within the server's loot reach, which it learns from the server's
+answers (it starts at 7 units; "Out of range." only means walk closer). A corpse you opened
+yourself (the attack key on a dead target loots it) is taken from that window. A corpse the
+server does not answer is asked again 2 units closer or after 5 seconds, three tries in all.
+With Auto-loot on the mod looks around four times a second, not on every creature update.
 Every decision is a line in the game's log (`eqoa.log`), starting
 `addon eqoa_bag_viewer: [info] auto-loot:` with the corpse id and the reason.
 
