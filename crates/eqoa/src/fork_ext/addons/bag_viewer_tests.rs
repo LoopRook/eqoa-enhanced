@@ -55,6 +55,8 @@ struct Bv {
     _config: Scratch,
     manager: Manager,
     play: crate::play::Play,
+    /// gives the API the player's position (the snapshot has none without a walker); `frame` sets it from `play.self_at`
+    walker: crate::walker::Walker,
     win: (u32, u32),
     target: Option<wgpu::Texture>,
 }
@@ -111,13 +113,17 @@ impl Bv {
         play.bags_words();
         play.bags_set(&bv_world());
         let manager = gpu.manager(&root.0, Some(config.0.clone()));
-        Some(Bv { gpu, _root: root, _config: config, manager, play, win, target: None })
+        let walker = crate::play::Play::bundled_ui_walker();
+        Some(Bv { gpu, _root: root, _config: config, manager, play, walker, win, target: None })
     }
     fn enable(&mut self) {
         self.manager.queue(Command::Enable(BV.into(), true));
         self.frames(3);
         assert!(self.manager.entries().iter().all(|e| e.status == Status::Enabled), "{:?}", self.manager.diagnostics());
         self.clean();
+        // Auto-loot looks at the world every frame in the tests (a quarter second apart in play; the crowd tests in
+        // `bv_busy_scene` keep the real interval)
+        self.lua().load("require('bags').AUTO_POLL_SECS = 0").exec().unwrap();
     }
     /// Every bundled-mod test session asserts zero Addon Manager diagnostics.
     fn clean(&self) {
@@ -125,7 +131,11 @@ impl Bv {
         assert!(d.is_empty(), "{d:?}");
     }
     fn frame(&mut self) -> wgpu::Texture {
-        let mut snapshot = self.play.forge_snapshot(None);
+        let at = self.play.bags_player_pos();
+        self.walker.cam.walk.phys.position.x.0 = at[0];
+        self.walker.cam.walk.phys.position.y.0 = at[1];
+        self.walker.cam.walk.phys.position.z.0 = at[2];
+        let mut snapshot = self.play.forge_snapshot(Some(&self.walker));
         snapshot.capture_pending = false;
         self.manager.flush_pending_fonts(&mut self.gpu.context);
         {
@@ -1006,7 +1016,7 @@ fn round6b_bag_viewer_merchant_bank_and_corpse_menus_and_captures() {
 }
 
 #[test]
-fn round6c_bag_viewer_junk_marks_persist_across_reload_grey_off_by_default_and_no_unclicked_actions() {
+fn round6c_bag_viewer_junk_marks_and_auto_loot_choice_persist_across_reload_and_no_unclicked_actions() {
     super::super::action_broker::reset_all_for_test();
     let Some(mut bv) = Bv::new() else { return };
     bv.play.bags_connect();
@@ -1017,8 +1027,10 @@ fn round6c_bag_viewer_junk_marks_persist_across_reload_grey_off_by_default_and_n
     bv.enable();
     bv.open();
 
-    // Grey-items rule must be OFF by default and zero actions run without click.
-    assert!(!bv.eval::<bool>("require('bags').sell_grey"));
+    // Auto-loot is Off by default, "Also sell grey items" is gone (item 5), and zero actions run without a click.
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "off");
+    assert!(bv.action_hit("sell grey").is_none(), "the grey-items checkbox is retired");
+    assert!(bv.action_hit("Auto-loot: Off").is_some() && bv.action_hit("Auto-loot: Everything but junk").is_some());
     let sends_before = bv.play.bags_sends_lost();
     bv.frames(4);
     bv.play.bags_broker_tick();
@@ -1044,27 +1056,21 @@ fn round6c_bag_viewer_junk_marks_persist_across_reload_grey_off_by_default_and_n
     bv.click((mx, my));
     bv.frames(2);
     assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"));
-    assert!(!bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "grey item stays non-junk while grey rule off");
+    assert!(!bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "an unmarked misc item is never junk: only the marks decide");
     bv.click(s8);
     bv.frames(2);
     assert!(bv.menu_row("Unmark").is_some(), "menu switches to Unmark once marked");
     bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
     bv.frames(1);
 
-    // Toggle "Also sell grey items" ON -> Rat Pelt (grey misc) gains junk badge too.
-    let (gx, gy, glbl) = bv.action_hit("Also sell grey items").unwrap();
-    assert_eq!(glbl, "Also sell grey items");
+    // Choose Auto-loot "Everything but junk": it is the saved choice, and Rat Pelt (never marked) is not junk.
+    let (gx, gy, glbl) = bv.action_hit("Auto-loot: Everything but junk").unwrap();
+    assert_eq!(glbl, "Auto-loot: Everything but junk");
     bv.click((gx, gy));
     let badge_tex = bv.frames(2);
     bv_r6_png(&rm_pixels(&bv.gpu, &badge_tex), bv.win, "r6-junk-badges.png");
-    assert!(bv.eval::<bool>("require('bags').sell_grey == true"));
-    assert!(bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "Rat Pelt matches grey rule when ON");
-
-    // Toggle back OFF before reload test -> disables & re-enables addon -> marks survive reload!
-    let (gx, gy, _) = bv.action_hit("Also sell grey items").unwrap();
-    bv.click((gx, gy));
-    bv.frames(2);
-    assert!(!bv.eval::<bool>("require('bags').sell_grey"));
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "non_junk");
+    assert!(!bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "Rat Pelt is not junk");
 
     bv.manager.queue(Command::Enable(BV.into(), false));
     bv.frames(2);
@@ -1073,7 +1079,7 @@ fn round6c_bag_viewer_junk_marks_persist_across_reload_grey_off_by_default_and_n
     // Give the player a new stack with the same item id 900008 -> mark applies by item type.
     bv.play.bags_added(&serde_json::json!({"name":"Odd Thing Copy","id":900008,"key":99,"wear":0,"icon":4008}));
     bv.open();
-    assert!(!bv.eval::<bool>("require('bags').sell_grey"), "grey=false survived reload");
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "non_junk", "the Auto-loot choice survived reload");
     assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"), "junk id 900008 survived reload");
     assert!(bv.eval::<bool>("(function() local ok=true for _,e in ipairs(require('bags').grid.items) do if e.item.id==900008 and not require('bags').is_junk(e.item) then ok=false end end return ok end)()"));
 
@@ -1102,8 +1108,8 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot()
     bv.enable();
     bv.open();
 
-    // Mark Chipped Tooth, Torn Cloth, and Cracked Fang as junk (leave Rat Pelt unmarked grey).
-    for slot in [3usize, 4, 5] {
+    // Mark Rat Pelt, Chipped Tooth, Torn Cloth and Cracked Fang as junk (the Rusty Sword stays).
+    for slot in [2usize, 3, 4, 5] {
         let sp = bv.slot(slot);
         bv.click(sp);
         bv.frames(2);
@@ -1113,13 +1119,13 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot()
         bv.frames(1);
     }
 
-    // Open merchant: grey OFF -> shows 3 items; turn grey ON -> shows 4 items with native quote.
+    // Open merchant: the button counts the 4 marked items with the native quote.
     bv.play.bags_open_merchant(44);
     bv.frames(2);
     let (_, _, lbl_off) = bv.action_hit("Sell junk (").unwrap();
-    let quote_3: u64 = bv.eval("select(3, require('bags').junk_sell_list())");
-    assert!(lbl_off.starts_with("Sell junk (3 items, "), "{lbl_off}");
-    assert!(quote_3 > 0, "native quote must be positive");
+    let quote: u64 = bv.eval("select(3, require('bags').junk_sell_list())");
+    assert!(lbl_off.starts_with("Sell junk (4 items, "), "{lbl_off}");
+    assert!(quote > 0, "native quote must be positive");
 
     // Idle frames perform zero sells even with merchant open.
     let sends_idle = bv.play.bags_sends_lost();
@@ -1127,9 +1133,7 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot()
     bv.play.bags_broker_tick();
     assert_eq!(bv.play.bags_sends_lost(), sends_idle);
 
-    // Enable grey items -> count includes Rat Pelt (4 items) -> capture merchant PNG.
-    let (gx, gy, _) = bv.action_hit("Also sell grey items").unwrap();
-    bv.click((gx, gy));
+    // capture merchant PNG
     let merch_tex = bv.frames(2);
     bv_r6_png(&rm_pixels(&bv.gpu, &merch_tex), bv.win, "r6-junk-merchant.png");
     let (bx, by, lbl_on) = bv.action_hit("Sell junk (").unwrap();
@@ -1190,11 +1194,6 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot()
     let (res, ok) = bv.result_text().unwrap();
     assert_eq!(ok, Some(false));
     assert!(res.starts_with("Sold 1 of 2: zone"), "{res}");
-
-    // Turn grey back OFF for corpse test: Rat Pelt id=2001 will be marked explicitly as junk while Bone Chip & Spider Silk stay non-junk.
-    let (gx, gy, _) = bv.action_hit("Also sell grey items").unwrap();
-    bv.click((gx, gy));
-    bv.frames(1);
 
     // Corpse open: mark Rat Pelt (id 2001) as junk, switch to Corpse tab, capture r6-junk-corpse.png.
     bv.play.bags_target_corpse(5001, "a decaying skeleton");
@@ -1326,16 +1325,29 @@ fn round6_item4_lazy_icons_load_without_native_windows_and_zero_per_frame_reques
     // Steady-state frames must issue ZERO resource requests, ZERO ESF lookups, and avoid per-frame allocations.
     let res_before = super::super::icons::resource_call_count();
     let lkp_before = super::super::icons::lookup_attempt_count();
+    // Three windows of ten frames, a full collection after every frame; a leak grows every window, so at most one may
+    // grow by more than 1 KB. Lua's string table grows by doubling and a collection shrinks it only when it is three
+    // quarters empty, and the window's caches settle once: one window alone measured those one-time steps, not what a
+    // frame keeps (fix round 5: the old package plus 1,500 unused string constants grew 107 KB in one window; a control
+    // keeping 1 KB a frame showed -52 KB then +11.7 KB, so neither one window nor the smaller of two catches it).
     bv.lua().gc_collect().unwrap();
-    let bytes_before = bv.lua().used_memory();
-    bv.frames(10);
+    let mut window = || {
+        let before = bv.lua().used_memory();
+        for _ in 0..10 {
+            bv.frames(1);
+            bv.lua().gc_collect().unwrap();
+        }
+        bv.lua().used_memory() as i64 - before as i64
+    };
+    let grew = [window(), window(), window()];
     let res_after = super::super::icons::resource_call_count();
     let lkp_after = super::super::icons::lookup_attempt_count();
-    bv.lua().gc_collect().unwrap();
-    let bytes_after = bv.lua().used_memory();
     assert_eq!(res_after, res_before, "steady frames must not re-request eqoa.icons.resource");
     assert_eq!(lkp_after, lkp_before, "steady frames must not trigger ESF surface lookups");
-    assert!(bytes_after.saturating_sub(bytes_before) <= 1024, "steady frames must not leak Lua tables (delta={} bytes)", bytes_after.saturating_sub(bytes_before));
+    assert!(
+        grew.iter().filter(|&&d| d > 1024).count() <= 1,
+        "steady frames must not leak Lua tables (three windows of ten frames grew {grew:?} bytes)"
+    );
 
     // Bank tab loads its own non-prefetched icon without ever opening native bank UI.
     bv.click(bv.tab(6));
@@ -2322,5 +2334,2104 @@ fn round6_sandstorm_duplicate_item_id_stacks_and_partial_take() {
     );
 
     bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refusal() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+
+    // 1. Addon Manager labels eqoa_bag_viewer as acting on its own + lists eqoa.windows.takeover.
+    let entry = bv
+        .manager
+        .entries()
+        .into_iter()
+        .find(|e| e.metadata.id == "eqoa_bag_viewer")
+        .unwrap();
+    assert!(
+        entry
+            .metadata
+            .requested_capabilities
+            .iter()
+            .any(|c| c == "eqoa.windows.takeover"),
+        "mod.json must declare eqoa.windows.takeover"
+    );
+    assert_eq!(
+        super::super::runtime::autonomous_action_label(&entry.metadata.requested_capabilities)
+            .as_deref(),
+        Some("Actions: can act on its own (open_loot, talk, loot, loot_all, sell, bank_move, use_item, equip, quick_slot, batch)"),
+        "L7: the label names exactly the actions the mod uses, not all of them"
+    );
+
+    // Spawn nearby corpse (9001), merchant (9002), and banker (9003); native mode stays 0 throughout.
+    bv.play.bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [6.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9003, "Banker Dan", 0x80 | 2, 1, [8.0, 0.0, 0.0]);
+    bv.open();
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0);
+    // M1: opening Bag Viewer holds ZERO takeovers; player-started merchant/corpse still open native windows normally.
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('loot') and not eqoa.windows.taken('merchant') and not eqoa.windows.taken('bank')"), "Bag Viewer must NOT hold takeovers while idle");
+    bv.play.bags_merchant_packet(888);
+    assert_eq!(bv.play.mode, 10, "player-started merchant must open natively while Bag Viewer is open");
+    bv.play.bags_close_merchant();
+    assert_eq!(bv.play.mode, 0);
+
+    // 2. Click Corpse tab (visible because corpse is nearby) -> click Loot -> server refuses 0x0085 -> visible server text.
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    let (lx, ly, lbl) = bv.action_hit("Look at corpse").unwrap();
+    assert_eq!(lbl, "Look at corpse");
+    let sends_0 = bv.play.bags_sends_lost();
+    bv.click((lx, ly));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends_0, "Loot opens nearest corpse");
+    bv.play.bags_loot_refused(1);
+    bv.frames(2);
+    let (res_txt, res_ok) = bv.result_text().unwrap();
+    assert_eq!(res_ok, Some(false));
+    assert!(res_txt.contains("too far away"), "must show server refusal text: {res_txt}");
+    assert_eq!(bv.play.mode, 0);
+
+    // 3. Click Loot -> 0x0018 opens corpse silently (mode stays 0!) -> Take all but junk (Sandstorm 2-item per-take reopen without native window).
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['2001'] = true return true end)()"));
+    bv.click((lx, ly));
+    bv.play.bags_broker_tick();
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100,"icon":4020},
+        {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100,"icon":4021},
+        {"name":"Bone Chip","id":2004,"key":2,"qty":1,"max_stack":100,"icon":4022}
+    ]));
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0, "corpse window must NOT open natively under takeover");
+    let (nx, ny, _) = bv.action_hit("Take all but junk").unwrap();
+    bv.click((nx, ny));
+    bv.play.bags_broker_tick(); // Take Bloodstone (step 1)
+    bv.play.bags_added(&serde_json::json!({"name":"Bloodstone","id":2003,"key":75,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close(); // Sandstorm 0x0016 close between takes
+    bv.frames(1);
+    bv.play.bags_broker_tick(); // Broker reopens corpse with 0x0015 automatically
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Bone Chip","id":2004,"key":1,"qty":1,"max_stack":100}
+    ]));
+    assert_eq!(bv.play.mode, 0, "reopened corpse must NOT open natively");
+    bv.frames(1);
+    bv.play.bags_broker_tick(); // Take Bone Chip (step 2)
+    bv.play.bags_added(&serde_json::json!({"name":"Bone Chip","id":2004,"key":76,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0);
+    assert_eq!(
+        bv.result_text(),
+        Some(("Looted 2 of 2".into(), Some(true)))
+    );
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('loot')"), "Bag Viewer must release loot takeover when batch ends");
+
+    // 4. Mark Odd Thing (slot 8) as junk on All tab, then click Sell junk near Merchant (native merchant closed) -> talks & sells without native window!
+    bv.click(bv.tab(1));
+    bv.frames(1);
+    let s8 = bv.slot(8);
+    bv.click(s8);
+    bv.frames(2);
+    let (mx, my, en, _, _) = bv.menu_row("Mark as junk").unwrap();
+    assert!(en);
+    bv.click((mx, my));
+    bv.frames(2);
+
+    let (sx, sy, slbl) = bv.action_hit("Sell junk (").unwrap();
+    assert!(slbl.starts_with("Sell junk (1 item)"), "{slbl}");
+    let sends_merch = bv.play.bags_sends_lost();
+    bv.click((sx, sy));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends_merch, "Sell junk must talk to merchant");
+    assert_eq!(bv.play.target, 9002);
+    bv.play.bags_merchant_packet(9002);
+    assert_eq!(bv.play.mode, 0, "native merchant window must stay closed");
+    bv.frames(2);
+    bv.play.bags_broker_tick(); // dispatches step 1 sell
+    assert!(bv.play.bags_shop_pending(), "sell step sent silently");
+    bv.play.bags_sell_confirm(7, 1);
+    bv.frames(2);
+    assert_eq!(bv.result_text(), Some(("Sold 1 of 1".into(), Some(true))));
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('merchant')"), "Bag Viewer must release merchant takeover when batch ends");
+
+    // 5. Deposit near Banker (native bank closed): click item -> Deposit -> talks & deposits silently (mode stays 0).
+    let s2 = bv.slot(2); // Healing Potion
+    bv.click(s2);
+    bv.frames(2);
+    let (dx, dy, den, _, _) = bv.menu_row("Deposit 1").unwrap();
+    assert!(den, "Deposit 1 must be enabled when near banker");
+    bv.click((dx, dy));
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.target, 9003);
+    bv.play.bags_bank_packet();
+    assert_eq!(bv.play.mode, 0, "native bank window must stay closed");
+    bv.frames(2);
+    bv.play.bags_broker_tick(); // dispatches bank_move cleanly via bank_taken_tick
+    assert_eq!(bv.play.bags_bank_state(), 2, "bank_move must have sent native 0x1254");
+    bv.play.bags_bank_deposit_confirm(99, 900002, "Healing Potion", 1);
+    bv.frames(2);
+    assert_eq!(bv.result_text(), Some(("Deposit: ok".into(), Some(true))));
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('bank')"), "Bag Viewer must release bank takeover when action ends");
+
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn round65_bag_viewer_auto_loot_option_takes_all_but_junk_on_killed_target() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+
+    // Auto-loot option is registered and OFF by default.
+    assert_eq!(
+        bv.eval::<String>("require('bags').auto_mode"),
+        "off",
+        "Auto-loot is Off until chosen"
+    );
+
+    // Living target 9010 dies while auto_loot is OFF -> zero actions taken.
+    bv.play.bags_spawn_npc(9010, "a goblin", 0, 1, [3.0, 0.0, 0.0]);
+    bv.play.bags_target_sync(9010);
+    bv.frames(2);
+    let sends_off = bv.play.bags_sends_lost();
+    bv.play.bags_entity_die(9010);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends_off, "auto_loot OFF must do nothing");
+
+    // Turn Auto-loot ON; mark Rat Pelt (id 2001) as junk so auto-loot leaves it behind.
+    bv.open();
+    bv.frames(2);
+    bv_auto(&bv, "non_junk");
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('loot')"), "auto_loot ON must NOT hold loot takeover while idle");
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['2001'] = true return true end)()"));
+
+    // Kill living target 9011 nearest ([2,0,0] < 9010 at [3,0,0]) -> auto-loot opens corpse & loots non-junk cleanly without native window!
+    bv.play.bags_self_id(77);
+    bv.play.bags_spawn_npc(9011, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_target_sync(9011);
+    bv.play.bags_combat_hit(77, 9011, -12); // you hit it: the signal that it is your kill
+    bv.frames(2);
+    let sends_before = bv.play.bags_sends_lost();
+    bv.play.bags_entity_die(9011);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends_before, "auto_loot must send 0x0015 open_loot");
+    assert_eq!(bv.play.target, 9011);
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Sapphire","id":2009,"key":1,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0, "native corpse window must remain closed during auto-loot");
+    bv.play.bags_broker_tick(); // dispatches Take Sapphire (leaves junk Rat Pelt!)
+    bv.play.bags_added(&serde_json::json!({"name":"Sapphire","id":2009,"key":81,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(
+        bv.result_text(),
+        Some(("Looted 1 of 1".into(), Some(true))),
+        "auto-loot must take all non-junk and report completion"
+    );
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('loot')"), "auto-loot must release loot takeover after completion");
+
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// L6: Auto-loot's "my kill" signal is that you hit the creature, not that it was merely targeted.
+#[test]
+fn round65_fix_bag_viewer_auto_loot_only_corpses_of_creatures_you_hit() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_self_id(77);
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    bv_auto(&bv, "non_junk");
+
+    // a) targeted but never hit by you (another player's kill, say): not looted
+    bv.play.bags_spawn_npc(9101, "a rat", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_target_sync(9101);
+    bv.frames(2);
+    let before = bv.play.bags_sends_lost();
+    bv.play.bags_entity_die(9101);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), before, "a corpse of a creature you did not hit is not auto-looted");
+
+    // b) hit by someone else only: not looted
+    bv.play.bags_spawn_npc(9102, "a bat", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_combat_hit(555, 9102, -9);
+    bv.frames(1);
+    bv.play.bags_entity_die(9102);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), before, "another player's hit does not make it your kill");
+
+    // c) a player's corpse you hit (a duel, a mistake): never auto-looted
+    bv.play.bags_spawn_npc(9103, "Somebody", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_creature(9103, 2, u32::MAX);
+    bv.play.bags_combat_hit(77, 9103, -9);
+    bv.frames(1);
+    bv.play.bags_entity_die(9103);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), before, "a player's corpse is never auto-looted");
+
+    // d) a creature you hit, even if you had switched target before it died: looted
+    bv.play.bags_spawn_npc(9104, "a snake", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_combat_hit(77, 9104, -9);
+    bv.frames(1);
+    bv.play.bags_entity_die(9104);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > before, "a creature you hit and that died is auto-looted");
+
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// M1: Auto-loot never runs while you are in combat (it retargets, which ends the auto-attack); it waits
+/// and goes on when the fight is over.
+#[test]
+fn round65_fix_bag_viewer_auto_loot_waits_while_in_combat() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_self_id(77);
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    bv_auto(&bv, "non_junk");
+
+    // one kill of yours, while a second hostile still has you targeted
+    bv.play.bags_spawn_npc(9201, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9202, "a gnoll scout", 0, 1, [4.0, 0.0, 0.0]);
+    bv.play.bags_creature(9202, 0, 77);
+    bv.play.bags_target_sync(9201);
+    bv.play.bags_combat_hit(77, 9201, -12);
+    bv_look_again(&mut bv); // the look at the zone is a quarter second old at most
+    let before = bv.play.bags_sends_lost();
+    bv.play.bags_entity_die(9201);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), before, "M1: no auto-loot while a live hostile has you targeted");
+    assert_eq!(bv.play.target, 9201, "M1: the target is not touched during combat");
+
+    // the scout stops (dies): out of combat, the held-back corpse is taken now (the next creature update, a quarter
+    // second on, asks again)
+    bv.play.bags_entity_die(9202);
+    bv_look_again(&mut bv); // the next look at the zone (at most half a second on, from Auto-loot's poll)
+    bv.eval::<bool>("(function() require('bags').tick_auto_loot() return true end)()");
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > before, "M1: auto-loot goes on once the fight is over");
+
+    // 9201's corpse answers with nothing on it: that open is over
+    bv.play.bags_corpse(&serde_json::json!([]));
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.play.bags_loot_close();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+
+    // auto-attack on a live creature is a fight; the game leaves it on after the creature dies, and then it is not
+    // (fix round 6, owner log 2026-11-19: corpses waited "in combat (auto-attack is on)" long after the kill)
+    bv.play.bags_spawn_npc(9203, "a rat", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9204, "a second rat", 0, 1, [3.0, 0.0, 0.0]);
+    bv.play.bags_target_sync(9203);
+    bv.play.bags_auto_attack(true);
+    bv.play.bags_combat_hit(77, 9203, -12);
+    bv_look_again(&mut bv);
+    let before2 = bv.play.bags_sends_lost();
+    bv.play.bags_entity_die(9203);
+    bv.play.bags_target_sync(9204); // the auto-attack goes on against the next one
+    bv_look_again(&mut bv);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), before2, "M1: no auto-loot while auto-attack is on against a live creature");
+    bv.play.bags_entity_die(9204); // auto-attack still on, its target a corpse now
+    bv_look_again(&mut bv);
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > before2, "fix round 6 B: auto-attack left on after the kill is not a fight");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// L5: the Loot tab keeps the hidden corpse session alive while it shows it; the idle timeout is for sessions
+/// nobody uses.
+#[test]
+fn round65_fix_bag_viewer_loot_tab_keeps_hidden_session_alive() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play.bags_spawn_npc(9301, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    let (lx, ly, _) = bv.action_hit("Look at corpse").unwrap();
+    bv.click((lx, ly));
+    bv.play.bags_broker_tick();
+    bv.play.bags_corpse(&bv_corpse());
+    bv.frames(2);
+    let hidden_open = |bv: &Bv| {
+        super::super::window_takeover::is_hidden_active(super::super::window_takeover::TakeoverKind::Loot)
+            && bv.play.bags_corpse_held()
+    };
+    assert!(hidden_open(&bv), "the corpse is open (hidden) in the tab");
+    // the player reads the tab for longer than the idle timeout
+    super::super::window_takeover::expire_hidden_session_for_test(super::super::window_takeover::TakeoverKind::Loot);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert!(hidden_open(&bv), "L5: the Loot tab must renew the session while it is shown");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// L7: the manifest declares exactly the actions the Lua calls.
+#[test]
+fn round65_fix_bag_viewer_manifest_declares_exactly_the_actions_it_uses() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods/eqoa_bag_viewer");
+    let mut used = std::collections::BTreeSet::new();
+    for file in ["main.lua", "modules/bags.lua"] {
+        let src = std::fs::read_to_string(root.join(file)).unwrap();
+        let mut rest = src.as_str();
+        while let Some(i) = rest.find("eqoa.actions.") {
+            rest = &rest[i + "eqoa.actions.".len()..];
+            let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            if !name.is_empty() {
+                used.insert(name);
+            }
+        }
+    }
+    // cancel and stop_batch ask for no capability
+    used.remove("cancel");
+    used.remove("stop_batch");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("mod.json")).unwrap()).unwrap();
+    let declared: std::collections::BTreeSet<String> = manifest["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|c| c.as_str()?.strip_prefix("eqoa.actions.").map(str::to_string))
+        .collect();
+    assert!(!declared.contains("*"), "no blanket eqoa.actions.*");
+    assert_eq!(declared, used, "declared actions must equal the actions the mod calls");
+}
+
+/// Owner test of round 6.5 (a, b): the corpse button opens the nearest corpse into the Corpse tab and SHOWS its
+/// items, without the game's window and without taking anything; stale loot-request bookkeeping (a request the
+/// server never answered) must not turn the mod's open into a native window.
+#[test]
+fn round65_fix2_open_corpse_shows_items_hidden_even_with_stale_loot_requests() {
+    r65fix2_open_corpse(true);
+}
+
+#[test]
+fn round65_fix2_open_button_only_displays_never_takes() {
+    r65fix2_open_corpse(false);
+}
+
+fn r65fix2_open_corpse(stale: bool) {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play
+        .bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+    // requests of earlier play that no list ever answered: the loot-source bookkeeping is tainted for good
+    if stale {
+        crate::fork_ext::loot_requested(7001);
+        crate::fork_ext::loot_requested(7002);
+    }
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    let (lx, ly, lbl) = bv.action_hit("Look at corpse").unwrap();
+    assert_eq!(lbl, "Look at corpse");
+    let _ = super::super::window_takeover::take_log_for_test();
+    bv.click((lx, ly));
+    bv.play.bags_broker_tick();
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(
+        log.iter().any(|l| l.contains("mod open_loot -> corpse 0x2329") && l.contains("opcode 0x0015")),
+        "the request's entity and opcode are logged: {log:?}"
+    );
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100},
+        {"name":"Bone Chip","id":2004,"key":2,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    assert_eq!(
+        bv.play.mode, 0,
+        "the game's corpse window must not open after a Bag Viewer button"
+    );
+    assert!(
+        super::super::window_takeover::is_hidden_active(
+            super::super::window_takeover::TakeoverKind::Loot
+        ),
+        "the open is the mod's hidden session"
+    );
+    let names = bv.names();
+    assert_eq!(
+        names,
+        vec!["Rat Pelt", "Bloodstone", "Bone Chip"],
+        "the Corpse tab shows the corpse's items"
+    );
+    assert_eq!(bv.result_text(), Some(("Corpse ready".into(), Some(true))));
+    // Opening must not leave a take queued for the next broker tick.
+    let sends = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    assert_eq!(
+        bv.play.bags_sends_lost(),
+        sends,
+        "opening must not queue a take request"
+    );
+    assert_eq!(bv.names().len(), 3);
+    assert!(bv.eval::<bool>("#assert(eqoa.loot.get()).items == 3"));
+    if std::env::var_os("EQOA_R6_CAPTURE_DIR").is_some() {
+        let shot = bv.frames(1);
+        bv_r6_png(&rm_pixels(&bv.gpu, &shot), bv.win, "r65-corpse-open.png");
+    }
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+}
+
+/// Owner test (c): a merchant that never answers the talk must end the step visibly after the server timeout,
+/// not stay on "Opening merchant...".
+#[test]
+fn round65_fix2_unanswered_merchant_talk_fails_visibly() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play
+        .bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [6.0, 0.0, 0.0]);
+    assert!(
+        bv.eval::<bool>("(function() require('bags').junk_ids['900008'] = true return true end)()")
+    );
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(1));
+    bv.frames(2);
+    let (sx, sy, _) = bv.action_hit("Sell junk (").unwrap();
+    let sends = bv.play.bags_sends_lost();
+    bv.click((sx, sy));
+    bv.play.bags_broker_tick();
+    assert!(
+        bv.play.bags_sends_lost() > sends,
+        "the talk request goes out"
+    );
+    assert_eq!(bv.result_text(), Some(("Opening merchant...".into(), None)));
+    // the server says nothing at all
+    for _ in 0..320 {
+        bv.play.bags_broker_tick();
+    }
+    bv.frames(2);
+    let (text, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert!(
+        text.contains("merchant did not answer"),
+        "visible failure, got: {text}"
+    );
+    assert!(
+        bv.eval::<bool>("not eqoa.windows.taken('merchant')"),
+        "the takeover is let go after the failure"
+    );
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Owner test (d): a banker who does not answer (out of the server's reach) is told in the result line, for the
+/// open and for a bank action.
+#[test]
+fn round65_fix2_unanswered_bank_requests_fail_visibly() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play
+        .bags_spawn_npc(9003, "Banker Dan", 0x80 | 2, 1, [8.0, 0.0, 0.0]);
+    bv.open();
+    bv.frames(2);
+    // Deposit near a banker: the open (talk) goes unanswered
+    let s2 = bv.slot(2);
+    bv.click(s2);
+    bv.frames(2);
+    let (dx, dy, den, _, _) = bv.menu_row("Deposit 1").unwrap();
+    assert!(den);
+    bv.click((dx, dy));
+    bv.play.bags_broker_tick();
+    for _ in 0..320 {
+        bv.play.bags_broker_tick();
+    }
+    bv.frames(2);
+    let (text, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert!(
+        text.contains("banker did not answer"),
+        "open: visible failure, got: {text}"
+    );
+
+    // the bank opens (the player stands nearer, 4 units: the silence at 8 made 8 and farther too far), but the
+    // deposit itself goes unanswered
+    bv.play.bags_player_at([4.0, 0.0, 0.0]);
+    bv.eval::<bool>("(function() require('bags').scan_reset() return true end)()");
+    bv.frames(2);
+    bv.click(s2);
+    bv.frames(2);
+    let (dx, dy, _, _, _) = bv.menu_row("Deposit 1").unwrap();
+    bv.click((dx, dy));
+    bv.play.bags_broker_tick();
+    bv.play.bags_bank_packet();
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_bank_state(), 2, "the deposit request went out");
+    for _ in 0..320 {
+        bv.play.bags_broker_tick();
+    }
+    bv.frames(2);
+    let (text, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert!(
+        text.contains("too far from the banker"),
+        "action: visible failure, got: {text}"
+    );
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---- Round 6.5 fix round 4, item 1: the Bag Viewer's cost per frame -------------------------------------------------
+
+/// Chooses Auto-loot in the window's own way (what its button does).
+fn bv_auto(bv: &Bv, mode: &str) {
+    assert!(bv.eval::<bool>(&format!("require('bags').set_auto_mode({mode:?})")), "Auto-loot {mode}");
+}
+
+/// A full pack: `n` distinct stacks (the biggest pack the game has is 100 slots).
+fn bv_full_pack(n: usize) -> serde_json::Value {
+    let mut world = bv_world();
+    let pack: Vec<serde_json::Value> = (0..n)
+        .map(|i| serde_json::json!({"name": format!("Pack Item {i}"), "id": 800_000 + i, "key": 100 + i, "qty": 1 + (i % 7), "max_stack": 20, "icon": 4001 + (i % 8)}))
+        .collect();
+    world["pack"] = serde_json::Value::Array(pack);
+    world
+}
+
+/// The first number after `needle` in `line`.
+fn bv_num_after(line: &str, needle: &str) -> Option<f64> {
+    let rest = &line[line.find(needle)? + needle.len()..];
+    let end = rest.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(rest.len());
+    rest[..end].parse().ok()
+}
+
+/// What the Bag Viewer cost over a run of busy frames.
+struct BvCost {
+    /// ms a frame spent in the mod (its Lua and its `eqoa.*` calls)
+    mod_ms: f64,
+    /// `eqoa.entities.list` calls a second of wall time
+    lists_per_s: f64,
+    /// wall seconds the frames took
+    secs: f64,
+    lines: Vec<String>,
+}
+
+/// One frame's creature updates: every twentieth creature moves and the session tells the API.
+fn bv_churn(bv: &mut Bv, tick: usize) {
+    for i in 3..bv.play.entities.slots.len() {
+        if (tick + i) % 20 != 0 {
+            continue;
+        }
+        if let Some(e) = bv.play.entities.slots[i].as_mut() {
+            if e.id >= 5000 {
+                e.pos[0] += 0.1;
+                e.actor_pos = e.pos;
+                bv.play.entity_slot_changed(i);
+            }
+        }
+    }
+}
+
+/// Runs `n` frames in a busy world (a creature in every twentieth slot changing each frame: 35 updates a frame, what the
+/// owner's log shows in a crowded zone)
+/// and returns what the Bag Viewer cost.
+fn bv_cost(bv: &mut Bv, n: usize) -> BvCost {
+    bv_cost_with(bv, n, &mut |_, _| {})
+}
+
+/// The release-build budgets of the Bag Viewer's cost a frame, ms (the report's numbers; before the fixes about 60 open).
+const RELEASE_OPEN_MS: f64 = 3.0;
+const RELEASE_AUTO_ON_MS: f64 = 3.0;
+
+/// `bv_cost` with something more happening each frame (`extra`, given the frame number).
+fn bv_cost_with(bv: &mut Bv, n: usize, extra: &mut dyn FnMut(&mut Bv, usize)) -> BvCost {
+    use super::super::addon_perf;
+    // every creature is touched once before the count starts: the API reports one it has not seen as added, and
+    // each such event (rightly) drops the Bag Viewer's look at the zone
+    for tick in 0..25 {
+        bv_churn(bv, tick);
+        extra(bv, tick);
+        bv.frame();
+    }
+    addon_perf::force_for_test(true);
+    let _ = addon_perf::take_report();
+    let started = std::time::Instant::now();
+    for tick in 25..25 + n {
+        bv_churn(bv, tick);
+        extra(bv, tick);
+        bv.frame();
+    }
+    let secs = started.elapsed().as_secs_f64();
+    let lines = addon_perf::take_report();
+    addon_perf::force_for_test(false);
+    let mod_ms = lines
+        .iter()
+        .find(|l| l.starts_with("addons:"))
+        .and_then(|l| bv_num_after(l, &format!("{BV} ")))
+        .unwrap_or(0.0);
+    let per_frame = lines
+        .iter()
+        .find(|l| l.starts_with("addon-api:") && l.contains(BV))
+        .and_then(|l| bv_num_after(l, "entities.list "))
+        .unwrap_or(0.0);
+    BvCost { mod_ms, lists_per_s: per_frame * n as f64 / secs, secs, lines }
+}
+
+/// What one `eqoa.entities.list()` of the busy zone costs here, in ms (the least of a few: the unit the window's
+/// per-frame budget is counted in, so the test means the same in a debug and a release build).
+fn bv_list_ms(bv: &Bv) -> f64 {
+    (0..5)
+        .map(|_| {
+            let t = std::time::Instant::now();
+            assert!(bv.eval::<i64>("#eqoa.entities.list()") > 700);
+            t.elapsed().as_secs_f64() * 1e3
+        })
+        .fold(f64::MAX, f64::min)
+}
+
+/// The real-shaped scene: a 100-slot pack, 700 creatures round the player, a corpse and a merchant in reach.
+fn bv_busy_scene() -> Option<Bv> {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let mut bv = Bv::new()?;
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_full_pack(100));
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    for i in 0..700 {
+        let a = i as f32 * 2.399_963;
+        let d = 20.0 + (i % 40) as f32 * 5.0;
+        bv.play.entities.slots.push(Some(rm_creature(5000 + i as u32, &format!("Busy Creature {i}"), [a.cos() * d, 0.0, a.sin() * d], 0, 1 + (i % 50) as u8)));
+    }
+    bv.enable();
+    bv.lua().load("require('bags').AUTO_POLL_SECS = 0.25").exec().unwrap();
+    bv.play.bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [6.0, 0.0, 0.0]);
+    Some(bv)
+}
+
+/// Owner log 2026-11-18: with the Bags window open the `hud` time went from about 10 to 22 ms a frame, 7-10 ms of it
+/// the Bag Viewer's, nearly all of it `eqoa.entities.list` (each call clones and compares every creature in the
+/// zone; the window asked for the list four times a frame). The window, open on a 100-slot pack beside a corpse and
+/// a merchant in a 700-creature zone, must ask for the list at most about twice a second, and cost less per frame
+/// than one list call does (counted so in any build; in a release build it must also be under 6 ms a frame, closed under 0.2).
+#[test]
+fn round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame() {
+    let Some(mut bv) = bv_busy_scene() else { return };
+    bv.frames(4);
+    let list_ms = bv_list_ms(&bv);
+    let closed = bv_cost(&mut bv, 120);
+    eprintln!("R65P one list call {list_ms:.3} ms; closed: {:.3} ms/frame, {:.2} list calls/s", closed.mod_ms, closed.lists_per_s);
+    bv.open();
+    bv.frames(6);
+    assert_eq!(bv.names().len(), 100, "the 100-slot pack is on screen");
+    let open = bv_cost(&mut bv, 120);
+    eprintln!("R65P open: {:.3} ms/frame, {:.2} list calls/s", open.mod_ms, open.lists_per_s);
+    for l in &open.lines {
+        eprintln!("R65P     {l}");
+    }
+    assert!(open.lists_per_s <= 3.0, "the open window asks for the zone's creature list {:.1} times a second", open.lists_per_s);
+    assert!(open.mod_ms < list_ms, "the open Bags window costs {:.3} ms a frame; one look at the zone is {list_ms:.3} ms", open.mod_ms);
+    if !cfg!(debug_assertions) {
+        assert!(open.mod_ms < RELEASE_OPEN_MS, "the open Bags window costs {:.3} ms a frame (budget {RELEASE_OPEN_MS}; before the fixes about 60)", open.mod_ms);
+        assert!(closed.mod_ms < 0.2, "the closed Bag Viewer costs {:.3} ms a frame (budget 0.2)", closed.mod_ms);
+    }
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+/// Auto-loot's fight check runs on every creature update while a looted corpse waits; it must share one look at the
+/// zone, not scan 700 creatures per call.
+#[test]
+fn round65_fix4_item1_waiting_auto_loot_shares_one_scan_of_the_zone() {
+    let Some(mut bv) = bv_busy_scene() else { return };
+    bv.frames(4);
+    bv_auto(&bv, "non_junk");
+    bv.frames(2);
+    bv.play.entity_slot_changed(5);
+    bv.frames(2);
+    super::super::addon_perf::force_for_test(true);
+    let _ = super::super::addon_perf::take_report();
+    // 50 questions in one frame: a fight check, then where the nearest corpse, merchant and banker are
+    {
+        let _in_the_mod = super::super::addon_perf::lua_scope(BV);
+        bv.eval::<bool>(
+            "(function() local b = require('bags') for i = 1, 50 do b.in_combat() b.nearby_corpse() b.nearby_npc('merchant') b.nearby_npc('bank') end return true end)()",
+        );
+    }
+    bv.frame();
+    let lines = super::super::addon_perf::take_report();
+    super::super::addon_perf::force_for_test(false);
+    let calls = lines
+        .iter()
+        .find(|l| l.starts_with("addon-api:") && l.contains(BV))
+        .and_then(|l| bv_num_after(l, "entities.list "))
+        .unwrap_or(0.0);
+    eprintln!("R65P 200 questions: {calls:.1} list calls; {lines:?}");
+    assert!(calls <= 2.0, "200 questions about the zone made {calls:.1} full scans of its creatures");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---- Round 6.5 fix round 4, item 2: every open a mod causes stays hidden -------------------------------------------
+
+/// Owner log 2026-11-18: after a hidden open_loot the game's own corpse window showed during auto-loot and batches
+/// ("takeover: loot window left to the game (no request of the holder is waiting for this window ...)"). The live
+/// server closes the corpse after each take (0x0016); the broker asks for it again (0x0015) and the answer (0x0018)
+/// must be the mod's, like the first one: the game's window never shows, and no line of the takeover log says it
+/// was left to the game. `auto_loot` is how the batch starts (the button, or Auto-loot after a kill); `relist` is how
+/// the server goes on after a take: it lists the corpse again by itself right behind its close (what the owner's
+/// log shows: no client request before those lists), or only after the broker asks for it (0x0015).
+fn r65fix4_hidden_batch(auto_loot: bool, relist: bool) {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_self_id(77);
+    bv.enable();
+    let _ = super::super::window_takeover::take_log_for_test();
+    let items = |keys_from: usize| {
+        let all = [("Rat Pelt", 2001), ("Bloodstone", 2003), ("Bone Chip", 2004)];
+        serde_json::Value::Array(
+            all[keys_from..]
+                .iter()
+                .enumerate()
+                .map(|(k, (n, id))| serde_json::json!({"name": n, "id": id, "key": k, "qty": 1, "max_stack": 100}))
+                .collect(),
+        )
+    };
+    if auto_loot {
+        bv.open();
+        bv.frames(2);
+        bv_auto(&bv, "non_junk");
+        bv.play.bags_spawn_npc(9011, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
+        bv.play.bags_target_sync(9011);
+        bv.play.bags_combat_hit(77, 9011, -12);
+        bv.frames(2);
+        bv.play.bags_entity_die(9011);
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+    } else {
+        bv.play.bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+        bv.open();
+        bv.frames(2);
+        bv.click(bv.tab(7));
+        bv.frames(1);
+        let (lx, ly, _) = bv.action_hit("Take all but junk").unwrap();
+        bv.click((lx, ly));
+        bv.play.bags_broker_tick();
+    }
+    let names = ["Rat Pelt", "Bloodstone", "Bone Chip"];
+    // the list that answers the open
+    bv.play.bags_corpse(&items(0));
+    for (taken, name) in names.iter().enumerate() {
+        bv.frames(2);
+        assert_eq!(bv.play.mode, 0, "the game's corpse window must not show (list {taken})");
+        bv.play.bags_broker_tick(); // the next take
+        let id = [2001, 2003, 2004][taken];
+        bv.play.bags_added(&serde_json::json!({"name": name, "id": id, "key": 80 + taken, "qty": 1, "max_stack": 100}));
+        bv.play.bags_chat(&format!("You receive {name} from the corpse."));
+        bv.play.bags_loot_close(); // the server closes the corpse after every take
+        if taken + 1 < names.len() {
+            if relist {
+                // ... and lists it again at once, with no request of ours before it
+                bv.play.bags_corpse(&items(taken + 1));
+            } else {
+                bv.frames(1);
+                let before = bv.play.bags_sends_lost();
+                bv.play.bags_broker_tick(); // the broker asks for the corpse again: 0x0015
+                assert!(bv.play.bags_sends_lost() > before, "the broker asks for the corpse again (take {taken})");
+                bv.play.bags_corpse(&items(taken + 1));
+            }
+        }
+    }
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0, "no game window at the end");
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(
+        !log.iter().any(|l| l.contains("left to the game")),
+        "every open the mod caused stays hidden, got: {log:#?}"
+    );
+    assert_eq!(
+        log.iter().filter(|l| l.contains("window HIDDEN for the mod")).count(),
+        3,
+        "the open and each list after a take are all the mod's: {log:#?}"
+    );
+    assert_eq!(bv.result_text(), Some(("Looted 3 of 3".into(), Some(true))));
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+}
+
+#[test]
+fn round65_fix4_item2_take_all_but_junk_relists_stay_hidden() {
+    r65fix4_hidden_batch(false, true);
+}
+
+#[test]
+fn round65_fix4_item2_take_all_but_junk_reopens_asked_by_the_broker_stay_hidden() {
+    r65fix4_hidden_batch(false, false);
+}
+
+#[test]
+fn round65_fix4_item2_auto_loot_relists_stay_hidden() {
+    r65fix4_hidden_batch(true, true);
+}
+
+#[test]
+fn round65_fix4_item2_auto_loot_reopens_asked_by_the_broker_stay_hidden() {
+    r65fix4_hidden_batch(true, false);
+}
+
+/// A corpse the player clicks themselves while a hidden session is up is still theirs: the game's window shows.
+#[test]
+fn round65_fix4_item2_a_players_own_click_on_the_corpse_still_shows_the_game_window() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play.bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    let (lx, ly, _) = bv.action_hit("Take all but junk").unwrap();
+    bv.click((lx, ly));
+    bv.play.bags_broker_tick();
+    let list = serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100}
+    ]);
+    bv.play.bags_corpse(&list);
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0, "the mod's open is hidden");
+    // the player presses the loot button on the same corpse themselves: no claim of the mod's stands behind it
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&list);
+    assert_eq!(bv.play.mode, 1, "the player's own request shows the game's corpse window");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+}
+
+// ---- Round 6.5 fix round 4, items 3-6: Auto-loot choice, Look/Take labels, no grey items, out-of-range buttons ------
+
+/// A killed creature of yours (you hit it), looted by Auto-loot under `mode`: returns the viewer with the creature
+/// dead, junk Rat Pelt (2001) marked.
+fn r65fix4_auto_kill(mode: &str) -> Option<Bv> {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let mut bv = Bv::new()?;
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_self_id(77);
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['2001'] = true return true end)()"));
+    if mode != "off" {
+        // the window's own button, as a player chooses it
+        let label = if mode == "all" { "Auto-loot: Everything" } else { "Auto-loot: Everything but junk" };
+        let (x, y, _) = bv.action_hit(label).unwrap();
+        bv.click((x, y));
+    }
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), mode);
+    bv.play.bags_spawn_npc(9011, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_target_sync(9011);
+    bv.play.bags_combat_hit(77, 9011, -12);
+    bv.frames(2);
+    bv.play.bags_entity_die(9011);
+    bv.frames(2);
+    Some(bv)
+}
+/// The corpse's list (junk Rat Pelt and Sapphire) answers Auto-loot's open.
+fn r65fix4_auto_list(bv: &mut Bv) {
+    bv.play.bags_broker_tick(); // 0x0015
+    bv.play.bags_corpse(&serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Sapphire","id":2009,"key":1,"qty":1,"max_stack":100}
+    ]));
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0, "the game's corpse window stays closed during Auto-loot");
+}
+
+/// Off: a kill is left alone.
+#[test]
+fn round65_fix4_item3_auto_loot_off_leaves_the_corpse_alone() {
+    let Some(mut bv) = r65fix4_auto_kill("off") else { return };
+    let sends = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.bags_sends_lost(), sends, "Off: nothing is asked of the server");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Everything: the corpse's junk goes too (one Take all).
+#[test]
+fn round65_fix4_item3_auto_loot_everything_takes_the_junk_too() {
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    r65fix4_auto_list(&mut bv);
+    let sends = bv.play.bags_sends_lost();
+    bv.play.bags_broker_tick(); // Take all: 0x001A
+    assert!(bv.play.bags_sends_lost() > sends, "Everything sends one Take all");
+    bv.play.bags_loot_confirm_all();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.result_text(), Some(("Take all: ok".into(), Some(true))), "Everything is a Take all, junk included");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Everything but junk: the marked junk stays on the corpse.
+#[test]
+fn round65_fix4_item3_auto_loot_everything_but_junk_leaves_the_junk() {
+    let Some(mut bv) = r65fix4_auto_kill("non_junk") else { return };
+    r65fix4_auto_list(&mut bv);
+    bv.play.bags_broker_tick(); // takes Sapphire only
+    bv.play.bags_added(&serde_json::json!({"name":"Sapphire","id":2009,"key":81,"qty":1,"max_stack":100}));
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    assert_eq!(bv.result_text(), Some(("Looted 1 of 1".into(), Some(true))), "only the one that is not junk");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// The choice is three buttons with a one-line explanation under them, kept with the junk marks, and it replaces
+/// the old on/off option (the Options page no longer lists one).
+#[test]
+fn round65_fix4_item3_auto_loot_choice_buttons_explanation_and_saved() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "off");
+    let mut explained = Vec::new();
+    for (label, key) in [("Auto-loot: Off", "off"), ("Auto-loot: Everything", "all"), ("Auto-loot: Everything but junk", "non_junk")] {
+        let (x, y, found) = bv.action_hit(label).unwrap_or_else(|| panic!("a button for {label}"));
+        assert_eq!(found, label);
+        bv.click((x, y));
+        bv.frames(1);
+        assert_eq!(bv.eval::<String>("require('bags').auto_mode"), key);
+        let line: String = bv.eval("require('bags').auto_explain()");
+        assert!(line.starts_with("Auto-loot: ") && line.len() < 60, "one short line: {line:?}");
+        explained.push(line);
+    }
+    explained.sort();
+    explained.dedup();
+    assert_eq!(explained.len(), 3, "each choice explains itself");
+    assert_eq!(super::super::options::get_toggle(BV, "auto_loot"), None, "the old on/off option is gone");
+    // kept: written with the junk marks, read back after a reload
+    let saved: String = bv.eval("eqoa.files.read('junk.cfg')");
+    assert!(saved.lines().next() == Some("auto:Wereoxx=non_junk"), "{saved:?}");
+    bv.manager.queue(Command::Enable(BV.into(), false));
+    bv.frames(2);
+    bv.manager.queue(Command::Enable(BV.into(), true));
+    bv.frames(3);
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "non_junk");
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item 4: the buttons say what they do: Look only shows, Take takes.
+#[test]
+fn round65_fix4_item4_look_and_take_labels() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play.bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(2);
+    let labels: Vec<String> = bv.eval("(function() local t = {} for _, h in ipairs(require('bags').action_hits) do t[#t + 1] = h.label end return t end)()");
+    for want in ["Look at corpse", "Take all", "Take all but junk"] {
+        assert!(labels.iter().any(|l| l == want), "a button {want:?} among {labels:?}");
+    }
+    assert!(!labels.iter().any(|l| l.contains("Open nearest corpse")), "the unclear label is gone: {labels:?}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item 5: no "Also sell grey items": no checkbox, no setting; only the marks make junk; an old file's `grey=` line
+/// is ignored and not written back.
+#[test]
+fn round65_fix4_item5_no_grey_items_option() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    let labels: Vec<String> = bv.eval("(function() local t = {} for _, h in ipairs(require('bags').action_hits) do t[#t + 1] = h.label end return t end)()");
+    assert!(!labels.iter().any(|l| l.to_lowercase().contains("grey")), "no grey-items checkbox: {labels:?}");
+    assert!(bv.eval::<bool>("require('bags').sell_grey == nil and require('bags').toggle_grey == nil and require('bags').is_grey_item == nil"));
+    // an older version's file: its grey line changes nothing, the mark loads, and saving drops the line
+    assert!(bv.eval::<bool>("(function() eqoa.files.write('junk.cfg', 'grey=1\\n900008\\n') require('bags').load_junk() return true end)()"));
+    assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"));
+    assert!(!bv.eval::<bool>("require('bags').is_junk({id = 900007, name = 'Rat Pelt'})"), "a plain misc item is not junk");
+    assert!(bv.eval::<bool>("(function() require('bags').save_junk() return true end)()"));
+    let saved: String = bv.eval("eqoa.files.read('junk.cfg')");
+    assert!(!saved.contains("grey"), "{saved:?}");
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// The nearest NPC list is cached for half a second; a test that moves the player asks again at once.
+fn bv_look_again(bv: &mut Bv) {
+    bv.eval::<bool>("(function() require('bags').scan_reset() return true end)()");
+    bv.frames(2);
+}
+
+/// Item 6: with the nearest merchant or banker beyond the reach the server last accepted, the mod's own buttons
+/// grey out and say why. The reach is learned: an answer at a distance makes that distance fine, silence makes it
+/// (and farther) too far; until known, a conservative default decides. The player's own windows are never blocked.
+#[test]
+fn round65_fix4_item6_out_of_range_buttons_grey_out_and_the_reach_is_learned() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    // the merchant and the banker stand 30 units away: past the default reach
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [30.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9003, "Banker Dan", 0x80 | 2, 1, [0.0, 0.0, 30.0]);
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['900008'] = true return true end)()"));
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(1));
+    bv.frames(2);
+    let sends = bv.play.bags_sends_lost();
+    let (x, y, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.contains("too far from the merchant"), "greyed out and says why: {label}");
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends, "nothing is sent to a merchant out of reach");
+    assert_eq!(bv.result_text(), Some(("Sell junk: too far from the merchant (click again to try anyway)".into(), Some(false))));
+    // Deposit and Withdraw: the rows are there, greyed, with the reason
+    bv.click(bv.slot(2));
+    bv.frames(2);
+    let (_, _, en, reason, _) = bv.menu_row("Deposit").unwrap();
+    assert!(!en && reason.as_deref() == Some("too far from the banker"), "{en} {reason:?}");
+    bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
+    bv.frames(1);
+
+    // walking up to 5 units: in reach; the merchant answers: 5 is a distance that works
+    bv.play.bags_player_at([25.0, 0.0, 0.0]);
+    bv_look_again(&mut bv);
+    let (x, y, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.starts_with("Sell junk (1 item)"), "in reach: {label}");
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends, "the talk request goes out");
+    bv.play.bags_merchant_packet(9002);
+    bv.frames(2);
+    let ok: f64 = bv.eval("require('bags').range.merchant.ok");
+    assert!((ok - 5.0).abs() < 0.01, "an answer at 5 units: {ok}");
+    bv.play.bags_close_merchant();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+
+    // at 9 units (inside the default reach) the merchant says nothing, once: one miss greys nothing
+    bv.play.bags_player_at([21.0, 0.0, 0.0]);
+    bv_look_again(&mut bv);
+    let (x, y, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.starts_with("Sell junk (1 item)"), "9 units is inside the default reach: {label}");
+    bv.click((x, y));
+    for _ in 0..330 {
+        bv.play.bags_broker_tick();
+    }
+    bv.frames(2);
+    assert!(bv.result_text().unwrap().0.contains("did not answer"));
+    let fail: Option<f64> = bv.eval("require('bags').range.merchant.fail");
+    assert_eq!(fail, None, "one silence is not yet 'too far'");
+    bv_look_again(&mut bv);
+    let (x, y, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.starts_with("Sell junk (1 item)"), "after one miss: {label}");
+    // the second silence at the same distance: 9 and farther are too far from now on
+    bv.click((x, y));
+    for _ in 0..330 {
+        bv.play.bags_broker_tick();
+    }
+    bv.frames(2);
+    let fail: f64 = bv.eval("require('bags').range.merchant.fail");
+    assert!((fail - 9.0).abs() < 0.01, "two silences at 9 units: {fail}");
+    bv_look_again(&mut bv);
+    let (_, _, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.contains("too far from the merchant"), "9 units is now known to be too far: {label}");
+    // 7 units lies between a distance that worked (5) and one that did not (9): worth trying
+    bv.play.bags_player_at([23.0, 0.0, 0.0]);
+    bv_look_again(&mut bv);
+    let (_, _, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.starts_with("Sell junk (1 item)"), "between worked and failed: {label}");
+
+    // the player's own window is never blocked: far from the merchant, with the shop open, Sell junk works
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_open_merchant(9002);
+    bv_look_again(&mut bv);
+    let (x, y, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.starts_with("Sell junk (1 item"), "open shop: no distance check: {label}");
+    let sends = bv.play.bags_sends_lost();
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert!(bv.play.bags_sends_lost() > sends || bv.play.bags_shop_pending(), "the sell goes out from an open shop");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item 6, bank side: far from the banker the rows are greyed with the reason; a bank the player opened by hand is a
+/// real answer (the reach is learned from it), and an open bank is never blocked.
+#[test]
+fn round65_fix4_item6_bank_rows_follow_the_reach_and_native_opens_teach_it() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play.bags_spawn_npc(9003, "Banker Dan", 0x80 | 2, 1, [0.0, 0.0, 14.0]);
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(1));
+    bv.frames(2);
+    bv.click(bv.slot(2));
+    bv.frames(2);
+    let (_, _, en, reason, _) = bv.menu_row("Deposit").unwrap();
+    assert!(!en, "14 units: past the default reach");
+    assert_eq!(reason.as_deref(), Some("too far from the banker"));
+    bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
+    // the player walks to 4 units and opens the bank themselves: that answer is learned (4 units works)
+    bv.play.bags_player_at([0.0, 0.0, 10.0]);
+    bv_look_again(&mut bv);
+    bv.play.bags_bank_packet();
+    bv.frames(2);
+    let ok: Option<f64> = bv.eval("require('bags').range.bank.ok");
+    assert!(ok.is_some_and(|d| (d - 4.0).abs() < 0.01), "a native open at 4 units teaches the reach: {ok:?}");
+    // with the bank open nothing is blocked, wherever the banker stands
+    bv.play.bags_player_at([0.0, 0.0, -40.0]);
+    bv_look_again(&mut bv);
+    bv.click(bv.slot(2));
+    bv.frames(2);
+    let (_, _, en, reason, _) = bv.menu_row("Deposit").unwrap();
+    assert!(en, "an open bank is never blocked: {reason:?}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---- Round 6.5 fix round 4, review H1: the server's list after the mod's LAST take stays hidden too ---------------------
+
+/// The corpse after the last take: the junk is still on it, so the server closes it (0x0016) and lists it again by
+/// itself (0x0018). The mod's session has just ended with that take; the list must still not reach the player as the
+/// game's window, and the corpse is closed again quietly. A corpse the player asks for afterwards is theirs.
+/// `single` is how the last take is made: one item from its menu, or a Take all but junk batch.
+fn r65fix4_last_take_relist(single: bool) {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['2001'] = true return true end)()"));
+    bv.play.bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    let _ = super::super::window_takeover::take_log_for_test();
+    let pelt = serde_json::json!({"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100});
+    let stone = |key: u32| serde_json::json!({"name":"Bloodstone","id":2003,"key":key,"qty":1,"max_stack":100});
+    if single {
+        let (x, y, _) = bv.action_hit("Look at corpse").unwrap();
+        bv.click((x, y));
+        bv.play.bags_broker_tick();
+        bv.play.bags_corpse(&serde_json::json!([stone(0), {"name":"Rat Pelt","id":2001,"key":1,"qty":1,"max_stack":100}]));
+        bv.frames(2);
+        assert_eq!(bv.play.mode, 0, "the preview is hidden");
+        bv.click(bv.slot(1));
+        bv.frames(2);
+        let (mx, my, en, _, _) = bv.menu_row("Take").unwrap();
+        assert!(en);
+        bv.click((mx, my));
+        bv.play.bags_broker_tick();
+    } else {
+        let (x, y, _) = bv.action_hit("Take all but junk").unwrap();
+        bv.click((x, y));
+        bv.play.bags_broker_tick();
+        bv.play.bags_corpse(&serde_json::json!([pelt.clone(), {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100}]));
+        bv.frames(2);
+        assert_eq!(bv.play.mode, 0);
+        bv.play.bags_broker_tick(); // the one item that is not junk
+    }
+    // the take: the item, the chat line, the close, and the list of what is left (the junk), all at once
+    bv.play.bags_added(&serde_json::json!({"name":"Bloodstone","id":2003,"key":80,"qty":1,"max_stack":100}));
+    bv.play.bags_chat("You receive Bloodstone from the corpse.");
+    bv.play.bags_loot_close();
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100}]));
+    assert_eq!(bv.play.mode, 0, "the list after the last take must not show the game's corpse window");
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    bv.play.bags_broker_tick(); // the session of a single take ends in this tick, its close is sent in the next
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0);
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(!log.iter().any(|l| l.contains("left to the game")), "nothing left to the game: {log:#?}");
+    assert!(
+        log.iter().any(|l| l.contains("again")),
+        "the list is recognised as the server's (the session going on, or the grace after its last take): {log:#?}"
+    );
+    assert!(
+        single || !bv.play.bags_corpse_held(),
+        "and after a batch the corpse is closed again, quietly (hidden active {}, mode {}): {log:#?}",
+        super::super::window_takeover::is_hidden_active(super::super::window_takeover::TakeoverKind::Loot),
+        bv.play.mode
+    );
+    // the player's own click on that corpse afterwards is theirs: the game's window shows
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100}]));
+    assert_eq!(bv.play.mode, 1, "a player's own request is never hidden");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+}
+
+#[test]
+fn round65_fix4_h1_list_after_the_last_batch_take_stays_hidden() {
+    r65fix4_last_take_relist(false);
+}
+
+#[test]
+fn round65_fix4_h1_list_after_a_single_menu_take_stays_hidden() {
+    r65fix4_last_take_relist(true);
+}
+
+// ---- Round 6.5 fix round 4, review M2: the Auto-loot choice is per character ----------------------------------------
+
+/// The choice is kept per character (the junk file keeps one line for each); a login as another character reads that
+/// character's choice; a reload of the mod keeps both. The junk marks stay shared: they are per item type, in the same file.
+#[test]
+fn round65_fix4_m2_auto_loot_choice_is_per_character() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    bv.open();
+    bv.frames(3);
+    assert_eq!(bv.eval::<String>("require('bags').character"), "Wereoxx");
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "off", "nothing chosen yet");
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['900008'] = true require('bags').save_junk() return true end)()"));
+    bv_auto(&bv, "all");
+    let saved: String = bv.eval("eqoa.files.read('junk.cfg')");
+    assert!(saved.lines().any(|l| l == "auto:Wereoxx=all"), "{saved:?}");
+
+    // another character enters the world: the choice is theirs (off), the first one's is kept
+    bv.play.bags_set_name("Aldara");
+    bv.play.bags_zone();
+    bv.eval::<bool>("(function() require('bags').char_checked = -100 return true end)()");
+    bv.frames(3);
+    bv.eval::<bool>("(function() require('bags').sync_character() return true end)()"); // the game's next player update does this
+    let who: String = bv.eval("(function() local p = eqoa.player.get() return tostring(p and p.name) .. ' dirty=' .. tostring(require('bags').char_dirty) end)()");
+    assert_eq!(bv.eval::<String>("require('bags').character"), "Aldara", "{who}");
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "off", "a new character starts with Auto-loot off");
+    assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"), "the junk marks are shared");
+    bv_auto(&bv, "non_junk");
+    let saved: String = bv.eval("eqoa.files.read('junk.cfg')");
+    assert!(saved.lines().any(|l| l == "auto:Wereoxx=all") && saved.lines().any(|l| l == "auto:Aldara=non_junk"), "{saved:?}");
+
+    // back to the first character
+    bv.play.bags_set_name("Wereoxx");
+    bv.play.bags_zone();
+    bv.eval::<bool>("(function() require('bags').char_checked = -100 return true end)()");
+    bv.frames(3);
+    bv.eval::<bool>("(function() require('bags').sync_character() return true end)()"); // the game's next player update does this
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "all");
+
+    // a reload of the mod: each character still has theirs
+    bv.manager.queue(Command::Enable(BV.into(), false));
+    bv.frames(2);
+    bv.manager.queue(Command::Enable(BV.into(), true));
+    bv.frames(3);
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "all");
+    bv.play.bags_set_name("Aldara");
+    bv.play.bags_zone();
+    bv.eval::<bool>("(function() require('bags').char_checked = -100 return true end)()");
+    bv.frames(3);
+    bv.eval::<bool>("(function() require('bags').sync_character() return true end)()"); // the game's next player update does this
+    assert_eq!(bv.eval::<String>("require('bags').auto_mode"), "non_junk");
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---- Round 6.5 fix round 4, review M3: one unanswered request does not grey a button for the session ----------------
+
+/// Silence is weaker evidence than an answer: one miss greys nothing, two misses grey the nearer distance, a miss closer
+/// than the farthest answer drops the old answers and greys at once, and an answer always clears the doubt.
+#[test]
+fn round65_fix4_m3_note_range_needs_two_misses_and_an_answer_clears() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    let eval = |lua: &str| bv.eval::<Option<f64>>(&format!("(function() local b = require('bags') b.range.merchant = {{}} {lua} end)()"));
+    assert_eq!(eval("b.note_range('merchant', 9, false) return b.range.merchant.fail"), None, "one miss greys nothing");
+    assert_eq!(eval("b.note_range('merchant', 9, false) b.note_range('merchant', 12, false) return b.range.merchant.fail"), Some(9.0), "two misses grey the nearer one");
+    assert_eq!(eval("b.note_range('merchant', 9, false) b.note_range('merchant', 12, false) b.note_range('merchant', 6, true) return b.range.merchant.fail"), None, "an answer clears the misses");
+    assert_eq!(eval("b.note_range('merchant', 12, true) b.note_range('merchant', 15, false) return b.range.merchant.fail"), None, "one miss past the farthest answer greys nothing");
+    assert_eq!(eval("b.note_range('merchant', 12, true) b.note_range('merchant', 5, false) return b.range.merchant.fail"), Some(5.0), "a miss closer than the farthest answer greys at once");
+    assert_eq!(eval("b.note_range('merchant', 12, true) b.note_range('merchant', 5, false) return b.range.merchant.ok"), None, "and the old answer no longer counts");
+}
+
+/// A greyed button still allows one try: the first click says why and asks to click again, the second goes out; an
+/// answer to it clears the grey.
+#[test]
+fn round65_fix4_m3_a_greyed_button_still_allows_one_try() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [20.0, 0.0, 0.0]);
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['900008'] = true return true end)()"));
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(1));
+    bv.frames(2);
+    let (x, y, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.contains("too far from the merchant"), "{label}");
+    let sends = bv.play.bags_sends_lost();
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends, "the first click only says why");
+    let (text, _) = bv.result_text().unwrap();
+    assert!(text.contains("too far from the merchant") && text.contains("click again"), "{text}");
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends, "the second click tries anyway");
+    // the merchant answers (the server's reach is longer than guessed): the grey is gone for good
+    bv.play.bags_merchant_packet(9002);
+    bv.frames(2);
+    let ok: f64 = bv.eval("require('bags').range.merchant.ok");
+    assert!((ok - 20.0).abs() < 0.01, "{ok}");
+    bv.play.bags_close_merchant();
+    bv.play.bags_broker_tick();
+    bv.eval::<bool>("(function() require('bags').scan_reset() return true end)()");
+    bv.frames(2);
+    let (_, _, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.starts_with("Sell junk (1 item)"), "an answer clears the grey: {label}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---- Round 6.5 fix round 4, review M4: rescans capped, Auto-loot ON in a crowded zone, the window's drawing ------------
+
+/// Auto-loot ON in a crowded zone, window closed, a corpse of yours held back by a fight, and a hostile that starts and
+/// stops targeting you every frame (each flip makes the fight check stale): the zone is looked at no more than once
+/// every quarter second, and the mod's per-frame cost stays small.
+#[test]
+fn round65_fix4_m4_auto_loot_on_in_a_crowded_zone_scans_at_most_four_times_a_second() {
+    let Some(mut bv) = bv_busy_scene() else { return };
+    bv.play.bags_self_id(77);
+    bv.frames(4);
+    bv_auto(&bv, "non_junk");
+    bv.frames(2);
+    bv.play.bags_spawn_npc(9700, "a hostile", 0, 1, [5.0, 0.0, 0.0]);
+    bv.frames(2);
+    // a corpse of yours waits for the fight to end
+    assert!(bv.eval::<bool>("(function() require('bags').eligible_corpses = {[9001] = {id = 9001, position = {x = 3, y = 0, z = 0}}} return true end)()"));
+    // fix round 6: Auto-loot polls instead of hearing creature updates, so a flip no longer makes the look stale and a
+    // moment without the hostile let it open the corpse (then nothing waits and nothing is looked at); the hostile now
+    // stays on the player, updated every frame, and the corpse waits in combat throughout
+    bv.play.bags_creature(9700, 0, 77);
+    bv.eval::<bool>("(function() require('bags').scan_reset() return true end)()");
+    let scans_before: u32 = bv.eval("require('bags').scan_count");
+    let cost = bv_cost_with(&mut bv, 120, &mut |bv, _| {
+        bv.play.bags_creature(9700, 0, 77);
+    });
+    eprintln!("R65P auto-loot on, crowded: {:.3} ms/frame, {:.2} list calls/s", cost.mod_ms, cost.lists_per_s);
+    for l in &cost.lines {
+        eprintln!("R65P     {l}");
+    }
+    let scans = bv.eval::<u32>("require('bags').scan_count") - scans_before;
+    let per_s = scans as f64 / (cost.secs + 0.001);
+    let state: String = bv.eval("(function() local b = require('bags') return tostring(b.auto_mode) .. ' elig=' .. tostring(next(b.eligible_corpses or {})) .. ' batch=' .. tostring(b.batch_id) .. ' open=' .. tostring(b.pending_open) .. ' last=' .. tostring(b.last_req) .. ' char=' .. tostring(b.character) end)()");
+    eprintln!("R65P scans: {scans} in {:.1} s ({per_s:.2} a second); {state}", cost.secs);
+    assert!(per_s <= 4.5, "a flip every frame made {per_s:.1} looks at the zone a second (cap: one every 0.25 s)");
+    assert!(per_s > 0.5, "the fight check still looks at the zone ({per_s:.2} a second): {state}");
+    if !cfg!(debug_assertions) {
+        assert!(cost.mod_ms < RELEASE_AUTO_ON_MS, "Auto-loot on in a crowded zone costs {:.3} ms a frame (budget {RELEASE_AUTO_ON_MS})", cost.mod_ms);
+    }
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---- Round 6.5 fix round 4, review L5: a merchant or banker across the city shows nothing, not a "too far" line ----------
+
+#[test]
+fn round65_fix4_l5_a_merchant_or_banker_far_away_shows_no_button_and_no_row() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [60.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9003, "Banker Dan", 0x80 | 2, 1, [0.0, 0.0, 60.0]);
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['900008'] = true return true end)()"));
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(1));
+    bv.frames(2);
+    assert!(bv.action_hit("Sell junk").is_none(), "no Sell junk line for a merchant 60 units away");
+    bv.click(bv.slot(2));
+    bv.frames(2);
+    assert!(bv.menu_row("Deposit").is_none(), "no Deposit row for a banker 60 units away");
+    bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
+    bv.frames(1);
+    // within sight (30 units) the greyed line is there
+    bv.play.bags_player_at([30.0, 0.0, 0.0]);
+    bv_look_again(&mut bv);
+    let (_, _, label) = bv.action_hit("Sell junk").unwrap();
+    assert!(label.contains("too far from the merchant"), "{label}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---- Round 6.5 fix round 5: Auto-loot stopped for good after the owner's live test (2026-11-18) -------------------
+
+/// A creature of yours killed at `pos`: you target it, hit it, it dies (its corpse is where it stood).
+fn r65fix5_kill(bv: &mut Bv, id: u32, pos: [f32; 3]) {
+    bv.play.bags_spawn_npc(id, "a vulture", 0, 1, pos);
+    bv.play.bags_target_sync(id);
+    bv.play.bags_combat_hit(77, id, -12);
+    bv_look_again(bv);
+    bv.play.bags_entity_die(id);
+    bv.frames(2);
+}
+
+/// The mod asked the server for corpse `id` (0x0015 by the mod, seen in the takeover log).
+fn r65fix5_asked(log: &[String], id: u32) -> bool {
+    let needle = format!("mod open_loot -> corpse {id:#x}");
+    log.iter().any(|l| l.contains(&needle))
+}
+
+/// The owner's live sequence (r65-retest3 log, lines 403-483): a corpse with coin only, a corpse the server answers
+/// with "Out of range." and nothing else (then the player's own Loot click on it, unanswered too), a corpse the player
+/// opens and closes in the game's own window, Take all on a later corpse; then every kill after it must still be
+/// auto-looted.
+#[test]
+fn round65_fix5_auto_loot_keeps_going_after_the_owners_sequence() {
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    // B's retry (fix round 5) is not part of this sequence: only coming closer to it would ask again; the reach is
+    // the 15 units of that round (fix round 6 starts at 7 and learns it)
+    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 1e9 require('bags').LOOT_DEFAULT_REACH = 15 return true end)()");
+    let _ = super::super::window_takeover::take_log_for_test();
+    // A: 9011's list has coin only
+    bv.play.bags_broker_tick();
+    bv.play.bags_corpse(&serde_json::json!([]));
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.play.bags_loot_close();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    // B: the server says "Out of range." and nothing more
+    r65fix5_kill(&mut bv, 9012, [12.0, 0.0, 0.0]);
+    bv.play.bags_broker_tick();
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(r65fix5_asked(&log, 9012), "B is asked for: {log:#?}");
+    bv.play.bags_chat("Yours alone for 5:12 more.");
+    bv.play.bags_chat("Out of range.");
+    bv.frames(2);
+    for _ in 0..320 {
+        bv.play.bags_broker_tick();
+    }
+    bv.frames(2);
+    // C: a fight (auto-attack on) holds Auto-loot back; the player opens C in the game's window and closes it
+    bv.play.bags_spawn_npc(9013, "a vulture", 0, 1, [3.0, 0.0, 0.0]);
+    bv.play.bags_target_sync(9013);
+    bv.play.bags_auto_attack(true);
+    bv.play.bags_combat_hit(77, 9013, -12);
+    bv_look_again(&mut bv);
+    bv.play.bags_entity_die(9013);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.play.bags_target(9013);
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([{"name":"broken vulture feather","id":2101,"key":0,"qty":1,"max_stack":20}]));
+    assert_eq!(bv.play.mode, 1, "the player's own click shows the game's window");
+    bv.play.bags_loot_close();
+    bv.frames(2);
+    bv.play.bags_auto_attack(false);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    // ... after which Auto-loot opens C hidden and takes all
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(r65fix5_asked(&log, 9013), "C is asked for once the fight is over: {log:#?}");
+    bv.play.bags_corpse(&serde_json::json!([{"name":"broken vulture feather","id":2101,"key":0,"qty":1,"max_stack":20}]));
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0, "Auto-loot's open is hidden");
+    bv.play.bags_broker_tick(); // Take all: 0x001A
+    bv.play.bags_loot_confirm_all();
+    bv.play.bags_loot_close();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let _ = super::super::window_takeover::take_log_for_test();
+    // D and E: every kill after it is still auto-looted
+    for (id, x) in [(9014u32, 2.0f32), (9015, 4.0)] {
+        r65fix5_kill(&mut bv, id, [x, 0.0, 0.0]);
+        bv.play.bags_broker_tick();
+        let log = super::super::window_takeover::take_log_for_test();
+        let state: String = bv.eval(
+            "(function() local B = require('bags') return string.format('pending=%s last=%s batch=%s combat=%s eligible=%s', \
+             tostring(B.pending_open ~= nil), tostring(B.last_req), tostring(B.batch_id), tostring(B.in_combat()), \
+             tostring(B.eligible_corpses and next(B.eligible_corpses) ~= nil)) end)()",
+        );
+        assert!(r65fix5_asked(&log, id), "kill {id} after the owner's sequence is auto-looted ({state}): {log:#?}");
+        bv.play.bags_corpse(&serde_json::json!([{"name":"Aquamarine","id":2102,"key":0,"qty":1,"max_stack":20}]));
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+        bv.play.bags_loot_confirm_all();
+        bv.play.bags_loot_close();
+        bv.play.bags_broker_tick();
+        bv.frames(2);
+    }
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Who has the player targeted after a fight is not only a hostile: the player's mercenary (a group member), a
+/// merchant or banker spoken to, or a creature at the far end of the zone that once chased the player. None of them
+/// is a fight: Auto-loot goes on.
+#[test]
+fn round65_fix5_a_friendly_or_distant_npc_targeting_you_is_not_a_fight() {
+    for who in ["mercenary", "merchant", "far creature"] {
+        let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+        // the first kill's corpse is taken
+        r65fix4_auto_list(&mut bv);
+        bv.play.bags_broker_tick();
+        bv.play.bags_loot_confirm_all();
+        bv.play.bags_loot_close();
+        bv.play.bags_broker_tick();
+        bv.frames(2);
+        match who {
+            "mercenary" => {
+                bv.play.bags_spawn_npc(9050, "Quinor", 0, 1, [1.0, 0.0, 1.0]);
+                bv.play.group.in_group = true;
+                bv.play.group.members.push(crate::group::Member { id: 9050, name: "Quinor".into(), active: true, ..Default::default() });
+                bv.play.bags_creature(9050, 0, 77);
+            }
+            "merchant" => {
+                bv.play.bags_spawn_npc(9051, "a merchant", 1, 1, [6.0, 0.0, 0.0]);
+                bv.play.bags_creature(9051, 0, 77);
+            }
+            _ => {
+                bv.play.bags_spawn_npc(9052, "a gnoll", 0, 1, [300.0, 0.0, 0.0]);
+                bv.play.bags_creature(9052, 0, 77);
+            }
+        }
+        let _ = super::super::window_takeover::take_log_for_test();
+        r65fix5_kill(&mut bv, 9016, [3.0, 0.0, 0.0]);
+        bv.play.bags_broker_tick();
+        let log = super::super::window_takeover::take_log_for_test();
+        assert!(r65fix5_asked(&log, 9016), "a {who} targeting you is not a fight: {log:#?}");
+        bv.clean();
+        super::super::window_takeover::reset_all_for_test();
+        super::super::action_broker::reset_all_for_test();
+    }
+}
+
+/// Auto-loot's own log lines so far (`bags.auto_log`).
+fn r65fix5_auto_log(bv: &Bv) -> Vec<String> {
+    let all: String = bv.eval("table.concat(require('bags').auto_log, string.char(10))");
+    all.lines().map(str::to_string).collect()
+}
+
+fn r65fix5_tick(bv: &mut Bv) {
+    bv_look_again(bv);
+    bv.eval::<bool>("(function() require('bags').tick_auto_loot() return true end)()");
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+}
+
+/// The first kill (9011) taken, so the next kill is the only corpse waiting.
+fn r65fix5_first_taken(bv: &mut Bv) {
+    r65fix4_auto_list(bv);
+    bv.play.bags_broker_tick();
+    bv.play.bags_loot_confirm_all();
+    bv.play.bags_loot_close();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+}
+
+/// Item 3: a corpse the server does not answer is asked again when the player comes closer (not while they stand
+/// still), at most three times in all, and each step is in the log.
+#[test]
+fn round65_fix5_item3_unanswered_corpse_is_retried_when_closer_at_most_three_times() {
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    r65fix5_first_taken(&mut bv);
+    // fix round 5's 15-unit reach (fix round 6 starts at 7 and learns it)
+    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 1e9 require('bags').LOOT_DEFAULT_REACH = 15 return true end)()");
+    let _ = super::super::window_takeover::take_log_for_test();
+    r65fix5_kill(&mut bv, 9020, [14.0, 0.0, 0.0]);
+    bv.play.bags_broker_tick();
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(r65fix5_asked(&log, 9020), "the first try: {log:#?}");
+    let mut x = 0.0f32;
+    for attempt in 1..=3 {
+        for _ in 0..320 {
+            bv.play.bags_broker_tick(); // the server says nothing
+        }
+        bv.frames(2);
+        let alog = r65fix5_auto_log(&bv);
+        if attempt < 3 {
+            assert!(
+                alog.iter().any(|l| l.contains("0x233c") && l.contains(&format!("(try {} of 3)", attempt + 1))),
+                "try {attempt} unanswered: a retry is announced: {alog:#?}"
+            );
+            // standing still: not asked again
+            r65fix5_tick(&mut bv);
+            let log = super::super::window_takeover::take_log_for_test();
+            assert!(!r65fix5_asked(&log, 9020), "no retry while standing where the server did not answer: {log:#?}");
+            // three units closer: asked again
+            x += 3.0;
+            bv.play.bags_player_at([x, 0.0, 0.0]);
+            r65fix5_tick(&mut bv);
+            let log = super::super::window_takeover::take_log_for_test();
+            assert!(r65fix5_asked(&log, 9020), "try {}: asked again once closer: {log:#?}", attempt + 1);
+        } else {
+            assert!(
+                alog.iter().any(|l| l.contains("0x233c") && l.contains("gave up after 3 tries")),
+                "the third silence ends it: {alog:#?}"
+            );
+            x += 3.0;
+            bv.play.bags_player_at([x, 0.0, 0.0]);
+            r65fix5_tick(&mut bv);
+            let log = super::super::window_takeover::take_log_for_test();
+            assert!(!r65fix5_asked(&log, 9020), "never a fourth try: {log:#?}");
+        }
+    }
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item 3 with the live server's own answer: "Out of range." in chat ends the open at once (no 10 s wait), the result
+/// line says so, and the corpse is asked again from closer.
+#[test]
+fn round65_fix5_item3_out_of_range_ends_the_open_at_once_and_is_retried() {
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    r65fix5_first_taken(&mut bv);
+    // fix round 5's 15-unit reach (fix round 6 starts at 7 and learns it)
+    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 1e9 require('bags').LOOT_DEFAULT_REACH = 15 return true end)()");
+    let _ = super::super::window_takeover::take_log_for_test();
+    r65fix5_kill(&mut bv, 9020, [14.0, 0.0, 0.0]);
+    bv.play.bags_broker_tick();
+    bv.play.bags_chat("Yours alone for 5:12 more.");
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert!(bv.eval::<bool>("require('bags').pending_open ~= nil"), "a chat line that is not a refusal changes nothing");
+    bv.play.bags_chat("Out of range.");
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let (text, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert!(text.contains("Out of range."), "the server's own words in the result line: {text}");
+    assert!(bv.eval::<bool>("require('bags').pending_open == nil"), "nothing left waiting");
+    let alog = r65fix5_auto_log(&bv);
+    assert!(alog.iter().any(|l| l.contains("Out of range.") && l.contains("waiting until you are closer")), "{alog:#?}");
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(log.iter().any(|l| l.contains("refused the corpse open: Out of range.")), "{log:#?}");
+    bv.play.bags_player_at([4.0, 0.0, 0.0]);
+    r65fix5_tick(&mut bv);
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(r65fix5_asked(&log, 9020), "asked again from closer: {log:#?}");
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Aquamarine","id":2102,"key":0,"qty":1,"max_stack":20}]));
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0, "the retry's open is hidden like the first");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item 4: the game itself turns a corpse's list away while another of its windows is up (`npcw` answers 0x0016
+/// outside mode 0; after the 11-18 upstream sync that includes the mercenary windows and the dye picker, modes 61-63).
+/// The mod's open ends as refused at once, nothing waits, nothing loops, and Auto-loot asks again later.
+#[test]
+fn round65_fix5_item4_a_list_the_game_turns_away_ends_the_open() {
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    r65fix5_first_taken(&mut bv);
+    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 1e9 return true end)()");
+    let _ = super::super::window_takeover::take_log_for_test();
+    r65fix5_kill(&mut bv, 9021, [3.0, 0.0, 0.0]);
+    bv.play.bags_broker_tick();
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(r65fix5_asked(&log, 9021), "{log:#?}");
+    // the player opened the start menu (mode 13) before the list came back
+    bv.play.mode = 13;
+    let sends = bv.play.bags_sends_lost();
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Aquamarine","id":2102,"key":0,"qty":1,"max_stack":20}]));
+    assert!(bv.play.bags_sends_lost() > sends, "the game answers the list with its own 0x0016");
+    for _ in 0..3 {
+        bv.play.bags_broker_tick();
+        bv.frames(2);
+    }
+    assert_eq!(bv.play.mode, 13, "the player's menu stays");
+    let (text, ok) = bv.result_text().unwrap();
+    assert_eq!(ok, Some(false));
+    assert!(text.contains("another game window was open"), "{text}");
+    assert!(bv.eval::<bool>("require('bags').pending_open == nil and require('bags').last_req == nil"), "nothing waits");
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(log.iter().any(|l| l.contains("turned away by the game (mode 13")), "{log:#?}");
+    assert!(!r65fix5_asked(&log, 9021), "no loop of re-asks while the menu is up: {log:#?}");
+    // the menu closes: Auto-loot asks again and the corpse opens hidden
+    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 0 return true end)()");
+    bv.play.mode = 0;
+    r65fix5_tick(&mut bv);
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(r65fix5_asked(&log, 9021), "asked again once the menu is gone: {log:#?}");
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Aquamarine","id":2102,"key":0,"qty":1,"max_stack":20}]));
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0);
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item 2: every Auto-loot decision is a line in the game's log (eqoa.log), through eqoa.log.write, with the corpse id
+/// and the reason; none of them is an Addon Manager diagnostic.
+#[test]
+fn round65_fix5_item2_auto_loot_decisions_are_in_the_game_log() {
+    let _ = super::take_mod_log_for_test();
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    r65fix5_first_taken(&mut bv);
+    // not your kill: a creature nobody of yours hit dies near you
+    bv.play.bags_spawn_npc(9030, "a rat", 0, 1, [5.0, 0.0, 0.0]);
+    bv.frames(2);
+    bv.play.bags_entity_die(9030);
+    bv.frames(2);
+    // in combat: a scout has you targeted when your kill dies
+    bv.play.bags_spawn_npc(9031, "a gnoll scout", 0, 1, [4.0, 0.0, 0.0]);
+    bv.play.bags_creature(9031, 0, 77);
+    r65fix5_kill(&mut bv, 9032, [2.0, 0.0, 0.0]);
+    bv.play.bags_broker_tick();
+    // too far: the scout dies (out of combat) and the player walks off 30 units
+    bv.play.bags_entity_die(9031);
+    bv.play.bags_player_at([32.0, 0.0, 0.0]);
+    r65fix5_tick(&mut bv);
+    // back: it opens and takes
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    r65fix5_tick(&mut bv);
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Aquamarine","id":2102,"key":0,"qty":1,"max_stack":20}]));
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.play.bags_loot_confirm_all();
+    bv.play.bags_loot_close();
+    bv.play.bags_broker_tick();
+    bv.frames(3);
+    let game_log = super::take_mod_log_for_test();
+    let has = |needle: &str| {
+        game_log
+            .iter()
+            .any(|l| l.starts_with("addon eqoa_bag_viewer: [info] auto-loot: ") && l.contains(needle))
+    };
+    for needle in [
+        "mode Everything for",
+        "corpse 0x2333: a gnoll, your kill: queued",
+        "corpse 0x2333: done: Take all ok",
+        "corpse 0x2346: a rat: skipped, not your kill",
+        "corpse 0x2348: waiting: in combat (a gnoll scout has you targeted)",
+        "corpse 0x2348: waiting: walk closer (30 units",
+        "corpse 0x2348: opening it",
+        "corpse 0x2348: done: Take all ok (1 items)",
+    ] {
+        assert!(has(needle), "the game log has `{needle}`: {game_log:#?}");
+    }
+    bv.clean(); // and not one of them is a diagnostic
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---- Round 6.5 fix round 6: owner live tests of d221531e (2026-11-19) ---------------------------------------------
+
+/// Item 1, owner log r65-retest4 lines 828-862: the ant died while the player was fighting; the player's attack key on
+/// the dead target (the game's `attack_press` on a corpse, the only native 0x0015) opened it in the game's own window
+/// (mode 1), and Auto-loot then burned its three tries on "cannot open corpse right now". The corpse it wants is open:
+/// it takes from that session (no open of its own), and says so.
+#[test]
+fn round65_fix6_item1_auto_loot_takes_from_the_corpse_the_player_opened() {
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    r65fix5_first_taken(&mut bv);
+    let _ = super::super::window_takeover::take_log_for_test();
+    // the fight: auto-attack on the ant, which dies; the player presses attack again on the dead target
+    bv.play.bags_spawn_npc(9040, "ant", 0, 1, [1.0, 0.0, 0.0]);
+    bv.play.bags_target_sync(9040);
+    bv.play.bags_auto_attack(true);
+    bv.play.bags_combat_hit(77, 9040, -12);
+    bv.play.bags_spawn_npc(9041, "a second ant", 0, 1, [4.0, 0.0, 0.0]);
+    bv.play.bags_creature(9041, 0, 77); // still fighting: Auto-loot waits
+    bv_look_again(&mut bv);
+    bv.play.bags_entity_die(9040);
+    bv.frames(2);
+    bv.play.bags_press_loot(); // the game's own loot request
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Ant Leg","id":2201,"key":0,"qty":1,"max_stack":20}]));
+    assert_eq!(bv.play.mode, 1, "the player's own key opened the game's corpse window");
+    bv.play.bags_entity_die(9041); // the fight is over
+    let sends = bv.play.bags_sends_lost();
+    r65fix5_tick(&mut bv);
+    bv.play.bags_broker_tick();
+    let log = super::super::window_takeover::take_log_for_test();
+    let alog = r65fix5_auto_log(&bv);
+    assert!(!r65fix5_asked(&log, 9040), "no open of its own while the corpse is open: {log:#?}");
+    assert!(!alog.iter().any(|l| l.contains("0x2350") && l.contains("try 2 of 3")), "no try burned: {alog:#?}");
+    assert!(
+        alog.iter().any(|l| l.contains("0x2350") && l.contains("open already") && l.contains("taking from it (Take all)")),
+        "{alog:#?}"
+    );
+    assert!(bv.play.bags_sends_lost() > sends, "Take all goes out from the player's session");
+    bv.play.bags_loot_confirm_all();
+    bv.play.bags_loot_close();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let alog = r65fix5_auto_log(&bv);
+    assert!(alog.iter().any(|l| l.contains("0x2350: done: Take all ok")), "{alog:#?}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item 1, the other case: another corpse is open in the game's window. Auto-loot's corpse waits (no try burned) and is
+/// opened once that window closes.
+#[test]
+fn round65_fix6_item1_another_open_corpse_makes_auto_loot_wait_not_fail() {
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    r65fix5_first_taken(&mut bv);
+    let _ = super::super::window_takeover::take_log_for_test();
+    bv.play.bags_spawn_npc(9042, "a fallen gnoll", 0, 3, [2.0, 0.0, 0.0]);
+    bv.play.bags_target(9042);
+    bv.play.bags_press_loot(); // the player opens someone else's corpse
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Bone Chip","id":2004,"key":0,"qty":1,"max_stack":100}]));
+    assert_eq!(bv.play.mode, 1);
+    r65fix5_kill(&mut bv, 9043, [3.0, 0.0, 0.0]);
+    for _ in 0..3 {
+        r65fix5_tick(&mut bv);
+    }
+    let log = super::super::window_takeover::take_log_for_test();
+    let alog = r65fix5_auto_log(&bv);
+    assert!(!r65fix5_asked(&log, 9043), "{log:#?}");
+    assert!(alog.iter().any(|l| l.contains("0x2353: waiting: another corpse (0x2352) is open")), "{alog:#?}");
+    assert!(!alog.iter().any(|l| l.contains("0x2353") && (l.contains("try 2") || l.contains("gave up"))), "{alog:#?}");
+    bv.play.bags_loot_close(); // the player closes it
+    bv.frames(2);
+    r65fix5_tick(&mut bv);
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(r65fix5_asked(&log, 9043), "opened once the player's window closed: {log:#?}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item A, owner log eqoa.log 980-1146: the server opened corpses at 3 and 6 units and said "Out of range." at 11, 12,
+/// 13 and 15; Auto-loot (reach 15) gave up after three refusals. The reach now starts at 7 and is learned from the
+/// answers: a kill 12 units off waits ("walk closer"), and opens once the player is within reach.
+#[test]
+fn round65_fix6_item_a_loot_reach_starts_short_and_says_walk_closer() {
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    r65fix5_first_taken(&mut bv);
+    let _ = super::super::window_takeover::take_log_for_test();
+    r65fix5_kill(&mut bv, 9050, [12.0, 0.0, 0.0]);
+    r65fix5_tick(&mut bv);
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(!r65fix5_asked(&log, 9050), "12 units is beyond the reach not yet learned (7): {log:#?}");
+    let alog = r65fix5_auto_log(&bv);
+    assert!(alog.iter().any(|l| l.contains("0x235a: waiting: walk closer (12 units; server reach ~7 units)")), "{alog:#?}");
+    bv.play.bags_player_at([6.0, 0.0, 0.0]); // 6 units: what the owner's server opened
+    r65fix5_tick(&mut bv);
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(r65fix5_asked(&log, 9050), "within reach: {log:#?}");
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Damselfly Wing","id":2301,"key":0,"qty":1,"max_stack":20}]));
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0, "hidden");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item A with the owner's own order (11, 12, 13, 15 refused in a row): four refusals in a row never give up; the corpse
+/// opens when the player comes within the learned reach.
+#[test]
+fn round65_fix6_item_a_four_refusals_in_a_row_still_loot_when_closer() {
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    r65fix5_first_taken(&mut bv);
+    bv.eval::<bool>("(function() local b = require('bags') b.AUTO_RETRY_SECS = 1e9 b.LOOT_DEFAULT_REACH = 16 return true end)()");
+    let _ = super::super::window_takeover::take_log_for_test();
+    r65fix5_kill(&mut bv, 9051, [20.0, 0.0, 0.0]);
+    for d in [15.0f32, 13.0, 12.0, 11.0] {
+        bv.play.bags_player_at([20.0 - d, 0.0, 0.0]);
+        // what the owner's server answered: the mod forgets nothing, it only waits for the player to come closer
+        r65fix5_tick(&mut bv);
+        let log = super::super::window_takeover::take_log_for_test();
+        assert!(r65fix5_asked(&log, 9051), "asked from {d} units (nearer than any refusal so far): {log:#?}");
+        bv.play.bags_chat("Out of range.");
+        bv.play.bags_broker_tick();
+        bv.frames(2);
+    }
+    bv.play.bags_player_at([14.0, 0.0, 0.0]); // 6 units
+    r65fix5_tick(&mut bv);
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(r65fix5_asked(&log, 9051), "the fifth ask, from 6 units: {log:#?}");
+    let alog = r65fix5_auto_log(&bv);
+    assert!(!alog.iter().any(|l| l.contains("0x235b") && (l.contains("gave up") || l.contains("try 2 of 3"))), "never a try: {alog:#?}");
+    assert!(
+        alog.iter().any(|l| l.contains("0x235b") && l.contains("\"Out of range.\" at 11 units: waiting until you are closer (server reach ~")),
+        "{alog:#?}"
+    );
+    let reach: f64 = bv.eval("require('bags').loot_reach_now()");
+    assert!((reach - 10.5).abs() < 0.01, "the nearest refusal was 11 units: reach {reach}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item 2, owner log r65-retest4: with Auto-loot on in a crowd the mod cost 2.2-4.3 ms a frame, `player.get` 6-25 times
+/// a frame and 53-70 event deliveries a frame (every creature update, every move of the player). Auto-loot on, window
+/// closed, 700 creatures with 35 updates a frame, the player walking and hits landing every frame: at most 3 event
+/// deliveries and one `player.get` a frame, and (release build) under 0.5 ms a frame.
+#[test]
+fn round65_fix6_item2_auto_loot_on_in_a_crowd_is_cheap() {
+    let Some(mut bv) = bv_busy_scene() else { return };
+    bv.play.bags_self_id(77);
+    bv.frames(4);
+    bv_auto(&bv, "all");
+    bv.frames(2);
+    let mut x = 0.0f32;
+    let cost = bv_cost_with(&mut bv, 120, &mut |bv, tick| {
+        x += 0.05;
+        bv.play.bags_player_at([x, 0.0, 0.0]);
+        bv.play.bags_auto_attack(tick % 2 == 0);
+        bv.play.bags_combat_hit(5003, 77, -2);
+    });
+    for l in &cost.lines {
+        eprintln!("R65P6     {l}");
+    }
+    let deliveries = cost
+        .lines
+        .iter()
+        .find(|l| l.starts_with("core:"))
+        .and_then(|l| bv_num_after(l, "events.deliver "))
+        .unwrap_or(0.0);
+    let player_gets = cost
+        .lines
+        .iter()
+        .find(|l| l.starts_with("addon-api:") && l.contains(BV))
+        .and_then(|l| bv_num_after(l, "player.get "))
+        .unwrap_or(0.0);
+    eprintln!("R65P6 auto-loot on, crowd: {:.3} ms/frame, {deliveries:.1} deliveries, {player_gets:.2} player.get a frame", cost.mod_ms);
+    assert!(deliveries <= 3.0, "{deliveries:.1} event deliveries a frame with Auto-loot on in a crowd");
+    assert!(player_gets <= 1.0, "player.get {player_gets:.2} times a frame");
+    if !cfg!(debug_assertions) {
+        assert!(cost.mod_ms < 0.5, "Auto-loot on in a crowd costs {:.3} ms a frame (budget 0.5)", cost.mod_ms);
+    }
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
 }

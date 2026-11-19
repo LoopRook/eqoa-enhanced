@@ -33,6 +33,11 @@ MEAT_RECEIPT = r"chat: You receive (?:[1-9]\d* )?sliver of fire bat meat from th
 JUNK_RECEIPT = r"chat: You receive (?:[1-9]\d* )?torn fire bat wings from the corpse\."
 BAG_MEAT_LOG = r"scene: Bag Viewer loot log \d{2}:\d{2} sliver of fire bat meat x[1-9]\d*(?:, from fire bat)?"
 CORPSE_LIST = r"play: 0x0018 \([1-9]\d* bytes\) in mode 0"
+# Auto-loot's own lines (eqoa.log.write "info" lands in the client log); the GM's #kill is not the player's hit
+AUTO_MODE = rf"addon eqoa_bag_viewer: \[info\] auto-loot: mode Everything but junk for {CHARACTER}"
+AUTO_NOT_YOURS = (
+    r"addon eqoa_bag_viewer: \[info\] auto-loot: corpse 0x[0-9a-f]+: fire bat: skipped, not your kill \(you did not hit it\)"
+)
 AUTH_PORT = 9735
 GAME_PORT = 10070
 SERVER_TIMEOUT = 120
@@ -47,7 +52,7 @@ def read_gm_password(accounts, user):
     return passwords[0]
 
 
-def scene_checks(log, scene="native", r65=False):
+def scene_checks(log, scene="native", r65=False, auto_loot=False):
     """Match each event only after all prior events in this client's log."""
     patterns = {
         "entered world": rf'in the world as 0x[0-9a-f]+: .*\bname: "{CHARACTER}".*',
@@ -88,6 +93,9 @@ def scene_checks(log, scene="native", r65=False):
     }
     if scene == "bag-viewer":
         checks["no junk loot receipt"] = re.search(rf"^{JUNK_RECEIPT}$", log, re.M | re.I) is None
+    if auto_loot:
+        checks["Auto-loot mode logged"] = re.search(rf"^{AUTO_MODE}$", log, re.M) is not None
+        checks["GM kill logged as not the player's kill"] = re.search(rf"^{AUTO_NOT_YOURS}$", log, re.M) is not None
     return checks
 
 
@@ -150,7 +158,7 @@ def base_environment():
     return {k: v for k, v in os.environ.items() if not k.upper().startswith("EQOA_")}
 
 
-def prepare_profile(config, host, scene):
+def prepare_profile(config, host, scene, auto_loot=False):
     # Select the bundled defaults so the first-run addon panel stays closed.
     profiles = config / "addons" / "profiles"
     profiles.mkdir(parents=True)
@@ -166,7 +174,8 @@ def prepare_profile(config, host, scene):
         # A relative eqoa.files path maps to the addon's private files/data mount.
         files = config / "addons" / f"{key}-files" / "files" / "data"
         files.mkdir(parents=True)
-        (files / "junk.cfg").write_text(f"grey=0\n{JUNK_ID}\n", encoding="utf-8")
+        auto = f"auto:{CHARACTER}=non_junk\n" if auto_loot else ""
+        (files / "junk.cfg").write_text(f"grey=0\n{auto}{JUNK_ID}\n", encoding="utf-8")
     write_json(profiles / "Default.json", {"schemaVersion": 1, "enabled": enabled, "addons": {}, "layout": ""})
     write_json(profiles / "characters.json", {
         "schemaVersion": 1, "characters": {host: {CHARACTER.lower(): "Default"}}, "classes": {},
@@ -248,7 +257,7 @@ def run_scene(run_dir, install, host, iso, checks, args):
     source = install / "eqoa-server"
     config = server_config(host)
     exe = client_binary(run_dir, args.exe)
-    prepare_profile(run_dir / "config", host, args.scene)
+    prepare_profile(run_dir / "config", host, args.scene, args.auto_loot)
     creationflags = subprocess.CREATE_NO_WINDOW
     # Stage the release binary because the client can create a mods folder beside its executable.
     with tempfile.TemporaryDirectory(dir=run_dir, prefix="runtime-") as scratch:
@@ -301,10 +310,14 @@ def main():
     parser.add_argument("--host", help="Local IPv4 address, defaults to the server's bind_address")
     parser.add_argument("--scene", choices=("native", "bag-viewer"), default="native")
     parser.add_argument("--r65", action="store_true", help="Use the round 6.5 Bag Viewer and require takeover logs")
+    parser.add_argument("--auto-loot", action="store_true",
+                        help="With --r65: Auto-loot on (Everything but junk) and its log lines required")
     parser.add_argument("--exe", type=Path, help="Use the specified release client instead of the shared build")
     args = parser.parse_args()
     if args.r65 and args.scene != "bag-viewer":
         parser.error("--r65 requires --scene bag-viewer")
+    if args.auto_loot and not args.r65:
+        parser.error("--auto-loot requires --r65")
     if os.name != "nt":
         parser.error("This tool uses the Windows local test server and release client")
     install = args.server_dir.resolve()
@@ -331,7 +344,7 @@ def main():
         error = "Scene interrupted"
     client_log = run_dir / "client.log"
     log = client_log.read_text(encoding="utf-8", errors="replace") if client_log.exists() else ""
-    checks.update(scene_checks(log, args.scene, args.r65))
+    checks.update(scene_checks(log, args.scene, args.r65, args.auto_loot))
     screenshot = run_dir / "scene.png"
     checks["in-world screenshot"] = False
     if screenshot.is_file():

@@ -52,6 +52,14 @@ pub(crate) fn reply() -> Option<u32> {
     })
 }
 
+/// Non-mutating peek at the single un-tainted waiting loot target, if any.
+pub(crate) fn peek_single() -> Option<u32> {
+    STATE.with(|s| {
+        let st = s.get();
+        (!st.tainted && st.outstanding == 1).then_some(st.last).flatten()
+    })
+}
+
 /// The loot window closed (0x0016). With no request waiting this is a quiet point: the next request starts
 /// afresh. With one still waiting (sent before the close arrived) nothing is known, and nothing changes.
 pub(crate) fn closed() {

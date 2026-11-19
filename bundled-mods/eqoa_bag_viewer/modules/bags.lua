@@ -5,7 +5,17 @@ local M = {
     open = false, tab = 1, grid = nil, log = {}, scroll = 0, grid_scroll = 0, hover = nil,
     builds = 0, draws = 0, rect = nil, menu = nil, result = nil,
     pending_label = nil, last_req = nil,
-    junk_ids = {}, sell_grey = false, junk_loaded = false,
+    junk_ids = {}, junk_loaded = false,
+    -- Auto-loot: "off", "all" (everything) or "non_junk" (everything but the items marked as junk); saved with the junk marks
+    auto_mode = "off",
+    -- the Auto-loot choice of each character (the junk marks stay shared: they are per item type); `character` is whose
+    -- choice `auto_mode` is, `char_dirty` that the character may have changed (a new world, a login)
+    auto_by_char = {}, character = nil, char_dirty = true, char_checked = 0,
+    scan_count = 0, -- looks at the zone taken (for the tests)
+    -- how far the server answered a merchant or a banker (kept per session; see `note_range`)
+    range = {merchant = {}, bank = {}},
+    -- a greyed button the player clicked once: the second click (within 10 s, about the same distance) is let through
+    try_anyway = {},
     batch_id = nil, batch_kind = nil, batch_verb = nil, batch_total = 0,
     corpse_tab_kept = false,
     action_hits = {},
@@ -28,8 +38,244 @@ local function keeping_corpse_tab()
     return M.tab == 7 and (loot_batch_active() or M.corpse_tab_kept)
 end
 
+local function dist_sq(a, b)
+    if not a or not b then return nil end
+    local dx = (a.x or 0) - (b.x or 0)
+    local dy = (a.y or 0) - (b.y or 0)
+    local dz = (a.z or 0) - (b.z or 0)
+    return dx * dx + dy * dy + dz * dz
+end
+
+-- One look at the zone's creatures answers every per-frame question (the nearest corpse, merchant and banker, a live
+-- hostile with the player targeted). `eqoa.entities.list()` hands over a record for every creature in the zone, so
+-- asking it per question, per frame, cost the Bags window 7-10 ms a frame in a busy zone (owner log 2026-11-18). The
+-- look is kept SCAN_TTL seconds (distances only drift by a step in that time), so a crowded zone never makes it one
+-- look per frame; Auto-loot's poll (`auto_poll`) shares it.
+local SCAN_TTL, SCAN_MIN = 0.5, 0.25
+-- A merchant or banker farther than this is not "nearby" at all: no Sell junk or bank row for one at the other end of a
+-- city (the "too far" line is for one within sight that the server may not answer yet).
+M.NPC_SHOWN_WITHIN = 40.0
+local scan_at, scan_data, scan_dirty, scan_pid = nil, nil, false, nil
+
+local function has_bit(val, b)
+    return val ~= nil and math.floor(val / b) % 2 == 1
+end
+
+-- A live NPC with the player targeted is a fight only when it can be one: not the player's pet or a group member (a
+-- mercenary heals or follows you with you targeted), not a merchant, banker or other service NPC (they face whoever
+-- spoke to them), and not farther than a fight reaches (a creature that once chased you keeps you as its target at the
+-- other end of the zone). Owner log 2026-11-18: Auto-loot stopped for good while such an NPC had the player targeted.
+-- Returns why it is not a fight, nil when it is one.
+M.FIGHT_RANGE = 30.0
+function M.not_a_fight(e, ppos, pl)
+    if pl and pl.pet_id ~= nil and e.id == pl.pet_id then return "your pet" end
+    local flags = e.npc_flags
+    if flags and (has_bit(flags, 1) or has_bit(flags, 2) or has_bit(flags, 8) or has_bit(flags, 128)) then
+        return "a merchant, banker or trainer"
+    end
+    local d2 = dist_sq(ppos, e.actor_position or e.position)
+    if d2 and d2 > M.FIGHT_RANGE * M.FIGHT_RANGE then return "too far away to fight" end
+    local g = eqoa.group and eqoa.group.get and eqoa.group.get()
+    if g and g.members then
+        for _, m in ipairs(g.members) do
+            if m.id == e.id then return "in your group" end
+        end
+    end
+    return nil
+end
+
+local function scan_zone()
+    local now = os.clock()
+    if scan_data and scan_at and now >= scan_at then
+        local age = now - scan_at
+        if age < SCAN_TTL and not (scan_dirty and age >= SCAN_MIN) then return scan_data end
+    end
+    local data = {corpses = {}, nearest = {}}
+    M.scan_count = M.scan_count + 1
+    scan_data, scan_at, scan_dirty = data, now, false
+    local list = eqoa.entities and eqoa.entities.list and eqoa.entities.list()
+    if not list then
+        data.none = true
+        return data
+    end
+    local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
+    local ppos = pl and pl.position
+    local pid = pl and pl.id
+    scan_pid = pid
+    local nearest = data.nearest
+    local function consider(kind, e, d2)
+        local cur = nearest[kind]
+        if not cur or d2 < cur.d2 then nearest[kind] = {e = e, d2 = d2} end
+    end
+    for _, e in ipairs(list) do
+        if e.corpse then
+            local d2 = dist_sq(ppos, e.actor_position or e.position) or 0
+            data.corpses[#data.corpses + 1] = e
+            consider("corpse", e, d2)
+        else
+            if pid and not data.hostile and e.kind == "npc" and e.target_id == pid and not M.not_a_fight(e, ppos, pl) then
+                data.hostile = (e.name and e.name ~= "") and e.name or ("creature " .. tostring(e.id))
+            end
+            local flags = e.npc_flags
+            if flags then
+                local merchant, bank = has_bit(flags, 1), has_bit(flags, 2)
+                if merchant or bank or has_bit(flags, 128) or has_bit(flags, 8) then
+                    local d2 = dist_sq(ppos, e.actor_position or e.position) or 0
+                    if d2 <= M.NPC_SHOWN_WITHIN * M.NPC_SHOWN_WITHIN then
+                        consider("any", e, d2)
+                        if merchant then consider("merchant", e, d2) end
+                        if bank then consider("bank", e, d2) end
+                    end
+                end
+            end
+        end
+    end
+    return data
+end
+
+function M.scan_reset()
+    scan_at, scan_data, scan_dirty = nil, nil, false
+end
+
+function M.nearby_corpse()
+    local data = scan_zone()
+    local c = data.nearest.corpse
+    if not c then return nil end
+    return c.e, c.d2
+end
+
+function M.nearby_npc(kind)
+    local data = scan_zone()
+    local c = data.nearest[kind == "merchant" and "merchant" or (kind == "bank" and "bank" or "any")]
+    if not c then return nil end
+    return c.e, c.d2
+end
+
+-- How near a merchant or a banker must be. The game has no range check of its own: the server decides, and a
+-- request out of its reach is simply not answered. The mod learns the reach from real answers, per session: the
+-- largest distance that got an answer (`ok`) and the smallest that got none (`fail`). Until a distance is known to
+-- work or not to, the conservative DEFAULT_REACH decides. It only greys out the mod's own buttons: a window the
+-- player opened (or that is open) is never blocked.
+M.DEFAULT_REACH = 10.0
+local TOO_FAR = {merchant = "too far from the merchant", bank = "too far from the banker"}
+
+-- An answer at `dist` always clears the doubt (`fail`, the misses). Silence is weaker evidence than an answer: one
+-- unanswered request (lag, a busy server) greys nothing; two misses grey the smallest distance missed. A miss closer
+-- than the farthest answer is different: the reach has changed, the old answers no longer count and it greys at once.
+function M.note_range(kind, dist, answered)
+    local r = M.range[kind]
+    if not r or type(dist) ~= "number" then return end
+    if answered then
+        if not r.ok or dist > r.ok then r.ok = dist end
+        r.fail, r.misses = nil, {}
+        M.try_anyway[kind] = nil
+        return
+    end
+    M.try_anyway[kind] = nil
+    if r.ok and dist <= r.ok then
+        r.ok, r.fail, r.misses = nil, dist, {dist}
+        return
+    end
+    r.misses = r.misses or {}
+    r.misses[#r.misses + 1] = dist
+    if #r.misses >= 2 then
+        local low = r.misses[1]
+        for _, d in ipairs(r.misses) do
+            if d < low then low = d end
+        end
+        r.fail = low
+    end
+end
+
+-- Is `dist` within the reach of a `kind` NPC, as far as the mod knows?
+function M.within_reach(kind, dist)
+    local r = M.range[kind] or {}
+    if r.ok and dist <= r.ok then return true end
+    if r.fail and dist >= r.fail then return false end
+    if r.ok and r.fail then return true end -- between a distance that worked and one that did not: worth trying
+    return dist <= M.DEFAULT_REACH
+end
+
+-- The nearest `kind` NPC's distance (nil when none is in the zone). `fresh` asks the zone again first.
+function M.npc_distance(kind, fresh)
+    if fresh then M.scan_reset() end
+    local npc, d2 = M.nearby_npc(kind)
+    if not npc then return nil end
+    return math.sqrt(d2 or 0), npc
+end
+
+-- Why a button for `kind` is out of reach ("too far from the banker"), or nil when it is in reach or there is none.
+function M.too_far(kind)
+    local dist = M.npc_distance(kind)
+    if dist == nil or M.within_reach(kind, dist) then return nil end
+    return TOO_FAR[kind]
+end
+
+-- Called when a button that is greyed for being too far is clicked: the first click says why and asks to click again, the
+-- second (within 10 s, standing about where they stood) goes through, so the mod's guess never keeps a try from the
+-- player. Returns true when the click is held back.
+function M.far_gate(kind, verb)
+    local far = M.too_far(kind)
+    if not far then return false end
+    local dist = M.npc_distance(kind)
+    local now = os.clock()
+    local t = M.try_anyway[kind]
+    if t and now <= t.expires and dist and math.abs(t.dist - dist) < 2 then
+        t.expires = now + 10
+        return false
+    end
+    M.try_anyway[kind] = {dist = dist or 0, expires = now + 10}
+    M.result = {text = verb .. ": " .. far .. " (click again to try anyway)", ok = false}
+    M.dirty()
+    return true
+end
+
+-- A window of `kind` that the player opened by hand answers from where they stand: that is a real answer too.
+function M.learn_native_open(kind)
+    if M.pending_open and M.pending_open.kind == kind then return end
+    local dist = M.npc_distance(kind, true)
+    if dist then M.note_range(kind, dist, true) end
+end
+
+local function release_takeover(kind)
+    if kind and eqoa.windows and eqoa.windows.release then
+        eqoa.windows.release(kind)
+    end
+end
+M.release_takeover = release_takeover
+
+function M.ensure_takeover(kind)
+    if not (eqoa.windows and eqoa.windows.takeover and eqoa.windows.taken) then
+        return true
+    end
+    if eqoa.windows.taken(kind) then
+        return true
+    end
+    local ok, err = eqoa.windows.takeover(kind)
+    if not ok then
+        M.result = {text = (err and err.message) or ("cannot take over " .. kind), ok = false}
+        M.dirty()
+        return false
+    end
+    return true
+end
+
 function M.clear_corpse_hold()
     M.corpse_tab_kept = false
+    M.pending_open = nil
+    M.held_for_req = nil
+    M.eligible_corpses = {}
+    M.auto_looted = {}
+    M.tracked_target_id = nil
+    M.tracked_target_pos = nil
+    M.recently_dead = nil
+    M.engaged = {}
+    M.auto_retry = {}
+    M.auto_take = nil
+    M.auto_done = {}
+    M.auto_said = {}
+    M.engaged_pos = {}
+    M.corpses_seen, M.corpses_seen_in = nil, nil
 end
 
 M.COLUMNS, M.MAX_ROWS, M.LOG_MAX = 8, 6, 50
@@ -59,7 +305,7 @@ end
 function M.visible_tabs()
     local tabs = {}
     for _, t in ipairs(M.TABS) do tabs[#tabs + 1] = t end
-    if eqoa.loot.get() or keeping_corpse_tab() then
+    if eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse() ~= nil then
         local t = M.CORPSE_TAB
         tabs[#tabs + 1] = {key = t.key, label = t.label, idx = 7}
     end
@@ -168,7 +414,7 @@ local function active_key_and_container()
             if not loot_batch_active() then
                 M.corpse_tab_kept = false
             end
-        elseif keeping_corpse_tab() then
+        elseif keeping_corpse_tab() or M.nearby_corpse() ~= nil then
             c = EMPTY_CORPSE
         else
             M.tab = 1
@@ -245,9 +491,12 @@ function M.dirty()
 end
 
 function M.select(tab)
-    if tab == 7 and (eqoa.loot.get() or keeping_corpse_tab()) and M.tab ~= 7 then
+    if tab == 7 and (eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse() ~= nil) and M.tab ~= 7 then
+        if M.tab == 6 then release_takeover("bank") end
         M.tab = 7; M.scroll = 0; M.grid_scroll = 0; M.grid = nil; M.menu = nil
     elseif tab ~= M.tab and M.TABS[tab] then
+        if M.tab == 7 then release_takeover("loot") end
+        if M.tab == 6 then release_takeover("bank") end
         M.corpse_tab_kept = false
         M.tab = tab; M.scroll = 0; M.grid_scroll = 0; M.grid = nil; M.menu = nil
     end
@@ -290,24 +539,40 @@ local function cannot_reason(it, can)
     return "cannot use item"
 end
 
+M.AUTO_MODES = {
+    {key = "off", label = "Off", explain = "Auto-loot: off. Loot with the buttons below."},
+    {key = "all", label = "Everything", explain = "Auto-loot: takes every item from creatures you kill."},
+    {key = "non_junk", label = "Everything but junk", explain = "Auto-loot: takes all but items marked as junk."},
+}
+
+local function auto_mode_valid(key)
+    for _, m in ipairs(M.AUTO_MODES) do
+        if m.key == key then return true end
+    end
+    return false
+end
+
 function M.load_junk()
     M.junk_ids = {}
-    M.sell_grey = false
+    M.auto_by_char = {}
     if eqoa and eqoa.files and eqoa.files.read then
         local data = eqoa.files.read(JUNK_FILE)
         if type(data) == "string" then
             for line in data:gmatch("[^\r\n]+") do
-                if line == "grey=1" then
-                    M.sell_grey = true
-                elseif line == "grey=0" then
-                    M.sell_grey = false
+                local who, mode = line:match("^auto:([^=]+)=(%a[%w_]*)$")
+                if who then
+                    if auto_mode_valid(mode) then M.auto_by_char[who] = mode end
                 elseif line:match("^%d+$") then
                     M.junk_ids[line] = true
                 end
+                -- anything else (a retired "grey=" line, an un-keyed "auto=" line) is ignored
             end
         end
     end
     M.junk_loaded = true
+    M.character = nil
+    M.char_dirty = true
+    M.sync_character()
 end
 
 function M.save_junk()
@@ -317,28 +582,78 @@ function M.save_junk()
         if v then ids[#ids + 1] = k end
     end
     table.sort(ids)
-    local lines = {M.sell_grey and "grey=1" or "grey=0"}
+    local who = {}
+    for name, mode in pairs(M.auto_by_char) do
+        if mode ~= "off" then who[#who + 1] = name end
+    end
+    table.sort(who)
+    local lines = {}
+    for _, name in ipairs(who) do lines[#lines + 1] = "auto:" .. name .. "=" .. M.auto_by_char[name] end
     for _, k in ipairs(ids) do lines[#lines + 1] = k end
     eqoa.files.write(JUNK_FILE, table.concat(lines, "\n") .. "\n")
 end
 
--- Grey vendor trash: unequipped, non-equippable, non-quickslot misc item without usable/charged role or stats.
-function M.is_grey_item(it)
-    if not it or it.equipped or it.equippable or it.quick_slot ~= nil then return false end
-    local wearable = it.wear_slot ~= nil and it.wear_slot ~= 0 and it.wear_slot ~= 4294967295
-    if wearable then return false end
-    if has_tab(it, "usable") or has_tab(it, "charged") or has_tab(it, "equipment") then return false end
-    if not has_tab(it, "misc") then return false end
-    if (it.charges or 0) > 0 then return false end
-    if it.stats and #it.stats > 0 then return false end
+-- The Auto-loot choice belongs to the character in the world: when it changes (a login, another world) the choice of
+-- the new one is read back. Nil until the game says who the character is.
+function M.sync_character()
+    local pl = eqoa and eqoa.player and eqoa.player.get and eqoa.player.get()
+    local name = pl and pl.name
+    if type(name) ~= "string" or name == "" then return false end
+    M.char_dirty = false
+    if name == M.character then return false end
+    M.character = name
+    local mode = M.auto_by_char[name] or "off"
+    M.alog(nil, "mode:" .. name .. ":" .. mode, M.auto_mode_line(mode, name))
+    if mode ~= M.auto_mode then
+        M.auto_mode = mode
+        M.eligible_corpses = {}
+        M.auto_looted = {}
+        M.scan_reset()
+        if M.on_auto_mode then M.on_auto_mode(mode) end
+        M.dirty()
+    end
+    return true
+end
+
+function M.auto_mode_line(mode, name)
+    local what = mode == "all" and "Everything" or (mode == "non_junk" and "Everything but junk" or "Off")
+    local line = "mode " .. what .. " for " .. tostring(name)
+    if mode == "off" then line = line .. ": kills are left alone" end
+    return line
+end
+
+function M.auto_explain()
+    for _, m in ipairs(M.AUTO_MODES) do
+        if m.key == M.auto_mode then return m.explain end
+    end
+    return ""
+end
+
+function M.set_auto_mode(mode)
+    if not auto_mode_valid(mode) then return false end
+    if not M.character then M.sync_character() end
+    if not M.character then
+        M.result = {text = "Auto-loot: waiting for your character", ok = false}
+        M.dirty()
+        return false
+    end
+    M.auto_mode = mode
+    M.auto_by_char[M.character] = mode
+    M.alog_forget(nil, "mode:" .. M.character .. ":" .. mode)
+    M.alog(nil, "mode:" .. M.character .. ":" .. mode, M.auto_mode_line(mode, M.character))
+    -- corpses held for the old choice are not looted under the new one
+    M.eligible_corpses = {}
+    M.auto_looted = {}
+    M.save_junk()
+    M.scan_reset()
+    if M.on_auto_mode then M.on_auto_mode(mode) end
+    M.dirty()
     return true
 end
 
 function M.is_junk(it)
     if not it then return false end
-    if M.junk_ids[tostring(it.id)] then return true end
-    if M.sell_grey and M.is_grey_item(it) then return true end
-    return false
+    return M.junk_ids[tostring(it.id)] == true
 end
 
 function M.set_junk(it, flag)
@@ -353,23 +668,15 @@ function M.set_junk(it, flag)
     M.save_junk()
 end
 
-function M.toggle_grey()
-    M.sell_grey = not M.sell_grey
-    M.save_junk()
-    M.result = {
-        text = M.sell_grey and "Also sell grey items: ON" or "Also sell grey items: OFF",
-        ok = nil,
-    }
-end
-
 function M.junk_sell_list()
     local inv = eqoa.inventory.get()
     if not inv then return {}, 0, 0 end
+    local has_merch = eqoa.merchant.get() ~= nil
     local steps, total_tunar = {}, 0
     for _, it in ipairs(inv.items) do
         if not it.equipped and M.is_junk(it) then
             local qty = it.quantity or 1
-            local q = eqoa.merchant.price(it.ref, "sell", qty)
+            local q = has_merch and eqoa.merchant.price(it.ref, "sell", qty) or 0
             steps[#steps + 1] = {kind = "sell", item = it.ref, count = qty}
             total_tunar = total_tunar + (q or 0)
         end
@@ -389,60 +696,153 @@ function M.loot_non_junk_list()
     return steps, #loot.items
 end
 
+function M.open_loot_corpse(after_kind, corpse_id)
+    -- one open at a time: a second request while the first is unanswered would orphan the first (its answer, or
+    -- its silence, would no longer reach the button or Auto-loot that asked)
+    if M.pending_open then
+        return nil, {code = "busy", message = "still waiting for the server to open a corpse"}
+    end
+    if not M.ensure_takeover("loot") then return nil, {message = "window busy"} end
+    local req, err = eqoa.actions.open_loot(corpse_id)
+    if not req then
+        release_takeover("loot")
+        local msg = (err and (err.message or err.code)) or "refused"
+        M.result = {text = "Open corpse: " .. msg, ok = false}
+        M.dirty()
+        return nil, err
+    end
+    local verb = after_kind == "loot_all" and "Take all"
+        or (after_kind == "loot_non_junk" and "Take all but junk" or "Open corpse")
+    M.pending_open = {kind = "loot", req = req, after = after_kind, verb = verb}
+    M.result = {text = "Opening corpse...", ok = nil}
+    M.dirty()
+    return req, nil
+end
+
+function M.open_talk_npc(talk_kind, verb, after_fn)
+    local dist = M.npc_distance(talk_kind, true)
+    if M.far_gate(talk_kind, verb) then return nil, {message = TOO_FAR[talk_kind]} end
+    if not M.ensure_takeover(talk_kind) then return nil, {message = "window busy"} end
+    local req, err = eqoa.actions.talk(nil, {kind = talk_kind})
+    if not req then
+        release_takeover(talk_kind)
+        local msg = (err and (err.message or err.code)) or "refused"
+        M.result = {text = verb .. ": " .. msg, ok = false}
+        M.dirty()
+        return nil, err
+    end
+    M.pending_open = {kind = talk_kind, req = req, fn = after_fn, verb = verb, dist = dist}
+    M.result = {text = talk_kind == "merchant" and "Opening merchant..." or "Opening bank...", ok = nil}
+    M.dirty()
+    return req, nil
+end
+
+function M.start_loot_button()
+    local l = eqoa.loot.get()
+    if l and l.open then
+        M.select(#M.TABS + 1)
+        M.result = {text = "Corpse ready", ok = true}
+        M.dirty()
+        return true
+    end
+    return M.open_loot_corpse(nil) ~= nil
+end
+
 function M.start_sell_junk()
+    local merch = eqoa.merchant.get()
+    if not merch then
+        if M.nearby_npc("merchant") ~= nil then
+            return M.open_talk_npc("merchant", "Sell junk", M.start_sell_junk) ~= nil
+        end
+        M.result = {text = "Sell junk: merchant is not open", ok = false}
+        return false
+    end
     local steps, count = M.junk_sell_list()
     if count == 0 then
+        release_takeover("merchant")
         M.result = {text = "No junk items to sell", ok = false}
-        return
+        return false
     end
     local bid, err = eqoa.actions.batch({steps = steps, require_window = "merchant"})
     if not bid then
+        release_takeover("merchant")
         local msg = err and (err.message or err.code) or "refused"
         M.result = {text = "Sell junk: " .. msg, ok = false}
-        return
+        return false
     end
     M.batch_id = bid
     M.batch_kind = "sell"
     M.batch_verb = "Sold"
     M.batch_total = count
     M.result = {text = string.format("Selling junk 0 of %d...", count), ok = nil}
+    return true
 end
 
 function M.start_loot_all()
     local loot = eqoa.loot.get()
-    if not loot or #(loot.items or {}) == 0 then
+    if not loot then
+        if M.nearby_corpse() ~= nil then
+            return M.open_loot_corpse("loot_all") ~= nil
+        end
         M.dirty()
         M.result = {text = "Corpse has no items", ok = false}
-        return
+        return false
+    end
+    if #(loot.items or {}) == 0 then
+        release_takeover("loot")
+        M.dirty()
+        M.result = {text = "Corpse has no items", ok = false}
+        M.auto_done_line("done: no items on it (coin only)")
+        return false
     end
     M.pending_label = "Take all"
+    M.auto_take_n = #loot.items
     local req, err = eqoa.actions.loot_all()
     if not req then
+        release_takeover("loot")
         local msg = err and (err.message or err.code) or "refused"
         M.result = {text = "Take all: " .. msg, ok = false}
+        M.auto_done_line("Take all refused: " .. msg)
         M.last_req = nil
+        return false
     else
         M.last_req = req
+        M.held_for_req = "loot"
         M.result = {text = "Take all: queued...", ok = nil}
+        return true
     end
 end
 
 function M.start_loot_non_junk()
-    local steps, total = M.loot_non_junk_list()
-    if total == 0 then
+    local loot = eqoa.loot.get()
+    if not loot then
+        if M.nearby_corpse() ~= nil then
+            return M.open_loot_corpse("loot_non_junk") ~= nil
+        end
         M.dirty()
         M.result = {text = "Corpse has no items", ok = false}
-        return
+        return false
+    end
+    local steps, total = M.loot_non_junk_list()
+    if total == 0 then
+        release_takeover("loot")
+        M.dirty()
+        M.result = {text = "Corpse has no items", ok = false}
+        M.auto_done_line("done: no items on it (coin only)")
+        return false
     end
     if #steps == 0 then
+        release_takeover("loot")
         M.result = {text = "Corpse has only junk items", ok = false}
-        return
+        M.auto_done_line("done: only junk on it, left there")
+        return false
     end
     local bid, err = eqoa.actions.batch({steps = steps, require_window = "loot"})
     if not bid then
         local msg = err and (err.message or err.code) or "refused"
         M.result = {text = "Take all but junk: " .. msg, ok = false}
-        return
+        M.auto_done_line("Take all but junk refused: " .. msg)
+        return false
     end
     M.batch_id = bid
     M.batch_kind = "loot"
@@ -450,9 +850,19 @@ function M.start_loot_non_junk()
     M.batch_total = #steps
     M.corpse_tab_kept = (M.tab == 7)
     M.result = {text = string.format("Looting %d of %d...", 0, #steps), ok = nil}
+    return true
 end
 
 function M.stop_batch()
+    if M.pending_open then
+        local req = M.pending_open.req
+        local kind = M.pending_open.kind
+        M.pending_open = nil
+        if req then pcall(eqoa.actions.cancel, req) end
+        release_takeover(kind)
+        M.result = {text = "Stopped", ok = false}
+        M.dirty()
+    end
     if not M.batch_id then return end
     local stopped = eqoa.actions.stop_batch(M.batch_id)
     if stopped then
@@ -471,25 +881,31 @@ end
 
 function M.on_batch_result(d)
     if not d or not M.batch_id or d.batch_id ~= M.batch_id then return end
-    local verb = M.batch_verb or (M.batch_kind == "loot" and "Looted" or "Sold")
+    local kind = M.batch_kind
+    local verb = M.batch_verb or (kind == "loot" and "Looted" or "Sold")
     local done, total = d.completed or 0, d.total or M.batch_total or 0
     if d.ok == true then
         M.result = {text = string.format("%s %d of %d", verb, done, total), ok = true}
+        if kind == "loot" then M.auto_done_line(string.format("done: took %d of %d items (junk left)", done, total)) end
     else
         local reason = d.reason or d.code or d.state or "stopped"
         M.result = {text = string.format("%s %d of %d: %s", verb, done, total, reason), ok = false}
+        if kind == "loot" then
+            M.auto_done_line(string.format("stopped after %d of %d items: %s", done, total, reason))
+        end
     end
-    if M.batch_kind == "loot" and M.tab == 7 then
+    if kind == "loot" and M.tab == 7 then
         M.corpse_tab_kept = true
     end
     M.batch_id = nil
+    release_takeover(kind == "loot" and "loot" or "merchant")
 end
 
 -- Build the click menu for one stack (never includes Destroy; refused entries carry the game's reason).
 function M.build_menu(it, fx, fy)
     local rows = {}
-    local function add(label, enabled, reason, run, local_only)
-        rows[#rows + 1] = {label = label, enabled = enabled, reason = reason, run = run, local_only = local_only}
+    local function add(label, enabled, reason, run, local_only, far_kind)
+        rows[#rows + 1] = {label = label, enabled = enabled, reason = reason, run = run, local_only = local_only, far_kind = far_kind}
     end
     local loot = eqoa.loot.get()
     local bank = eqoa.bank.get()
@@ -511,14 +927,26 @@ function M.build_menu(it, fx, fy)
             loot == nil and "corpse window is not open" or nil,
             function() return eqoa.actions.loot_all() end)
     elseif it.list == "bank" then
+        local near_bank = M.nearby_npc("bank") ~= nil
+        local bank_far = not bank_open and near_bank and M.too_far("bank") or nil
+        local can_bank = bank_open or (near_bank and not bank_far)
+        local no_bank = bank_far or "bank window is not open"
+        local function bank_move_or_open(qty)
+            if bank and bank.open then
+                return eqoa.actions.bank_move("bank", it.ref, qty)
+            end
+            return M.open_talk_npc("bank", "Withdraw", function()
+                M.run_single("Withdraw", function() return eqoa.actions.bank_move("bank", it.ref, qty) end)
+            end)
+        end
         if it.quantity > 1 then
-            add("Withdraw 1", bank_open, not bank_open and "bank window is not open" or nil,
-                function() return eqoa.actions.bank_move("bank", it.ref, 1) end)
-            add("Withdraw stack (" .. it.quantity .. ")", bank_open, not bank_open and "bank window is not open" or nil,
-                function() return eqoa.actions.bank_move("bank", it.ref, it.quantity) end)
+            add("Withdraw 1", can_bank, not can_bank and no_bank or nil,
+                function() return bank_move_or_open(1) end, nil, bank_far and "bank" or nil)
+            add("Withdraw stack (" .. it.quantity .. ")", can_bank, not can_bank and no_bank or nil,
+                function() return bank_move_or_open(it.quantity) end, nil, bank_far and "bank" or nil)
         else
-            add("Withdraw", bank_open, not bank_open and "bank window is not open" or nil,
-                function() return eqoa.actions.bank_move("bank", it.ref, 1) end)
+            add("Withdraw", can_bank, not can_bank and no_bank or nil,
+                function() return bank_move_or_open(1) end, nil, bank_far and "bank" or nil)
         end
     else
         local can = eqoa.items.can_use(it.ref)
@@ -565,16 +993,27 @@ function M.build_menu(it, fx, fy)
             end
         end
 
-        if bank_open then
-            local dep_deny = it.equipped and "cannot deposit an equipped item" or nil
+        local near_bank = M.nearby_npc("bank") ~= nil
+        if bank_open or near_bank then
+            local dep_far = not bank_open and M.too_far("bank") or nil
+            local dep_deny = it.equipped and "cannot deposit an equipped item" or dep_far or nil
+            local dep_far_kind = (not it.equipped and dep_far) and "bank" or nil
+            local function dep_move_or_open(qty)
+                if bank_open then
+                    return eqoa.actions.bank_move("inventory", it.ref, qty)
+                end
+                return M.open_talk_npc("bank", "Deposit", function()
+                    M.run_single("Deposit", function() return eqoa.actions.bank_move("inventory", it.ref, qty) end)
+                end)
+            end
             if (it.quantity or 1) > 1 then
                 add("Deposit 1", dep_deny == nil, dep_deny,
-                    function() return eqoa.actions.bank_move("inventory", it.ref, 1) end)
+                    function() return dep_move_or_open(1) end, nil, dep_far_kind)
                 add("Deposit stack (" .. it.quantity .. ")", dep_deny == nil, dep_deny,
-                    function() return eqoa.actions.bank_move("inventory", it.ref, it.quantity) end)
+                    function() return dep_move_or_open(it.quantity) end, nil, dep_far_kind)
             else
                 add("Deposit", dep_deny == nil, dep_deny,
-                    function() return eqoa.actions.bank_move("inventory", it.ref, 1) end)
+                    function() return dep_move_or_open(1) end, nil, dep_far_kind)
             end
         end
     end
@@ -589,38 +1028,530 @@ function M.build_menu(it, fx, fy)
     return M.menu
 end
 
+function M.run_single(label, fn)
+    M.pending_label = label
+    local req, err = fn()
+    if not req then
+        local msg = err and (err.message or err.code) or "refused"
+        M.result = {text = label .. ": " .. msg, ok = false}
+        M.last_req = nil
+    else
+        M.last_req = req
+        if not M.pending_open then
+            M.result = {text = label .. ": queued...", ok = nil}
+        end
+    end
+    M.dirty()
+    return req, err
+end
+
 function M.trigger_menu(row)
     if not row then return end
     if row.local_only and row.enabled and row.run then
         row.run()
         return
     end
+    if not row.enabled and row.far_kind and row.run then
+        -- greyed for being too far: the second click tries anyway
+        if M.far_gate(row.far_kind, row.label) then return end
+        M.run_single(row.label, row.run)
+        return
+    end
     if not row.enabled or not row.run then
         M.result = {text = row.label .. ": " .. (row.reason or "unavailable"), ok = false}
         return
     end
-    M.pending_label = row.label
-    local req, err = row.run()
-    if not req then
-        local msg = err and (err.message or err.code) or "refused"
-        M.result = {text = row.label .. ": " .. msg, ok = false}
-        M.last_req = nil
-    else
-        M.last_req = req
-        M.result = {text = row.label .. ": queued...", ok = nil}
+    M.run_single(row.label, row.run)
+end
+
+local function finish_pending_open(expected_kind)
+    local p = M.pending_open
+    if not p or p.kind ~= expected_kind then return false end
+    M.pending_open = nil
+    if p.dist then M.note_range(p.kind, p.dist, true) end
+    if p.kind == "loot" then
+        if p.auto then
+            M.auto_take = p.auto
+            if M.auto_retry then M.auto_retry[p.auto] = nil end
+            if p.auto_d2 then M.note_loot_reach(math.sqrt(p.auto_d2), true) end
+        end
+        if p.after == "loot_all" then
+            M.start_loot_all()
+        elseif p.after == "loot_non_junk" then
+            M.start_loot_non_junk()
+        else
+            M.result = {text = "Corpse ready", ok = true}
+            M.dirty()
+        end
+    elseif p.fn then
+        p.fn()
+        if M.last_req ~= nil then
+            M.held_for_req = p.kind
+        elseif not M.batch_id and not (p.kind == "bank" and M.tab == 6) then
+            release_takeover(p.kind)
+        end
     end
+    return true
+end
+
+function M.on_loot_changed(d)
+    if d and d.before and not d.after then
+        if not keeping_corpse_tab() and M.tab == 7 then
+            M.tab = 1
+        end
+    elseif eqoa.loot.get() ~= nil then
+        finish_pending_open("loot")
+    end
+    M.dirty()
+end
+
+function M.on_merchant_changed(d)
+    if eqoa.merchant.get() ~= nil then
+        finish_pending_open("merchant")
+    end
+    M.dirty()
+end
+
+function M.on_bank_changed(d)
+    local b = eqoa.bank.get()
+    if b and b.open then
+        finish_pending_open("bank")
+    end
+    M.dirty()
+end
+
+-- Auto-loot's "my kill" signal. The wire does not say who killed a creature or who may loot it, so the best the
+-- client can know is that YOU hit it: an outgoing damage hit (combat.hit, you as the attacker) or your auto-attack
+-- on it while it was your target. A creature nobody on your side touched, another player's kill, a player's corpse
+-- and a pet's are never auto-looted. What stays uncertain: a creature you hit that another player then killed
+-- still counts (the server decides who may loot and its refusal is shown); manual Loot works on any corpse.
+M.ENGAGED_SECS = 120.0
+
+function M.mark_engaged(id)
+    if not id then return end
+    M.engaged = M.engaged or {}
+    M.engaged[id] = os.clock() + M.ENGAGED_SECS
+end
+
+function M.engaged_recently(id)
+    local until_ = M.engaged and M.engaged[id]
+    return until_ ~= nil and os.clock() <= until_
+end
+
+function M.on_combat_hit(d)
+    if d and d.outgoing and d.kind == "damage" and not d.from_pet and d.defender_id then
+        M.mark_engaged(d.defender_id)
+    end
+end
+
+-- The player is in combat: the game's own combat flag (`fighting`, the one that asks for battle music), auto-attack
+-- on a live hostile target, or a live hostile that has the player targeted. Auto-loot must not run then: opening a
+-- corpse retargets, which ends the auto-attack. The game leaves auto-attack on after its target dies (owner log
+-- 2026-11-19: corpses waited "in combat (auto-attack is on)" long after the kill), so auto-attack counts only while the
+-- target is a live creature that can be fought. Returns true and why (for the log). `pl` is the player when the
+-- caller has it already.
+function M.in_combat(pl)
+    pl = pl or (eqoa.player and eqoa.player.get and eqoa.player.get())
+    if not pl then return false end
+    if pl.fighting == true then return true, "the game says you are fighting" end
+    if pl.auto_attacking == true and pl.target_id then
+        local t = eqoa.entities and eqoa.entities.find and eqoa.entities.find(pl.target_id)
+        if t and not t.corpse and t.kind == "npc" and t.disposition_name ~= "Friendly"
+            and not M.not_a_fight(t, pl.position, pl)
+        then
+            return true, "auto-attack is on against " .. ((t.name and t.name ~= "") and t.name or "your target")
+        end
+    end
+    local h = pl.id ~= nil and scan_zone().hostile
+    if h then return true, h .. " has you targeted" end
+    return false
+end
+
+-- Auto-loot's decisions go to the game's log (eqoa.log, through eqoa.log.write), one line per corpse and reason, so
+-- a play session explains itself: queued, waiting (in combat, walk closer), skipped (not your kill, already looted),
+-- the server's answers and the retries, done. `auto_log` keeps the last lines for the tests.
+M.auto_log, M.auto_said = {}, {}
+function M.alog(id, key, text)
+    local k = tostring(id) .. ":" .. key
+    if M.auto_said[k] then return end
+    M.auto_said[k] = true
+    local line = id and string.format("auto-loot: corpse 0x%x: %s", id, text) or ("auto-loot: " .. text)
+    M.auto_log[#M.auto_log + 1] = line
+    if #M.auto_log > 80 then table.remove(M.auto_log, 1) end
+    if eqoa.log and eqoa.log.write then pcall(eqoa.log.write, "info", line) end
+end
+-- a reason said for a corpse may be said again (its state moved on: a new try, a fight over)
+function M.alog_forget(id, key)
+    M.auto_said[tostring(id) .. ":" .. key] = nil
+end
+
+local function corpse_name(e)
+    return (e and e.name and e.name ~= "") and e.name or "a corpse"
+end
+
+local function make_eligible(e)
+    M.eligible_corpses = M.eligible_corpses or {}
+    if not M.eligible_corpses[e.id] then
+        M.alog(e.id, "queued", corpse_name(e) .. ", your kill: queued for Auto-loot (" .. M.auto_mode .. ")")
+    end
+    M.eligible_corpses[e.id] = e
+end
+
+-- How near a corpse must be. The server answers a loot request from too far with "Out of range." (owner log
+-- 2026-11-19: it opened corpses at 3 and 6 units and refused them at 11, 12, 13 and 15). The mod learns the reach from
+-- real answers: the farthest distance that opened (`ok`) and the nearest that was refused (`fail`); until it knows, it
+-- tries within LOOT_DEFAULT_REACH. A refusal is a firm answer (no second miss needed, unlike a merchant's silence).
+M.LOOT_DEFAULT_REACH = 7.0
+M.loot_reach = {}
+
+function M.note_loot_reach(dist, opened)
+    if type(dist) ~= "number" then return end
+    local r = M.loot_reach
+    if opened then
+        if not r.ok or dist > r.ok then r.ok = dist end
+        if r.fail and r.fail <= dist then r.fail = nil end -- the reach changed: the old refusal no longer holds
+    else
+        if not r.fail or dist < r.fail then r.fail = dist end
+        if r.ok and r.ok >= dist then r.ok = nil end
+    end
+end
+
+-- The distance Auto-loot opens corpses within, as far as the mod knows.
+function M.loot_reach_now()
+    local r = M.loot_reach
+    if r.fail then return math.max(r.ok or 0, r.fail - 0.5) end
+    return math.max(r.ok or 0, M.LOOT_DEFAULT_REACH)
+end
+
+-- The answer to Auto-loot's open of corpse `id` (asked from `d2`, squared distance) was not the corpse (`code`, `why`).
+--  * "Out of range." (or 0x0085's "too far"): the reach is learned and the corpse waits until the player is closer;
+--    never a try, never a give-up.
+--  * The game could not send it ("not_ready": a window of its own is up, the player is casting or dead; "busy": the
+--    game turned the list away): waits AUTO_RETRY_SECS, not a try.
+--  * Anything else (no answer in 10 s, another refusal) is a try: asked again 2 units closer or AUTO_RETRY_SECS later,
+--    AUTO_TRIES in all.
+function M.auto_open_failed(id, d2, why, code)
+    M.auto_retry = M.auto_retry or {}
+    if M.auto_looted then M.auto_looted[id] = nil end
+    M.alog_forget(id, "far")
+    M.alog_forget(id, "combat")
+    local r = M.auto_retry[id] or {n = 0}
+    local dist = d2 and math.sqrt(d2)
+    local text = tostring(why or "")
+    if code == "out_of_range" or text:find("Out of range", 1, true) or text:lower():find("too far", 1, true) then
+        M.note_loot_reach(dist, false)
+        r.wait_closer = dist
+        M.auto_retry[id] = r
+        M.alog_forget(id, "closer")
+        M.alog(id, "oor" .. tostring(dist and math.floor(dist + 0.5)), string.format(
+            "the server said \"%s\" at %.0f units: waiting until you are closer (server reach ~%.0f units)",
+            text, dist or 0, M.loot_reach_now()))
+        return
+    end
+    if code == "not_ready" or code == "busy" then
+        r.d2, r.at = d2, os.clock()
+        M.auto_retry[id] = r
+        M.alog(id, "notready" .. r.n, string.format(
+            "the game could not open it now (%s): trying again in %d s (not counted as a try)", text, M.AUTO_RETRY_SECS))
+        return
+    end
+    r.n, r.d2, r.at = r.n + 1, d2, os.clock()
+    M.auto_retry[id] = r
+    if r.n >= M.AUTO_TRIES then
+        if M.auto_looted then M.auto_looted[id] = true end
+        M.alog(id, "gaveup", string.format("gave up after %d tries (%s); use the Loot button", r.n, text))
+        return
+    end
+    M.alog(id, "retry" .. r.n, string.format(
+        "the server did not open it (%s): will retry when you are closer or in %d s (try %d of %d)",
+        text, M.AUTO_RETRY_SECS, r.n + 1, M.AUTO_TRIES))
+end
+
+-- What Auto-loot took from its corpse (or why nothing), said once the take is over.
+function M.auto_done_line(text)
+    local id = M.auto_take
+    if not id then return end
+    M.auto_take = nil
+    M.auto_done = M.auto_done or {}
+    M.auto_done[id] = true
+    M.alog(id, "done", text)
+end
+
+-- A corpse seen by the poll: a creature you hit (or one that vanished where a corpse now lies) is queued; any other
+-- creature's corpse within sight is said once to be left alone.
+local function consider_corpse(e, new)
+    if e.kind == "player" or e.kind == "pet" then return end
+    local yours = M.engaged_recently(e.id)
+    if not yours and M.recently_dead and os.clock() <= M.recently_dead.expires then
+        local d2 = dist_sq(M.recently_dead.pos, e.actor_position or e.position)
+        yours = d2 ~= nil and d2 <= 36.0
+    end
+    if yours then
+        if M.auto_done and M.auto_done[e.id] then
+            M.alog(e.id, "already", "skipped, already looted")
+        else
+            make_eligible(e)
+        end
+    elseif new then
+        local pl = M.poll_pl
+        local d2 = dist_sq(pl and pl.position, e.actor_position or e.position)
+        if not (d2 and d2 > M.NPC_SHOWN_WITHIN * M.NPC_SHOWN_WITHIN) then
+            M.alog(e.id, "notyours", corpse_name(e) .. ": skipped, not your kill (you did not hit it)")
+        end
+    end
+end
+
+-- Auto-loot looks at the world AUTO_POLL_SECS apart, from the render event, instead of listening to every creature
+-- update: in a crowd those were 50-70 deliveries a frame, each asking for the player again (owner log 2026-11-19:
+-- 2.2-4.3 ms a frame with Auto-loot on, 0.1 ms off). A poll reads the player once, asks after the few creatures you
+-- hit (`eqoa.entities.find`), looks for new corpses in the shared look at the zone (at most every SCAN_TTL), then
+-- decides. Your hits come from `combat.hit`, the one other event it hears.
+M.AUTO_POLL_SECS = 0.25
+M.AUTO_IDLE_SCAN_SECS = 2.0
+M.poll_count = 0 -- polls made (for the tests)
+
+function M.auto_poll(force)
+    if M.auto_mode == "off" then return end
+    local now = os.clock()
+    if not force and M.auto_polled and now - M.auto_polled < M.AUTO_POLL_SECS and now >= M.auto_polled then return end
+    M.auto_polled = now
+    M.poll_count = M.poll_count + 1
+    local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
+    M.poll_pl = pl
+    if not pl then return end
+    if M.recently_dead and now > M.recently_dead.expires then M.recently_dead = nil end
+    if pl.auto_attacking == true and pl.target_id then M.mark_engaged(pl.target_id) end
+    local find = eqoa.entities and eqoa.entities.find
+    -- the creatures you hit: a corpse now, still alive (where), or gone (its corpse may come as a new entity there)
+    M.engaged_pos = M.engaged_pos or {}
+    if M.engaged and find then
+        for id, until_ in pairs(M.engaged) do
+            if until_ < now then
+                M.engaged[id] = nil
+                M.engaged_pos[id] = nil
+            else
+                local e = find(id)
+                if e and e.corpse then
+                    consider_corpse(e, false)
+                elseif e then
+                    M.engaged_pos[id] = e.actor_position or e.position
+                elseif M.engaged_pos[id] then
+                    M.recently_dead = {id = id, pos = M.engaged_pos[id], expires = now + 3.0}
+                    M.engaged_pos[id] = nil
+                end
+            end
+        end
+    end
+    -- a corpse waiting that is gone (decayed, looted by someone): forget it
+    if M.eligible_corpses and find then
+        for id in pairs(M.eligible_corpses) do
+            local e = find(id)
+            if not (e and e.corpse) then
+                M.eligible_corpses[id] = nil
+                if M.auto_retry then M.auto_retry[id] = nil end
+            else
+                M.eligible_corpses[id] = e
+            end
+        end
+    end
+    -- new corpses near you, from the shared look at the zone (one look at a crowded zone costs ~3.75 ms in the owner's
+    -- log): every SCAN_TTL while a creature you hit has just vanished (its corpse may be a new entity) or a corpse waits
+    -- (the fight check reads the look too), every AUTO_IDLE_SCAN_SECS otherwise; the creatures you hit are followed by
+    -- `entities.find` above, without a look at the zone
+    local busy = M.recently_dead ~= nil
+    if not busy and M.eligible_corpses then
+        for id in pairs(M.eligible_corpses) do
+            if not (M.auto_looted and M.auto_looted[id]) then busy = true break end
+        end
+    end
+    if not busy and M.idle_scan_at and now - M.idle_scan_at < M.AUTO_IDLE_SCAN_SECS and now >= M.idle_scan_at then
+        M.tick_auto_loot(pl)
+        return
+    end
+    M.idle_scan_at = now
+    local data = scan_zone()
+    if data.corpses and data ~= M.corpses_seen_in then
+        M.corpses_seen_in = data
+        local seen, before = {}, M.corpses_seen or {}
+        for _, e in ipairs(data.corpses) do
+            seen[e.id] = true
+            if not before[e.id] then consider_corpse(e, M.corpses_seen ~= nil) end
+        end
+        M.corpses_seen = seen
+    end
+    M.tick_auto_loot(pl)
+end
+
+-- Auto-loot opens a corpse within the learned reach. A corpse whose open failed is asked again 2 units closer or
+-- AUTO_RETRY_SECS later (AUTO_TRIES real failures in all; see `auto_open_failed`).
+M.AUTO_TRIES, M.AUTO_CLOSER, M.AUTO_RETRY_SECS = 3, 2.0, 5.0
+
+function M.tick_auto_loot(pl)
+    if M.auto_mode == "off" then return end
+    if not (M.eligible_corpses and next(M.eligible_corpses)) then return end
+    local waiting = false
+    for id in pairs(M.eligible_corpses) do
+        if not (M.auto_looted and M.auto_looted[id]) then waiting = true break end
+    end
+    if not waiting then return end
+    if M.batch_id or M.pending_open or M.last_req or loot_batch_active() then return end
+    pl = pl or (eqoa.player and eqoa.player.get and eqoa.player.get())
+    -- never while fighting: it waits (the corpse stays eligible) and runs when the fight is over
+    local fighting, why = M.in_combat(pl)
+    if fighting then
+        for id in pairs(M.eligible_corpses) do
+            if not (M.auto_looted and M.auto_looted[id]) then
+                M.alog(id, "combat", "waiting: in combat (" .. tostring(why) .. ")")
+            end
+        end
+        return
+    end
+    -- a corpse already open (the player's attack key on the dead target loots it, or a click, or the Loot button): the
+    -- server will not open another while it is up, and the client refuses to ask. If it is the corpse Auto-loot wants,
+    -- Auto-loot takes from that session; any other corpse waits until it closes (owner log 2026-11-19: three tries
+    -- burned on "cannot open corpse right now" while the player's own attack key had the corpse open).
+    local open = eqoa.loot and eqoa.loot.get and eqoa.loot.get()
+    if open then
+        local src = open.source and open.source.entity_id
+        if src and M.eligible_corpses[src] and not (M.auto_looted and M.auto_looted[src]) then
+            M.auto_looted = M.auto_looted or {}
+            M.auto_looted[src] = true
+            M.auto_take = src
+            local take = M.auto_mode == "all" and "Take all" or "Take all but junk"
+            M.alog(src, "takeopen", "it is open already (in the game's window or the mod's): taking from it (" .. take .. ")")
+            if M.auto_mode == "all" then M.start_loot_all() else M.start_loot_non_junk() end
+        else
+            for id in pairs(M.eligible_corpses) do
+                if not (M.auto_looted and M.auto_looted[id]) then
+                    M.alog(id, "busy:" .. tostring(src), src
+                        and string.format("waiting: another corpse (0x%x) is open; looting this one once it closes", src)
+                        or "waiting: a corpse window is open; looting this one once it closes")
+                end
+            end
+        end
+        return
+    end
+    local ppos = pl and pl.position
+    local now = os.clock()
+    local reach = M.loot_reach_now()
+    local best, best_d2 = nil, nil
+    for id, e in pairs(M.eligible_corpses) do
+        if not (M.auto_looted and M.auto_looted[id]) then
+            M.alog_forget(id, "combat")
+            M.alog_forget(id, "busy:nil")
+            local d2 = dist_sq(ppos, e.actor_position or e.position)
+            local dist = d2 and math.sqrt(d2)
+            local r = M.auto_retry and M.auto_retry[id]
+            local ready = true
+            if r and r.at then
+                local closer = dist ~= nil and r.d2 ~= nil and math.sqrt(r.d2) - dist >= M.AUTO_CLOSER
+                ready = r.n < M.AUTO_TRIES and (closer or now - r.at >= M.AUTO_RETRY_SECS)
+            end
+            if dist ~= nil and dist > reach then
+                M.alog(id, "closer", string.format("waiting: walk closer (%.0f units; server reach ~%.0f units)", dist,
+                    reach))
+            elseif ready and (not best or (d2 or 0) < (best_d2 or 0)) then
+                best, best_d2 = e, d2 or 0
+            end
+        end
+    end
+    if best then
+        M.auto_looted = M.auto_looted or {}
+        M.auto_looted[best.id] = true
+        M.alog_forget(best.id, "closer")
+        local after = M.auto_mode == "all" and "loot_all" or "loot_non_junk"
+        local r = M.auto_retry and M.auto_retry[best.id]
+        local n = r and r.n or 0
+        M.alog(best.id, "open" .. n .. ":" .. math.floor(math.sqrt(best_d2) + 0.5), string.format(
+            "opening it (%.0f units away, %s, try %d of %d)", math.sqrt(best_d2),
+            after == "loot_all" and "Take all" or "Take all but junk", n + 1, M.AUTO_TRIES))
+        local req, err = M.open_loot_corpse(after, best.id)
+        if req and M.pending_open and M.pending_open.req == req then
+            M.pending_open.auto, M.pending_open.auto_d2 = best.id, best_d2
+        elseif not req then
+            M.auto_open_failed(best.id, best_d2, (err and (err.message or err.code)) or "refused", err and err.code)
+        end
+    end
+end
+
+-- A mod's hidden corpse session ends after 15 s without use; showing the Loot tab keeps it alive: asking for the
+-- takeover again while holding it renews the timer (walking away, zoning or releasing still end it).
+function M.renew_loot_session()
+    if eqoa.windows and eqoa.windows.takeover and eqoa.windows.taken and eqoa.windows.taken("loot") and eqoa.loot.get() then
+        eqoa.windows.takeover("loot")
+    end
+end
+
+-- What the result line says when the server gave no answer in time (the game has no range check of its own: the
+-- server decides, and a request out of its reach is simply not answered).
+function M.no_answer_text(kind)
+    if kind == "merchant" then return "the merchant did not answer (too far away?)" end
+    if kind == "bank" then return "the banker did not answer (too far from the banker?)" end
+    if kind == "loot" then return "the corpse did not open (too far away?)" end
+    if kind == "bank_move" or kind == "bank_money" then return "no answer from the server (too far from the banker?)" end
+    if kind == "sell" or kind == "buy" then return "no answer from the server (too far from the merchant?)" end
+    return "no answer from the server"
+end
+
+-- The broker's own timeout (nothing came back in 10 s). Other "unknown" outcomes keep their own reason
+-- (for instance "corpse closed" for a take the server never confirmed).
+function M.timed_out(d)
+    if d.state ~= "unknown" and d.code ~= "unknown" then return false end
+    return d.reason == nil or d.reason:find("outcome unknown after", 1, true) ~= nil
 end
 
 function M.on_action_result(d)
     if not d then return end
+    if M.pending_open and d.request_id == M.pending_open.req then
+        local p = M.pending_open
+        if d.ok == false then
+            M.pending_open = nil
+            release_takeover(p.kind)
+            local msg = d.reason or d.code or d.state or "refused"
+            M.result = {text = (p.verb or d.kind) .. ": " .. msg, ok = false}
+            if p.auto then M.auto_open_failed(p.auto, p.auto_d2, msg, d.code) end
+            M.dirty()
+            return
+        elseif d.ok == true and d.phase ~= "dispatch" then
+            finish_pending_open(p.kind)
+            return
+        elseif d.ok == nil and M.timed_out(d) then
+            -- the server never answered the open: say so, never hang on "Opening..."
+            if p.dist then M.note_range(p.kind, p.dist, false) end
+            M.pending_open = nil
+            release_takeover(p.kind)
+            M.result = {text = (p.verb or d.kind) .. ": " .. M.no_answer_text(p.kind), ok = false}
+            if p.auto then M.auto_open_failed(p.auto, p.auto_d2, "no answer from the server in 10 s", "timeout") end
+            M.dirty()
+            return
+        end
+    end
     if M.last_req == nil or d.request_id ~= M.last_req then return end
     local label = M.pending_label or d.kind
     if d.state == "dispatched" and d.phase == "dispatch" then
         M.result = {text = label .. ": waiting for server...", ok = nil}
     elseif d.ok == true then
         M.result = {text = label .. ": ok", ok = true}
+        M.auto_done_line(string.format("done: %s ok (%d items)", label, M.auto_take_n or 0))
+        M.last_req = nil
+        if M.held_for_req then
+            local k = M.held_for_req
+            M.held_for_req = nil
+            release_takeover(k)
+        end
     else
-        M.result = {text = label .. ": " .. (d.reason or d.code or d.state), ok = false}
+        local why = d.reason or d.code or d.state
+        if d.ok == nil and M.timed_out(d) then
+            why = M.no_answer_text(d.kind)
+        end
+        M.result = {text = label .. ": " .. why, ok = false}
+        M.auto_done_line("the take did not finish: " .. tostring(why))
+        M.last_req = nil
+        if M.held_for_req then
+            local k = M.held_for_req
+            M.held_for_req = nil
+            release_takeover(k)
+        end
     end
 end
 

@@ -342,3 +342,16 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
   blocked every build for ~1.5 h on 11-19; treat it as stale after a few minutes. Wereoxxs perf test: SKIP line when no GPU
   is counted only through the manager's prerequisite line; the 110k instruction budget is ~6 steps above the measured peak
   (tight); the old-Forge-host fallback path in chat_window.lua is untested.
+
+## Map Search reads the Creature Journal before it is running (owner screenshot, 2026-11-19)
+
+- **Status:** Not scheduled; not caused by round 6.5 (`exchange.rs` and Map Search are the same as on develop). At
+  startup Mods & Addons showed "eqoa_map_search: eqoa.files.load_json [permission_denied]: shared file owner is missing
+  or disabled (1 occurrence) Phase: entry". Map Search asks for `@eqoa_creature_journal/data/journal.json` in its entry
+  (`bundled-mods/eqoa_map_search/main.lua:10`); `exchange::read` serves a shared file only from a VM whose event bus is
+  primed (`native_events::prime`, the owner's first frame entry). Entries run in id order in one frame, so the Journal
+  normally comes first; the error means the Journal's VM was not running yet when Map Search started (a load-order race:
+  enabled later, or its package still loading). Map Search already retries (`resource.failed` / `reload`), so it heals;
+  only the diagnostic shows. Proposed fix: (1) Map Search makes its first journal read at its first `render`, not in
+  its entry; (2) the host answers a read whose owner is enabled but not yet primed with a `not_yet` code that is not a
+  diagnostic, keeping `permission_denied` for an owner that is disabled or missing.

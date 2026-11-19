@@ -4,9 +4,9 @@
 //! correlation.
 
 use super::{
-    gesture::{self, GestureToken},
+    gesture,
     host::Host,
-    native::{bind, describe, error, record, session},
+    native::{bind, describe, error, record, require_capability, session},
     native_core::CORE,
     native_items::{LootItemIdentity, ResolvedItemSpec, item_identity_of, resolve_item_handle},
 };
@@ -105,6 +105,13 @@ pub(crate) struct WinTarget {
     pub sig: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TalkKind {
+    AnyFriendly,
+    Merchant,
+    Bank,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ActionKind {
     Assist,
@@ -148,6 +155,8 @@ pub(crate) enum ActionKind {
     DialogAnswer { win: WinTarget, option: usize },
     InputText { win: WinTarget, text: String, submit: bool },
     MenuCommand { win: WinTarget, command: String },
+    OpenLoot { entity_id: Option<u32> },
+    Talk { entity_id: Option<u32>, kind: TalkKind },
 }
 
 impl ActionKind {
@@ -194,6 +203,8 @@ impl ActionKind {
             Self::DialogAnswer { .. } => "dialog_answer",
             Self::InputText { .. } => "input_text",
             Self::MenuCommand { .. } => "menu_command",
+            Self::OpenLoot { .. } => "open_loot",
+            Self::Talk { .. } => "talk",
         }
     }
 
@@ -236,7 +247,9 @@ impl ActionKind {
             | Self::ActivateRow { .. }
             | Self::DialogAnswer { .. }
             | Self::InputText { .. }
-            | Self::MenuCommand { .. } => None,
+            | Self::MenuCommand { .. }
+            | Self::OpenLoot { .. }
+            | Self::Talk { .. } => None,
         }
     }
 
@@ -259,6 +272,8 @@ pub(crate) enum ServerMatcher {
     BankMove { from_bank: bool, key: u32, item_id: i64, qty_before: i64, count: i64 },
     BankMoney { dir: u8, bank_before: i64, amount: i64 },
     Camera,
+    OpenLoot { corpse_id: u32 },
+    Talk { npc_id: u32, kind: TalkKind },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -335,8 +350,6 @@ struct QueuedAction {
     addon_id: String,
     kind: ActionKind,
     queued_tick: u64,
-    #[allow(dead_code)]
-    gesture_serial: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -417,6 +430,7 @@ struct ActiveBatch {
     rate_wait_start_tick: Option<u64>,
     corpse_target_id: Option<u32>,
     corpse_reopen: Option<CorpseReopen>,
+    takeover_kinds: [bool; 3],
 }
 
 #[derive(Default)]
@@ -491,6 +505,11 @@ impl VmBroker {
         self.upsert_batch_retained(rec.clone());
         if emit_event {
             self.pending_batch_events.push_back((true, rec));
+        }
+        for kind in super::window_takeover::TakeoverKind::ALL {
+            if batch.takeover_kinds[kind as usize] {
+                super::window_takeover::end_session_for_vm(batch.vm, kind);
+            }
         }
     }
 
@@ -646,7 +665,8 @@ impl BrokerState {
 
     fn enqueue(
         &mut self,
-        token: GestureToken,
+        vm: u64,
+        addon_id: &str,
         kind: ActionKind,
     ) -> std::result::Result<RequestId, (&'static str, String)> {
         if kind.requires_in_world() && !self.native.in_world {
@@ -663,7 +683,6 @@ impl BrokerState {
                 format!("{} subsystem already has an active request", sub.label()),
             ));
         }
-        let vm = token.vm;
         let now_tick = self.tick;
         let queued_len = self
             .vms
@@ -677,14 +696,13 @@ impl BrokerState {
         }
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1).max(1);
-        let vm_state = self.ensure_vm(vm, &token.addon_id);
+        let vm_state = self.ensure_vm(vm, addon_id);
         let req = QueuedAction {
             id,
             vm,
-            addon_id: token.addon_id,
+            addon_id: addon_id.to_string(),
             kind: kind.clone(),
             queued_tick: now_tick,
-            gesture_serial: token.serial,
         };
         vm_state.queued.push_back(req);
         vm_state.upsert_retained(ActionResultRecord {
@@ -706,7 +724,8 @@ impl BrokerState {
 
     fn enqueue_batch(
         &mut self,
-        token: GestureToken,
+        vm: u64,
+        addon_id: &str,
         steps: Vec<ActionKind>,
         require_window: Option<BatchWindow>,
     ) -> std::result::Result<BatchId, (&'static str, String)> {
@@ -719,7 +738,6 @@ impl BrokerState {
                 format!("batch exceeds {MAX_BATCH_STEPS} steps"),
             ));
         }
-        let vm = token.vm;
         if self
             .vms
             .get(&vm)
@@ -751,7 +769,32 @@ impl BrokerState {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1).max(1);
         let total = steps.len();
-        let vm_state = self.ensure_vm(vm, &token.addon_id);
+        let mut takeover_kinds = [false; 3];
+        if inferred_window == Some(BatchWindow::Loot)
+            || steps.iter().any(|k| {
+                matches!(
+                    k,
+                    ActionKind::OpenLoot { .. } | ActionKind::Loot { .. } | ActionKind::LootAll
+                )
+            })
+        {
+            takeover_kinds[super::window_takeover::TakeoverKind::Loot as usize] = true;
+        }
+        if inferred_window == Some(BatchWindow::Merchant)
+            || steps
+                .iter()
+                .any(|k| matches!(k, ActionKind::Buy { .. } | ActionKind::Sell { .. }))
+        {
+            takeover_kinds[super::window_takeover::TakeoverKind::Merchant as usize] = true;
+        }
+        if inferred_window == Some(BatchWindow::Bank)
+            || steps
+                .iter()
+                .any(|k| matches!(k, ActionKind::BankMove { .. } | ActionKind::BankMoney { .. }))
+        {
+            takeover_kinds[super::window_takeover::TakeoverKind::Bank as usize] = true;
+        }
+        let vm_state = self.ensure_vm(vm, addon_id);
         let batch = ActiveBatch {
             id,
             vm,
@@ -767,6 +810,7 @@ impl BrokerState {
                 .then(|| CURRENT_CORPSE_TARGET.with(|c| c.get()))
                 .flatten(),
             corpse_reopen: None,
+            takeover_kinds,
         };
         vm_state.active_batch = Some(batch);
         vm_state.upsert_batch_retained(BatchResultRecord {
@@ -1414,6 +1458,7 @@ impl BrokerState {
                             .and_then(|v| v.queued.pop_front())
                             .expect("front queued");
 
+                        let _vm_guard = DispatchVmGuard::enter(vm_id);
                         match dispatch(&popped.kind) {
                             DispatchOutcome::Completed { detail } => {
                                 let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
@@ -1583,7 +1628,10 @@ impl BrokerState {
                         }
                         let step_req_id = self.next_id;
                         self.next_id = self.next_id.wrapping_add(1).max(1);
-                        let outcome = dispatch(&step_kind);
+                        let outcome = {
+                            let _vm_guard = DispatchVmGuard::enter(vm_id);
+                            dispatch(&step_kind)
+                        };
                         let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
                         if let Some(batch) = vm_state.active_batch.as_mut() {
                             let _ = batch.steps.pop_front();
@@ -1891,6 +1939,19 @@ impl BrokerState {
                     rec.code.as_deref(),
                     rec.reason,
                 );
+                let finished_takeover = match rec.kind {
+                    "loot" | "loot_all" => Some(super::window_takeover::TakeoverKind::Loot),
+                    "buy" | "sell" => Some(super::window_takeover::TakeoverKind::Merchant),
+                    "bank_move" | "bank_money" => Some(super::window_takeover::TakeoverKind::Bank),
+                    _ => None,
+                };
+                if let Some(kind) = finished_takeover
+                    && vm_state.active_batch.is_none()
+                    && !vm_state.queued.iter().any(|q| q.kind.subsystem() == inflight.subsystem)
+                    && !vm_state.in_flight.values().any(|f| f.subsystem == inflight.subsystem)
+                {
+                    super::window_takeover::end_session_for_vm(inflight.vm, kind);
+                }
                 if all {
                     continue;
                 }
@@ -1907,6 +1968,24 @@ thread_local! {
     static MASTER_LOOT_ACTIVE: Cell<bool> = const { Cell::new(false) };
     static CURRENT_CORPSE_TARGET: Cell<Option<u32>> = const { Cell::new(None) };
     static EXPIRED_LOOT_TIMEOUT: Cell<bool> = const { Cell::new(false) };
+    static DISPATCHING_VM: Cell<Option<u64>> = const { Cell::new(None) };
+}
+
+struct DispatchVmGuard(Option<u64>);
+impl DispatchVmGuard {
+    fn enter(vm: u64) -> Self {
+        let prev = DISPATCHING_VM.with(|d| d.replace(Some(vm)));
+        Self(prev)
+    }
+}
+impl Drop for DispatchVmGuard {
+    fn drop(&mut self) {
+        DISPATCHING_VM.with(|d| d.set(self.0));
+    }
+}
+
+pub(crate) fn current_dispatch_vm() -> Option<u64> {
+    DISPATCHING_VM.with(Cell::get)
 }
 
 pub(crate) fn set_corpse_target_id(id: Option<u32>) {
@@ -2059,7 +2138,54 @@ pub(crate) fn mark_loot_inv_added(added_item_id: i64) {
     });
 }
 
-pub(crate) fn take_corpse_reopen_ask() -> Option<u32> {
+/// For each mod VM, the window kinds (indexed by `TakeoverKind`) whose open it still waits for:
+/// an `open_loot` or `talk` request in flight, or a batch's corpse reopen. A pending takeover claim
+/// outlives none of these (refused, timed out, stopped).
+pub(crate) fn open_requests_waiting() -> Vec<(u64, [bool; 3])> {
+    BROKER.with(|b| {
+        let b = b.borrow();
+        let mut out = Vec::new();
+        for (vm, state) in &b.vms {
+            let mut kinds = [false; 3];
+            for f in state.in_flight.values() {
+                match f.matcher {
+                    ServerMatcher::OpenLoot { .. } => kinds[0] = true,
+                    ServerMatcher::Talk { kind, .. } => match kind {
+                        TalkKind::Merchant => kinds[1] = true,
+                        TalkKind::Bank => kinds[2] = true,
+                        TalkKind::AnyFriendly => {
+                            kinds[1] = true;
+                            kinds[2] = true;
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            if state
+                .active_batch
+                .as_ref()
+                .is_some_and(|batch| batch.corpse_reopen.is_some())
+            {
+                kinds[0] = true;
+            }
+            if kinds.iter().any(|&k| k) {
+                out.push((*vm, kinds));
+            }
+        }
+        out
+    })
+}
+
+/// Nothing of this mod VM's is queued, in flight or running as a batch.
+pub(crate) fn vm_is_idle(vm: u64) -> bool {
+    BROKER.with(|b| {
+        b.borrow().vms.get(&vm).is_none_or(|s| {
+            s.queued.is_empty() && s.in_flight.is_empty() && s.active_batch.is_none()
+        })
+    })
+}
+
+pub(crate) fn take_corpse_reopen_ask() -> Option<(u64, u32)> {
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         for vm in b.vms.values_mut() {
@@ -2068,7 +2194,7 @@ pub(crate) fn take_corpse_reopen_ask() -> Option<u32> {
                 && !reopen.asked
             {
                 reopen.asked = true;
-                return Some(reopen.corpse_id);
+                return Some((batch.vm, reopen.corpse_id));
             }
         }
         None
@@ -2183,6 +2309,15 @@ pub(crate) fn resolve_server_loot_open(opened_corpse_id: Option<u32>, is_empty: 
         if let Some(cid) = opened_corpse_id {
             CURRENT_CORPSE_TARGET.with(|c| c.set(Some(cid)));
         }
+        b.resolve_matching(|inflight| {
+            let ServerMatcher::OpenLoot { corpse_id } = inflight.matcher else {
+                return None;
+            };
+            if opened_corpse_id.is_some() && opened_corpse_id != Some(corpse_id) {
+                return None;
+            }
+            Some((Some(true), None, None))
+        });
         for vm_state in b.vms.values_mut() {
             let Some(reopen) = vm_state
                 .active_batch
@@ -2219,7 +2354,8 @@ pub(crate) fn resolve_server_loot_open(opened_corpse_id: Option<u32>, is_empty: 
     });
 }
 
-pub(crate) fn resolve_server_loot_blocked() {
+pub(crate) fn resolve_server_loot_blocked(reason: Option<&str>) {
+    let text = reason.unwrap_or("loot blocked by server");
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
         let now_tick = b.tick;
@@ -2234,16 +2370,88 @@ pub(crate) fn resolve_server_loot_blocked() {
                     "refused",
                     Some(false),
                     Some("refused"),
-                    Some("loot blocked by server".into()),
+                    Some(text.to_string()),
                     now_tick,
                     step,
                     true,
                 );
             }
         }
+        b.resolve_matching(|inflight| {
+            matches!(
+                inflight.matcher,
+                ServerMatcher::OpenLoot { .. } | ServerMatcher::Talk { .. }
+            )
+            .then(|| (Some(false), Some("refused"), Some(text.to_string())))
+        });
     });
-    resolve_server_loot_one(None, Some(false), Some("loot blocked by server"), |_| 0);
-    resolve_server_loot_all(Some(false), Some("loot blocked by server"), false);
+    resolve_server_loot_one(None, Some(false), Some(text), |_| 0);
+    resolve_server_loot_all(Some(false), Some(text), false);
+}
+
+/// A corpse open that did not happen: the server said so in chat ("Out of range."), or the game turned the corpse's list
+/// away itself (another window was up, so it answered with 0x0016). The waiting `open_loot` requests and a batch's
+/// re-ask of its corpse end as refused with `reason` at once, never left to the 10 s timeout. Takes in flight are not
+/// touched (they have their own answers).
+pub(crate) fn resolve_server_open_loot_refused(code: &'static str, reason: &str) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        let now_tick = b.tick;
+        for vm_state in b.vms.values_mut() {
+            if vm_state
+                .active_batch
+                .as_ref()
+                .is_some_and(|batch| batch.corpse_reopen.as_ref().is_some_and(|r| r.asked))
+            {
+                let step = vm_state.active_batch.as_ref().map(|batch| batch.current_step);
+                vm_state.finish_batch(
+                    "refused",
+                    Some(false),
+                    Some(code),
+                    Some(reason.to_string()),
+                    now_tick,
+                    step,
+                    true,
+                );
+            }
+        }
+        b.resolve_matching(|inflight| {
+            (inflight.native_sent && matches!(inflight.matcher, ServerMatcher::OpenLoot { .. }))
+                .then(|| (Some(false), Some(code), Some(reason.to_string())))
+        });
+    });
+}
+
+/// An `open_loot` request is waiting for the server's answer.
+pub(crate) fn open_loot_in_flight() -> bool {
+    BROKER.with(|b| {
+        b.borrow().vms.values().any(|v| {
+            v.in_flight
+                .values()
+                .any(|f| f.native_sent && matches!(f.matcher, ServerMatcher::OpenLoot { .. }))
+                || v
+                    .active_batch
+                    .as_ref()
+                    .is_some_and(|batch| batch.corpse_reopen.as_ref().is_some_and(|r| r.asked))
+        })
+    })
+}
+
+pub(crate) fn resolve_server_talk_open(opened: TalkKind, opened_npc_id: Option<u32>) {
+    BROKER.with(|b| {
+        b.borrow_mut().resolve_matching(|inflight| {
+            let ServerMatcher::Talk { npc_id, kind } = inflight.matcher else {
+                return None;
+            };
+            if (kind == TalkKind::AnyFriendly || kind == opened)
+                && opened_npc_id.is_none_or(|id| id == npc_id)
+            {
+                Some((Some(true), None, None))
+            } else {
+                None
+            }
+        });
+    });
 }
 
 pub(crate) fn resolve_server_loot_one(
@@ -2794,19 +3002,15 @@ pub(crate) fn enqueue_lua_with(
 ) -> Result<mlua::MultiValue> {
     let vm = super::native_events::bus(lua).borrow().vm;
     let addon = session(lua).borrow().addon.clone();
-    let token = match gesture::peek_token(vm, &addon, false) {
-        Ok(tok) => tok,
-        Err((code, msg)) => return error(lua, symbol, code, &msg),
-    };
+    if let Err((code, msg)) = require_capability(lua, symbol, symbol) {
+        return error(lua, symbol, code, &msg);
+    }
     let kind = match build() {
         Ok(kind) => kind,
         Err((code, msg)) => return error(lua, symbol, code, &msg),
     };
-    match BROKER.with(|b| b.borrow_mut().enqueue(token.clone(), kind)) {
-        Ok(req) => {
-            gesture::consume_token(&token, false);
-            lua.pack_multi((lua.create_userdata(req)?, Value::Nil))
-        }
+    match BROKER.with(|b| b.borrow_mut().enqueue(vm, &addon, kind)) {
+        Ok(req) => lua.pack_multi((lua.create_userdata(req)?, Value::Nil)),
         Err((code, msg)) => error(lua, symbol, code, &msg),
     }
 }
@@ -3049,6 +3253,28 @@ fn parse_batch_step(raw: Value) -> std::result::Result<ActionKind, (&'static str
     match kind.as_str() {
         "assist" | "target_target" => Ok(ActionKind::Assist),
         "interact" => Ok(ActionKind::Interact),
+        "open_loot" => Ok(ActionKind::OpenLoot {
+            entity_id: parse_entity_id(step_field(&t, "entity_id", Some(1)))?,
+        }),
+        "talk" => {
+            let entity_id = parse_entity_id(step_field(&t, "entity_id", Some(1)))?;
+            let kind = match step_field(&t, "kind_filter", None) {
+                Value::Nil => TalkKind::AnyFriendly,
+                Value::String(s) => match s.to_str().ok().as_deref() {
+                    Some("merchant") => TalkKind::Merchant,
+                    Some("bank") => TalkKind::Bank,
+                    Some(other) => {
+                        return Err((
+                            "invalid_argument",
+                            format!("talk kind_filter must be 'merchant' or 'bank', got '{other}'"),
+                        ));
+                    }
+                    None => return Err(("invalid_argument", "talk kind_filter must be UTF-8".into())),
+                },
+                _ => return Err(("invalid_argument", "talk kind_filter must be a string".into())),
+            };
+            Ok(ActionKind::Talk { entity_id, kind })
+        }
         "loot_all" => Ok(ActionKind::LootAll),
         "stop" => Ok(ActionKind::Stop),
         "unmemorize_all" => Ok(ActionKind::UnmemorizeAll),
@@ -3543,10 +3769,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua.create_function(|lua, spec: Value| {
             let vm = super::native_events::bus(lua).borrow().vm;
             let addon = session(lua).borrow().addon.clone();
-            let token = match gesture::peek_token(vm, &addon, true) {
-                Ok(tok) => tok,
-                Err((code, msg)) => return error(lua, "eqoa.actions.batch", code, &msg),
-            };
+            if let Err((code, msg)) = require_capability(lua, "eqoa.actions.batch", "eqoa.actions.batch") {
+                return error(lua, "eqoa.actions.batch", code, &msg);
+            }
             if !CORE.with(|c| c.borrow().view.in_world) {
                 return error(
                     lua,
@@ -3559,11 +3784,14 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 Ok(parsed) => parsed,
                 Err((code, msg)) => return error(lua, "eqoa.actions.batch", code, &msg),
             };
-            match BROKER.with(|b| b.borrow_mut().enqueue_batch(token.clone(), steps, require_window)) {
-                Ok(batch_id) => {
-                    gesture::consume_token(&token, true);
-                    lua.pack_multi((lua.create_userdata(batch_id)?, Value::Nil))
+            for step in &steps {
+                let cap = format!("eqoa.actions.{}", step.name());
+                if let Err((code, msg)) = require_capability(lua, "eqoa.actions.batch", &cap) {
+                    return error(lua, "eqoa.actions.batch", code, &msg);
                 }
+            }
+            match BROKER.with(|b| b.borrow_mut().enqueue_batch(vm, &addon, steps, require_window)) {
+                Ok(batch_id) => lua.pack_multi((lua.create_userdata(batch_id)?, Value::Nil)),
                 Err((code, msg)) => error(lua, "eqoa.actions.batch", code, &msg),
             }
         })?,
@@ -4062,6 +4290,55 @@ fn install_non_item_actions(lua: &Lua) -> Result<()> {
     bind(
         lua,
         "actions",
+        "open_loot",
+        lua.create_function(|lua, entity: Option<Value>| {
+            enqueue_lua_with(lua, "eqoa.actions.open_loot", || {
+                let entity_id = match entity {
+                    None | Some(Value::Nil) => None,
+                    Some(v) => parse_entity_id(v)?,
+                };
+                Ok(ActionKind::OpenLoot { entity_id })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
+        "talk",
+        lua.create_function(|lua, (entity, options): (Option<Value>, Option<Value>)| {
+            enqueue_lua_with(lua, "eqoa.actions.talk", || {
+                let entity_id = match entity {
+                    None | Some(Value::Nil) => None,
+                    Some(v) => parse_entity_id(v)?,
+                };
+                let kind = match options {
+                    None | Some(Value::Nil) => TalkKind::AnyFriendly,
+                    Some(Value::Table(t)) => match t.get::<Value>("kind") {
+                        Ok(Value::Nil) | Err(_) => TalkKind::AnyFriendly,
+                        Ok(Value::String(s)) => match s.to_str().ok().as_deref() {
+                            Some("merchant") => TalkKind::Merchant,
+                            Some("bank") => TalkKind::Bank,
+                            Some(other) => {
+                                return Err((
+                                    "invalid_argument",
+                                    format!("talk options.kind must be 'merchant' or 'bank', got '{other}'"),
+                                ));
+                            }
+                            None => return Err(("invalid_argument", "talk options.kind must be UTF-8".into())),
+                        },
+                        Ok(_) => return Err(("invalid_argument", "talk options.kind must be a string".into())),
+                    },
+                    Some(_) => return Err(("invalid_argument", "talk options must be a table or nil".into())),
+                };
+                Ok(ActionKind::Talk { entity_id, kind })
+            })
+        })?,
+    )?;
+
+    bind(
+        lua,
+        "actions",
         "attack",
         lua.create_function(|lua, on: Option<bool>| {
             enqueue_lua(lua, "eqoa.actions.attack", ActionKind::Attack { on })
@@ -4385,10 +4662,7 @@ pub(crate) fn dispatch_all_for_test() -> Vec<&'static str> {
 mod tests {
     use super::*;
     use crate::fork_ext::addons::{
-        gesture::{
-            self, GestureKind, arm_imgui_click, enter_gesture, enter_render_scope,
-            is_forbidden_report_text,
-        },
+        gesture::{GestureKind, enter_gesture, is_forbidden_report_text},
         native_core::{CORE, Core},
         native_events,
     };
@@ -4402,12 +4676,32 @@ mod tests {
         addon_id: &str,
         kind: ActionKind,
     ) -> std::result::Result<RequestId, (&'static str, String)> {
-        let token = gesture::take_single_token(vm, addon_id)?;
-        BROKER.with(|b| b.borrow_mut().enqueue(token, kind))
+        BROKER.with(|b| b.borrow_mut().enqueue(vm, addon_id, kind))
+    }
+
+    fn cap_host(id: &str, caps: &[&str]) -> Host {
+        let root = std::env::temp_dir();
+        Host::for_addon(&super::super::discovery::DiscoveredAddon {
+            id: id.into(),
+            name: id.into(),
+            entry: root.join("main.lua"),
+            script_root: root.clone(),
+            package_root: root.clone(),
+            module_dirs: vec![root.clone()],
+            resource_dirs: vec![root],
+            api: Some("eqoa/1".into()),
+            entry_mode: super::super::discovery::EntryMode::Once,
+            capabilities_declared: true,
+            requested_capabilities: caps.iter().map(|s| (*s).to_string()).collect(),
+            extensions: Default::default(),
+            initially_enabled: true,
+            mods_root: None,
+        })
+        .unwrap()
     }
 
     #[test]
-    fn round6b_broker_gesture_gate_enforces_three_sources_and_one_action_per_gesture() {
+    fn round65_broker_allows_autonomous_actions_with_capability_and_refuses_without() {
         reset_all_for_test();
         crate::fork_ext::bindpage::reset_in_memory();
         CORE.with(|c| {
@@ -4416,50 +4710,57 @@ mod tests {
             *c.borrow_mut() = core;
         });
 
-        let host = Host::new().unwrap();
+        // Negative control: mod without eqoa.actions.* or eqoa.actions.assist is refused + diagnosed.
+        let denied = cap_host("r65_denied", &["eqoa.player.get"]);
+        denied
+            .execute(
+                r#"
+            local r, err = eqoa.actions.assist()
+            assert(r == nil and err.code == "permission_denied")
+            local b, berr = eqoa.actions.batch({ { kind = "assist" } })
+            assert(b == nil and berr.code == "permission_denied")
+        "#,
+            )
+            .unwrap();
+        let logs = denied.drain_logs().unwrap();
+        assert!(
+            logs.iter()
+                .any(|line| line.contains("eqoa.actions.assist")
+                    && line.contains("permission_denied")),
+            "undeclared action capability must record visible diagnostic: {logs:?}"
+        );
+
+        // Specific action capability grants that action outside any gesture, and refuses others.
+        let specific = cap_host("r65_specific", &["eqoa.actions.assist"]);
+        specific
+            .execute(
+                r#"
+            local r, err = eqoa.actions.assist()
+            assert(r ~= nil and err == nil)
+            local r2, err2 = eqoa.actions.assist()
+            assert(r2 ~= nil and err2 == nil)
+            local bad, berr = eqoa.actions.interact()
+            assert(bad == nil and berr.code == "permission_denied")
+        "#,
+            )
+            .unwrap();
+
+        // Wildcard capability grants actions and batches autonomously from render/event callbacks.
+        let host = cap_host("r65_wild", &["eqoa.actions.*"]);
         let vm = crate::fork_ext::addons::native_events::bus(&host.lua)
             .borrow()
             .vm;
-
-        // Outside gesture -> needs_player_action + diagnostic
         host.execute(
             r#"
-            events_seen = {}
-            eqoa.events.on("action.result", function(e)
-                events_seen[#events_seen + 1] = e.data
-            end)
             local r, err = eqoa.actions.assist()
-            assert(r == nil and err.code == "needs_player_action")
+            assert(r ~= nil and err == nil)
             eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
                 key_req, key_err = eqoa.actions.assist()
                 second_req, second_err = eqoa.actions.assist()
             end)
-            eqoa.events.on("pointer.pressed", function()
-                ptr_req, ptr_err = eqoa.actions.assist()
-            end)
         "#,
         )
         .unwrap();
-        let logs = host.drain_logs().unwrap();
-        assert!(
-            logs.iter()
-                .any(|line| line.contains("eqoa.actions.assist")
-                    && line.contains("needs_player_action")),
-            "missing gesture must record visible diagnostic: {logs:?}"
-        );
-
-        // Synthetic key down must NOT grant gesture
-        CORE.with(|c| {
-            c.borrow_mut().emit(
-                "input.key",
-                json!({"key":"k","down":true,"repeat":false,"synthetic":true,"text":""}),
-            )
-        });
-        native_events::dispatch(&host).unwrap();
-        host.execute("assert(key_req == nil)")
-            .unwrap();
-
-        // Physical ModKey gesture grants 1 action; 2nd fails with needs_player_action
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
@@ -4468,67 +4769,160 @@ mod tests {
         });
         native_events::dispatch(&host).unwrap();
         host.execute(
-            "assert(key_req ~= nil and key_err == nil); assert(second_req == nil and second_err.code == 'needs_player_action')",
+            "assert(key_req ~= nil and key_err == nil); assert(second_req ~= nil and second_err == nil)",
         )
         .unwrap();
+        assert!(enqueue_raw(vm, "r65_wild", ActionKind::Assist).is_ok());
 
-        // Pointer claim gate: unclaimed click rejected; claimed click accepted
-        CORE.with(|c| {
-            c.borrow_mut().frame = 10;
-            c.borrow_mut().emit(
-                "pointer.pressed",
-                json!({"x":50.0,"y":50.0,"inside_window":true,"button":"left","steps":0}),
-            );
-        });
-        native_events::dispatch(&host).unwrap();
-        host.execute("assert(ptr_req == nil and ptr_err.code == 'needs_player_action')")
-            .unwrap();
-
-        crate::fork_ext::addons::pointer_api::position([50.0, 50.0], true, (800, 600));
-        host.execute("assert(eqoa.input.claim_pointer{x=40,y=40,width=30,height=30})")
-            .unwrap();
-        CORE.with(|c| {
-            c.borrow_mut().emit(
-                "pointer.pressed",
-                json!({"x":50.0,"y":50.0,"inside_window":true,"button":"left","steps":0}),
-            );
-        });
-        native_events::dispatch(&host).unwrap();
-        host.execute("assert(ptr_req ~= nil and ptr_err == nil)")
-            .unwrap();
-
-        // ImGui render scope: unarmed fails, armed after click succeeds once then refuses second
-        {
-            let _render = enter_render_scope(vm, "test");
-            let err = enqueue_raw(vm, "test", ActionKind::Assist).unwrap_err();
-            assert_eq!(err.0, "needs_player_action");
-            arm_imgui_click();
-            let first = enqueue_raw(vm, "test", ActionKind::Assist);
-            assert!(first.is_ok());
-            let second = enqueue_raw(vm, "test", ActionKind::Assist).unwrap_err();
-            assert_eq!(second.0, "needs_player_action");
-        }
-        // Outside render scope again -> rejected
-        let after = enqueue_raw(vm, "test", ActionKind::Assist).unwrap_err();
-        assert_eq!(after.0, "needs_player_action");
+        // Synthetic report guard still holds even with eqoa.actions.*.
+        host.execute(
+            r#"
+            local bug_r, bug_e = eqoa.actions.command("/bug test")
+            assert(bug_r == nil and bug_e.code == "permission_denied")
+        "#,
+        )
+        .unwrap();
         reset_all_for_test();
         crate::fork_ext::bindpage::reset_in_memory();
     }
 
     #[test]
-    fn round6b_one_gesture_per_physical_event_across_multiple_listeners() {
+    fn round65_undeclared_capabilities_refuses_actions_and_takeover_with_not_declared() {
+        reset_all_for_test();
+        super::super::window_takeover::reset_all_for_test();
+        crate::fork_ext::bindpage::reset_in_memory();
+        CORE.with(|c| {
+            let mut core = Core::default();
+            core.view.in_world = true;
+            *c.borrow_mut() = core;
+        });
+
+        let uniq = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("eqoa-r65-not-declared-{uniq}"));
+        let mod_no_caps = root.join("no_caps");
+        let mod_explicit = root.join("explicit_caps");
+        std::fs::create_dir_all(&mod_no_caps).unwrap();
+        std::fs::create_dir_all(&mod_explicit).unwrap();
+        std::fs::write(mod_no_caps.join("main.lua"), "").unwrap();
+        std::fs::write(mod_explicit.join("main.lua"), "").unwrap();
+        std::fs::write(
+            mod_no_caps.join("mod.json"),
+            r#"{"schemaVersion":1,"runtime":"lua","api":"eqoa/1","id":"no_caps","name":"No Caps","entry":"main.lua","entryMode":"once"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            mod_explicit.join("mod.json"),
+            r#"{"schemaVersion":1,"runtime":"lua","api":"eqoa/1","id":"explicit_caps","name":"Explicit Caps","entry":"main.lua","entryMode":"once","capabilities":["eqoa.actions.assist","eqoa.windows.takeover"]}"#,
+        )
+        .unwrap();
+
+        let disc = super::super::discovery::discover(&root);
+        let a_no_caps = disc
+            .addons
+            .iter()
+            .find(|a| a.id == "no_caps")
+            .expect("discovered mod without capabilities");
+        let a_explicit = disc
+            .addons
+            .iter()
+            .find(|a| a.id == "explicit_caps")
+            .expect("discovered mod with explicit capabilities");
+        assert!(!a_no_caps.capabilities_declared);
+        assert_eq!(a_no_caps.declared_capabilities(), None);
+        assert_eq!(
+            super::super::runtime::autonomous_action_label(
+                a_no_caps.declared_capabilities().unwrap_or(&[])
+            ),
+            None
+        );
+        assert!(a_explicit.capabilities_declared);
+        assert_eq!(
+            super::super::runtime::autonomous_action_label(
+                a_explicit.declared_capabilities().unwrap_or(&[])
+            )
+            .as_deref(),
+            Some("Actions: can act on its own (assist)")
+        );
+
+        let h_no_caps = Host::for_addon(a_no_caps).unwrap();
+        h_no_caps
+            .execute(
+                r#"
+            -- Reads keep their normal behavior.
+            local _, r_err = eqoa.player.get()
+            assert(r_err == nil or r_err.code ~= "not_declared")
+            -- Actions and takeover refuse visibly with not_declared.
+            local r1, e1 = eqoa.actions.assist()
+            assert(r1 == nil and e1.code == "not_declared", "assist without capabilities list must refuse with not_declared")
+            local r2, e2 = eqoa.actions.open_loot()
+            assert(r2 == nil and e2.code == "not_declared")
+            local r3, e3 = eqoa.actions.talk()
+            assert(r3 == nil and e3.code == "not_declared")
+            local r4, e4 = eqoa.actions.batch({ { kind = "assist" } })
+            assert(r4 == nil and e4.code == "not_declared")
+            local r5, e5 = eqoa.windows.takeover("loot")
+            assert(r5 == nil and e5.code == "not_declared", "takeover without capabilities list must refuse with not_declared")
+        "#,
+            )
+            .unwrap();
+        let logs = h_no_caps.drain_logs().unwrap();
+        assert!(
+            logs.iter().any(|l| l.contains("not_declared") && l.contains("eqoa.actions.assist")),
+            "expected visible not_declared diagnostic for assist: {logs:?}"
+        );
+        assert!(
+            logs.iter().any(|l| l.contains("not_declared") && l.contains("eqoa.windows.takeover")),
+            "expected visible not_declared diagnostic for takeover: {logs:?}"
+        );
+
+        // Bare Host::new() (no mod.json) also refuses actions and takeover with not_declared.
+        let bare = Host::new().unwrap();
+        bare.execute(
+            r#"
+            local r, e = eqoa.actions.assist()
+            assert(r == nil and e.code == "not_declared")
+            local t, te = eqoa.windows.takeover("loot")
+            assert(t == nil and te.code == "not_declared")
+        "#,
+        )
+        .unwrap();
+
+        // Explicit mod.json grants only declared capabilities; other actions return permission_denied.
+        let h_explicit = Host::for_addon(a_explicit).unwrap();
+        h_explicit
+            .execute(
+                r#"
+            local r_ok, e_ok = eqoa.actions.assist()
+            assert(r_ok ~= nil and e_ok == nil)
+            local t_ok, te_ok = eqoa.windows.takeover("loot")
+            assert(t_ok == true and te_ok == nil)
+            local r_no, e_no = eqoa.actions.open_loot()
+            assert(r_no == nil and e_no.code == "permission_denied")
+        "#,
+            )
+            .unwrap();
+
+        let _ = std::fs::remove_dir_all(&root);
+        reset_all_for_test();
+        super::super::window_takeover::reset_all_for_test();
+        crate::fork_ext::bindpage::reset_in_memory();
+    }
+
+    #[test]
+    fn round65_multiple_listeners_can_dispatch_actions_autonomously() {
         use super::super::native_events;
         reset_all_for_test();
         crate::fork_ext::bindpage::reset_in_memory();
         CORE.with(|c| c.borrow_mut().view.in_world = true);
 
-        let host = Host::new().unwrap();
-        let vm = native_events::bus(&host.lua).borrow().vm;
-        assert_ne!(vm, 0);
+        let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
         crate::fork_ext::addons::pointer_api::position([40.0, 40.0], true, (800, 600));
         host.execute(
             r#"
-            p_res, k_res, b_res = {}, {}, {}
+            p_res, k_res = {}, {}
             assert(eqoa.input.claim_pointer({ x = 0, y = 0, width = 200, height = 200 }))
             eqoa.events.on("pointer.pressed", function()
                 local req, err = eqoa.actions.assist()
@@ -4557,10 +4951,8 @@ mod tests {
             );
         });
         native_events::dispatch(&host).unwrap();
-        host.execute(
-            "assert(#p_res == 2 and p_res[1].ok == true and p_res[2].ok == false and p_res[2].code == 'needs_player_action')",
-        )
-        .unwrap();
+        host.execute("assert(#p_res == 2 and p_res[1].ok == true and p_res[2].ok == true)")
+            .unwrap();
 
         CORE.with(|c| {
             c.borrow_mut().emit(
@@ -4569,10 +4961,8 @@ mod tests {
             );
         });
         native_events::dispatch(&host).unwrap();
-        host.execute(
-            "assert(#k_res == 2 and k_res[1].ok == true and k_res[2].ok == false and k_res[2].code == 'needs_player_action')",
-        )
-        .unwrap();
+        host.execute("assert(#k_res == 2 and k_res[1].ok == true and k_res[2].ok == true)")
+            .unwrap();
 
         reset_all_for_test();
         crate::fork_ext::bindpage::reset_in_memory();
@@ -4906,7 +5296,7 @@ mod tests {
             *c.borrow_mut() = core;
         });
 
-        let host = Host::new().unwrap();
+        let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
 
         // Capabilities for Part C batch symbols & events
         for sym in [
@@ -4935,15 +5325,12 @@ mod tests {
             assert_eq!(status, "supported", "{sym} must be supported");
         }
 
-        // Batch without gesture -> needs_player_action; 1 gesture allows 1 batch, 2nd fails;
-        // 2nd batch with new gesture while 1st runs -> busy; 3-step serial execution waits for server reply.
+        // Batch starts autonomously; 2nd batch while 1st runs -> busy; 3-step serial execution waits for server reply.
         host.execute(
             r#"
             bprog, bres = {}, {}
             eqoa.events.on("batch.progress", function(e) bprog[#bprog + 1] = e.data end)
             eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
-            local no_g, no_g_err = eqoa.actions.batch({ { kind = "assist" } })
-            assert(no_g == nil and no_g_err.code == "needs_player_action")
             eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
                 if mode == "first" then
                     b1, err1 = eqoa.actions.batch({
@@ -4951,7 +5338,6 @@ mod tests {
                         { kind = "assist" },
                         { kind = "assist" },
                     })
-                    same_g, same_g_err = eqoa.actions.batch({ { kind = "assist" } })
                 elseif mode == "second_while_running" then
                     b2, err2 = eqoa.actions.batch({ { kind = "assist" } })
                 end
@@ -4974,7 +5360,6 @@ mod tests {
         host.execute(
             r#"
             assert(b1 ~= nil and err1 == nil)
-            assert(same_g == nil and same_g_err.code == "needs_player_action")
             local st = assert(eqoa.actions.batch_status(b1))
             assert(st.state == "running" and st.completed == 0 and st.total == 3)
             assert(eqoa.actions.status(b1).state == "running")
@@ -5059,7 +5444,7 @@ mod tests {
             *c.borrow_mut() = core;
         });
 
-        let host = Host::new().unwrap();
+        let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
         host.execute(
             r#"
             bres = {}

@@ -832,6 +832,27 @@ struct FrameState {
     open: bool,
     settings: Option<String>,
 }
+pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
+    let mut kinds: Vec<&str> = Vec::new();
+    for cap in caps {
+        if cap == "eqoa.actions.*" {
+            if !kinds.contains(&"all actions") {
+                kinds.push("all actions");
+            }
+        } else if let Some(kind) = cap.strip_prefix("eqoa.actions.")
+            && !kind.is_empty()
+            && !kinds.contains(&kind)
+        {
+            kinds.push(kind);
+        }
+    }
+    if kinds.is_empty() {
+        None
+    } else {
+        Some(format!("Actions: can act on its own ({})", kinds.join(", ")))
+    }
+}
+
 fn controls(
     ui: &Ui,
     manager: &mut Manager,
@@ -850,6 +871,13 @@ fn controls(
             ui.separator();ui.text(format!("{} ({})",entry.metadata.name,entry.metadata.id));
             ui.text(match entry.status {super::manager::Status::Disabled=>"Disabled",super::manager::Status::Enabled=>"Enabled",super::manager::Status::Failed=>"Failed — reload to retry"});
             if !entry.metadata.extensions.permissions.is_empty() {ui.text(format!("Permissions: {}",entry.metadata.extensions.permissions.join(", ")));}
+            let caps = entry.metadata.declared_capabilities().unwrap_or(&[]);
+            if !caps.is_empty() {
+                ui.text_wrapped(format!("Capabilities: {}", caps.join(", ")));
+            }
+            if let Some(label) = autonomous_action_label(caps) {
+                ui.text_wrapped(label);
+            }
             let id=&entry.metadata.id;
             let warnings=manager.diagnostics().iter().filter(|d|d.id.as_ref()==Some(id)).count();
             if warnings>0 {ui.same_line();ui.text(format!("[Warnings: {warnings}]"));}
@@ -2379,6 +2407,27 @@ mod tests {
         assert!(
             !root.0.join("imgui.ini").exists(),
             "Must never write into mods dir"
+        );
+    }
+
+    #[test]
+    fn round65_addons_ui_labels_autonomous_action_capabilities() {
+        assert_eq!(
+            autonomous_action_label(&["eqoa.inventory.get".into(), "eqoa.actions.*".into()]).as_deref(),
+            Some("Actions: can act on its own (all actions)")
+        );
+        assert_eq!(
+            autonomous_action_label(&[
+                "eqoa.actions.loot".into(),
+                "eqoa.actions.sell".into(),
+                "eqoa.actions.bank_move".into(),
+            ])
+            .as_deref(),
+            Some("Actions: can act on its own (loot, sell, bank_move)")
+        );
+        assert_eq!(
+            autonomous_action_label(&["eqoa.player.stats".into(), "eqoa.hud.text".into()]),
+            None
         );
     }
 }

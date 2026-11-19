@@ -11,6 +11,7 @@ struct EntityData {
     entity_type: u8,
     corpse: bool,
     search_flags: Option<u8>,
+    npc_flags: Option<u16>,
     id: u32,
     name: String,
     level: Option<u8>,
@@ -43,6 +44,7 @@ impl EntityData {
             entity_type: e.kind,
             corpse: e.p18 & 2 != 0,
             search_flags: creature.map(|c| c.p255),
+            npc_flags: creature.map(|c| c.npc_flags),
             id: e.id,
             name: creature.map_or("", |c| c.name.as_str()).into(),
             level: creature.map(|c| c.level),
@@ -62,7 +64,7 @@ impl EntityData {
         }
     }
     fn value(&self) -> Json {
-        json!({"world_id":self.world,"entity_type":self.entity_type,"is_creature":self.entity_type==net::entity::TYPE_CREATURE,"corpse":self.corpse,"search_flags":self.search_flags,"id":self.id,"name":self.name,"level":self.level,"position":vec3(self.position),"actor_position":vec3(self.actor_position),"hp_fraction":(self.hp!=0 || self.is_target).then(||ee::div(self.hp as f32,255.)),"power":self.power,"kind":match self.code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":self.code,"target_id":self.target,"status_flags":self.flags,"poisoned":self.flags.map(|f|f&4!=0),"diseased":self.flags.map(|f|f&8!=0),"disposition":self.disposition,"disposition_name":self.disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
+        json!({"world_id":self.world,"entity_type":self.entity_type,"is_creature":self.entity_type==net::entity::TYPE_CREATURE,"corpse":self.corpse,"search_flags":self.search_flags,"npc_flags":self.npc_flags,"id":self.id,"name":self.name,"level":self.level,"position":vec3(self.position),"actor_position":vec3(self.actor_position),"hp_fraction":(self.hp!=0 || self.is_target).then(||ee::div(self.hp as f32,255.)),"power":self.power,"kind":match self.code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":self.code,"target_id":self.target,"status_flags":self.flags,"poisoned":self.flags.map(|f|f&4!=0),"diseased":self.flags.map(|f|f&8!=0),"disposition":self.disposition,"disposition_name":self.disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
     }
 }
 #[derive(Clone)]

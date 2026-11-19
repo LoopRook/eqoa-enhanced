@@ -1195,9 +1195,12 @@ fn install_math(lua: &Lua) -> Result<()> {
         "actions",
         "toggle_stats_box",
         lua.create_function(|lua, ()| {
-            let vm = super::native_events::bus(lua).borrow().vm;
             let addon = super::native::session(lua).borrow().addon.clone();
-            if let Err((code, msg)) = super::gesture::take_single_token(vm, &addon) {
+            if let Err((code, msg)) = super::native::require_capability(
+                lua,
+                "eqoa.actions.toggle_stats_box",
+                "eqoa.actions.toggle_stats_box",
+            ) {
                 return error(lua, "eqoa.actions.toggle_stats_box", code, &msg);
             }
             if addon != "eqoa_stats_box" {
