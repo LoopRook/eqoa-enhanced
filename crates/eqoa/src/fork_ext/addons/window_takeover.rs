@@ -31,6 +31,8 @@ pub(crate) fn take_log_for_test() -> Vec<String> {
 
 const PENDING_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 const HIDDEN_SESSION_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long after a mod-ended corpse session the server's own list of that corpse (junk left on it) stays the mod's.
+const LIST_GRACE: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum TakeoverKind {
@@ -152,8 +154,19 @@ pub(crate) struct RestoreTarget {
     pub mod_target: u32,
 }
 
+/// A mod's hidden corpse session just ended with its last take: the server closes the corpse and lists it again by
+/// itself (what is left on it), and that list must not reach the player as the game's window. Held a moment;
+/// never for a corpse the player asks for themselves.
+#[derive(Clone, Copy, Debug)]
+struct ListGrace {
+    target_id: u32,
+    until: Instant,
+    player_asked: bool,
+}
+
 #[derive(Default)]
 struct TakeoverState {
+    grace_loot: Option<ListGrace>,
     holders: [Option<Holder>; 3],
     pending_opens: [Option<PendingOpen>; 3],
     /// Why a kind's hidden session is to end (set by release, the mod finishing, the holder going).
@@ -168,7 +181,8 @@ struct TakeoverState {
 
 impl TakeoverState {
     fn has_activity(&self) -> bool {
-        self.holders.iter().any(Option::is_some)
+        self.grace_loot.is_some()
+            || self.holders.iter().any(Option::is_some)
             || self.pending_opens.iter().any(Option::is_some)
             || self.pending_close.iter().any(Option::is_some)
             || self.close_owed.iter().any(Option::is_some)
@@ -327,6 +341,9 @@ pub(crate) fn arm_pending_open(kind: TakeoverKind, vm: u64, target_id: u32) -> b
         if s.holders[idx].as_ref().is_none_or(|h| h.vm != vm) {
             return false;
         }
+        if kind == TakeoverKind::Loot {
+            s.grace_loot = None;
+        }
         s.pending_opens[idx] = Some(PendingOpen {
             vm,
             target_id,
@@ -393,9 +410,14 @@ pub(crate) fn note_loot_request(target_id: u32) {
             } else {
                 p.request_seen = true;
             }
-        } else if s.hidden[TakeoverKind::Loot as usize].active {
+        } else {
             // no claim of the holder's stands behind this request: the player's own
-            s.hidden[TakeoverKind::Loot as usize].player_asked = true;
+            if s.hidden[TakeoverKind::Loot as usize].active {
+                s.hidden[TakeoverKind::Loot as usize].player_asked = true;
+            }
+            if let Some(g) = s.grace_loot.as_mut() {
+                g.player_asked = true;
+            }
         }
     });
 }
@@ -423,6 +445,28 @@ pub(crate) fn decide_open(
             && p.expires_at <= now
         {
             s.pending_opens[idx] = None;
+        }
+        if kind == TakeoverKind::Loot
+            && let Some(g) = s.grace_loot
+        {
+            if g.until <= now {
+                s.grace_loot = None;
+            } else if s.pending_opens[idx].is_none()
+                && !s.hidden[idx].active
+                && fallback_player_target == Some(g.target_id)
+            {
+                s.grace_loot = None;
+                if !g.player_asked {
+                    // closed again at once, quietly (the corpse is the server's to forget)
+                    s.close_owed[idx] = Some(OwedClose {
+                        reason: "the server listed the corpse again after the mod's last take",
+                        had_session: true,
+                    });
+                    return OpenDecision::Accepted(
+                        "the server lists the corpse again after the mod's last take",
+                    );
+                }
+            }
         }
         let Some((holder_vm, holder_scope)) = s.holders[idx].as_ref().map(|h| (h.vm, h.scope))
         else {
@@ -537,6 +581,13 @@ pub(crate) fn end_session_for_vm(vm: u64, kind: TakeoverKind) {
             && s.hidden[idx].vm == vm
             && s.hidden[idx].scope == TakeoverScope::Own
         {
+            if kind == TakeoverKind::Loot {
+                s.grace_loot = Some(ListGrace {
+                    target_id: s.hidden[idx].target_id,
+                    until: Instant::now() + LIST_GRACE,
+                    player_asked: false,
+                });
+            }
             s.hidden[idx] = HiddenSession::default();
             s.pending_close[idx] = Some("the mod's action or batch finished");
             s.close_owed[idx] = Some(OwedClose {
@@ -560,6 +611,9 @@ where
     }
     let now = Instant::now();
     with_state_mut(|s| {
+        if s.grace_loot.is_some_and(|g| g.until <= now) {
+            s.grace_loot = None;
+        }
         let closed = std::mem::take(&mut s.pending_close);
         for kind in TakeoverKind::ALL {
             let idx = kind as usize;

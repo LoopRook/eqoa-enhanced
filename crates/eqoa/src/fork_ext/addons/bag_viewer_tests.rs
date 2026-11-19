@@ -3504,3 +3504,86 @@ fn round65_fix4_item6_bank_rows_follow_the_reach_and_native_opens_teach_it() {
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
 }
+
+// ---- Round 6.5 fix round 4, review H1: the server's list after the mod's LAST take stays hidden too ---------------------
+
+/// The corpse after the last take: the junk is still on it, so the server closes it (0x0016) and lists it again by
+/// itself (0x0018). The mod's session has just ended with that take; the list must still not reach the player as the
+/// game's window, and the corpse is closed again quietly. A corpse the player asks for afterwards is theirs.
+/// `single` is how the last take is made: one item from its menu, or a Take all but junk batch.
+fn r65fix4_last_take_relist(single: bool) {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['2001'] = true return true end)()"));
+    bv.play.bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
+    bv.open();
+    bv.frames(2);
+    bv.click(bv.tab(7));
+    bv.frames(1);
+    let _ = super::super::window_takeover::take_log_for_test();
+    let pelt = serde_json::json!({"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100});
+    let stone = |key: u32| serde_json::json!({"name":"Bloodstone","id":2003,"key":key,"qty":1,"max_stack":100});
+    if single {
+        let (x, y, _) = bv.action_hit("Look at corpse").unwrap();
+        bv.click((x, y));
+        bv.play.bags_broker_tick();
+        bv.play.bags_corpse(&serde_json::json!([stone(0), {"name":"Rat Pelt","id":2001,"key":1,"qty":1,"max_stack":100}]));
+        bv.frames(2);
+        assert_eq!(bv.play.mode, 0, "the preview is hidden");
+        bv.click(bv.slot(1));
+        bv.frames(2);
+        let (mx, my, en, _, _) = bv.menu_row("Take").unwrap();
+        assert!(en);
+        bv.click((mx, my));
+        bv.play.bags_broker_tick();
+    } else {
+        let (x, y, _) = bv.action_hit("Take all but junk").unwrap();
+        bv.click((x, y));
+        bv.play.bags_broker_tick();
+        bv.play.bags_corpse(&serde_json::json!([pelt.clone(), {"name":"Bloodstone","id":2003,"key":1,"qty":1,"max_stack":100}]));
+        bv.frames(2);
+        assert_eq!(bv.play.mode, 0);
+        bv.play.bags_broker_tick(); // the one item that is not junk
+    }
+    // the take: the item, the chat line, the close, and the list of what is left (the junk), all at once
+    bv.play.bags_added(&serde_json::json!({"name":"Bloodstone","id":2003,"key":80,"qty":1,"max_stack":100}));
+    bv.play.bags_chat("You receive Bloodstone from the corpse.");
+    bv.play.bags_loot_close();
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100}]));
+    assert_eq!(bv.play.mode, 0, "the list after the last take must not show the game's corpse window");
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0);
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(!log.iter().any(|l| l.contains("left to the game")), "nothing left to the game: {log:#?}");
+    assert!(
+        log.iter().any(|l| l.contains("lists the corpse again after the mod's last take")),
+        "the list is recognised as the server's: {log:#?}"
+    );
+    assert!(!bv.play.bags_corpse_held(), "and the corpse is closed again, quietly: {log:#?}");
+    // the player's own click on that corpse afterwards is theirs: the game's window shows
+    bv.play.bags_press_loot();
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100}]));
+    assert_eq!(bv.play.mode, 1, "a player's own request is never hidden");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+}
+
+#[test]
+fn round65_fix4_h1_list_after_the_last_batch_take_stays_hidden() {
+    r65fix4_last_take_relist(false);
+}
+
+#[test]
+fn round65_fix4_h1_list_after_a_single_menu_take_stays_hidden() {
+    r65fix4_last_take_relist(true);
+}
