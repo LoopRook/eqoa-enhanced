@@ -106,8 +106,8 @@ eqoa.events.on("loot.changed", function(e)
     B.log_loot(e.data)
     if not B.open then B.on_loot_changed(e.data) end
 end)
--- Auto-loot listens to the creatures only while it is on (the default is off): every creature update of the zone
--- would otherwise reach this mod's Lua for nothing.
+-- Auto-loot listens only while it is on (the default is off), and then only to your hits and to the render event it
+-- polls from (bags.lua `auto_poll`): never to every creature update of the zone.
 local auto_tokens = {}
 local function auto_listeners(on)
     if on and #auto_tokens == 0 then
@@ -115,21 +115,9 @@ local function auto_listeners(on)
             local token = eqoa.events.on(name, fn)
             if token then auto_tokens[#auto_tokens + 1] = token end
         end
-        add("target.changed", function() B.on_target_update() end)
-        add("player.changed", function()
-            B.on_target_update()
-            B.tick_auto_loot() -- a looting held back by a fight goes on when the fight ends
-        end)
+        -- your hits, and one look a poll (AUTO_POLL_SECS) from the render event: never every creature update
         add("combat.hit", function(e) B.on_combat_hit(e.data) end)
-        add("entity.changed", function(e)
-            B.on_entity_changed(e.data)
-            B.tick_auto_loot()
-        end)
-        add("entity.added", function(e)
-            B.on_entity_added(e.data)
-            B.tick_auto_loot()
-        end)
-        add("entity.removed", function(e) B.on_entity_removed(e.data) end)
+        add("render", function() B.auto_poll() end)
     elseif not on then
         for _, token in ipairs(auto_tokens) do eqoa.events.off(token) end
         auto_tokens = {}

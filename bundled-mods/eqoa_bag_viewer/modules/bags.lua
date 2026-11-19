@@ -49,9 +49,8 @@ end
 -- One look at the zone's creatures answers every per-frame question (the nearest corpse, merchant and banker, a live
 -- hostile with the player targeted). `eqoa.entities.list()` hands over a record for every creature in the zone, so
 -- asking it per question, per frame, cost the Bags window 7-10 ms a frame in a busy zone (owner log 2026-11-18). The
--- look is kept SCAN_TTL seconds (distances only drift by a step in that time). It is marked stale when a creature turns
--- into a corpse or starts or stops targeting the player (`note_entity_event`, heard only while Auto-loot is on), and
--- then asked again at most once every SCAN_MIN seconds, so a crowded zone never makes it one look per frame.
+-- look is kept SCAN_TTL seconds (distances only drift by a step in that time), so a crowded zone never makes it one
+-- look per frame; Auto-loot's poll (`auto_poll`) shares it.
 local SCAN_TTL, SCAN_MIN = 0.5, 0.25
 -- A merchant or banker farther than this is not "nearby" at all: no Sell junk or bank row for one at the other end of a
 -- city (the "too far" line is for one within sight that the server may not answer yet).
@@ -136,19 +135,6 @@ end
 
 function M.scan_reset()
     scan_at, scan_data, scan_dirty = nil, nil, false
-end
-
--- A creature event of the auto-loot handlers: marks the look stale when the creature became a corpse or started or
--- stopped targeting the player (what the corpse list and the fight check read). Everything else waits for the TTL.
-function M.note_entity_event(kind, d)
-    if not scan_data or kind ~= "changed" then return end
-    local before, after = d and d.before, d and d.after
-    if not (before and after) then return end
-    if before.corpse ~= after.corpse
-        or (scan_pid ~= nil and (before.target_id == scan_pid) ~= (after.target_id == scan_pid))
-    then
-        scan_dirty = true
-    end
 end
 
 function M.nearby_corpse()
@@ -288,6 +274,8 @@ function M.clear_corpse_hold()
     M.auto_take = nil
     M.auto_done = {}
     M.auto_said = {}
+    M.engaged_pos = {}
+    M.corpses_seen, M.corpses_seen_in = nil, nil
 end
 
 M.COLUMNS, M.MAX_ROWS, M.LOG_MAX = 8, 6, 50
@@ -1085,6 +1073,7 @@ local function finish_pending_open(expected_kind)
         if p.auto then
             M.auto_take = p.auto
             if M.auto_retry then M.auto_retry[p.auto] = nil end
+            if p.auto_d2 then M.note_loot_reach(math.sqrt(p.auto_d2), true) end
         end
         if p.after == "loot_all" then
             M.start_loot_all()
@@ -1156,38 +1145,31 @@ function M.on_combat_hit(d)
 end
 
 -- The player is in combat: the game's own combat flag (`fighting`, the one that asks for battle music), auto-attack
--- on, or a live NPC that has the player targeted. Auto-loot must not run then: opening a corpse retargets, which
--- ends the auto-attack, so it waits until the fight is over.
--- Returns true and why (for the log) while in combat.
-function M.in_combat()
-    local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
+-- on a live hostile target, or a live hostile that has the player targeted. Auto-loot must not run then: opening a
+-- corpse retargets, which ends the auto-attack. The game leaves auto-attack on after its target dies (owner log
+-- 2026-11-19: corpses waited "in combat (auto-attack is on)" long after the kill), so auto-attack counts only while the
+-- target is a live creature that can be fought. Returns true and why (for the log). `pl` is the player when the
+-- caller has it already.
+function M.in_combat(pl)
+    pl = pl or (eqoa.player and eqoa.player.get and eqoa.player.get())
     if not pl then return false end
     if pl.fighting == true then return true, "the game says you are fighting" end
-    if pl.auto_attacking == true then return true, "auto-attack is on" end
+    if pl.auto_attacking == true and pl.target_id then
+        local t = eqoa.entities and eqoa.entities.find and eqoa.entities.find(pl.target_id)
+        if t and not t.corpse and t.kind == "npc" and t.disposition_name ~= "Friendly"
+            and not M.not_a_fight(t, pl.position, pl)
+        then
+            return true, "auto-attack is on against " .. ((t.name and t.name ~= "") and t.name or "your target")
+        end
+    end
     local h = pl.id ~= nil and scan_zone().hostile
     if h then return true, h .. " has you targeted" end
     return false
 end
 
-function M.on_target_update()
-    local e = eqoa.target and eqoa.target.get and eqoa.target.get()
-    if not e and eqoa.player and eqoa.player.get and eqoa.entities and eqoa.entities.find then
-        local pl = eqoa.player.get()
-        if pl and pl.target_id then
-            e = eqoa.entities.find(pl.target_id)
-        end
-    end
-    if e and not e.corpse then
-        M.tracked_target_id = e.id
-        M.tracked_target_pos = e.actor_position or e.position
-        local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
-        if pl and pl.auto_attacking == true then M.mark_engaged(e.id) end
-    end
-end
-
 -- Auto-loot's decisions go to the game's log (eqoa.log, through eqoa.log.write), one line per corpse and reason, so
--- a play session explains itself: queued, waiting (in combat, too far), skipped (not your kill, already looted),
--- the server's silence and the retry, done. `auto_log` keeps the last lines for the tests.
+-- a play session explains itself: queued, waiting (in combat, walk closer), skipped (not your kill, already looted),
+-- the server's answers and the retries, done. `auto_log` keeps the last lines for the tests.
 M.auto_log, M.auto_said = {}, {}
 function M.alog(id, key, text)
     local k = tostring(id) .. ":" .. key
@@ -1215,86 +1197,74 @@ local function make_eligible(e)
     M.eligible_corpses[e.id] = e
 end
 
--- A corpse within sight that Auto-loot leaves alone, said once (a creature dying at the other end of the zone is not).
-local function note_not_yours(e)
-    local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
-    local d2 = dist_sq(pl and pl.position, e.actor_position or e.position)
-    if d2 and d2 > M.NPC_SHOWN_WITHIN * M.NPC_SHOWN_WITHIN then return end
-    M.alog(e.id, "notyours", corpse_name(e) .. ": skipped, not your kill (you did not hit it)")
-end
+-- How near a corpse must be. The server answers a loot request from too far with "Out of range." (owner log
+-- 2026-11-19: it opened corpses at 3 and 6 units and refused them at 11, 12, 13 and 15). The mod learns the reach from
+-- real answers: the farthest distance that opened (`ok`) and the nearest that was refused (`fail`); until it knows, it
+-- tries within LOOT_DEFAULT_REACH. A refusal is a firm answer (no second miss needed, unlike a merchant's silence).
+M.LOOT_DEFAULT_REACH = 7.0
+M.loot_reach = {}
 
-function M.on_entity_changed(d)
-    M.note_entity_event("changed", d)
-    if not (d and d.after) then return end
-    local after = d.after
-    if after.corpse then
-        if after.kind ~= "player" and after.kind ~= "pet" then
-            if M.engaged_recently(after.id) then
-                if M.auto_done and M.auto_done[after.id] then
-                    M.alog(after.id, "already", "skipped, already looted")
-                else
-                    make_eligible(after)
-                end
-            elseif d.before and not d.before.corpse then
-                note_not_yours(after)
-            end
-        end
-    elseif after.id == M.tracked_target_id then
-        M.tracked_target_pos = after.actor_position or after.position
-    end
-end
-
-function M.on_entity_removed(d)
-    if d and d.before and M.eligible_corpses then M.eligible_corpses[d.before.id] = nil end
-    if d and d.before and M.auto_retry then M.auto_retry[d.before.id] = nil end
-    if d and d.before and not d.before.corpse and M.engaged_recently(d.before.id) then
-        M.recently_dead = {
-            id = d.before.id,
-            pos = d.before.actor_position or d.before.position,
-            expires = os.clock() + 3.0,
-        }
-    end
-end
-
-function M.on_entity_added(d)
-    local after = d and d.after
-    if not after or not after.corpse then return end
-    if after.kind == "player" or after.kind == "pet" then return end
-    if M.recently_dead and os.clock() <= M.recently_dead.expires then
-        local d2 = dist_sq(M.recently_dead.pos, after.actor_position or after.position)
-        if d2 ~= nil and d2 <= 36.0 then
-            make_eligible(after)
-        else
-            note_not_yours(after)
-        end
-    elseif M.engaged_recently(after.id) then
-        make_eligible(after)
+function M.note_loot_reach(dist, opened)
+    if type(dist) ~= "number" then return end
+    local r = M.loot_reach
+    if opened then
+        if not r.ok or dist > r.ok then r.ok = dist end
+        if r.fail and r.fail <= dist then r.fail = nil end -- the reach changed: the old refusal no longer holds
     else
-        note_not_yours(after)
+        if not r.fail or dist < r.fail then r.fail = dist end
+        if r.ok and r.ok >= dist then r.ok = nil end
     end
 end
 
--- Auto-loot opens a corpse within AUTO_REACH units. A corpse the server did not open (no answer, "Out of range.", a
--- refusal) is asked again, at most AUTO_TRIES times in all: when the player has come AUTO_CLOSER units nearer than at
--- the last try, or AUTO_RETRY_SECS after it.
-M.AUTO_REACH, M.AUTO_TRIES, M.AUTO_CLOSER, M.AUTO_RETRY_SECS = 15.0, 3, 2.0, 5.0
+-- The distance Auto-loot opens corpses within, as far as the mod knows.
+function M.loot_reach_now()
+    local r = M.loot_reach
+    if r.fail then return math.max(r.ok or 0, r.fail - 0.5) end
+    return math.max(r.ok or 0, M.LOOT_DEFAULT_REACH)
+end
 
--- The server did not open Auto-loot's corpse `id` (asked from `d2`, squared distance): try again later, or give up.
-function M.auto_open_failed(id, d2, why)
+-- The answer to Auto-loot's open of corpse `id` (asked from `d2`, squared distance) was not the corpse (`code`, `why`).
+--  * "Out of range." (or 0x0085's "too far"): the reach is learned and the corpse waits until the player is closer;
+--    never a try, never a give-up.
+--  * The game could not send it ("not_ready": a window of its own is up, the player is casting or dead; "busy": the
+--    game turned the list away): waits AUTO_RETRY_SECS, not a try.
+--  * Anything else (no answer in 10 s, another refusal) is a try: asked again 2 units closer or AUTO_RETRY_SECS later,
+--    AUTO_TRIES in all.
+function M.auto_open_failed(id, d2, why, code)
     M.auto_retry = M.auto_retry or {}
+    if M.auto_looted then M.auto_looted[id] = nil end
+    M.alog_forget(id, "far")
+    M.alog_forget(id, "combat")
     local r = M.auto_retry[id] or {n = 0}
+    local dist = d2 and math.sqrt(d2)
+    local text = tostring(why or "")
+    if code == "out_of_range" or text:find("Out of range", 1, true) or text:lower():find("too far", 1, true) then
+        M.note_loot_reach(dist, false)
+        r.wait_closer = dist
+        M.auto_retry[id] = r
+        M.alog_forget(id, "closer")
+        M.alog(id, "oor" .. tostring(dist and math.floor(dist + 0.5)), string.format(
+            "the server said \"%s\" at %.0f units: waiting until you are closer (server reach ~%.0f units)",
+            text, dist or 0, M.loot_reach_now()))
+        return
+    end
+    if code == "not_ready" or code == "busy" then
+        r.d2, r.at = d2, os.clock()
+        M.auto_retry[id] = r
+        M.alog(id, "notready" .. r.n, string.format(
+            "the game could not open it now (%s): trying again in %d s (not counted as a try)", text, M.AUTO_RETRY_SECS))
+        return
+    end
     r.n, r.d2, r.at = r.n + 1, d2, os.clock()
     M.auto_retry[id] = r
     if r.n >= M.AUTO_TRIES then
-        M.alog(id, "gaveup", string.format("gave up after %d tries (%s); use the Loot button", r.n, why))
+        if M.auto_looted then M.auto_looted[id] = true end
+        M.alog(id, "gaveup", string.format("gave up after %d tries (%s); use the Loot button", r.n, text))
         return
     end
-    if M.auto_looted then M.auto_looted[id] = nil end
     M.alog(id, "retry" .. r.n, string.format(
         "the server did not open it (%s): will retry when you are closer or in %d s (try %d of %d)",
-        why, M.AUTO_RETRY_SECS, r.n + 1, M.AUTO_TRIES))
-    M.alog_forget(id, "far")
-    M.alog_forget(id, "combat")
+        text, M.AUTO_RETRY_SECS, r.n + 1, M.AUTO_TRIES))
 end
 
 -- What Auto-loot took from its corpse (or why nothing), said once the take is over.
@@ -1307,7 +1277,116 @@ function M.auto_done_line(text)
     M.alog(id, "done", text)
 end
 
-function M.tick_auto_loot()
+-- A corpse seen by the poll: a creature you hit (or one that vanished where a corpse now lies) is queued; any other
+-- creature's corpse within sight is said once to be left alone.
+local function consider_corpse(e, new)
+    if e.kind == "player" or e.kind == "pet" then return end
+    local yours = M.engaged_recently(e.id)
+    if not yours and M.recently_dead and os.clock() <= M.recently_dead.expires then
+        local d2 = dist_sq(M.recently_dead.pos, e.actor_position or e.position)
+        yours = d2 ~= nil and d2 <= 36.0
+    end
+    if yours then
+        if M.auto_done and M.auto_done[e.id] then
+            M.alog(e.id, "already", "skipped, already looted")
+        else
+            make_eligible(e)
+        end
+    elseif new then
+        local pl = M.poll_pl
+        local d2 = dist_sq(pl and pl.position, e.actor_position or e.position)
+        if not (d2 and d2 > M.NPC_SHOWN_WITHIN * M.NPC_SHOWN_WITHIN) then
+            M.alog(e.id, "notyours", corpse_name(e) .. ": skipped, not your kill (you did not hit it)")
+        end
+    end
+end
+
+-- Auto-loot looks at the world AUTO_POLL_SECS apart, from the render event, instead of listening to every creature
+-- update: in a crowd those were 50-70 deliveries a frame, each asking for the player again (owner log 2026-11-19:
+-- 2.2-4.3 ms a frame with Auto-loot on, 0.1 ms off). A poll reads the player once, asks after the few creatures you
+-- hit (`eqoa.entities.find`), looks for new corpses in the shared look at the zone (at most every SCAN_TTL), then
+-- decides. Your hits come from `combat.hit`, the one other event it hears.
+M.AUTO_POLL_SECS = 0.25
+M.AUTO_IDLE_SCAN_SECS = 2.0
+M.poll_count = 0 -- polls made (for the tests)
+
+function M.auto_poll(force)
+    if M.auto_mode == "off" then return end
+    local now = os.clock()
+    if not force and M.auto_polled and now - M.auto_polled < M.AUTO_POLL_SECS and now >= M.auto_polled then return end
+    M.auto_polled = now
+    M.poll_count = M.poll_count + 1
+    local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
+    M.poll_pl = pl
+    if not pl then return end
+    if M.recently_dead and now > M.recently_dead.expires then M.recently_dead = nil end
+    if pl.auto_attacking == true and pl.target_id then M.mark_engaged(pl.target_id) end
+    local find = eqoa.entities and eqoa.entities.find
+    -- the creatures you hit: a corpse now, still alive (where), or gone (its corpse may come as a new entity there)
+    M.engaged_pos = M.engaged_pos or {}
+    if M.engaged and find then
+        for id, until_ in pairs(M.engaged) do
+            if until_ < now then
+                M.engaged[id] = nil
+                M.engaged_pos[id] = nil
+            else
+                local e = find(id)
+                if e and e.corpse then
+                    consider_corpse(e, false)
+                elseif e then
+                    M.engaged_pos[id] = e.actor_position or e.position
+                elseif M.engaged_pos[id] then
+                    M.recently_dead = {id = id, pos = M.engaged_pos[id], expires = now + 3.0}
+                    M.engaged_pos[id] = nil
+                end
+            end
+        end
+    end
+    -- a corpse waiting that is gone (decayed, looted by someone): forget it
+    if M.eligible_corpses and find then
+        for id in pairs(M.eligible_corpses) do
+            local e = find(id)
+            if not (e and e.corpse) then
+                M.eligible_corpses[id] = nil
+                if M.auto_retry then M.auto_retry[id] = nil end
+            else
+                M.eligible_corpses[id] = e
+            end
+        end
+    end
+    -- new corpses near you, from the shared look at the zone (one look at a crowded zone costs ~3.75 ms in the owner's
+    -- log): every SCAN_TTL while a creature you hit has just vanished (its corpse may be a new entity) or a corpse waits
+    -- (the fight check reads the look too), every AUTO_IDLE_SCAN_SECS otherwise; the creatures you hit are followed by
+    -- `entities.find` above, without a look at the zone
+    local busy = M.recently_dead ~= nil
+    if not busy and M.eligible_corpses then
+        for id in pairs(M.eligible_corpses) do
+            if not (M.auto_looted and M.auto_looted[id]) then busy = true break end
+        end
+    end
+    if not busy and M.idle_scan_at and now - M.idle_scan_at < M.AUTO_IDLE_SCAN_SECS and now >= M.idle_scan_at then
+        M.tick_auto_loot(pl)
+        return
+    end
+    M.idle_scan_at = now
+    local data = scan_zone()
+    if data.corpses and data ~= M.corpses_seen_in then
+        M.corpses_seen_in = data
+        local seen, before = {}, M.corpses_seen or {}
+        for _, e in ipairs(data.corpses) do
+            seen[e.id] = true
+            if not before[e.id] then consider_corpse(e, M.corpses_seen ~= nil) end
+        end
+        M.corpses_seen = seen
+    end
+    M.tick_auto_loot(pl)
+end
+
+-- Auto-loot opens a corpse within the learned reach. A corpse whose open failed is asked again 2 units closer or
+-- AUTO_RETRY_SECS later (AUTO_TRIES real failures in all; see `auto_open_failed`).
+M.AUTO_TRIES, M.AUTO_CLOSER, M.AUTO_RETRY_SECS = 3, 2.0, 5.0
+
+function M.tick_auto_loot(pl)
     if M.auto_mode == "off" then return end
     if not (M.eligible_corpses and next(M.eligible_corpses)) then return end
     local waiting = false
@@ -1316,8 +1395,9 @@ function M.tick_auto_loot()
     end
     if not waiting then return end
     if M.batch_id or M.pending_open or M.last_req or loot_batch_active() then return end
+    pl = pl or (eqoa.player and eqoa.player.get and eqoa.player.get())
     -- never while fighting: it waits (the corpse stays eligible) and runs when the fight is over
-    local fighting, why = M.in_combat()
+    local fighting, why = M.in_combat(pl)
     if fighting then
         for id in pairs(M.eligible_corpses) do
             if not (M.auto_looted and M.auto_looted[id]) then
@@ -1326,23 +1406,50 @@ function M.tick_auto_loot()
         end
         return
     end
-    local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
+    -- a corpse already open (the player's attack key on the dead target loots it, or a click, or the Loot button): the
+    -- server will not open another while it is up, and the client refuses to ask. If it is the corpse Auto-loot wants,
+    -- Auto-loot takes from that session; any other corpse waits until it closes (owner log 2026-11-19: three tries
+    -- burned on "cannot open corpse right now" while the player's own attack key had the corpse open).
+    local open = eqoa.loot and eqoa.loot.get and eqoa.loot.get()
+    if open then
+        local src = open.source and open.source.entity_id
+        if src and M.eligible_corpses[src] and not (M.auto_looted and M.auto_looted[src]) then
+            M.auto_looted = M.auto_looted or {}
+            M.auto_looted[src] = true
+            M.auto_take = src
+            local take = M.auto_mode == "all" and "Take all" or "Take all but junk"
+            M.alog(src, "takeopen", "it is open already (in the game's window or the mod's): taking from it (" .. take .. ")")
+            if M.auto_mode == "all" then M.start_loot_all() else M.start_loot_non_junk() end
+        else
+            for id in pairs(M.eligible_corpses) do
+                if not (M.auto_looted and M.auto_looted[id]) then
+                    M.alog(id, "busy:" .. tostring(src), src
+                        and string.format("waiting: another corpse (0x%x) is open; looting this one once it closes", src)
+                        or "waiting: a corpse window is open; looting this one once it closes")
+                end
+            end
+        end
+        return
+    end
     local ppos = pl and pl.position
     local now = os.clock()
+    local reach = M.loot_reach_now()
     local best, best_d2 = nil, nil
     for id, e in pairs(M.eligible_corpses) do
         if not (M.auto_looted and M.auto_looted[id]) then
             M.alog_forget(id, "combat")
+            M.alog_forget(id, "busy:nil")
             local d2 = dist_sq(ppos, e.actor_position or e.position)
+            local dist = d2 and math.sqrt(d2)
             local r = M.auto_retry and M.auto_retry[id]
             local ready = true
-            if r then
-                local closer = d2 ~= nil and r.d2 ~= nil and math.sqrt(r.d2) - math.sqrt(d2) >= M.AUTO_CLOSER
+            if r and r.at then
+                local closer = dist ~= nil and r.d2 ~= nil and math.sqrt(r.d2) - dist >= M.AUTO_CLOSER
                 ready = r.n < M.AUTO_TRIES and (closer or now - r.at >= M.AUTO_RETRY_SECS)
             end
-            if d2 ~= nil and d2 > M.AUTO_REACH * M.AUTO_REACH then
-                M.alog(id, "far", string.format("waiting: too far (%.0f units; Auto-loot opens within %.0f)",
-                    math.sqrt(d2), M.AUTO_REACH))
+            if dist ~= nil and dist > reach then
+                M.alog(id, "closer", string.format("waiting: walk closer (%.0f units; server reach ~%.0f units)", dist,
+                    reach))
             elseif ready and (not best or (d2 or 0) < (best_d2 or 0)) then
                 best, best_d2 = e, d2 or 0
             end
@@ -1351,16 +1458,18 @@ function M.tick_auto_loot()
     if best then
         M.auto_looted = M.auto_looted or {}
         M.auto_looted[best.id] = true
+        M.alog_forget(best.id, "closer")
         local after = M.auto_mode == "all" and "loot_all" or "loot_non_junk"
         local r = M.auto_retry and M.auto_retry[best.id]
-        M.alog(best.id, "open" .. (r and r.n or 0), string.format("opening it (%.0f units away, %s, try %d of %d)",
-            math.sqrt(best_d2), after == "loot_all" and "Take all" or "Take all but junk", (r and r.n or 0) + 1,
-            M.AUTO_TRIES))
+        local n = r and r.n or 0
+        M.alog(best.id, "open" .. n .. ":" .. math.floor(math.sqrt(best_d2) + 0.5), string.format(
+            "opening it (%.0f units away, %s, try %d of %d)", math.sqrt(best_d2),
+            after == "loot_all" and "Take all" or "Take all but junk", n + 1, M.AUTO_TRIES))
         local req, err = M.open_loot_corpse(after, best.id)
         if req and M.pending_open and M.pending_open.req == req then
             M.pending_open.auto, M.pending_open.auto_d2 = best.id, best_d2
         elseif not req then
-            M.auto_open_failed(best.id, best_d2, (err and (err.message or err.code)) or "refused")
+            M.auto_open_failed(best.id, best_d2, (err and (err.message or err.code)) or "refused", err and err.code)
         end
     end
 end
@@ -1400,7 +1509,7 @@ function M.on_action_result(d)
             release_takeover(p.kind)
             local msg = d.reason or d.code or d.state or "refused"
             M.result = {text = (p.verb or d.kind) .. ": " .. msg, ok = false}
-            if p.auto then M.auto_open_failed(p.auto, p.auto_d2, msg) end
+            if p.auto then M.auto_open_failed(p.auto, p.auto_d2, msg, d.code) end
             M.dirty()
             return
         elseif d.ok == true and d.phase ~= "dispatch" then
@@ -1412,7 +1521,7 @@ function M.on_action_result(d)
             M.pending_open = nil
             release_takeover(p.kind)
             M.result = {text = (p.verb or d.kind) .. ": " .. M.no_answer_text(p.kind), ok = false}
-            if p.auto then M.auto_open_failed(p.auto, p.auto_d2, "no answer from the server in 10 s") end
+            if p.auto then M.auto_open_failed(p.auto, p.auto_d2, "no answer from the server in 10 s", "timeout") end
             M.dirty()
             return
         end

@@ -121,6 +121,9 @@ impl Bv {
         self.frames(3);
         assert!(self.manager.entries().iter().all(|e| e.status == Status::Enabled), "{:?}", self.manager.diagnostics());
         self.clean();
+        // Auto-loot looks at the world every frame in the tests (a quarter second apart in play; the crowd tests in
+        // `bv_busy_scene` keep the real interval)
+        self.lua().load("require('bags').AUTO_POLL_SECS = 0").exec().unwrap();
     }
     /// Every bundled-mod test session asserts zero Addon Manager diagnostics.
     fn clean(&self) {
@@ -2642,23 +2645,38 @@ fn round65_fix_bag_viewer_auto_loot_waits_while_in_combat() {
     // the scout stops (dies): out of combat, the held-back corpse is taken now (the next creature update, a quarter
     // second on, asks again)
     bv.play.bags_entity_die(9202);
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    bv_look_again(&mut bv); // the next look at the zone (at most half a second on, from Auto-loot's poll)
     bv.eval::<bool>("(function() require('bags').tick_auto_loot() return true end)()");
     bv.frames(2);
     bv.play.bags_broker_tick();
     assert!(bv.play.bags_sends_lost() > before, "M1: auto-loot goes on once the fight is over");
 
-    // auto-attack on is combat too
+    // 9201's corpse answers with nothing on it: that open is over
+    bv.play.bags_corpse(&serde_json::json!([]));
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.play.bags_loot_close();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+
+    // auto-attack on a live creature is a fight; the game leaves it on after the creature dies, and then it is not
+    // (fix round 6, owner log 2026-11-19: corpses waited "in combat (auto-attack is on)" long after the kill)
     bv.play.bags_spawn_npc(9203, "a rat", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9204, "a second rat", 0, 1, [3.0, 0.0, 0.0]);
     bv.play.bags_target_sync(9203);
     bv.play.bags_auto_attack(true);
     bv.play.bags_combat_hit(77, 9203, -12);
     bv_look_again(&mut bv);
     let before2 = bv.play.bags_sends_lost();
     bv.play.bags_entity_die(9203);
-    bv.frames(2);
+    bv.play.bags_target_sync(9204); // the auto-attack goes on against the next one
+    bv_look_again(&mut bv);
     bv.play.bags_broker_tick();
-    assert_eq!(bv.play.bags_sends_lost(), before2, "M1: no auto-loot while auto-attack is on");
+    assert_eq!(bv.play.bags_sends_lost(), before2, "M1: no auto-loot while auto-attack is on against a live creature");
+    bv.play.bags_entity_die(9204); // auto-attack still on, its target a corpse now
+    bv_look_again(&mut bv);
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > before2, "fix round 6 B: auto-attack left on after the kill is not a fight");
     bv.clean();
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
@@ -3051,6 +3069,7 @@ fn bv_busy_scene() -> Option<Bv> {
         bv.play.entities.slots.push(Some(rm_creature(5000 + i as u32, &format!("Busy Creature {i}"), [a.cos() * d, 0.0, a.sin() * d], 0, 1 + (i % 50) as u8)));
     }
     bv.enable();
+    bv.lua().load("require('bags').AUTO_POLL_SECS = 0.25").exec().unwrap();
     bv.play.bags_spawn_npc(9001, "a fallen orc", 0, 3, [3.0, 0.0, 0.0]);
     bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [6.0, 0.0, 0.0]);
     Some(bv)
@@ -3815,11 +3834,14 @@ fn round65_fix4_m4_auto_loot_on_in_a_crowded_zone_scans_at_most_four_times_a_sec
     bv.frames(2);
     // a corpse of yours waits for the fight to end
     assert!(bv.eval::<bool>("(function() require('bags').eligible_corpses = {[9001] = {id = 9001, position = {x = 3, y = 0, z = 0}}} return true end)()"));
-    let mut flip = false;
+    // fix round 6: Auto-loot polls instead of hearing creature updates, so a flip no longer makes the look stale and a
+    // moment without the hostile let it open the corpse (then nothing waits and nothing is looked at); the hostile now
+    // stays on the player, updated every frame, and the corpse waits in combat throughout
+    bv.play.bags_creature(9700, 0, 77);
+    bv.eval::<bool>("(function() require('bags').scan_reset() return true end)()");
     let scans_before: u32 = bv.eval("require('bags').scan_count");
     let cost = bv_cost_with(&mut bv, 120, &mut |bv, _| {
-        flip = !flip;
-        bv.play.bags_creature(9700, 0, if flip { 77 } else { u32::MAX });
+        bv.play.bags_creature(9700, 0, 77);
     });
     eprintln!("R65P auto-loot on, crowded: {:.3} ms/frame, {:.2} list calls/s", cost.mod_ms, cost.lists_per_s);
     for l in &cost.lines {
@@ -3898,8 +3920,9 @@ fn r65fix5_asked(log: &[String], id: u32) -> bool {
 #[test]
 fn round65_fix5_auto_loot_keeps_going_after_the_owners_sequence() {
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
-    // B's retry (fix round 5) is not part of this sequence: only coming closer to it would ask again
-    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 1e9 return true end)()");
+    // B's retry (fix round 5) is not part of this sequence: only coming closer to it would ask again; the reach is
+    // the 15 units of that round (fix round 6 starts at 7 and learns it)
+    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 1e9 require('bags').LOOT_DEFAULT_REACH = 15 return true end)()");
     let _ = super::super::window_takeover::take_log_for_test();
     // A: 9011's list has coin only
     bv.play.bags_broker_tick();
@@ -4046,7 +4069,8 @@ fn r65fix5_first_taken(bv: &mut Bv) {
 fn round65_fix5_item3_unanswered_corpse_is_retried_when_closer_at_most_three_times() {
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
     r65fix5_first_taken(&mut bv);
-    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 1e9 return true end)()");
+    // fix round 5's 15-unit reach (fix round 6 starts at 7 and learns it)
+    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 1e9 require('bags').LOOT_DEFAULT_REACH = 15 return true end)()");
     let _ = super::super::window_takeover::take_log_for_test();
     r65fix5_kill(&mut bv, 9020, [14.0, 0.0, 0.0]);
     bv.play.bags_broker_tick();
@@ -4097,7 +4121,8 @@ fn round65_fix5_item3_unanswered_corpse_is_retried_when_closer_at_most_three_tim
 fn round65_fix5_item3_out_of_range_ends_the_open_at_once_and_is_retried() {
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
     r65fix5_first_taken(&mut bv);
-    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 1e9 return true end)()");
+    // fix round 5's 15-unit reach (fix round 6 starts at 7 and learns it)
+    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 1e9 require('bags').LOOT_DEFAULT_REACH = 15 return true end)()");
     let _ = super::super::window_takeover::take_log_for_test();
     r65fix5_kill(&mut bv, 9020, [14.0, 0.0, 0.0]);
     bv.play.bags_broker_tick();
@@ -4113,7 +4138,7 @@ fn round65_fix5_item3_out_of_range_ends_the_open_at_once_and_is_retried() {
     assert!(text.contains("Out of range."), "the server's own words in the result line: {text}");
     assert!(bv.eval::<bool>("require('bags').pending_open == nil"), "nothing left waiting");
     let alog = r65fix5_auto_log(&bv);
-    assert!(alog.iter().any(|l| l.contains("Out of range.") && l.contains("will retry")), "{alog:#?}");
+    assert!(alog.iter().any(|l| l.contains("Out of range.") && l.contains("waiting until you are closer")), "{alog:#?}");
     let log = super::super::window_takeover::take_log_for_test();
     assert!(log.iter().any(|l| l.contains("refused the corpse open: Out of range.")), "{log:#?}");
     bv.play.bags_player_at([4.0, 0.0, 0.0]);
@@ -4135,7 +4160,7 @@ fn round65_fix5_item3_out_of_range_ends_the_open_at_once_and_is_retried() {
 fn round65_fix5_item4_a_list_the_game_turns_away_ends_the_open() {
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
     r65fix5_first_taken(&mut bv);
-    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 0 return true end)()");
+    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 1e9 return true end)()");
     let _ = super::super::window_takeover::take_log_for_test();
     r65fix5_kill(&mut bv, 9021, [3.0, 0.0, 0.0]);
     bv.play.bags_broker_tick();
@@ -4159,6 +4184,7 @@ fn round65_fix5_item4_a_list_the_game_turns_away_ends_the_open() {
     assert!(log.iter().any(|l| l.contains("turned away by the game (mode 13")), "{log:#?}");
     assert!(!r65fix5_asked(&log, 9021), "no loop of re-asks while the menu is up: {log:#?}");
     // the menu closes: Auto-loot asks again and the corpse opens hidden
+    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 0 return true end)()");
     bv.play.mode = 0;
     r65fix5_tick(&mut bv);
     let log = super::super::window_takeover::take_log_for_test();
@@ -4214,13 +4240,198 @@ fn round65_fix5_item2_auto_loot_decisions_are_in_the_game_log() {
         "corpse 0x2333: done: Take all ok",
         "corpse 0x2346: a rat: skipped, not your kill",
         "corpse 0x2348: waiting: in combat (a gnoll scout has you targeted)",
-        "corpse 0x2348: waiting: too far (30 units",
+        "corpse 0x2348: waiting: walk closer (30 units",
         "corpse 0x2348: opening it",
         "corpse 0x2348: done: Take all ok (1 items)",
     ] {
         assert!(has(needle), "the game log has `{needle}`: {game_log:#?}");
     }
     bv.clean(); // and not one of them is a diagnostic
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---- Round 6.5 fix round 6: owner live tests of d221531e (2026-11-19) ---------------------------------------------
+
+/// Item 1, owner log r65-retest4 lines 828-862: the ant died while the player was fighting; the player's attack key on
+/// the dead target (the game's `attack_press` on a corpse, the only native 0x0015) opened it in the game's own window
+/// (mode 1), and Auto-loot then burned its three tries on "cannot open corpse right now". The corpse it wants is open:
+/// it takes from that session (no open of its own), and says so.
+#[test]
+fn round65_fix6_item1_auto_loot_takes_from_the_corpse_the_player_opened() {
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    r65fix5_first_taken(&mut bv);
+    let _ = super::super::window_takeover::take_log_for_test();
+    // the fight: auto-attack on the ant, which dies; the player presses attack again on the dead target
+    bv.play.bags_spawn_npc(9040, "ant", 0, 1, [1.0, 0.0, 0.0]);
+    bv.play.bags_target_sync(9040);
+    bv.play.bags_auto_attack(true);
+    bv.play.bags_combat_hit(77, 9040, -12);
+    bv.play.bags_spawn_npc(9041, "a second ant", 0, 1, [4.0, 0.0, 0.0]);
+    bv.play.bags_creature(9041, 0, 77); // still fighting: Auto-loot waits
+    bv_look_again(&mut bv);
+    bv.play.bags_entity_die(9040);
+    bv.frames(2);
+    bv.play.bags_press_loot(); // the game's own loot request
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Ant Leg","id":2201,"key":0,"qty":1,"max_stack":20}]));
+    assert_eq!(bv.play.mode, 1, "the player's own key opened the game's corpse window");
+    bv.play.bags_entity_die(9041); // the fight is over
+    let sends = bv.play.bags_sends_lost();
+    r65fix5_tick(&mut bv);
+    bv.play.bags_broker_tick();
+    let log = super::super::window_takeover::take_log_for_test();
+    let alog = r65fix5_auto_log(&bv);
+    assert!(!r65fix5_asked(&log, 9040), "no open of its own while the corpse is open: {log:#?}");
+    assert!(!alog.iter().any(|l| l.contains("0x2350") && l.contains("try 2 of 3")), "no try burned: {alog:#?}");
+    assert!(
+        alog.iter().any(|l| l.contains("0x2350") && l.contains("open already") && l.contains("taking from it (Take all)")),
+        "{alog:#?}"
+    );
+    assert!(bv.play.bags_sends_lost() > sends, "Take all goes out from the player's session");
+    bv.play.bags_loot_confirm_all();
+    bv.play.bags_loot_close();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let alog = r65fix5_auto_log(&bv);
+    assert!(alog.iter().any(|l| l.contains("0x2350: done: Take all ok")), "{alog:#?}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item 1, the other case: another corpse is open in the game's window. Auto-loot's corpse waits (no try burned) and is
+/// opened once that window closes.
+#[test]
+fn round65_fix6_item1_another_open_corpse_makes_auto_loot_wait_not_fail() {
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    r65fix5_first_taken(&mut bv);
+    let _ = super::super::window_takeover::take_log_for_test();
+    bv.play.bags_spawn_npc(9042, "a fallen gnoll", 0, 3, [2.0, 0.0, 0.0]);
+    bv.play.bags_target(9042);
+    bv.play.bags_press_loot(); // the player opens someone else's corpse
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Bone Chip","id":2004,"key":0,"qty":1,"max_stack":100}]));
+    assert_eq!(bv.play.mode, 1);
+    r65fix5_kill(&mut bv, 9043, [3.0, 0.0, 0.0]);
+    for _ in 0..3 {
+        r65fix5_tick(&mut bv);
+    }
+    let log = super::super::window_takeover::take_log_for_test();
+    let alog = r65fix5_auto_log(&bv);
+    assert!(!r65fix5_asked(&log, 9043), "{log:#?}");
+    assert!(alog.iter().any(|l| l.contains("0x2353: waiting: another corpse (0x2352) is open")), "{alog:#?}");
+    assert!(!alog.iter().any(|l| l.contains("0x2353") && (l.contains("try 2") || l.contains("gave up"))), "{alog:#?}");
+    bv.play.bags_loot_close(); // the player closes it
+    bv.frames(2);
+    r65fix5_tick(&mut bv);
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(r65fix5_asked(&log, 9043), "opened once the player's window closed: {log:#?}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item A, owner log eqoa.log 980-1146: the server opened corpses at 3 and 6 units and said "Out of range." at 11, 12,
+/// 13 and 15; Auto-loot (reach 15) gave up after three refusals. The reach now starts at 7 and is learned from the
+/// answers: a kill 12 units off waits ("walk closer"), and opens once the player is within reach.
+#[test]
+fn round65_fix6_item_a_loot_reach_starts_short_and_says_walk_closer() {
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    r65fix5_first_taken(&mut bv);
+    let _ = super::super::window_takeover::take_log_for_test();
+    r65fix5_kill(&mut bv, 9050, [12.0, 0.0, 0.0]);
+    r65fix5_tick(&mut bv);
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(!r65fix5_asked(&log, 9050), "12 units is beyond the reach not yet learned (7): {log:#?}");
+    let alog = r65fix5_auto_log(&bv);
+    assert!(alog.iter().any(|l| l.contains("0x235a: waiting: walk closer (12 units; server reach ~7 units)")), "{alog:#?}");
+    bv.play.bags_player_at([6.0, 0.0, 0.0]); // 6 units: what the owner's server opened
+    r65fix5_tick(&mut bv);
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(r65fix5_asked(&log, 9050), "within reach: {log:#?}");
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Damselfly Wing","id":2301,"key":0,"qty":1,"max_stack":20}]));
+    bv.frames(2);
+    assert_eq!(bv.play.mode, 0, "hidden");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item A with the owner's own order (11, 12, 13, 15 refused in a row): four refusals in a row never give up; the corpse
+/// opens when the player comes within the learned reach.
+#[test]
+fn round65_fix6_item_a_four_refusals_in_a_row_still_loot_when_closer() {
+    let Some(mut bv) = r65fix4_auto_kill("all") else { return };
+    r65fix5_first_taken(&mut bv);
+    bv.eval::<bool>("(function() local b = require('bags') b.AUTO_RETRY_SECS = 1e9 b.LOOT_DEFAULT_REACH = 16 return true end)()");
+    let _ = super::super::window_takeover::take_log_for_test();
+    r65fix5_kill(&mut bv, 9051, [20.0, 0.0, 0.0]);
+    for d in [15.0f32, 13.0, 12.0, 11.0] {
+        bv.play.bags_player_at([20.0 - d, 0.0, 0.0]);
+        // what the owner's server answered: the mod forgets nothing, it only waits for the player to come closer
+        r65fix5_tick(&mut bv);
+        let log = super::super::window_takeover::take_log_for_test();
+        assert!(r65fix5_asked(&log, 9051), "asked from {d} units (nearer than any refusal so far): {log:#?}");
+        bv.play.bags_chat("Out of range.");
+        bv.play.bags_broker_tick();
+        bv.frames(2);
+    }
+    bv.play.bags_player_at([14.0, 0.0, 0.0]); // 6 units
+    r65fix5_tick(&mut bv);
+    let log = super::super::window_takeover::take_log_for_test();
+    assert!(r65fix5_asked(&log, 9051), "the fifth ask, from 6 units: {log:#?}");
+    let alog = r65fix5_auto_log(&bv);
+    assert!(!alog.iter().any(|l| l.contains("0x235b") && (l.contains("gave up") || l.contains("try 2 of 3"))), "never a try: {alog:#?}");
+    assert!(
+        alog.iter().any(|l| l.contains("0x235b") && l.contains("\"Out of range.\" at 11 units: waiting until you are closer (server reach ~")),
+        "{alog:#?}"
+    );
+    let reach: f64 = bv.eval("require('bags').loot_reach_now()");
+    assert!((reach - 10.5).abs() < 0.01, "the nearest refusal was 11 units: reach {reach}");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Item 2, owner log r65-retest4: with Auto-loot on in a crowd the mod cost 2.2-4.3 ms a frame, `player.get` 6-25 times
+/// a frame and 53-70 event deliveries a frame (every creature update, every move of the player). Auto-loot on, window
+/// closed, 700 creatures with 35 updates a frame, the player walking and hits landing every frame: at most 3 event
+/// deliveries and one `player.get` a frame, and (release build) under 0.5 ms a frame.
+#[test]
+fn round65_fix6_item2_auto_loot_on_in_a_crowd_is_cheap() {
+    let Some(mut bv) = bv_busy_scene() else { return };
+    bv.play.bags_self_id(77);
+    bv.frames(4);
+    bv_auto(&bv, "all");
+    bv.frames(2);
+    let mut x = 0.0f32;
+    let cost = bv_cost_with(&mut bv, 120, &mut |bv, tick| {
+        x += 0.05;
+        bv.play.bags_player_at([x, 0.0, 0.0]);
+        bv.play.bags_auto_attack(tick % 2 == 0);
+        bv.play.bags_combat_hit(5003, 77, -2);
+    });
+    for l in &cost.lines {
+        eprintln!("R65P6     {l}");
+    }
+    let deliveries = cost
+        .lines
+        .iter()
+        .find(|l| l.starts_with("core:"))
+        .and_then(|l| bv_num_after(l, "events.deliver "))
+        .unwrap_or(0.0);
+    let player_gets = cost
+        .lines
+        .iter()
+        .find(|l| l.starts_with("addon-api:") && l.contains(BV))
+        .and_then(|l| bv_num_after(l, "player.get "))
+        .unwrap_or(0.0);
+    eprintln!("R65P6 auto-loot on, crowd: {:.3} ms/frame, {deliveries:.1} deliveries, {player_gets:.2} player.get a frame", cost.mod_ms);
+    assert!(deliveries <= 3.0, "{deliveries:.1} event deliveries a frame with Auto-loot on in a crowd");
+    assert!(player_gets <= 1.0, "player.get {player_gets:.2} times a frame");
+    if !cfg!(debug_assertions) {
+        assert!(cost.mod_ms < 0.5, "Auto-loot on in a crowd costs {:.3} ms a frame (budget 0.5)", cost.mod_ms);
+    }
+    bv.clean();
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
 }
