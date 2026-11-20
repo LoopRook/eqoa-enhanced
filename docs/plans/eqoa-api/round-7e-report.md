@@ -499,3 +499,89 @@ press`), so an odd result in the next test can be read from the log.
   success. `ci_gates.py cleanup` run.
 - Not verified: the live client itself (Runtime::event, App::key_input and key_name are not run by any test), and
   that this is the state the owner was in (see "Cause").
+
+
+# Owner test fix 1, part 2: the live behaviour is the rule (owner's correction, 2026-11-20)
+
+The section above describes the first reading (a Shift+Space mod key should be refused). **It is superseded**: the owner
+says that with a mod on Shift+Space and Jump on Space, Shift+Space fires the mod and does not jump, plain Space still
+jumps, and that is wanted. The lead decided the live behaviour is the rule. Commits: `fix(input): a modifier plus a key
+the game uses plain is a key of its own ...` and `test(input): a bare mod key is never consumed`, then this report.
+Upstream lines: none new (`options.rs` stays +2/-0, footprint PASS).
+
+## 1. The mechanism (file:line), and the honest answer
+
+**I could not find a mechanism in the code that makes the game not act on plain Space for that press.** What I checked:
+- `viewer.rs:5667-5686` (`App::key_name`): with the combo not bound in the game and no capture waiting, the press is named
+  by the plain key (`space`); `viewer.rs:5870+` sends it on through `KeyEdge` unchanged; `viewer.rs:5018-5027` (the jump
+  match) tests `(None, Key::Named(Space))` and does not read the modifiers. So **before any mod holds the combo,
+  Shift+Space jumps** (on a server that has jumps).
+- `Binds::combo_bound` / `alias` (`binds.rs:594-609, 744-746`) read only the game's own rows and macros: there is no fork
+  hook that adds mod keys to them (`grep fork_ext::bindpage binds.rs` finds nothing).
+- The press-time code before my change (`input.rs` `route_mod_key_based`, `runtime.rs` `route_key`) never consumed a
+  press for a mod: `wants_capture` came from ImGui, text capture, or Forge's `SetKeySuppressed` only
+  (`input.rs wants_key_capture`, `capture.rs`), and a consumed event is the only way the game never sees a key
+  (`report_viewer.rs addon_event` returns true, `viewer.rs:5480` returns).
+- The Controls capture writes game binds only when it swaps or frees a game row (`bindpage.rs mod_row_capture`).
+By the code alone Shift+Space jumped as well, so the owner's build behaved differently from what I can read: a mod that
+claims keys itself (`eqoa.input.claim_key` with suppress, which Wereoxxs UI in the owner's mod list does call:
+`SetKeySuppressed` is in their `eqoa.log`) is the one candidate I can name, and I cannot confirm it. **That is why the
+behaviour is now made explicit instead of incidental**: see the rule.
+
+## 2. The rule, now stated once (`bindpage.rs`, the "THE RULE" block)
+
+- A key is a NAME: the modifiers held written before the key (Super first, then Ctrl, Alt, Shift). Shift+Space is not Space.
+- A mod may hold a modifier combination over a key the game uses plain. While it does, **that press is the mod's alone**:
+  the mod fires and the key event is consumed in `Runtime::route_key` (`input::mod_owns_press` -> `bindpage::owns_press`), so
+  the game does not act on the plain key for it. The plain key keeps working for the game. A bare key is never taken.
+- A real conflict is the SAME NAME bound in the game: a game row, or a key in a macro's trigger, by that exact name (a bare
+  key the game uses, or the combination itself bound there). The game's control wins at press time and Controls marks it. On
+  Controls a game row on that name is swapped or freed for the mod as before (a macro's key is refused).
+- Controls (capture, marks, defaults, saved keys), the static rule and press-time firing all use that one rule
+  (`game_owner`, `firing`). Nothing is decided by what a press types: the layout guessing is gone (`shifted`, `game_press`,
+  the learned record, the event field `game_key`, and the surface rows for it).
+- German Shift+7 (types `/`, the command key): the rule gives **no conflict**, because the key is the name `shift+7` and the
+  game has no `shift+7` bound; the mod owns that press and the command line does not open for it. The bare `/` is the
+  game's and untouched. Same for the UK Shift+' (types `@`) and the numpad with NumLock off (Ctrl+Numpad1 is `ctrl+1` by
+  its place, though it arrives as End).
+
+## 3. Tests: every assertion changed (before -> after, and why)
+
+All in `round7e_key_tests.rs`. Old = refused/blocked by the plain-key (shadow) rule; new = the owner's rule.
+| test | before | after |
+|---|---|---|
+| `fix_h1_a_ctrl_combo_over_a_plain_game_key_..._never_fires` | Ctrl+W refused on Controls; a saved ctrl+w never fires | renamed `..._is_the_mods_and_w_still_walks`: accepted, no mark; Ctrl+W fires the mod and the press is consumed; W alone is not consumed and still reaches the game |
+| `fix2_h1_shift_on_a_named_key_is_the_games_plain_key` | Shift+Space/Tab/F5/Up/` refused naming the control | `..._is_a_key_of_its_own_for_a_mod`: all (and Shift+Enter) accepted, no mark |
+| `fix2_h1_shift_space_does_not_fire_a_mod_with_jump` | mod never fires on Shift+Space (Jump acts) | `..._belongs_to_the_mod_and_space_still_jumps`: before a mod holds it the press reaches the game; after, the mod fires and the press is consumed; Space alone reaches the game and the mod does not fire |
+| `fix2_h1_a_game_row_on_a_shifted_symbol_is_the_games_press` | Shift+1 refused (game on `!`) | accepted: `!` and `shift+1` are different names; fires, consumed |
+| `fix2_h1_a_macro_on_a_shifted_symbol_is_the_games_press_too` | Shift+1 refused (macro on `!`) | `..._same_name_still_refuses_the_mod`: a macro on bare `!` does not hold Shift+1; a macro on `shift+1` itself still refuses |
+| `fix3_a_german_shift_7_types_slash_and_the_game_acts` | mod did not fire (game acts on `/`) | `..._is_the_mods_by_its_name_not_by_what_it_types`: fires and consumed; bare `/` untouched; US Shift+7 the same name |
+| `fix3_a_uk_shift_quote_types_at_and_the_game_acts` | mod did not fire (slot on `@`) | `..._is_the_mods_by_its_name_even_with_a_game_row_on_at`: fires, consumed |
+| `fix3_the_numpad_with_numlock_off_arrives_as_end` | mod blocked by End (Orbit right) | `..._is_named_by_its_place`: ctrl+1 / shift+1 fire and are consumed; End alone not |
+| `fix3_a_capture_uses_what_the_real_press_typed` | German Shift+7 capture refused | `..._is_accepted_whatever_the_layout_types` |
+| `fix3_the_marks_use_what_presses_showed_and_nothing_is_written` | mark appears once a press showed Shift+7 types `/` | `fix3_a_mark_means_the_same_name_is_the_games`: no mark for shift+7; a game row on exactly `shift+7` marks it and names the row |
+| `owner1_shift_and_friends_over_a_game_key_are_refused_in_the_live_order` | 7 combos refused | `..._are_accepted_in_the_live_order` (live order: modifiers, mod runtime, `GameKeys`, real Options window) |
+| `owner1_shift_space_is_refused_after_the_swaps_the_owner_made` | refused in 5 states | `..._is_accepted_...` in the same 5 states; Jump keeps Space |
+| `owner1_a_saved_shift_space_is_marked_says_jump_and_does_not_fire` | marked, says Jump, mod silent | `..._fires_the_mod_and_not_jump_and_is_not_marked`: this is the owner's live case |
+| `owner1_a_game_control_on_shift_space_cannot_hand_it_to_a_mod_that_jump_then_beats` | refused (Jump would beat it) | `..._is_a_real_conflict_and_swaps_as_any_game_key`: a saved mod key loses at press time and is marked; given on Controls the slot is freed and the mod fires (consumed) |
+New: `owner1_a_bare_mod_key_is_never_consumed_only_a_modifier_combination_is`. Unchanged and still passing: bare-key conflicts
+(`round7e_legacy_conflicts...`, marks, defaults, macro refusal), the client keys, release naming, normalisation, the
+zero-allocation key path, H3 cancel/save.
+
+## 4. Negative controls (`R7E_BREAK=n`, same binary, one run per n)
+- n=1 (a mod never owns a press): 8 tests fail (the shift+space, ctrl+w, German/UK/numpad, saved shift+space, game-control cases).
+- n=2 (the game never has an exact key): 18 tests fail (every conflict, mark, swap and default test).
+- n=4 (bare keys consumed too): passed at the time: no test then asserted it; `owner1_a_bare_mod_key_is_never_consumed...` now does
+  (control run for it is with the manager-row build below).
+
+## 5. What the owner should retest
+1. A mod on Shift+Space, Jump on Space: Shift+Space fires the mod, does not jump; Space jumps. No `!` on the row.
+2. Give a game control (a bar slot) Shift+Space: then a mod Shift+Space: the slot loses it (the usual note); and a mod already
+   saved on a name a game control has: marked, the game wins.
+3. German/UK keyboards if available: a mod on Shift+7 owns that press.
+4. Local gates: see Gates.
+
+## Gates (owner test fix 1)
+- Local with the disc: `--filter round7e_ fork_ext:: options:: settings:: bindpage:: binds:: play::fork_hooks::`: 1121 passed,
+  0 failed, 26 ignored (unrelated SKIPs); wasm, footprint, paths PASS. CI for this and the next section runs once on the final
+  commit (see Owner request 1).
