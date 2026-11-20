@@ -68,10 +68,10 @@ fn extension_list(raw: &serde_json::Value, field: &str) -> Result<Vec<String>, S
             }
             "commands" => is_valid_id(value),
             "replaces" => {
-                if !super::window_kinds::is_window(value) {
+                if !super::window_kinds::is_window(value) && !super::visibility::is_hud_disclosure(value) {
                     return Err(format!(
                         "Invalid manifest 'replaces': {value:?} is not a game window kind \
-                         (the kinds eqoa.windows.get() reports)"
+                         or an eqoa.hud piece token"
                     ));
                 }
                 true
@@ -971,13 +971,13 @@ mod tests {
             "schemaVersion": 1, "runtime": "lua", "api": "eqoa/1",
             "id": "replacement", "entry": "main.lua",
             "capabilities": ["eqoa.windows.takeover"],
-            "replaces": ["bank", "bank", "inventory"]
+            "replaces": ["bank", "bank", "hud.target"]
         });
         fs::write(pkg.join("mod.json"), manifest.to_string()).unwrap();
         let discovered = discover(temp.path());
         assert!(discovered.diagnostics.is_empty());
         let addon = &discovered.addons[0];
-        assert_eq!(addon.extensions.replaces, ["bank", "inventory"]);
+        assert_eq!(addon.extensions.replaces, ["bank", "hud.target"]);
         let host = super::super::host::Host::for_addon(addon).unwrap();
         host.execute(
             r#"

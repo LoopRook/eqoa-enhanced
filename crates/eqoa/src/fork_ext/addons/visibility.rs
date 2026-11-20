@@ -637,6 +637,11 @@ fn native_leaves(element: &str) -> Option<Vec<&'static str>> {
         _ => return None,
     })
 }
+
+pub(super) fn is_hud_disclosure(token: &str) -> bool {
+    token.strip_prefix("hud.").is_some_and(|piece| native_leaves(piece).is_some())
+}
+
 fn install_native(host: &Host, lease: &VisibilityLease) -> mlua::Result<()> {
     use super::{
         native::{bind, error},

@@ -91,6 +91,15 @@ pub(crate) fn is_window(kind: &str) -> bool {
     title(kind).is_some()
 }
 
+/// Local views in the window replacement design have no helper session to claim.
+pub(super) fn is_view(kind: &str) -> bool {
+    matches!(
+        kind,
+        "inventory" | "spellbook" | "quest_log" | "trainer" | "mastery"
+            | "recipe_book" | "experiment" | "start_menu" | "map"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

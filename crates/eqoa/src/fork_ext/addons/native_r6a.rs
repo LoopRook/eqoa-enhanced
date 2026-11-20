@@ -410,10 +410,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     "kind must be 'loot', 'merchant', or 'bank'",
                 );
             };
-            let parsed = match TakeoverKind::parse(&kind_str) {
-                Ok(k) => k,
-                Err((code, msg)) => return error(lua, "eqoa.windows.takeover", code, &msg),
-            };
+            if !super::window_kinds::is_window(&kind_str) {
+                return error(lua, "eqoa.windows.takeover", "invalid_argument", "kind must name a game window");
+            }
             let scope = match opts {
                 None | Some(Value::Nil) => TakeoverScope::Own,
                 Some(Value::Table(t)) => match t.get::<Value>("scope")? {
@@ -451,6 +450,13 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                         "options must be a table or nil",
                     );
                 }
+            };
+            if scope == TakeoverScope::Own && super::window_kinds::is_view(&kind_str) {
+                return error(lua, "eqoa.windows.takeover", "invalid_argument", "a local view requires scope 'all'");
+            }
+            let parsed = match TakeoverKind::parse(&kind_str) {
+                Ok(k) => k,
+                Err((code, msg)) => return error(lua, "eqoa.windows.takeover", code, &msg),
             };
             let addon = {
                 let session = session(lua);

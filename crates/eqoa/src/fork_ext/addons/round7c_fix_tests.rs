@@ -142,7 +142,10 @@ fn round7c_window_design_manifest_loads_and_discloses_hud_target() {
         }),
     );
     let disclosure = lines(&one(&temp.0));
-    assert!(disclosure.iter().any(|line| line.contains("Target frame")), "{disclosure:?}");
+    assert_eq!(disclosure, [
+        "Replaces game windows: Target frame",
+        "Not replaceable in this version: Inventory, Abilities",
+    ]);
 }
 
 #[test]
@@ -179,7 +182,7 @@ fn round7c_replaces_accepts_game_windows_and_reports_any_other_name() {
         ["Not replaceable in this version: Inventory"]
     );
     std::fs::remove_dir_all(temp.0.join("views_only")).unwrap();
-    for unknown in ["hud.target", "bags", "journal"] {
+    for unknown in ["hud.bogus", "bags", "journal"] {
         package(
             &temp.0,
             "typo",

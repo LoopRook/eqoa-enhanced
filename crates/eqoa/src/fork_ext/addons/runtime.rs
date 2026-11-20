@@ -862,6 +862,13 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
 fn replacement_labels(replaces: &[String]) -> [Option<String>; 2] {
     let (mut now, mut later) = (Vec::new(), Vec::new());
     for kind in replaces {
+        if super::visibility::is_hud_disclosure(kind) {
+            let label = if kind == "hud.target" { "Target frame" } else { kind };
+            if !now.contains(&label) {
+                now.push(label);
+            }
+            continue;
+        }
         let Some(title) = super::window_kinds::title(kind) else {
             continue;
         };
@@ -2475,6 +2482,10 @@ mod tests {
                 Some("Replaces game windows: Bank, Loot".into()),
                 Some("Not replaceable in this version: Abilities".into())
             ]
+        );
+        assert_eq!(
+            replacement_labels(&["hud.target".into()]),
+            [Some("Replaces game windows: Target frame".into()), None]
         );
         assert!(declares_dialog_actions(&[
             "eqoa.actions.dialog_answer".into()
