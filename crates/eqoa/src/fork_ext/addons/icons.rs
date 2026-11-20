@@ -1750,8 +1750,14 @@ mod round7a_tests {
                 })
             }
         }
+        super::super::native_tests::install_field_check(&host).unwrap();
         set_custom_icon_provider(Some(Box::new(Provider)));
-        let result=host.lua.load("local i=require('frontiers_forge.icon'); local t,w,h=i.GetTexture(1); assert(t~=nil and w==1 and h==1)").exec();
+        let result = host.execute(r#"
+            local i = require('frontiers_forge.icon')
+            local t, w, h = i.GetTexture(1)
+            assert(t ~= nil and w == 1 and h == 1)
+            fields('icons.SurfaceInfo', eqoa.icons.info(1))
+        "#);
         set_custom_icon_provider(None);
         result.unwrap();
         assert!(super::super::native::drain(&host.lua).is_empty());

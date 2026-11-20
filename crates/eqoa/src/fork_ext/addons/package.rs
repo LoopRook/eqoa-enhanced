@@ -1535,6 +1535,7 @@ mod round7a_more_tests {
                 .unwrap();
             return;
         }
+        super::super::native_tests::install_field_check(&host).unwrap();
         let data = root.join("private");
         file_io::install(&host, &addon, Some(data.clone())).unwrap();
         host.lua
@@ -1548,6 +1549,8 @@ mod round7a_more_tests {
             local all=eqoa.files.list('resources')
             assert(#all==2 and all[1].path=='resources/a.txt' and all[2].path=='resources/nested')
             assert(all[2].kind=='directory' and all[2].size==nil)
+            fields('files.FileEntry', all[1])
+            fields('files.FileEntry', all[2], 'size')
             assert(#eqoa.files.list('resources','?.txt')==1)
             assert(#eqoa.files.list('sibling/resources')==0)
             local v,e=eqoa.files.list('resources','../*'); assert(v==nil and e.code=='invalid_argument')

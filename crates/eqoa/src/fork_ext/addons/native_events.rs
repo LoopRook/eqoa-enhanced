@@ -188,8 +188,8 @@ fn install_event_fields(lua: &mlua::Lua) {
         ),
         ("events.dropped", "first_seq last_seq count streams"),
     ] {
+        let payload = format!("eqoa.events.{name}.data");
         for field in fields.split_whitespace() {
-            let payload = format!("eqoa.events.{name}.data");
             let reason = super::native::unprojected_field(&payload, field);
             super::native::describe(
                 lua,

@@ -1,6 +1,6 @@
 use super::*;
+use crate::fork_ext::addons::native_tests::{PLAY_EVENTS, install_field_check};
 use crate::fork_ext::addons::{
-    native_tests::ROUND7C_CHECK_FIELDS,
     host::Host,
     native_core::{CORE, Core},
     native_events,
@@ -21,7 +21,16 @@ fn ready() -> Play {
 fn round7c_play_records_match_declared_fields() {
     crate::fork_ext::addons::big_stack(|| {
         let mut p = Play::bundled_ui_fixture();
-        let walker = Play::bundled_ui_walker();
+        let mut walker = Play::bundled_ui_walker();
+        walker.scene.grid = Some(vi::world::Grid {
+            bbox: Default::default(),
+            rows: 3,
+            cols: 3,
+            subdiv: 1,
+            cell_size: vi::fpu::F::new(1000.),
+            origin: Default::default(),
+            regions: Vec::new(),
+        });
         p.map = crate::map::testing::up((640, 448));
         p.map.open = true;
         assert!(p.map.click([320., 224.], false));
@@ -62,11 +71,12 @@ fn round7c_play_records_match_declared_fields() {
             true,
             true,
         );
-        host.execute(ROUND7C_CHECK_FIELDS).unwrap();
+        install_field_check(&host).unwrap();
         host.execute(
             r#"
             local p = eqoa.player.get()
-            fields('player.Player', p, 'location')
+            fields('player.Player', p)
+            fields('player.Location', p.location, 'name')
             fields('player.Vital', p.hp)
             fields('player.Vital', p.power)
             fields('player.Attributes', p.attributes)
@@ -121,7 +131,7 @@ fn round7c_play_records_match_declared_fields() {
             fields('hud.SinglePanelLayout', layout.pet)
             fields('hud.Rect', layout.player.panel)
             local map = eqoa.map.get()
-            fields('map.MapState', map, 'world_name zone search_anchor')
+            fields('map.MapState', map, 'world_name search_anchor')
             fields('map.Bounds', map.bounds)
             fields('map.Waypoint', map.waypoint, 'label owner')
             fields('map.Marker', eqoa.map.markers(map.world_id)[1], 'level_min level_max label step')
@@ -143,18 +153,9 @@ fn round7c_world_events_come_from_play_changes() {
         let mut walker = Play::bundled_ui_walker();
         native_core::fixture_demand(true);
         let host = Host::new().unwrap();
+        host.lua.globals().set("world_events", host.lua.create_sequence_from(PLAY_EVENTS.iter().copied()).unwrap()).unwrap();
         host.execute(
             r#"
-            world_events = {
-                'world.entered', 'world.leaving', 'state.reset',
-                'player.changed', 'player.stats_changed', 'target.changed',
-                'entity.added', 'entity.changed', 'entity.removed', 'group.changed',
-                'map.changed', 'inventory.changed', 'bank.changed',
-                'quests.changed', 'camera.changed', 'windows.changed', 'mastery.changed',
-                'abilities.changed', 'hotbar.changed', 'effects.changed',
-                'cooldown.started', 'cooldown.updated', 'cooldown.ended', 'guide.lost',
-                'chat.message', 'chat.history_scroll', 'combat.hit', 'input.key', 'input.pad',
-            }
             seen = {}
             for _, name in ipairs(world_events) do
                 assert(eqoa.capabilities.has('eqoa.events.' .. name), name)
@@ -211,7 +212,7 @@ fn round7c_world_events_come_from_play_changes() {
         p.forge_snapshot(None);
         native_events::dispatch(&host).unwrap();
 
-        host.execute(ROUND7C_CHECK_FIELDS).unwrap();
+        install_field_check(&host).unwrap();
         host.execute(
             r#"
             local missing = {}

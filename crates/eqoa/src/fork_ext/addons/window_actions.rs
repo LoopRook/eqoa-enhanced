@@ -6,7 +6,7 @@
 use super::{
     action_broker::{ActionKind, WinTarget, enqueue_lua_with},
     gesture::is_forbidden_report_text,
-    native::{bind, describe},
+    native::bind,
     native_core::CORE,
     native_r6a::resolve_in,
     native_state::Ref,
@@ -323,26 +323,5 @@ pub(crate) fn install(lua: &Lua) -> Result<()> {
             })
         })?,
     )?;
-    for name in [
-        "drop_quest",
-        "mastery_share",
-        "mastery_browse",
-        "mastery_buy",
-        "mastery_refund",
-        "close_window",
-        "select_row",
-        "activate_row",
-        "dialog_answer",
-        "input_text",
-        "menu_command",
-    ] {
-        describe(
-            lua,
-            &format!("eqoa.actions.{name}"),
-            "supported",
-            Some(4),
-            "native key/window/handler path, revalidated at dispatch",
-        );
-    }
     Ok(())
 }

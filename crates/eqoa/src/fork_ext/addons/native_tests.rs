@@ -1,6 +1,57 @@
 use super::host::Host;
 
-pub(crate) const ROUND7C_CHECK_FIELDS: &str = r#"
+pub(crate) const PLAY_EVENTS: &[&str] = &[
+    "world.entered",
+    "world.leaving",
+    "state.reset",
+    "player.changed",
+    "player.stats_changed",
+    "target.changed",
+    "entity.added",
+    "entity.changed",
+    "entity.removed",
+    "group.changed",
+    "map.changed",
+    "inventory.changed",
+    "bank.changed",
+    "quests.changed",
+    "camera.changed",
+    "windows.changed",
+    "mastery.changed",
+    "abilities.changed",
+    "hotbar.changed",
+    "effects.changed",
+    "cooldown.started",
+    "cooldown.updated",
+    "cooldown.ended",
+    "guide.lost",
+    "chat.message",
+    "chat.history_scroll",
+    "combat.hit",
+    "input.key",
+    "input.pad",
+];
+
+const SERVICE_EVENTS: &[&str] = &[
+    "enabled",
+    "disabling",
+    "render",
+    "settings.render",
+    "timer",
+    "pointer.pressed",
+    "pointer.wheel",
+    "resource.ready",
+    "resource.failed",
+    "shared.changed",
+    "mod.command",
+    "action.result",
+    "batch.progress",
+    "batch.result",
+    "events.dropped",
+];
+
+
+const RECORD_FIELD_CHECK: &str = r#"
 function fields(name, record, optional)
     local path = 'eqoa.' .. name
     assert(type(record) == 'table', path .. ' did not produce a record')
@@ -14,9 +65,10 @@ function fields(name, record, optional)
         may_be_nil[field] = true
     end
     local actual = {}
-    for key, value in pairs(record) do
+    for _, key in ipairs(round7c_record_keys(record)) do
         assert(declared[key], path .. '.' .. key .. ' is undeclared')
-        actual[key] = value
+        assert(declared[key] == 'supported', path .. '.' .. key .. ' is projected but marked unsupported')
+        actual[key] = record[key]
     end
     for key, status in pairs(declared) do
         if status == 'supported' and not may_be_nil[key] then
@@ -25,6 +77,45 @@ function fields(name, record, optional)
     end
 end
 "#;
+
+/// The Lua-facing proxies expose properties through their backing table.
+/// Inspect its keys without changing the public read-only table behavior.
+pub(crate) fn install_field_check(host: &Host) -> mlua::Result<()> {
+    use mlua::{Table, Value};
+
+    host.lua.globals().set(
+        "round7c_record_keys",
+        host.lua.create_function(|lua, record: Table| {
+            let backing = record
+                .metatable()
+                .and_then(|mt| mt.raw_get::<Table>("__index").ok())
+                .unwrap_or(record);
+            let keys = backing
+                .pairs::<String, Value>()
+                .map(|entry| entry.map(|(key, _)| key))
+                .collect::<mlua::Result<Vec<_>>>()?;
+            lua.create_sequence_from(keys)
+        })?,
+    )?;
+    host.execute(RECORD_FIELD_CHECK)
+}
+
+#[test]
+fn round7c_supported_event_inventory_has_fixture_coverage() {
+    use std::collections::BTreeSet;
+
+    let host = Host::new().unwrap();
+    let fixtures = PLAY_EVENTS.iter().chain(SERVICE_EVENTS)
+        .copied().chain(["loot.changed", "merchant.changed"]).collect::<BTreeSet<_>>();
+    let rows: mlua::Table = host.lua.load("return eqoa.capabilities.list('eqoa.events')").eval().unwrap();
+    let events = rows.sequence_values::<mlua::Table>().map(|row| row.unwrap())
+        .filter(|row| row.get::<String>("status").unwrap() == "supported")
+        .filter_map(|row| row.get::<String>("path").unwrap().strip_prefix("eqoa.events.").map(str::to_owned))
+        .filter(|name| !name.contains(".data.") && !name.starts_with("Event")
+            && !matches!(name.as_str(), "on" | "off" | "once" | "after"))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(events.iter().map(String::as_str).collect::<BTreeSet<_>>(), fixtures);
+}
 
 #[test]
 fn round7c_refusing_members_report_the_same_capability_as_their_call() {
@@ -123,14 +214,9 @@ fn round7c_host_service_events_reach_lua_from_their_producers() {
         *core = native_core::Core::default();
         core.view.in_world = true;
     });
+    host.lua.globals().set("service_events", host.lua.create_sequence_from(SERVICE_EVENTS.iter().copied()).unwrap()).unwrap();
     host.execute(
         r#"
-        service_events = {
-            'enabled', 'disabling', 'render', 'settings.render', 'timer',
-            'pointer.pressed', 'pointer.wheel', 'resource.ready', 'resource.failed',
-            'shared.changed', 'mod.command', 'action.result', 'batch.progress', 'batch.result',
-            'events.dropped',
-        }
         seen = {}
         for _, name in ipairs(service_events) do
             assert(eqoa.capabilities.has('eqoa.events.' .. name), name)
@@ -176,7 +262,7 @@ fn round7c_host_service_events_reach_lua_from_their_producers() {
     host.execute(
         r#"
         assert(eqoa.actions.assist())
-        assert(eqoa.actions.batch({{kind='assist'}}))
+        assert(eqoa.actions.batch({{kind='assist'}, {kind='assist'}}))
     "#,
     )
     .unwrap();
@@ -185,6 +271,7 @@ fn round7c_host_service_events_reach_lua_from_their_producers() {
         action_broker::dispatch_all_for_test();
         native_events::dispatch(&host).unwrap();
     }
+    install_field_check(&host).unwrap();
     for _ in 0..1050 {
         native_core::observe_text("overflow fixture", [1.; 4]);
     }
@@ -198,7 +285,9 @@ fn round7c_host_service_events_reach_lua_from_their_producers() {
         assert(#missing == 0, 'Host did not emit: ' .. table.concat(missing, ', '))
         assert(seen['pointer.pressed'].data.x == 10)
         assert(seen['mod.command'].data.args.id == 17)
-        assert(seen['batch.result'].data.completed == 1)
+        assert(seen['batch.result'].data.completed == 2)
+        fields('actions.ActionResult', seen['action.result'].data, 'code reason detail')
+        fields('actions.BatchResult', seen['batch.result'].data, 'code reason detail current_step failed_step')
         assert(seen['events.dropped'].data.count > 0)
     "#,
     )
@@ -837,6 +926,7 @@ fn round_3_stage_a_hud_frame_and_layout_and_visible() {
 #[test]
 fn round_3_stage_a_options_toggle_and_get() {
     let h = option_test_host("my_custom_mod");
+    install_field_check(&h).unwrap();
 
     // Negative control: invalid argument
     h.execute(
@@ -854,6 +944,7 @@ fn round_3_stage_a_options_toggle_and_get() {
         r#"
         local t, err = eqoa.options.toggle({ id = "test_opt", label = "Test Option", default = true })
         assert(err == nil, "toggle registered")
+        fields('options.Toggle', t)
         assert(t.id == "test_opt")
         assert(t.value == true)
         local val = eqoa.options.get("test_opt")

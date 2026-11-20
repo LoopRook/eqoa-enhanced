@@ -209,8 +209,7 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
         let (mut p, host) = world();
         p.bags_item_page(1, 0);
         frame(&p, &host);
-        host.execute(crate::fork_ext::addons::native_tests::ROUND7C_CHECK_FIELDS)
-            .unwrap();
+        crate::fork_ext::addons::native_tests::install_field_check(&host).unwrap();
         host.execute(
             r#"
             local inv = eqoa.inventory.get()
@@ -221,6 +220,7 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
             fields('items.Item', sword, 'quick_slot charges damage attack_type attack_name')
             fields('items.ItemStat', sword.stats[1], 'name')
             fields('items.CanUse', eqoa.items.can_use(sword.ref))
+            fields('gems.Gem', eqoa.gems.get('Moonstone'))
             fields('items.SlotInfo', eqoa.items.slot_info(sword.wear_slot), 'name')
         "#,
         )
@@ -256,11 +256,18 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
             opcode(0x00B7, shop_bytes(17, 90, 110, &[sword()], "Welcome")),
         );
         p.bags_merchant_open();
+        let mut words = vec![""; 162];
+        words[62] = "Sell";
+        words[63] = "Buy";
+        words[161] = "Exit";
+        CORE.with(|c| {
+            c.borrow_mut().words = vi::strtab::StringTable::parse(words.join("\n").as_bytes());
+        });
         frame(&p, &host);
         host.execute(
             r#"
             local shop = eqoa.merchant.get()
-            fields('items.MerchantState', shop.merchant, 'selected_option button_hint')
+            fields('items.MerchantState', shop.merchant)
             fields('items.MerchantOption', shop.merchant.options[1])
             assert(log[#log].name == 'merchant.changed', 'no merchant event from the native open')
         "#,

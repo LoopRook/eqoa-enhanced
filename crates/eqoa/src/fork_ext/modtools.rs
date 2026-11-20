@@ -83,6 +83,13 @@ fn reference() -> crate::Result<Json> {
 }
 
 fn reference_with_instance(instance: render::wgpu::Instance) -> crate::Result<Json> {
+    with_reference_host(instance, collect_reference)
+}
+
+fn with_reference_host<T>(
+    instance: render::wgpu::Instance,
+    inspect: impl FnOnce(&super::host::Host) -> crate::Result<T>,
+) -> crate::Result<T> {
     use dear_imgui_rs::Context;
     use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer};
     use render::wgpu;
@@ -148,6 +155,10 @@ fn reference_with_instance(instance: render::wgpu::Instance) -> crate::Result<Js
     )));
     super::fonts::FontBank::install_for_addon(&fonts, &host.lua, addon)?;
 
+    inspect(&host)
+}
+
+fn collect_reference(host: &super::host::Host) -> crate::Result<Json> {
     // Read the public Lua API, rather than the private seed/descriptor storage.
     let list: Table = host
         .lua
@@ -317,6 +328,21 @@ mod tests {
             }
             Err(error) => panic!("mod-api install failed: {error}"),
         }
+    }
+
+    #[test]
+    fn round7c_media_records_match_the_installed_service_fields() {
+        super::super::big_stack(|| {
+            let _ = with_graphics(with_reference_host(render::wgpu::Instance::default(), |host| {
+                super::super::native_tests::install_field_check(host)?;
+                host.execute(r#"
+                    fields('client.DisplayMetrics', eqoa.client.display())
+                    fields('fonts.FontInfo', eqoa.fonts.default(), 'reason')
+                    fields('textures.TextureInfo', eqoa.textures.rgba(string.char(255, 0, 0, 255), 1, 1))
+                "#)?;
+                Ok(())
+            }));
+        });
     }
 
     #[test]
