@@ -62,6 +62,20 @@ class LocalSceneTests(unittest.TestCase):
         for log in (bag[:-1], [*bag, LOOT], [*bag[:-3], MEAT, BAG_TAKE, BAG_LOOT]):
             self.assertFalse(all(scene_checks("\n".join(log), "bag-viewer").values()))
 
+    def test_bag_log_without_a_server_loot_receipt_cannot_pass(self):
+        for r65 in (False, True):
+            with self.subTest(r65=r65):
+                opened = [R65_OPEN, R65_HIDDEN] if r65 else [BAG_TARGET, OPEN]
+                click = BAG_TAKE.replace("650", "750") if r65 else BAG_TAKE
+                closed = [R65_CLOSE] if r65 else []
+                prefix = [*SCENE[:4], BAG_KEY, *opened, click]
+                suffix = [*closed, BAG_LOOT]
+                self.assertTrue(all(scene_checks("\n".join([*prefix, MEAT, *suffix]), "bag-viewer", r65).values()))
+                no_receipt = scene_checks("\n".join([*prefix, *suffix]), "bag-viewer", r65)
+                self.assertTrue(no_receipt["Take all but junk clicked"])
+                self.assertFalse(no_receipt["non-junk loot receipt"])
+                self.assertFalse(all(no_receipt.values()))
+
     def test_r65_requires_open_hidden_and_closed_loot_session(self):
         bag = [*SCENE[:4], BAG_KEY, R65_OPEN, R65_HIDDEN, BAG_TAKE.replace("650", "750"), MEAT, R65_CLOSE, BAG_LOOT]
         self.assertTrue(all(scene_checks("\n".join(bag), "bag-viewer", True).values()))

@@ -5307,3 +5307,21 @@ impl Play {
         self.map.open = open;
     }
 }
+
+pub(super) fn presses_from_device() -> bool {
+    device_presses(
+        crate::input::from_device(),
+        std::env::var_os("EQOA_MOD_KEYS").is_some(),
+    )
+}
+
+fn device_presses(upstream: bool, mod_keys: bool) -> bool {
+    upstream && !mod_keys
+}
+
+#[test]
+fn mod_keys_alone_make_presses_scripted() {
+    assert!(device_presses(true, false));
+    assert!(!device_presses(true, true));
+    assert!(!device_presses(false, false));
+}
