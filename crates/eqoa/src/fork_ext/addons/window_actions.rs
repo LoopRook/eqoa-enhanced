@@ -301,14 +301,20 @@ pub(crate) fn install(lua: &Lua) -> Result<()> {
                     return Err(("out_of_range", "text must be at most 512 characters without NUL".into()));
                 }
                 let submit = submit.unwrap_or(false);
-                // Dispatch revalidates the editor purpose in the window signature.
-                if submit && w["dialog"]["chat"] == true && !text.is_empty() {
+                // A chat editor's line needs the grant for what it is, submitted now or left for the player to
+                // send; dispatch judges again from what the game will actually send then (a Who-list Tell).
+                if w["dialog"]["chat"] == true && !text.is_empty() {
                     require_capability(lua, "eqoa.actions.input_text", super::chat::line_capability(&text))?;
                 }
+                let grants = super::action_broker::LineGrants {
+                    chat: require_capability(lua, "eqoa.actions.input_text", "eqoa.actions.chat").is_ok(),
+                    command: require_capability(lua, "eqoa.actions.input_text", "eqoa.actions.command").is_ok(),
+                };
                 Ok(ActionKind::InputText {
                     win,
                     text,
                     submit,
+                    grants,
                 })
             })
         })?,

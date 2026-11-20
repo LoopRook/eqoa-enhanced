@@ -3191,7 +3191,7 @@ fn dispatch_window_action(
                 Err(e) => e,
             }
         }
-        ActionKind::InputText { win, text, submit } => {
+        ActionKind::InputText { win, text, submit, grants } => {
             let w = match live(play, win) {
                 Ok(w) => w,
                 Err(e) => return e,
@@ -3207,6 +3207,24 @@ fn dispatch_window_action(
             }
             if crate::editbox::paste_chars(text, true) != *text {
                 return refuse("invalid_argument", "the text has characters the game's keyboard cannot type");
+            }
+            // The line the game sends from this editor (`Play::edit_done`): the Who list's Tell sends
+            // `/t <name> <text>`, the chat editor the text itself. Judged now, submitted or left to send.
+            if !text.is_empty() && play.edit.purpose == 0x0B0F_0000 {
+                let line = match &play.who_tell {
+                    Some(name) => format!("/t {name} {text}"),
+                    None => text.clone(),
+                };
+                if !grants.allow(&line) {
+                    return refuse(
+                        "permission_denied",
+                        if line.starts_with('/') {
+                            "the editor would send a slash command: requires eqoa.actions.command"
+                        } else {
+                            "the editor would send chat: requires eqoa.actions.chat"
+                        },
+                    );
+                }
             }
             let old = play.edit.text.clone();
             let now = play.session.now() as i64;

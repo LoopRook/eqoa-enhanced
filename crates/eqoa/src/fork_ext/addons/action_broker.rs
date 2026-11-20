@@ -153,7 +153,9 @@ pub(crate) enum ActionKind {
     SelectRow { win: WinTarget, row: usize },
     ActivateRow { win: WinTarget, row: usize },
     DialogAnswer { win: WinTarget, option: usize },
-    InputText { win: WinTarget, text: String, submit: bool },
+    /// `grants`: whether the mod holds `eqoa.actions.chat` and `eqoa.actions.command`, taken when queued, so
+    /// dispatch can judge the line the chat editor will send then (H1's rule, fix round 3 item 3).
+    InputText { win: WinTarget, text: String, submit: bool, grants: LineGrants },
     MenuCommand { win: WinTarget, command: String },
     OpenLoot { entity_id: Option<u32> },
     Talk { entity_id: Option<u32>, kind: TalkKind },
@@ -311,6 +313,20 @@ impl NativeSnapshot {
             Subsystem::Loot => self.loot_busy,
             Subsystem::Inventory => self.inventory_busy,
         }
+    }
+}
+
+/// The line grants a mod held when it queued text for a chat editor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LineGrants {
+    pub chat: bool,
+    pub command: bool,
+}
+
+impl LineGrants {
+    /// Whether these grants cover a line the game sends: a slash line is a command, any other line chat.
+    pub(crate) fn allow(self, line: &str) -> bool {
+        if super::chat::line_capability(line) == "eqoa.actions.command" { self.command } else { self.chat }
     }
 }
 
