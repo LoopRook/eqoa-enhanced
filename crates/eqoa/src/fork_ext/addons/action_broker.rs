@@ -5614,7 +5614,7 @@ mod tests {
             r#"
             bres = {}
             eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
-            eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+            eqoa.input.bind({ id = "go", label = "Go", default_key = "u" }, function()
                 batches[#batches + 1] = assert(eqoa.actions.batch({ steps = { { kind = "assist" }, { kind = "assist" } } }))
             end)
             batches = {}
@@ -5626,7 +5626,7 @@ mod tests {
             CORE.with(|c| {
                 c.borrow_mut().emit(
                     "input.key",
-                    json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                    json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
                 )
             });
             native_events::dispatch(&host).unwrap();

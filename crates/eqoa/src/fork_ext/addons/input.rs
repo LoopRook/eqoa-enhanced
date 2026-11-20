@@ -340,10 +340,11 @@ pub(crate) fn observe_modifiers(event: &winit::event::WindowEvent) {
 
 pub fn emit_named_key_event(key_name: &str, is_down: bool) {
     let key_str = key_name.to_ascii_lowercase();
+    // A named key carries no modifiers: the press and what the game acts on are the key itself.
     super::native_core::defer(256, move |c| {
         c.emit(
             "input.key",
-            serde_json::json!({"key": key_str, "down": is_down, "repeat": false, "synthetic": false}),
+            serde_json::json!({"key": key_str, "combo": key_str, "game_key": key_str, "down": is_down, "repeat": false, "synthetic": false}),
         )
     });
 }
