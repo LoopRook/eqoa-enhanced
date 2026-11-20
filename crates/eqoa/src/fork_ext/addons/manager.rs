@@ -1153,6 +1153,8 @@ mod tests {
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
+            // a folder with this process id is left by an earlier process that had the same id
+            let _ = fs::remove_dir_all(&path);
             fs::create_dir(&path).unwrap();
             Self(path)
         }
