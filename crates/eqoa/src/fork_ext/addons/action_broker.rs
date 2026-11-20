@@ -472,7 +472,8 @@ struct VmBroker {
     pending_batch_events: VecDeque<(bool, BatchResultRecord)>,
     /// A stopped batch whose step was already on the wire: its terminal result waits for that step's
     /// server reply (request id, record), so the count it reports includes a late success (M2).
-    stopped_awaiting: Option<(u64, BatchResultRecord)>,
+    /// Every one still waiting (fix round 3 item 4b): a later stop never drops an earlier one's result.
+    stopped_awaiting: Vec<(u64, BatchResultRecord)>,
     tokens: u32,
     last_refill_tick: u64,
 }
@@ -488,7 +489,7 @@ impl VmBroker {
             active_batch: None,
             retained_batches: VecDeque::new(),
             pending_batch_events: VecDeque::new(),
-            stopped_awaiting: None,
+            stopped_awaiting: Vec::new(),
             tokens: TOKEN_BUCKET_BURST,
             last_refill_tick: now_tick,
         }
@@ -575,8 +576,8 @@ impl VmBroker {
         code: Option<&str>,
         reason: Option<String>,
     ) {
-        if self.stopped_awaiting.as_ref().is_some_and(|(waiting, _)| *waiting == req_id) {
-            let (_, mut rec) = self.stopped_awaiting.take().expect("checked above");
+        if let Some(at) = self.stopped_awaiting.iter().position(|(waiting, _)| *waiting == req_id) {
+            let (_, mut rec) = self.stopped_awaiting.swap_remove(at);
             if ok == Some(true) {
                 rec.completed += 1;
             }
@@ -941,7 +942,7 @@ impl BrokerState {
             sent_step.is_none(),
         );
         if let (Some(req_id), Some(rec)) = (sent_step, rec) {
-            vm_state.stopped_awaiting = Some((req_id, rec));
+            vm_state.stopped_awaiting.push((req_id, rec));
         }
         Ok(true)
     }
