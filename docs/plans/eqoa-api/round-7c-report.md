@@ -343,3 +343,125 @@ nil); every existing record test still passes.
 - No live client or server session. The decomp/eqoa-port oracle is not on this machine; oracle tests skip.
 - The bundled Wereoxxs, ARPG UI, Modern UI and `eqoa_*` mods are covered by the bundled-package test above and
   their own tests in the full CI set; not played.
+
+## Fix round 3
+
+From the cross-family read-only recheck of ac752c29 (REJECT: two HIGH regressions, one MEDIUM, two LOW, plus
+a new lead decision on bundled mods). Builder: Claude Opus 5.5. Zero upstream lines; every change is under
+`crates/eqoa/src/fork_ext/` or `docs/`.
+
+All nine reproducing tests were committed first (e75f6ebe) and ran red on 99408179's code in one build:
+9 run, 9 failed, each on the defect named below. Negative controls: the fix broken by the named mutation,
+`python tools/run_gates.py --only round --filter <the round's tests>`, then `git checkout -- crates`
+(status clean afterwards). Batches D, E, G, H and F2. Two results in batch D were confounded and are not
+counted: (a) the 1a mutation added an empty in-file `disclosures` key, which wiped the records and let a
+disabled package through the bundled test; (b) the disabled-mod test hit a leftover temp folder from an
+earlier process with the same id. Both were rerun alone (G, H). The fixture now clears a dead process's
+leftover (b9da8f0e).
+
+| Item | Red (reproduced) | Fix | Test | Negative control: mutation → failing line |
+|---|---|---|---|---|
+| 1 HIGH state.json downgrade | yes: `0.6.0 must accept the state.json this build writes: "invalid addon state registry"` | 43b39b93 | `round7c_state_json_stays_compatible_with_0_6_0_both_ways` (storage) | third key written into state.json → `storage.rs:868 0.6.0 must accept ...: "invalid addon state registry"`; stale check removed → `storage.rs:877 a disclosure record older than the enabled flags is stale: adopt again, never block` |
+| 2 HIGH pin across logout | yes: `the disabled mod's pin stays gone on the next character left: Some([22000.0, 15000.0])`; `still the mod pin: nil` | a6d1cd80, 93daf90d | `round7c_disabled_mods_pin_does_not_return_after_a_logout`, `round7c_mod_pin_ownership_carries_across_characters_until_compared` | reconcile not gated on loaded pins → `api_capture_tests.rs:3661 still the mod pin: nil`; no drain in the Play drop hook → `api_capture_tests.rs:3623 cleared when the world closed` |
+| 3 MEDIUM input_text | yes: all three accepted the line (`r6d_tests.rs:88 nil req=RequestId(1) n=1 msg=nil`) | cb123907 | `round7c_who_list_tell_editor_needs_the_command_grant`, `round7c_input_text_judges_the_line_at_dispatch`, `round7c_prefilled_slash_line_needs_the_command_grant` | dispatch check off and the enqueue check back to submit-only → `r6d_tests.rs:88 nil req=RequestId(1) n=1 msg=nil` in all three |
+| 4a LOW disabled mod blocked | yes: `[Diagnostic { id: Some("quiet"), phase: "permissions", message: "its permissions changed; enable it again to accept" }]` | ccee06d6, 5236a687 | `round7c_disabled_mod_widening_its_grants_gets_no_permissions_line` | early return removed (batch H) → `manager.rs:2606 [Diagnostic { id: Some("quiet"), phase: "permissions", ... }]` |
+| 4b LOW stopped batches | yes: `both stopped batches report: 1` | b933b6e6 | `round7c_every_stopped_batch_reports_its_late_reply` (broker) | list cleared before each push → `action_broker.rs:5651 both stopped batches report: 1` |
+| 5 bundled exemption | yes: `the shipped package stays enabled` | ccee06d6, 5236a687 | `round7c_shipped_bundled_package_adopts_its_own_wider_grants` | exemption always off (batch G) → `manager.rs:2653 the shipped package stays enabled`; hash check off (batch E) → `manager.rs:2669 an edited bundled package is asked again`; folder check off and files read inside whatever folder holds the package (batch F2) → `manager.rs:2683 a borrowed bundled id gets no exemption` |
+
+How each works:
+
+- **1.** `state.json` is written as `{"schemaVersion":1,"enabled":{...}}`, exactly as 0.6.0 writes and accepts.
+  The disclosures live in a fork-owned `addons/disclosures.json`:
+  `{"schemaVersion":1,"enabled":<the flags it was written with>,"disclosures":{...}}`. Reading it:
+  - **Missing or unreadable:** read as no records, so every enabled package adopts its current disclosure
+    once. Never an error, never a disable.
+  - **Stale** (its `enabled` copy differs from `state.json`, because an older build rewrote that file): same
+    as missing.
+  - **Three-key file** from an earlier build of this branch: still read. The next write puts it back in
+    0.6.0's shape and moves the records beside it.
+
+  The test copies 0.6.0's acceptance check from `Storage::registry` at 0e35c35e (`storage.rs:395-420`) and
+  its writer from `set_enabled`, and checks both directions.
+- **2.** The per-step reconcile and the disabled-mod cleanup run only once the map has read the window's pin
+  file. A fresh map after a login reads it at its first frame in a world: `Map::read_waypoints`, through
+  the fork accessor `api_waypoints_loaded`. A mod's own `clear_waypoint` loads the pins first. The Play drop
+  hook (upstream's existing `fork_hooks::dropped` call) clears pins still owned by a mod disabled since the
+  last step, when the pins are loaded. If they aren't, the released records wait for the next map's first
+  loaded step.
+- **3.** `input_text` takes the mod's `eqoa.actions.chat` / `eqoa.actions.command` grants when queued. At
+  dispatch, for the chat editor (purpose `0x0B0F_0000`), it judges the line the game will send from it
+  (`Play::edit_done`):
+  - the Who list's Tell (`who_tell` set) sends `/t <name> <text>`: a command whatever the text, so it needs
+    `eqoa.actions.command` (no narrower existing capability covers a tell);
+  - otherwise the text itself, judged by H1's rule.
+
+  This applies whether the text is submitted or only pre-filled. The enqueue check now also covers pre-filled
+  text. Refusal is `permission_denied`, with the reason naming the capability.
+- **4a.** A package the player has off returns early: no record change, no line. Its new labels show and one
+  enable accepts them.
+- **4b.** `stopped_awaiting` is a list; each reply finishes its own batch.
+- **5.** `bundled::is_shipped_package` decides whether a package is "as shipped". It checks only when a
+  stored disclosure would otherwise block. Requirements:
+  - the folder and the id both name a bundled package;
+  - every file this build embeds for it, read at `<mods>/<package>/...`, hashes to a shipped version of that
+    file (`shipped_hashes`: this build's bytes plus the shipped-hash list).
+
+  Such a package re-adopts its new disclosure silently and keeps the player's enabled or disabled choice. An
+  edited copy, or a third-party package borrowing the id from another folder, is treated like any other.
+
+### Cross-character rule (item 2)
+
+The game keeps the personal pins in one file per client window (`waypoints.opt`), shared by every character
+played in that window. So:
+
+- A mod's pin is the same pin for every character, and its ownership carries across a logout and a character
+  change for the rest of the client session.
+- Ownership is compared only against pins the map has read.
+- A mod disabled just before a logout loses its still-owned pins when the world closes.
+- Disabling it while another character plays clears the pin it still owns.
+- Ownership is not saved: after a client restart every pin is the player's.
+
+Stated in the spec's waypoint paragraph and the `map_waypoint` module docs.
+
+### Existing tests whose assertion changed
+
+None. The manager test fixture `Scratch::new` now removes a leftover folder with this process's id before
+creating it (b9da8f0e; 4,379 such folders are in this PC's temp directory from earlier runs).
+
+### What a player would notice
+
+- Going back from this build to 0.6.0 (Stable after Nightly) keeps every mod's on/off choice. Coming forward
+  again, mods turned on in the older build adopt their current permissions once, without being switched off.
+- A mod switched off just before logging out no longer leaves its map pin behind for the next character.
+  A mod's pin carries over to another character played in the same window, as the game's own pin does.
+- A chat-only mod that types into the Who list's Tell box, or pre-fills a slash command in the chat box, is
+  refused.
+- A mod you have switched off that gains permissions in an update shows its new permissions and stays off,
+  without the "enable it again" line.
+- Bundled mods keep your choice across a client update that widens their own permissions. A bundled mod
+  whose files you edited is asked again.
+
+### Gates
+
+- Focused, with the disc (`--only round,wasm,footprint,paths --filter round7`): **97 passed, 0 failed, 1 SKIP**
+  (`round7b_without_adapter_is_an_explicit_skip`, deliberate). wasm PASS, footprint PASS (no budget change,
+  no upstream line), paths PASS. `round7b_support_table_matches_the_running_client` passes: the API surface
+  did not change, so the reference files were not regenerated.
+- Local `addons` step (all `fork_ext::addons::` tests, CI's order): 604 passed, 0 failed, 25 ignored.
+- GitHub CI run 44722290563 at 5236a687: full set **3236 passed, 0 failed**. The `addons` job failed one
+  existing test, `file_io::tests::round4_async_json_save_is_private_and_latest_value_wins` (bare Lua
+  `assertion failed!` on its first chunk). This round doesn't touch that code. The test is racy: its first
+  `save_json_async('journal.json', ...)` can still be running when it checks that `cycle.json` is refused
+  `invalid_argument`. The queue's "one JSON save path at a time" check (`quota`, `json_save.rs:466`) comes
+  first, so on a slow runner the code is `quota`. The same test passed in that run's `full` job, alone
+  locally, and in the local `addons` step. Not changed here (an existing round 4 test); worth fixing by
+  waiting for the first save before the cycle check.
+- CI_RERUN_PLACEHOLDER
+
+### Not verified
+
+- No live client: no real downgrade to 0.6.0 (the old acceptance rule was copied into the test), and no
+  logout or character change in a real session.
+- The drop-hook drain runs only when the closing map had read its pins. Otherwise the released record waits
+  for the next login's first loaded step, which the cross-character test covers.
+- The decomp/eqoa-port oracle is not on this machine.
