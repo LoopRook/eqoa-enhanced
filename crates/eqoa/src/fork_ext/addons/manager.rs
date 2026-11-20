@@ -18,13 +18,13 @@ use super::{
     discovery::DiscoveredAddon,
     host::{Host, Snapshot},
     sound::SoundBank,
-    storage::Storage,
+    storage::{Disclosure, Storage},
     textures::Textures,
 };
 use dear_imgui_wgpu::WgpuRenderer;
 use mlua::{Function, Value};
 use render::wgpu;
-use std::{cell::RefCell, collections::VecDeque, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, collections::{BTreeMap, VecDeque}, path::PathBuf, rc::Rc};
 
 /// A line a mod wrote with `eqoa.log.write`. Every one goes to the game's log (eqoa.log, as `addon <id>: [level]
 /// text`). "info" and "debug" are the mod's own record of what it did, not a problem: they stop there and stay out of
@@ -126,6 +126,7 @@ pub(crate) struct Manager {
     named: Option<named::NamedSession>,
     root: PathBuf,
     storage: Storage,
+    disclosures: BTreeMap<String, Disclosure>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     renderer: Rc<RefCell<WgpuRenderer>>,
@@ -155,6 +156,7 @@ impl Manager {
             named: None,
             root,
             storage: Storage::new(storage_root),
+            disclosures: BTreeMap::new(),
             device: device.clone(),
             queue: queue.clone(),
             renderer,
@@ -170,6 +172,10 @@ impl Manager {
             health_claims: Rc::new(RefCell::new(super::health::HealthBarClaimsRegistry::new())),
             hud_claims: Rc::new(RefCell::new(super::visibility::HudClaimsRegistry::new())),
         };
+        match manager.storage.disclosures() {
+            Ok(disclosures) => manager.disclosures = disclosures,
+            Err(error) => manager.diagnostic(None, "storage", error),
+        }
         manager.rescan(false);
         manager
     }
@@ -852,13 +858,23 @@ impl Manager {
                     entry.enabled_intent = enabled;
                     super::options::set_addon_enabled(&entry.metadata.id, enabled);
                     crate::fork_ext::bindpage::set_addon_enabled(&entry.metadata.id, enabled);
-                    let result = if let Some(s) = &mut self.named {
+                    let grant = enabled.then(|| Disclosure::for_addon(&entry.metadata));
+                    let legacy_enable = if let Some(s) = &mut self.named {
                         s.data.enabled.insert(entry.key.clone(), enabled);
                         s.dirty = true;
-                        Ok(())
+                        None
                     } else {
-                        self.storage.set_enabled(&entry.key, enabled)
+                        Some((entry.key.as_str(), enabled))
                     };
+                    let id = &entry.metadata.id;
+                    let result = self.storage.update_enable_state(
+                        legacy_enable,
+                        grant.as_ref().map(|grant| (id.as_str(), grant)),
+                    );
+                    if let Some(grant) = grant {
+                        self.disclosures.insert(id.clone(), grant);
+                        self.diagnostics.retain(|d| d.phase != "permissions" || d.id.as_ref() != Some(id));
+                    }
                     if let Err(e) = result {
                         self.diagnostic(Some(&entry.metadata.id), "storage", e);
                     }
@@ -913,6 +929,39 @@ impl Manager {
             Command::Rescan => unreachable!(),
         }
         self.entries.insert(index, entry);
+    }
+
+    /// Bind a remembered enable to its disclosure before any VM can start.
+    fn check_enabled_disclosure(&mut self, addon: &DiscoveredAddon, requested: bool) -> bool {
+        if !requested && !self.disclosures.contains_key(&addon.id) {
+            return false;
+        }
+        let new = Disclosure::for_addon(addon);
+        let (allowed, update) = match self.disclosures.get(&addon.id) {
+            Some(old) if old.allows(&new) => return requested,
+            Some(old) => {
+                let mut blocked = old.clone();
+                blocked.blocked = true;
+                (false, (!old.blocked).then_some(blocked))
+            }
+            None => (true, Some(new)),
+        };
+        if let Some(record) = update {
+            let persisted = self.storage.update_enable_state(None, Some((&addon.id, &record)));
+            self.disclosures.insert(addon.id.clone(), record);
+            if let Err(error) = persisted {
+                self.diagnostic(Some(&addon.id), "storage", error);
+            }
+        }
+        if !allowed && !self.diagnostics.iter().any(|d| {
+            d.phase == "permissions" && d.id.as_deref() == Some(addon.id.as_str())
+        }) {
+            self.diagnostic(
+                Some(&addon.id), "permissions",
+                "its permissions changed; enable it again to accept".into(),
+            );
+        }
+        allowed
     }
 
     fn rescan(&mut self, rendering: bool) {
@@ -980,7 +1029,8 @@ impl Manager {
                     None
                 }
             };
-            let enabled_intent = intent.or(persisted).unwrap_or(metadata.initially_enabled);
+            let requested = intent.or(persisted).unwrap_or(metadata.initially_enabled);
+            let enabled_intent = self.check_enabled_disclosure(&metadata, requested);
             super::options::set_addon_enabled(&metadata.id, enabled_intent);
             crate::fork_ext::bindpage::set_addon_enabled(&metadata.id, enabled_intent);
             if !enabled_intent {

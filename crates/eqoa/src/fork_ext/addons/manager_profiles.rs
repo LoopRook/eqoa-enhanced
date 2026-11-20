@@ -91,9 +91,12 @@ impl Manager {
             }
         };
         let mut data = data;
-        for entry in &mut self.entries {
-            entry.enabled_intent = data.enabled_for(&entry.metadata, &entry.key);
+        let mut entries = std::mem::take(&mut self.entries);
+        for entry in &mut entries {
+            let requested = data.enabled_for(&entry.metadata, &entry.key);
+            entry.enabled_intent = self.check_enabled_disclosure(&entry.metadata, requested);
         }
+        self.entries = entries;
         // A store made before a bundled mod existed has no key for it: keep the
         // mod's own default and write it down on the next save.
         let recorded = data.record_bundled_defaults(
@@ -346,7 +349,8 @@ impl Manager {
                 }
             }
             entry.instance = None;
-            entry.enabled_intent = data.enabled_for(&entry.metadata, &entry.key);
+            let requested = data.enabled_for(&entry.metadata, &entry.key);
+            entry.enabled_intent = self.check_enabled_disclosure(&entry.metadata, requested);
             entry.status = Status::Disabled;
             entry.not_before = self.frame_number + 1;
         }

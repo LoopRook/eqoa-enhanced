@@ -15,6 +15,7 @@ use mlua::{Lua, Value};
 use serde_json::{Value as Json, json};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeMap,
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -96,6 +97,75 @@ fn is_hidden_or_system(entry: &fs::DirEntry) -> bool {
         }
     }
     false
+}
+
+/// The authority the player saw when enabling a package.
+#[derive(Clone, Debug)]
+pub(super) struct Disclosure {
+    native: bool,
+    capabilities: Vec<String>,
+    replaces: Vec<String>,
+    permissions: Vec<String>,
+    pub(super) blocked: bool,
+}
+
+impl Disclosure {
+    pub(super) fn for_addon(addon: &DiscoveredAddon) -> Self {
+        let native = addon.api.is_some();
+        let capabilities = if native {
+            addon.declared_capabilities().unwrap_or(&[]).to_vec()
+        } else {
+            super::native::FORGE_IMPORT_ACTIONS.map(str::to_owned).to_vec()
+        };
+        let can_takeover = super::native::capability_grants(&capabilities, "eqoa.windows.takeover");
+        let replaces = addon.extensions.replaces.iter()
+            .filter(|kind| can_takeover || super::visibility::is_hud_disclosure(kind))
+            .cloned().collect();
+        Self {
+            native,
+            capabilities,
+            replaces,
+            permissions: addon.extensions.permissions.clone(),
+            blocked: false,
+        }
+    }
+
+    pub(super) fn allows(&self, new: &Self) -> bool {
+        !self.blocked
+            && self.native == new.native
+            && new.capabilities.iter().all(|cap| super::native::capability_grants(&self.capabilities, cap))
+            && new.replaces.iter().all(|kind| self.replaces.contains(kind))
+            && new.permissions.iter().all(|permission| self.permissions.contains(permission))
+    }
+
+    fn to_json(&self) -> Json {
+        json!({
+            "native": self.native,
+            "capabilities": self.capabilities,
+            "replaces": self.replaces,
+            "permissions": self.permissions,
+            "blocked": self.blocked,
+        })
+    }
+
+    fn from_json(value: &Json) -> Option<Self> {
+        let strings = |key: &str| {
+            value[key].as_array()?.iter().map(|value| value.as_str().map(str::to_owned)).collect()
+        };
+        Some(Self {
+            native: value["native"].as_bool()?,
+            capabilities: strings("capabilities")?,
+            replaces: strings("replaces")?,
+            permissions: strings("permissions")?,
+            blocked: value["blocked"].as_bool()?,
+        })
+    }
+}
+
+#[derive(Default)]
+struct Registry {
+    enabled: serde_json::Map<String, Json>,
+    disclosures: BTreeMap<String, Disclosure>,
 }
 
 #[derive(Clone)]
@@ -292,9 +362,9 @@ impl Storage {
 
         // Migrate state.json enabled flags from the SAME candidate as profile (most recent)
         if let Ok(mut registry) = self.registry() {
-            if !registry.contains_key(new_key) {
+            if !registry.enabled.contains_key(new_key) {
                 let chosen = if let Some((best_key, _)) = &best_candidate {
-                    registry
+                    registry.enabled
                         .get(best_key)
                         .and_then(Json::as_bool)
                         .map(|v| (best_key.clone(), v))
@@ -305,7 +375,7 @@ impl Storage {
                 // Fallback to other candidates only if best_candidate had no enabled flag or no profile existed
                 let chosen = chosen.or_else(|| {
                     for cand in candidates {
-                        if let Some(val) = registry.get(cand).and_then(Json::as_bool) {
+                        if let Some(val) = registry.enabled.get(cand).and_then(Json::as_bool) {
                             return Some((cand.clone(), val));
                         }
                     }
@@ -317,15 +387,9 @@ impl Storage {
                         "migrated enabled flag ({val}) from legacy v1 key {} to {}",
                         best_key, new_key
                     ));
-                    registry.insert(new_key.to_string(), Json::Bool(val));
-                    let target = self
-                        .root
-                        .as_ref()
-                        .ok_or("addon configuration directory unavailable")?
-                        .join("state.json");
-                    write_json(&target, &json!({"schemaVersion":1,"enabled":registry})).map_err(
-                        |e| format!("failed to update state.json during migration: {e}"),
-                    )?;
+                    registry.enabled.insert(new_key.to_string(), Json::Bool(val));
+                    self.write_registry(&registry)
+                        .map_err(|e| format!("failed to update state.json during migration: {e}"))?;
                 }
             }
         }
@@ -343,19 +407,38 @@ impl Storage {
 
     pub fn enabled(&self, key: &str) -> Result<Option<bool>, String> {
         validate_key(key)?;
-        Ok(self.registry()?.get(key).and_then(Json::as_bool))
+        Ok(self.registry()?.enabled.get(key).and_then(Json::as_bool))
     }
 
+    #[cfg(test)]
     pub fn set_enabled(&self, key: &str, enabled: bool) -> Result<(), String> {
-        validate_key(key)?;
+        self.update_enable_state(Some((key, enabled)), None)
+    }
+
+    pub(super) fn disclosures(&self) -> Result<BTreeMap<String, Disclosure>, String> {
+        if self.root.is_none() {
+            return Ok(BTreeMap::new());
+        }
+        Ok(self.registry()?.disclosures)
+    }
+
+    pub(super) fn update_enable_state(
+        &self,
+        enabled: Option<(&str, bool)>,
+        disclosure: Option<(&str, &Disclosure)>,
+    ) -> Result<(), String> {
+        if enabled.is_none() && (disclosure.is_none() || self.root.is_none()) {
+            return Ok(());
+        }
         let mut registry = self.registry()?;
-        registry.insert(key.to_owned(), Json::Bool(enabled));
-        let target = self
-            .root
-            .as_ref()
-            .ok_or("addon configuration directory unavailable")?
-            .join("state.json");
-        write_json(&target, &json!({"schemaVersion":1,"enabled":registry}))
+        if let Some((key, value)) = enabled {
+            validate_key(key)?;
+            registry.enabled.insert(key.to_owned(), Json::Bool(value));
+        }
+        if let Some((id, record)) = disclosure {
+            registry.disclosures.insert(id.to_owned(), record.clone());
+        }
+        self.write_registry(&registry)
     }
 
     pub fn save_profile(&self, key: &str, value: Value) -> Result<(), String> {
@@ -392,18 +475,28 @@ impl Storage {
             .join(format!("{key}-files")))
     }
 
-    fn registry(&self) -> Result<serde_json::Map<String, Json>, String> {
-        let path = self
-            .root
-            .as_ref()
+    fn registry_path(&self) -> Result<PathBuf, String> {
+        Ok(self.root.as_ref()
             .ok_or("addon configuration directory unavailable")?
-            .join("state.json");
-        let Some(value) = read_json(&path)? else {
+            .join("state.json"))
+    }
+
+    fn write_registry(&self, registry: &Registry) -> Result<(), String> {
+        let mut value = json!({"schemaVersion": 1, "enabled": registry.enabled});
+        if !registry.disclosures.is_empty() {
+            value["disclosures"] = Json::Object(registry.disclosures.iter()
+                .map(|(id, disclosure)| (id.clone(), disclosure.to_json())).collect());
+        }
+        write_json(&self.registry_path()?, &value)
+    }
+
+    fn registry(&self) -> Result<Registry, String> {
+        let Some(value) = read_json(&self.registry_path()?)? else {
             return Ok(Default::default());
         };
         let object = value
             .as_object()
-            .filter(|o| o.len() == 2)
+            .filter(|o| o.len() == 2 || (o.len() == 3 && o.contains_key("disclosures")))
             .ok_or("invalid addon state registry")?;
         if object.get("schemaVersion").and_then(Json::as_u64) != Some(1) {
             return Err("unsupported addon state schemaVersion".into());
@@ -418,7 +511,17 @@ impl Storage {
                 return Err("addon enabled state must be boolean".into());
             }
         }
-        Ok(enabled.clone())
+        let disclosures = if let Some(value) = object.get("disclosures") {
+            value.as_object().ok_or("invalid addon disclosure registry")?.iter()
+                .map(|(id, value)| {
+                    Disclosure::from_json(value).map(|record| (id.clone(), record))
+                        .ok_or_else(|| format!("invalid addon disclosure for {id}"))
+                })
+                .collect::<Result<_, _>>()?
+        } else {
+            BTreeMap::new()
+        };
+        Ok(Registry { enabled: enabled.clone(), disclosures })
     }
 }
 
