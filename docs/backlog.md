@@ -377,3 +377,7 @@ A font restored after going missing is retried after a face or size change or af
 - **Status:** Wanted, not scheduled; needs a 5-line "what you'll see" first. The window is busy with text and does not
   look good; revisit its layout. It is also slow to reach while testing (Options, the Enhanced page, then the manager,
   every session): consider a Controls key for it and remembering that it was open.
+- **Owner thought, 2026-11-20 (not a commitment):** rather than doing everything through the game's Options pages, one
+  key (F10, which opens the addon manager from round 7 on) could open our own settings hub: the mod list, each mod's
+  options, the Enhanced toggles and the mod keys in one window. Easier once `eqoa/1` is frozen; it could largely be a
+  mod on top of the API. Decide together with the manager redesign.
