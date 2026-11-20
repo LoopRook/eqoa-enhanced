@@ -200,7 +200,8 @@ impl TakeoverState {
 thread_local! {
     static STATE: RefCell<TakeoverState> = RefCell::new(TakeoverState::default());
     static HAS_ACTIVITY: Cell<bool> = const { Cell::new(false) };
-    static USE_GAME_WINDOWS: Cell<bool> = const { Cell::new(false) };
+    /// The "Use the game's windows" switch; none until first read from the fork's settings.
+    static USE_GAME_WINDOWS: Cell<Option<bool>> = const { Cell::new(None) };
     #[cfg(test)]
     static STATE_BORROWS: Cell<usize> = const { Cell::new(0) };
 }
@@ -234,20 +235,58 @@ pub(crate) fn take_state_borrows_for_test() -> usize {
     STATE_BORROWS.with(|n| n.replace(0))
 }
 
+/// The fork's own settings file (`fork_ext/settings.rs`); the switch is its `use_game_windows` line, and
+/// every other line in it is kept as it is.
+const SETTINGS_FILE: &str = "enhanced.opt";
+const SWITCH_KEY: &str = "use_game_windows=";
+
 pub(crate) fn use_game_windows() -> bool {
-    USE_GAME_WINDOWS.with(Cell::get)
+    USE_GAME_WINDOWS.with(|value| {
+        value.get().unwrap_or_else(|| {
+            let saved = crate::settings::read_config(SETTINGS_FILE).is_some_and(|bytes| {
+                String::from_utf8_lossy(&bytes)
+                    .lines()
+                    .any(|line| line.strip_prefix(SWITCH_KEY) == Some("on"))
+            });
+            value.set(Some(saved));
+            saved
+        })
+    })
+}
+
+fn save_switch(on: bool) {
+    let old = crate::settings::read_config(SETTINGS_FILE).unwrap_or_default();
+    let mut text = String::new();
+    for line in String::from_utf8_lossy(&old).lines() {
+        if !line.starts_with(SWITCH_KEY) {
+            text.push_str(line);
+            text.push('
+');
+        }
+    }
+    text.push_str(SWITCH_KEY);
+    text.push_str(if on { "on" } else { "off" });
+    text.push('
+');
+    if let Err(error) = crate::settings::write_config(SETTINGS_FILE, text.as_bytes()) {
+        log(format!("takeover: the game's windows switch was not saved: {error}"));
+    }
 }
 
 /// What a restart does to the switch's in-memory value: forgotten, read again on first use.
 #[cfg(test)]
 pub(crate) fn forget_switch_for_test() {
-    USE_GAME_WINDOWS.with(|value| value.set(false));
+    USE_GAME_WINDOWS.with(|value| value.set(None));
 }
 
+/// The player's "Use the game's windows" switch: saved with the fork's settings. Turning it on releases every
+/// claim and stops each running batch that worked through a released claim, as its Stop button would.
 pub(crate) fn set_use_game_windows(on: bool) {
-    USE_GAME_WINDOWS.with(|value| value.set(on));
+    USE_GAME_WINDOWS.with(|value| value.set(Some(on)));
+    save_switch(on);
     if on && has_activity() {
-        release_claims("released by the player", true);
+        let released = release_claims("released by the player", true);
+        super::action_broker::stop_batches_of_released_claims(&released);
     }
 }
 
@@ -327,22 +366,26 @@ pub(crate) fn release_vm(vm: u64) {
 }
 
 pub(crate) fn release_all() {
-    release_claims("zoning", false);
+    let _ = release_claims("zoning", false);
 }
 
-fn release_claims(reason: &'static str, clear_grace: bool) {
+/// Releases every claim; returns who held what.
+fn release_claims(reason: &'static str, clear_grace: bool) -> Vec<(u64, TakeoverKind)> {
     with_state_mut(|s| {
         if clear_grace {
             s.grace_loot = None;
         }
+        let mut released = Vec::new();
         for kind in TakeoverKind::ALL {
             let idx = kind as usize;
-            if s.holders[idx].take().is_some() {
+            if let Some(holder) = s.holders[idx].take() {
                 s.pending_opens[idx] = None;
                 s.pending_close[idx] = Some(reason);
+                released.push((holder.vm, kind));
             }
         }
-    });
+        released
+    })
 }
 
 pub(crate) fn is_taken(kind: TakeoverKind) -> bool {

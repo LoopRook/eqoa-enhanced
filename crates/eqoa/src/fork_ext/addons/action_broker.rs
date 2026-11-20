@@ -873,6 +873,25 @@ impl BrokerState {
         Ok(true)
     }
 
+    /// Stops every running batch whose mod held, in `released`, a claim on a window that batch works in.
+    fn stop_batches_of_released_claims(&mut self, released: &[(u64, super::window_takeover::TakeoverKind)]) {
+        let stopping: Vec<u64> = self
+            .vms
+            .iter()
+            .filter(|(vm, state)| {
+                state.active_batch.as_ref().is_some_and(|batch| {
+                    released
+                        .iter()
+                        .any(|(holder, kind)| holder == *vm && batch.takeover_kinds[*kind as usize])
+                })
+            })
+            .map(|(vm, _)| *vm)
+            .collect();
+        for vm in stopping {
+            let _ = self.stop_batch(vm, None);
+        }
+    }
+
     fn status(&self, req: RequestId) -> std::result::Result<Option<ActionResultRecord>, (&'static str, String)> {
         let Some(vm_state) = self.vms.get(&req.vm) else {
             return Ok(None);
@@ -4607,6 +4626,14 @@ fn install_non_item_actions(lua: &Lua) -> Result<()> {
     )?;
 
     Ok(())
+}
+
+/// The player turned on "Use the game's windows": batches that worked through a claim it released stop.
+pub(crate) fn stop_batches_of_released_claims(released: &[(u64, super::window_takeover::TakeoverKind)]) {
+    if released.is_empty() {
+        return;
+    }
+    BROKER.with(|b| b.borrow_mut().stop_batches_of_released_claims(released));
 }
 
 #[cfg(test)]
