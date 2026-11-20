@@ -897,6 +897,19 @@ fn refuse(capture: &mut Option<Column>, note: &mut Option<String>, cues: &mut Ve
     true
 }
 
+/// A modified key refused because the game takes the press as the plain key, which a control has.
+fn shadow_text(game: &Binds, key: &str, taken: &Owner) -> String {
+    let plain = binds::display(&game_press(game, key));
+    let who = match taken {
+        Owner::Row(r) => row_label(*r),
+        Owner::Macros(ms) => crate::bindpage::macro_names(ms),
+    };
+    format!(
+        "{} is pressed as {plain} too, which is {who}'s: choose another key.",
+        binds::display(key)
+    )
+}
+
 fn mod_row_capture(
     capture: &mut Option<Column>,
     note: &mut Option<String>,
@@ -933,17 +946,7 @@ fn mod_row_capture(
         }
         // the game would take the press as the plain key too: both would act
         Some((taken, true)) => {
-            let plain = binds::display(&game_press(&game, key));
-            let who = match taken {
-                Owner::Row(r) => row_label(*r),
-                Owner::Macros(ms) => crate::bindpage::macro_names(ms),
-            };
-            return refuse(
-                capture,
-                note,
-                cues,
-                format!("{shown} is pressed as {plain} too, which is {who}'s: choose another key."),
-            );
+            return refuse(capture, note, cues, shadow_text(&game, key, taken));
         }
         _ => {}
     }
@@ -969,6 +972,13 @@ fn mod_row_capture(
                     }
                     None => without_key(&game, g),
                 };
+                // The game row that had the combo gives it up: from then on the game takes
+                // the press as the plain key, which another control may have (a slot on
+                // Shift+Space gives it to a mod and Jump beats the mod at once). `game` is
+                // only a copy until `set_binds`, so nothing has changed when this refuses.
+                if let Some((taken, true)) = game_owner(&game, key) {
+                    return refuse(capture, note, cues, shadow_text(&game, key, &taken));
+                }
                 moved_game = true;
                 changes.extend(others.iter().map(|&j| (j, String::new())));
             }

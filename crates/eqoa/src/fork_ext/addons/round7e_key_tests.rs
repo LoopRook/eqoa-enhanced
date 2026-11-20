@@ -1363,3 +1363,25 @@ fn round7e_owner1_a_saved_shift_space_is_marked_says_jump_and_does_not_fire() {
     press_based(&mut rt, SHIFT, &space, None, &[&host]);
     hits(&host, 0);
 }
+
+#[test]
+fn round7e_owner1_a_game_control_on_shift_space_cannot_hand_it_to_a_mod_that_jump_then_beats() {
+    reset();
+    let _host = bind("alpha", "");
+    let slot = row_named("bar1_slot1").unwrap();
+    let mut game = settings::binds();
+    game.bind_key(slot, "shift+space");
+    settings::set_binds(game);
+    assert!(game_acts(SHIFT, &Key::Named(NamedKey::Space), None), "the combo is bound: the slot acts");
+    // Taking the combo off the slot would leave Shift+Space as Space again: Jump's. So refused.
+    refused(ROWS.len(), "shift+space", "Jump");
+    assert_eq!(mod_key_of("alpha"), "");
+    assert_eq!(settings::binds().key(slot), Some("shift+space"), "the slot keeps it");
+    // control: a combo whose plain key nothing has is handed over by the usual swap
+    let mut game = settings::binds();
+    game.bind_key(slot, "shift+u");
+    settings::set_binds(game);
+    capture(&mut ControlsPage::default(), ROWS.len(), "shift+u");
+    assert_eq!(mod_key_of("alpha"), "shift+u");
+    assert_eq!(settings::binds().key(slot), None, "the slot has none now");
+}
