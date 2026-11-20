@@ -224,17 +224,19 @@ pub fn session_begin() {
 
 /// Options cancelled (Triangle on the menu, without saving): every mod key back as it was
 /// when the window opened, in memory and in `mod-keys.opt`, with the game's keys that
-/// `options.rs` has just put back.
+/// `options.rs` has just put back. A key whose file cannot be written stays as it is in
+/// memory too (memory and file agree) and the failure is said.
 pub fn session_cancel() {
     let errors = restore_session(|addon, id, key| match key {
         Some(key) => save_mod_bind(addon, id, key),
         None => forget_mod_bind(addon, id),
     });
     for error in errors {
-        eprintln!("settings: mod key not put back: {error}");
+        crate::say(&format!("a mod key was not put back: {error}"));
     }
 }
 
+/// `session_cancel` with the writing handed in: the errors, one per key not put back.
 fn restore_session(mut write: impl FnMut(&str, &str, Option<&str>) -> Result<(), String>) -> Vec<String> {
     let Some(snapshot) = SESSION.lock().unwrap().take() else {
         return Vec::new();
@@ -249,10 +251,10 @@ fn restore_session(mut write: impl FnMut(&str, &str, Option<&str>) -> Result<(),
         if b.stored == stored {
             continue;
         }
-        if let Err(error) = write(&addon, &id, stored.as_deref()) {
-            errors.push(format!("{addon}.{id}: {error}"));
+        match write(&addon, &id, stored.as_deref()) {
+            Ok(()) => b.stored = stored,
+            Err(error) => errors.push(format!("{addon}.{id}: {error}")),
         }
-        b.stored = stored;
     }
     resolve(&game, &mut binds);
     errors
@@ -302,14 +304,17 @@ pub fn capture_key(
 
 /// Keys the client takes for itself, beside or before the game's key handling
 /// (`App::key_input`, `clipboard_key`): full screen, the report keys, Escape's
-/// clean-ups, Windows' Alt+Enter, and the clipboard's Ctrl+C, V and X. A mod never
-/// has them, whatever modifier is on them.
+/// clean-ups, Windows' Alt+Enter, the clipboard's Ctrl+C, V and X and a Mac's Cmd (Super)
+/// forms of them and Cmd+, . A mod never has them, whatever other modifier is on them.
 fn never_mod_key(key: &str) -> bool {
-    let ((ctrl, alt, _), base) = binds::split_combo(key);
+    let bare = key.strip_prefix("super+").unwrap_or(key);
+    let sup = bare.len() != key.len();
+    let ((ctrl, alt, _), base) = binds::split_combo(bare);
     binds::reserved(base)
         || base == "escape"
         || (alt && base == "enter")
         || (ctrl && matches!(base, "c" | "v" | "x"))
+        || (sup && matches!(base, "c" | "v" | "x" | ","))
 }
 
 /// What the game takes a key as.
@@ -331,13 +336,55 @@ fn game_row(game: &Binds, key: &str) -> Option<usize> {
     })
 }
 
-/// The key a modified press is taken as where nothing is bound to the combo
-/// (`App::key_name`): the key itself, for Ctrl and Alt and for a letter with
-/// Shift; a Shift digit becomes a symbol the layout decides, which is not known here.
-fn plain_of(key: &str) -> Option<&str> {
-    let ((ctrl, alt, shift), base) = binds::split_combo(key);
-    let letter = base.len() == 1 && base.bytes().all(|c| c.is_ascii_alphabetic());
-    ((ctrl || alt || shift) && (ctrl || alt || letter)).then_some(base)
+/// What a key types with Shift held (the US layout's): a letter its lower-case self (a key's
+/// name is lower case), a digit or a symbol the one over it. Another key is itself.
+fn shifted(base: &str) -> String {
+    let mut chars = base.chars();
+    let (Some(c), None) = (chars.next(), chars.next()) else {
+        return base.to_string();
+    };
+    let over = match c {
+        '1' => '!',
+        '2' => '@',
+        '3' => '#',
+        '4' => '$',
+        '5' => '%',
+        '6' => '^',
+        '7' => '&',
+        '8' => '*',
+        '9' => '(',
+        '0' => ')',
+        '-' => '_',
+        '=' => '+',
+        '[' => '{',
+        ']' => '}',
+        '\\' => '|',
+        ';' => ':',
+        '\'' => '"',
+        ',' => '<',
+        '.' => '>',
+        '/' => '?',
+        '`' => '~',
+        other => other.to_ascii_lowercase(),
+    };
+    over.to_string()
+}
+
+/// The name the game acts on for a press named `key` (the modifiers held written before
+/// the key, `binds::combo_name`). This is `App::key_name`'s rule (viewer.rs, "its own name
+/// with theirs before it where a row or a macro is on that ... else the name it types"),
+/// for every key and every modifier: the combo where the game has that combo bound
+/// (`Binds::combo_bound`), else the plain name, which is the key's own, or with Shift the
+/// character it types (`shifted`). Super is no modifier the game names, so it is dropped. A
+/// key with no modifier is itself. Everything about a mod key meeting a game control (marks,
+/// swaps, refusals, defaults, press time) goes through this one function.
+fn game_press(game: &Binds, key: &str) -> String {
+    let bare = key.strip_prefix("super+").unwrap_or(key);
+    let ((ctrl, alt, shift), base) = binds::split_combo(bare);
+    if !(ctrl || alt || shift) || game.combo_bound(bare) {
+        return bare.to_string();
+    }
+    if shift { shifted(base) } else { base.to_string() }
 }
 
 fn owner_of(game: &Binds, key: &str) -> Option<Owner> {
@@ -348,15 +395,11 @@ fn owner_of(game: &Binds, key: &str) -> Option<Owner> {
     (!ms.is_empty()).then_some(Owner::Macros(ms))
 }
 
-/// What the game does with a press named `key`, and whether it does it as the
-/// plain key (the combo has no row or macro of its own, so the game takes the
-/// press as the key without its modifiers).
+/// What the game does with a press named `key`, and whether it does it under another name
+/// (the combo has no row or macro of its own, so the game takes the press as the plain key).
 fn game_owner(game: &Binds, key: &str) -> Option<(Owner, bool)> {
-    if let Some(owner) = owner_of(game, key) {
-        return Some((owner, false));
-    }
-    let plain = plain_of(key).filter(|_| !game.combo_bound(key))?;
-    owner_of(game, plain).map(|owner| (owner, true))
+    let name = game_press(game, key);
+    owner_of(game, &name).map(|owner| (owner, name != key))
 }
 
 fn enabled_index(binds: &[ModBind], nth: usize) -> Option<usize> {
@@ -517,8 +560,8 @@ fn conflict_text(game: &Binds, binds: &[ModBind], i: usize) -> Option<String> {
     let key = binds::display(&binds[i].current_key);
     let also = |plain: bool| {
         if plain {
-            let base = plain_of(&binds[i].current_key).unwrap_or_default();
-            format!("{key} is pressed as {} too, and that is", binds::display(base))
+            let name = game_press(game, &binds[i].current_key);
+            format!("{key} is pressed as {} too, and that is", binds::display(&name))
         } else {
             format!("{key} is also")
         }
@@ -664,24 +707,27 @@ fn game_row_capture(
 ) -> bool {
     let mut game = crate::settings::binds();
     let mut binds = MOD_BINDS.lock().unwrap();
-    // the mods on the key, and those on a modified press of it that would now be
-    // pressed as the key too (the game takes Ctrl+U as U where Ctrl+U has no row)
+    let had = game.macros_with(&Input::Key(name.to_string()));
+    let old = game.key(row).map(str::to_string).filter(|k| !k.is_empty());
+    let moved = game.bind_key(row, name);
+    // the mods on the key, and those on a modified press the game would now take as the
+    // key (Shift+Space is Jump's Space where Shift+Space has no row): `game` is only a copy
+    // until `set_binds`, so with none the client does it all
     let exact = holders(&binds, key, None);
     let shadowed: Vec<usize> = (0..binds.len())
         .filter(|&i| {
+            let on = &binds[i].current_key;
             binds[i].enabled
                 && !exact.contains(&i)
-                && plain_of(&binds[i].current_key) == Some(key)
-                && !game.combo_bound(&binds[i].current_key)
+                && !on.is_empty()
+                && on != key
+                && game_press(&game, on) == key
         })
         .collect();
     if exact.is_empty() && shadowed.is_empty() {
         return false;
     }
     let held: Vec<usize> = exact.iter().chain(&shadowed).copied().collect();
-    let had = game.macros_with(&Input::Key(name.to_string()));
-    let old = game.key(row).map(str::to_string).filter(|k| !k.is_empty());
-    let moved = game.bind_key(row, name);
     let mut changes: Vec<(usize, String)> = held.iter().map(|&i| (i, String::new())).collect();
     // the first mod on the key takes the key the row left, if it is free and no game row took it
     if let (Some(_), Moved::Freed(_) | Moved::Already, Some(old)) =
@@ -771,7 +817,7 @@ fn mod_row_capture(
         }
         // the game would take the press as the plain key too: both would act
         Some((taken, true)) => {
-            let plain = binds::display(plain_of(key).unwrap_or_default());
+            let plain = binds::display(&game_press(&game, key));
             let who = match taken {
                 Owner::Row(r) => row_label(*r),
                 Owner::Macros(ms) => crate::bindpage::macro_names(ms),

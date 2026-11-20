@@ -122,6 +122,7 @@ pub(crate) fn live_snapshot() -> InputSnapshot {
 pub(crate) fn focus(focused: bool) {
     FOCUSED.with(|f| f.set(focused));
     if !focused {
+        PRESS_COMBOS.with(|c| c.borrow_mut().clear());
         INPUT_STATE.with(|s| {
             let mut state = s.borrow_mut();
             // Claims describe live VM intent, not a held physical key. The
@@ -156,6 +157,8 @@ pub fn reset_input_state() {
         *s.borrow_mut() = InputState::default();
     });
     set_modifiers((false, false, false));
+    set_super(false);
+    PRESS_COMBOS.with(|c| c.borrow_mut().clear());
 }
 
 thread_local! {
@@ -167,7 +170,18 @@ pub(crate) fn set_modifiers(held: (bool, bool, bool)) {
     MODIFIERS.with(|m| m.set(held));
 }
 
-pub(crate) fn set_super(_held: bool) {}
+thread_local! {
+    /// Super (Cmd) as the window last said it. The game names no combo with it
+    /// (`App::key_name`), so it is kept apart.
+    static SUPER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The combo each key (by its own name) went down with, kept until it is let
+    /// go, as `App::key_name` keeps `key_names`: a release is named as its press was.
+    static PRESS_COMBOS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+}
+
+pub(crate) fn set_super(held: bool) {
+    SUPER.with(|m| m.set(held));
+}
 
 pub(crate) fn modifiers() -> (bool, bool, bool) {
     MODIFIERS.with(|m| m.get())
@@ -197,6 +211,10 @@ pub(crate) fn route_mod_key_based(
     plain_play: bool,
     keyboard: bool,
 ) {
+    // Nothing listens: no name made, no event built.
+    if !super::native_core::capture_requested() {
+        return;
+    }
     let editor = is_text_capture_active();
     if !synthetic && plain_play && (editor || (!repeat && !keyboard)) {
         if let Some(name) = crate::binds::name_of(key) {
@@ -210,19 +228,49 @@ pub(crate) fn route_mod_key_based(
                 None
             };
             // The name a binding is matched by: the key as the game names a press
-            // (`App::key_name`), the modifiers held written before it. Never while
-            // an edit box types.
-            let (ctrl, alt, shift) = modifiers();
-            let combo = if (ctrl || alt || shift) && !editor {
-                crate::binds::combo_name(ctrl, alt, shift, base.unwrap_or(&name))
-            } else {
-                name.clone()
-            };
+            // (`App::key_name`), the modifiers held written before it, and a release
+            // named as its press was. Never while an edit box types. None: the key's own.
+            let combo = press_combo(&name, base, down, repeat, editor);
             super::native_core::defer(256 + text.as_ref().map_or(0, String::len), move |c| {
+                let combo = combo.as_deref().unwrap_or(&name).to_string();
                 c.emit("input.key", serde_json::json!({"key":name,"combo":combo,"down":down,"repeat":repeat,"synthetic":false,"text":text}));
             });
         }
     }
+}
+
+/// The combo a key press, repeat or release is named by, or None when it is just the key
+/// (no modifier was held when it went down).
+fn press_combo(name: &str, base: Option<&'static str>, down: bool, repeat: bool, editor: bool) -> Option<String> {
+    let own = base.unwrap_or(name);
+    if down && !repeat || down && repeat && !PRESS_COMBOS.with(|c| c.borrow().contains_key(own)) {
+        let (ctrl, alt, shift) = modifiers();
+        let sup = SUPER.with(|m| m.get());
+        let combo = if (ctrl || alt || shift || sup) && !editor {
+            let named = crate::binds::combo_name(ctrl, alt, shift, own);
+            Some(if sup { format!("super+{named}") } else { named })
+        } else {
+            None
+        };
+        if !repeat {
+            PRESS_COMBOS.with(|c| {
+                let mut c = c.borrow_mut();
+                match &combo {
+                    Some(combo) => {
+                        c.insert(own.to_string(), combo.clone());
+                    }
+                    None => {
+                        c.remove(own);
+                    }
+                }
+            });
+        }
+        return combo;
+    }
+    PRESS_COMBOS.with(|c| {
+        let mut c = c.borrow_mut();
+        if down { c.get(own).cloned() } else { c.remove(own) }
+    })
 }
 
 /// Keeps the modifiers the window last said (`ModifiersChanged`).
@@ -230,6 +278,7 @@ pub(crate) fn observe_modifiers(event: &winit::event::WindowEvent) {
     if let winit::event::WindowEvent::ModifiersChanged(m) = event {
         let s = m.state();
         set_modifiers((s.control_key(), s.alt_key(), s.shift_key()));
+        set_super(s.super_key());
     }
 }
 
