@@ -3217,8 +3217,8 @@ fn validate_chat_string(raw: Value, command_mode: bool) -> std::result::Result<S
         .map_err(|_| ("invalid_argument", "message text must be UTF-8".into()))?
         .trim()
         .to_string();
-    if text.is_empty() || text.len() > 255 {
-        return Err(("invalid_argument", "message length must be 1..=255 bytes".into()));
+    if text.is_empty() {
+        return Err(("invalid_argument", "message text is empty".into()));
     }
     if text.contains('\0') || text.contains('\r') || text.contains('\n') {
         return Err(("invalid_argument", "message cannot contain control newlines or NUL".into()));
@@ -3228,6 +3228,9 @@ fn validate_chat_string(raw: Value, command_mode: bool) -> std::result::Result<S
     } else {
         text
     };
+    if normalized.encode_utf16().count() >= 128 {
+        return Err(("invalid_argument", "message must be shorter than 128 UTF-16 units".into()));
+    }
     if gesture::is_forbidden_report_text(&normalized) {
         return Err((
             "permission_denied",
@@ -4459,7 +4462,17 @@ fn install_non_item_actions(lua: &Lua) -> Result<()> {
         lua,
         "actions",
         "chat",
-        lua.create_function(|lua, text: Value| enqueue_chat_line(lua, text, false))?,
+        lua.create_function(|lua, (text, channel): (Value, Value)| {
+            if !channel.is_nil() {
+                return error(
+                    lua,
+                    "eqoa.actions.chat",
+                    "unsupported",
+                    "use eqoa.actions.command with the channel's slash command to select a channel",
+                );
+            }
+            enqueue_chat_line(lua, text, false)
+        })?,
     )?;
 
     bind(
