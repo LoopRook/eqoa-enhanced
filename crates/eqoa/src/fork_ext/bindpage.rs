@@ -77,6 +77,7 @@ pub fn set_addon_enabled(addon_id: &str, enabled: bool) {
 pub fn reset_in_memory() {
     let mut binds = MOD_BINDS.lock().unwrap();
     binds.clear();
+    *SESSION.lock().unwrap() = None;
 }
 
 pub fn get_key(addon: &str, id: &str) -> Option<String> {
@@ -206,11 +207,48 @@ pub fn draw(
     true
 }
 
-/// Options opens: the mod keys as they are now (stub, filled in with the fix).
-pub fn session_begin() {}
+/// What each mod's kept key was when the Options window opened.
+static SESSION: Mutex<Option<Vec<(String, String, Option<String>)>>> = Mutex::new(None);
 
-/// Options cancelled (stub, filled in with the fix).
-pub fn session_cancel() {}
+/// Options opens (`options.rs`, beside the game's own snapshot, `saved_binds`): the mod
+/// keys as they are, so a cancel can put them back with the game's. Mod keys are still
+/// written as they are changed; only a cancel rewrites them.
+pub fn session_begin() {
+    let binds = MOD_BINDS.lock().unwrap();
+    let snapshot = binds
+        .iter()
+        .map(|b| (b.addon_id.clone(), b.id.clone(), b.stored.clone()))
+        .collect();
+    *SESSION.lock().unwrap() = Some(snapshot);
+}
+
+/// Options cancelled (Triangle on the menu, without saving): every mod key back as it was
+/// when the window opened, in memory and in `mod-keys.opt`, with the game's keys that
+/// `options.rs` has just put back.
+pub fn session_cancel() {
+    let Some(snapshot) = SESSION.lock().unwrap().take() else {
+        return;
+    };
+    let game = crate::settings::with_binds(Clone::clone);
+    let mut binds = MOD_BINDS.lock().unwrap();
+    for (addon, id, stored) in snapshot {
+        let Some(b) = binds.iter_mut().find(|b| b.addon_id == addon && b.id == id) else {
+            continue;
+        };
+        if b.stored == stored {
+            continue;
+        }
+        let written = match &stored {
+            Some(key) => save_mod_bind(&addon, &id, key),
+            None => forget_mod_bind(&addon, &id),
+        };
+        if let Err(error) = written {
+            eprintln!("settings: mod key not put back: {error}");
+        }
+        b.stored = stored;
+    }
+    resolve(&game, &mut binds);
+}
 
 pub fn reset_defaults() {
     // The game's defaults come back with these, so a default is judged against
