@@ -535,3 +535,54 @@ fn round7c_typed_chat_refuses_explicit_channels() {
     assert!(last_ok(&host));
     assert!(p.session.sends_lost > sent);
 }
+
+const TYPE_HELLO: &str = "local w = eqoa.windows.find('input'); return eqoa.actions.input_text(w.ref, 'hello', true)";
+
+/// Fix round 3 item 3: the Who list's Tell opens the chat editor, and submitting it sends `/t <name> <text>`:
+/// a slash command whatever the typed text is, so it needs `eqoa.actions.command`.
+#[test]
+fn round7c_who_list_tell_editor_needs_the_command_grant() {
+    let (mut p, host) = rig_with_capabilities(&["eqoa.actions.input_text", "eqoa.actions.chat"]);
+    p.open_edit(0xB0F0000, 128, -1, false);
+    p.who_tell = Some("Bob".into());
+    let sent = p.session.sends_lost;
+    gesture(&mut p, &host, TYPE_HELLO);
+    expect_code(&host, "permission_denied");
+    assert_eq!(p.session.sends_lost, sent, "no tell went out");
+    assert_eq!(p.who_tell.as_deref(), Some("Bob"), "the Tell editor is still open");
+
+    let (mut p, host) =
+        rig_with_capabilities(&["eqoa.actions.input_text", "eqoa.actions.chat", "eqoa.actions.command"]);
+    p.open_edit(0xB0F0000, 128, -1, false);
+    p.who_tell = Some("Bob".into());
+    let sent = p.session.sends_lost;
+    gesture(&mut p, &host, TYPE_HELLO);
+    assert!(last_ok(&host));
+    assert!(p.session.sends_lost > sent, "with the command grant the tell goes out");
+}
+
+/// Fix round 3 item 3: the line is judged when it is dispatched, from what the game will send then: a chat
+/// editor that became the Who list's Tell after the request was queued refuses a chat-only mod.
+#[test]
+fn round7c_input_text_judges_the_line_at_dispatch() {
+    let (mut p, host) = rig_with_capabilities(&["eqoa.actions.input_text", "eqoa.actions.chat"]);
+    p.open_edit(0xB0F0000, 128, -1, false);
+    let sent = p.session.sends_lost;
+    gesture_then(&mut p, &host, TYPE_HELLO, |p| p.who_tell = Some("Bob".into()));
+    expect_code(&host, "permission_denied");
+    assert_eq!(p.session.sends_lost, sent, "no tell went out");
+}
+
+/// Fix round 3 item 3: a slash line typed into the chat editor without submitting is still a command the
+/// player is one key from sending: it needs the command grant like a submitted one.
+#[test]
+fn round7c_prefilled_slash_line_needs_the_command_grant() {
+    let (mut p, host) = rig_with_capabilities(&["eqoa.actions.input_text", "eqoa.actions.chat"]);
+    p.open_edit(0x0B0F_0000, 128, -1, false);
+    gesture(&mut p, &host, "local w = eqoa.windows.find('input'); return eqoa.actions.input_text(w.ref, '/sit', false)");
+    expect_code(&host, "permission_denied");
+    assert!(p.edit.text.is_empty(), "nothing was typed");
+    gesture(&mut p, &host, "local w = eqoa.windows.find('input'); return eqoa.actions.input_text(w.ref, 'hello', false)");
+    assert!(last_ok(&host));
+    assert_eq!(p.edit.text, crate::ui::wide("hello"));
+}

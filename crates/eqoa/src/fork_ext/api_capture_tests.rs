@@ -3603,3 +3603,63 @@ fn round7c_other_mods_identical_pin_survives_disable_in_the_same_step() {
     assert_eq!(p.map.waypoint(0), None);
     map_waypoint::reset_for_test();
 }
+
+/// Fix round 3 item 2: a mod disabled just before a logout, with no game step between, loses its pin; the
+/// next character's fresh map (pins not read yet) does not bring it back.
+#[test]
+fn round7c_disabled_mods_pin_does_not_return_after_a_logout() {
+    use crate::fork_ext::addons::{action_broker, map_waypoint};
+    action_broker::reset_all_for_test();
+    map_waypoint::reset_for_test();
+    let host = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+    let mut a = ready();
+    a.map = crate::map::testing::up((640, 448));
+    a.forge_snapshot(None);
+    host.execute("assert(eqoa.map.set_waypoint{world_id=0, x=22000, z=15000})").unwrap();
+    a.bags_broker_tick();
+    assert_eq!(a.map.waypoint(0), Some([22000., 15000.]));
+    native_events::clear(&host);
+    drop(a);
+    let mut b = ready();
+    b.map = crate::map::testing::up((640, 448));
+    b.forge_snapshot(None);
+    b.bags_broker_tick();
+    b.map.round7c_read_waypoints();
+    b.bags_broker_tick();
+    assert_eq!(b.map.waypoint(0), None, "the disabled mod's pin stays gone on the next character");
+    map_waypoint::reset_for_test();
+}
+
+/// Fix round 3 item 2, the cross-character rule: the game keeps one pin file per window, shared by every
+/// character played in it, so a mod's pin and its ownership carry across a logout for the rest of the client
+/// session. A game step before the next character's pins are read changes nothing; disabling the mod then
+/// clears the pin it still owns.
+#[test]
+fn round7c_mod_pin_ownership_carries_across_characters_until_compared() {
+    use crate::fork_ext::addons::{action_broker, map_waypoint};
+    action_broker::reset_all_for_test();
+    map_waypoint::reset_for_test();
+    let host = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+    let mut a = ready();
+    a.map = crate::map::testing::up((640, 448));
+    a.forge_snapshot(None);
+    host.execute("assert(eqoa.map.set_waypoint{world_id=0, x=22000, z=15000})").unwrap();
+    a.bags_broker_tick();
+    drop(a);
+    let mut b = ready();
+    b.map = crate::map::testing::up((640, 448));
+    b.forge_snapshot(None);
+    b.bags_broker_tick();
+    b.bags_broker_tick();
+    b.map.round7c_read_waypoints();
+    b.bags_broker_tick();
+    b.forge_snapshot(None);
+    host.execute(r#"
+        local w = assert(eqoa.map.get().waypoint, 'the pin shows for the next character')
+        assert(w.owner == 'test', 'still the mod pin: ' .. tostring(w.owner))
+    "#).unwrap();
+    native_events::clear(&host);
+    b.bags_broker_tick();
+    assert_eq!(b.map.waypoint(0), None, "disabling the mod clears the pin it still owns");
+    map_waypoint::reset_for_test();
+}

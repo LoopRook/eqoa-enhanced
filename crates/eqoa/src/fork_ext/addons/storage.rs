@@ -130,6 +130,12 @@ impl Disclosure {
         }
     }
 
+    /// What an earlier release with no grants would have recorded for `addon`, for the update tests.
+    #[cfg(test)]
+    pub(super) fn narrower_for_test(addon: &DiscoveredAddon) -> Self {
+        Self { capabilities: Vec::new(), replaces: Vec::new(), permissions: Vec::new(), ..Self::for_addon(addon) }
+    }
+
     pub(super) fn allows(&self, new: &Self) -> bool {
         !self.blocked
             && self.native == new.native
@@ -784,6 +790,82 @@ mod tests {
             );
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    /// 0.6.0's acceptance rule for `state.json`, copied from `Storage::registry` at 0e35c35e
+    /// (`crates/eqoa/src/fork_ext/addons/storage.rs:395-420`): exactly two keys, schema 1, boolean flags.
+    fn accepted_by_0_6_0(bytes: &[u8]) -> Result<serde_json::Map<String, Json>, String> {
+        let value: Json = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+        let object = value
+            .as_object()
+            .filter(|o| o.len() == 2)
+            .ok_or("invalid addon state registry")?;
+        if object.get("schemaVersion").and_then(Json::as_u64) != Some(1) {
+            return Err("unsupported addon state schemaVersion".into());
+        }
+        let enabled = object
+            .get("enabled")
+            .and_then(Json::as_object)
+            .ok_or("invalid addon enabled registry")?;
+        for (key, value) in enabled {
+            validate_key(key)?;
+            if !value.is_boolean() {
+                return Err("addon enabled state must be boolean".into());
+            }
+        }
+        Ok(enabled.clone())
+    }
+
+    /// 0.6.0's writer (`Storage::set_enabled` at 0e35c35e): the whole file, two keys.
+    fn write_as_0_6_0(state: &Path, enabled: serde_json::Map<String, Json>) {
+        fs::write(state, serde_json::to_vec(&json!({"schemaVersion": 1, "enabled": enabled})).unwrap()).unwrap();
+    }
+
+    /// Fix round 3 item 1: a downgrade reads what this build wrote, and this build reads what 0.6.0 wrote.
+    #[test]
+    fn round7c_state_json_stays_compatible_with_0_6_0_both_ways() {
+        let s = Scratch::new();
+        let addon = s.addon();
+        let key = s.key();
+        let storage = Storage::new(Some(s.0.clone()));
+        let record = Disclosure::for_addon(&addon);
+        storage.update_enable_state(Some((&key, true)), Some((&addon.id, &record))).unwrap();
+        let state = s.0.join("addons/state.json");
+
+        // this build -> 0.6.0: the old reader accepts the file and keeps the enable
+        let old_view = accepted_by_0_6_0(&fs::read(&state).unwrap())
+            .expect("0.6.0 must accept the state.json this build writes");
+        assert_eq!(old_view.get(&key), Some(&Json::Bool(true)));
+        assert!(storage.disclosures().unwrap().contains_key(&addon.id), "the disclosure is kept beside it");
+
+        // 0.6.0 -> this build: the old build rewrites state.json (the player toggles the mod there)
+        let mut toggled = old_view.clone();
+        toggled.insert(key.clone(), Json::Bool(false));
+        write_as_0_6_0(&state, toggled);
+        assert_eq!(storage.enabled(&key).unwrap(), Some(false), "this build reads 0.6.0's file");
+        assert!(
+            storage.disclosures().unwrap().is_empty(),
+            "a disclosure record older than the enabled flags is stale: adopt again, never block"
+        );
+
+        // a missing or unreadable disclosure file reads as no records (adopt once), never an error
+        storage.update_enable_state(Some((&key, true)), Some((&addon.id, &record))).unwrap();
+        let beside = s.0.join("addons/disclosures.json");
+        fs::write(&beside, b"{not json").unwrap();
+        assert!(storage.disclosures().unwrap().is_empty());
+        fs::remove_file(&beside).unwrap();
+        assert!(storage.disclosures().unwrap().is_empty());
+        assert_eq!(storage.enabled(&key).unwrap(), Some(true));
+
+        // the three-key file an earlier build of this branch wrote still loads, and the next write repairs it
+        let mut legacy = json!({"schemaVersion": 1, "enabled": {key.clone(): true}});
+        legacy["disclosures"] = json!({addon.id.clone(): record.to_json()});
+        fs::write(&state, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        assert_eq!(storage.enabled(&key).unwrap(), Some(true));
+        assert!(storage.disclosures().unwrap().contains_key(&addon.id));
+        storage.update_enable_state(Some((&key, true)), None).unwrap();
+        accepted_by_0_6_0(&fs::read(&state).unwrap()).expect("rewritten in 0.6.0's shape");
+        assert!(storage.disclosures().unwrap().contains_key(&addon.id), "its records moved beside it");
     }
 
     #[test]

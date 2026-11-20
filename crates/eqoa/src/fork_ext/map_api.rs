@@ -297,6 +297,9 @@ impl Map {
 
     pub(crate) fn round4_waypoint(&mut self,world:i32,at:Option<[f32;2]>){self.set_waypoint(world,at);}
 
+    /// The pins read from the settings, as the map's first frame in a world does.
+    pub(crate) fn round7c_read_waypoints(&mut self){self.read_waypoints();}
+
     /// A minimap frame as `Play::map_frame` makes it each frame (a moved or toggled minimap
     /// is laid out again), centred on `at` with `view`'s dots and marks, over a terrain
     /// stand-in of `color` (a picture without a disc).

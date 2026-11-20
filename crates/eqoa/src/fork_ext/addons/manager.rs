@@ -2571,6 +2571,125 @@ mod tests {
         }));
     }
 
+    /// Fix round 3 item 4a: a mod the player turned off that widens its grants just shows its new labels and
+    /// stays off: no "permissions changed" line and no blocked record, so enabling it later is one click.
+    #[test]
+    fn round7c_disabled_mod_widening_its_grants_gets_no_permissions_line() {
+        let Some(mut gpu) = Gpu::new() else {
+            eprintln!("SKIP round7c disabled-mod grants: no GPU adapter");
+            return;
+        };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("quiet", false, "loaded = true");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        manager.queue(Command::Enable("quiet".into(), true));
+        gpu.frame(&mut manager);
+        manager.queue(Command::Enable("quiet".into(), false));
+        gpu.frame(&mut manager);
+        drop(manager);
+        let manifest = scripts.0.join("quiet/mod.json");
+        let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        raw["capabilities"] = serde_json::json!(["eqoa.actions.command"]);
+        fs::write(&manifest, serde_json::to_vec(&raw).unwrap()).unwrap();
+
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        assert!(!manager.entries()[0].enabled_intent, "the player's off stays off");
+        assert!(
+            !manager.diagnostics().iter().any(|d| d.message.contains("its permissions changed")),
+            "{:?}",
+            manager.diagnostics()
+        );
+        manager.queue(Command::Enable("quiet".into(), true));
+        gpu.frame(&mut manager);
+        assert_eq!(manager.entries()[0].status, Status::Enabled, "one enable accepts the new grants");
+        drop(manager);
+        let manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        assert!(manager.entries()[0].enabled_intent, "and that choice holds on restart");
+    }
+
+    /// Stores, for every package found in `mods`, an enable of `enabled` bound to a narrower disclosure than its
+    /// manifest's (what an earlier release with fewer grants would have recorded).
+    fn round7c_bind_older_release(config: &Path, mods: &Path, enabled: &[(&str, bool)]) {
+        let storage = Storage::new(Some(config.to_path_buf()));
+        for addon in super::super::discovery::discover(mods).addons {
+            let Some((_, on)) = enabled.iter().find(|(id, _)| *id == addon.id) else { continue };
+            let older = super::super::storage::Disclosure::narrower_for_test(&addon);
+            storage
+                .update_enable_state(Some((&Storage::key(&addon).unwrap(), *on)), Some((&addon.id, &older)))
+                .unwrap();
+        }
+    }
+
+    fn round7c_permissions_line(manager: &Manager, id: &str) -> bool {
+        manager.diagnostics().iter().any(|d| {
+            d.id.as_deref() == Some(id) && d.message.contains("its permissions changed; enable it again to accept")
+        })
+    }
+
+    /// Fix round 3 item 5: a bundled package whose files are the shipped ones re-adopts the wider grants a new
+    /// release gives it, silently, and stays as the player had it; the same package with an edited file, or a
+    /// third-party package borrowing a bundled id, is asked again like any other.
+    #[test]
+    fn round7c_shipped_bundled_package_adopts_its_own_wider_grants() {
+        let Some(gpu) = Gpu::new() else {
+            eprintln!("SKIP round7c bundled exemption: no GPU adapter");
+            return;
+        };
+        let config = Scratch::new();
+        let mods = Scratch::new();
+        crate::fork_ext::bundled::install_bundled_mods(&mods.0, Some(&config.0)).unwrap();
+        round7c_bind_older_release(&config.0, &mods.0, &[("eqoa_bag_viewer", true), ("eqoa_stats_box", false)]);
+        let manager = gpu.manager(&mods.0, Some(config.0.clone()));
+        let entry = |id: &str| manager.entries().iter().find(|e| e.metadata.id == id).unwrap().enabled_intent;
+        assert!(entry("eqoa_bag_viewer"), "the shipped package stays enabled");
+        assert!(!entry("eqoa_stats_box"), "and a disabled one stays disabled");
+        assert!(!round7c_permissions_line(&manager, "eqoa_bag_viewer"), "{:?}", manager.diagnostics());
+        assert!(!round7c_permissions_line(&manager, "eqoa_stats_box"), "{:?}", manager.diagnostics());
+        drop(manager);
+
+        // the player edited a shipped file: no longer the shipped package
+        let edited = crate::fork_ext::bundled::EMBEDDED_FILES
+            .iter()
+            .find(|f| f.package == "eqoa_bag_viewer" && f.path.ends_with(".lua"))
+            .unwrap();
+        let path = mods.0.join(edited.path);
+        let mut bytes = fs::read(&path).unwrap();
+        bytes.extend_from_slice(b"\n-- edited by the player\n");
+        fs::write(&path, bytes).unwrap();
+        round7c_bind_older_release(&config.0, &mods.0, &[("eqoa_bag_viewer", true)]);
+        let manager = gpu.manager(&mods.0, Some(config.0.clone()));
+        let bag = manager.entries().into_iter().find(|e| e.metadata.id == "eqoa_bag_viewer").unwrap();
+        assert!(!bag.enabled_intent, "an edited bundled package is asked again");
+        assert!(round7c_permissions_line(&manager, "eqoa_bag_viewer"), "{:?}", manager.diagnostics());
+        drop(manager);
+
+        // a third-party package that copies the shipped files and id into its own folder
+        let other_config = Scratch::new();
+        let other = Scratch::new();
+        let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods/eqoa_bag_viewer");
+        copy_tree(&from, &other.0.join("bag_viewer_copy"));
+        round7c_bind_older_release(&other_config.0, &other.0, &[("eqoa_bag_viewer", true)]);
+        let manager = gpu.manager(&other.0, Some(other_config.0.clone()));
+        let copy = manager.entries().into_iter().find(|e| e.metadata.id == "eqoa_bag_viewer").unwrap();
+        assert!(!copy.enabled_intent, "a borrowed bundled id gets no exemption");
+        assert!(round7c_permissions_line(&manager, "eqoa_bag_viewer"), "{:?}", manager.diagnostics());
+    }
+
+    fn copy_tree(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_tree(&entry.path(), &target);
+            } else {
+                fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+
     #[test]
     fn round7c_bundled_packages_keep_their_enabled_disclosures() {
         let Some(gpu) = Gpu::new() else { return };

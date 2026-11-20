@@ -5577,6 +5577,63 @@ mod tests {
         crate::fork_ext::bindpage::reset_in_memory();
     }
 
+    /// Fix round 3 item 4b: two batches of one mod stopped while each had a step on the wire both report,
+    /// each once, when their replies land; the second stop does not lose the first's result.
+    #[test]
+    fn round7c_every_stopped_batch_reports_its_late_reply() {
+        reset_all_for_test();
+        crate::fork_ext::bindpage::reset_in_memory();
+        CORE.with(|c| {
+            let mut core = Core::default();
+            core.view.in_world = true;
+            *c.borrow_mut() = core;
+        });
+        let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
+        host.execute(
+            r#"
+            bres = {}
+            eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
+            eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+                batches[#batches + 1] = assert(eqoa.actions.batch({ steps = { { kind = "assist" }, { kind = "assist" } } }))
+            end)
+            batches = {}
+        "#,
+        )
+        .unwrap();
+        let in_world = NativeSnapshot { in_world: true, mode: 0, ..Default::default() };
+        for _ in 0..2 {
+            CORE.with(|c| {
+                c.borrow_mut().emit(
+                    "input.key",
+                    json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                )
+            });
+            native_events::dispatch(&host).unwrap();
+            BROKER.with(|b| {
+                b.borrow_mut().step_tick(in_world, &mut |_: &ActionKind| DispatchOutcome::AwaitingServer {
+                    matcher: ServerMatcher::Assist,
+                    detail: None,
+                })
+            });
+            host.execute("assert(eqoa.actions.stop_batch(batches[#batches]))").unwrap();
+        }
+        native_events::dispatch(&host).unwrap();
+        host.execute("assert(#bres == 0, 'each result waits for its reply: ' .. #bres)").unwrap();
+        resolve_server_assist(7);
+        resolve_server_assist(7);
+        native_events::dispatch(&host).unwrap();
+        host.execute(
+            r#"
+            assert(#bres == 2, 'both stopped batches report: ' .. #bres)
+            for i, r in ipairs(bres) do
+                assert(r.state == 'stopped' and r.completed == 1, i .. ': ' .. r.state .. ' ' .. r.completed)
+            end
+        "#,
+        )
+        .unwrap();
+        reset_all_for_test();
+    }
+
     #[test]
     fn round6c_batch_stops_on_refusal_window_close_stop_call_and_zoning_without_replay() {
         reset_all_for_test();
