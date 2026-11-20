@@ -70,8 +70,11 @@ All run through `tools/run_gates.py`, with `EQOA_ISO` set (disc present).
 
 - `python tools/run_gates.py --only round,addons --filter round7e_ fork_ext::bindpage fork_ext::settings`:
   round 23 passed, 0 failed, 0 ignored; addons 585 passed, 1 failed, 25 ignored. The one failure
-  (`round_3_stage_a_options_toggle_and_get`, a key leaked by another test) was fixed afterwards (`7` for that
-  mod); that test was not re-run locally alone after the fix, see CI.
+  (`round_3_stage_a_options_toggle_and_get`, a key leaked by another test) was fixed (`7` for that mod) and
+  re-run: `--filter round7e_ round_3_stage_a fork_ext::bindpage` 30 passed, 0 failed.
+- CI's first full run (run 44670590646) found 25 more fixtures that used game keys (`k`, `f8`) in
+  `api_capture_tests.rs`, `items_tests.rs`, `r6d_tests.rs`, `fork_ext/settings.rs`; fixed, then locally
+  `--filter play::fork_hooks:: settings::fork_settings round7e_`: 190 passed, 0 failed.
 - SKIP lines in the addons run: 11, all unrelated (no graphics adapter, symlink privilege, Wereoxxs recording,
   UI goldens). Round 7e tests: 0 skips.
 - Full set: GitHub CI (below). Oracle tests skip here as always (no decomp on this machine).
@@ -103,4 +106,16 @@ no `brk` left). `hits = N` is the Lua assert in `round7e_key_tests.rs:34`.
 
 ## Footprint, wasm, CI
 
-See the final lines below (filled in after the runs).
+- `python tools/run_gates.py --only wasm,footprint,paths`: wasm PASS, footprint PASS (no upstream file touched,
+  no budget change), paths PASS.
+- CI run https://github.com/LoopRook/eqoa-enhanced/actions/runs/44674074606 on 77eb403787: success. addons 586
+  passed / 0 failed / 25 ignored (17 SKIP); full 3177 passed / 0 failed / 37 ignored (378 SKIP, CI has no disc
+  or GPU); wasm, footprint, paths, player-release (20), tools (199) all success. `ci_gates.py cleanup` run.
+
+## Not done / not verified
+
+- Not played in the live client: the `!` mark position (x=20 left of the label) and the note wording are
+  tested through the real page drawing with a test font, not seen on screen.
+- Macro-trigger keys: handled by refusal and press-time precedence; no UI flow for resolving an old
+  macro/mod conflict beyond choosing another key.
+- Several bindings of one mod on the same key (older saves): one wins by binding id; the rest are marked.
