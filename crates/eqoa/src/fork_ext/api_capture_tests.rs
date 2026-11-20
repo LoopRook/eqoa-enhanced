@@ -188,9 +188,11 @@ fn round7c_world_events_come_from_play_changes() {
         capture(&p, &Kind::Entity(2), None);
         p.entities.slots[2].as_mut().unwrap().p19 = 100;
         capture(&p, &Kind::Entity(2), None);
+        // the target moves while the old one is still in view: target.changed carries both
+        p.target = 2003;
+        capture(&p, &Kind::Player, None);
         p.entities.slots[1] = None;
         capture(&p, &Kind::Entity(1), None);
-        p.target = 2003;
         p.group.members[0].hp = 128;
         capture(&p, &Kind::Group, None);
         p.stats.stat[8] += 10;
@@ -199,6 +201,8 @@ fn round7c_world_events_come_from_play_changes() {
         capture(&p, &Kind::Quests, None);
         p.effects.name[0] = "A different effect".encode_utf16().collect();
         capture(&p, &Kind::Effects, None);
+        p.effects.name[0] = "Another effect".encode_utf16().collect();
+        capture(&p, &Kind::Effects, None);
         p.hud_menus.defs[0].entries[0].id = 2;
         for (old, new) in [(0., 5000), (5., 2500), (2.5, 0)] {
             p.abilities.get_mut(&1).unwrap().lockout = new;
@@ -206,6 +210,7 @@ fn round7c_world_events_come_from_play_changes() {
         }
         p.cm.m.x0c += 1;
         p.mode = 13;
+        p.map.open = true;
         walker.eye.position.x = vi::fpu::F::new(10.);
         p.forge_snapshot(Some(&walker));
         p.add_chat("Event audit".into(), [1.; 4]);
@@ -215,6 +220,16 @@ fn round7c_world_events_come_from_play_changes() {
         input::observe_report(
             &mut crate::input::Report {
                 buttons: 1 << 4,
+                sticks: [0.; 4],
+                triggers: [0.; 2],
+            },
+            true,
+            true,
+        );
+        native_events::dispatch(&host).unwrap();
+        input::observe_report(
+            &mut crate::input::Report {
+                buttons: 0,
                 sticks: [0.; 4],
                 triggers: [0.; 2],
             },

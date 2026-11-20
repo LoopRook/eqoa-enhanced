@@ -288,10 +288,13 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
             fields('items.MerchantState', shop.merchant)
             fields('items.MerchantOption', shop.merchant.options[1])
             assert(log[#log].name == 'merchant.changed', 'no merchant event from the native open')
-            event_fields(seen, {'loot.changed', 'merchant.changed'})
         "#,
         )
         .unwrap();
+        p.bags_close_merchant();
+        frame(&p, &host);
+        host.execute("event_fields(seen, {'loot.changed', 'merchant.changed'})")
+            .unwrap();
     });
 }
 
