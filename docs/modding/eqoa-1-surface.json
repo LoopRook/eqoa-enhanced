@@ -4506,6 +4506,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.input.key.data.combo",
+      "reason": null,
+      "revision": 1,
+      "round": 7,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.input.key.data.down",
       "reason": null,
       "revision": 1,
