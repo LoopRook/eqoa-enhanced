@@ -603,7 +603,7 @@ contract rules and the four defects are settled.
    switch can be added later, additively, if a server operator asks.
 2. Order agreed: A0, A1, A2, A3, then HUD completion.
 3. Irreversible steps: lead's recommendation is that a confirmation always happens but a replacement mod may
-   draw it (the prompt is readable and answerable); a mod cannot skip it. Explained to the owner; awaiting a
-   final yes. Destroy stays unsupported.
+   draw it (the prompt is readable and answerable); a mod cannot skip it. Owner agreed 2026-11-19 ("keeping
+   the confirm, we could skin it"). Destroy stays unsupported.
 4. Before the world (login, character select, creation): left to the game. Mods only act once in the world.
 5. Name plates and damage numbers (A12): wanted.
