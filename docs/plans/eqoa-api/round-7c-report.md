@@ -465,3 +465,108 @@ creating it (b9da8f0e; 4,379 such folders are in this PC's temp directory from e
 - The drop-hook drain runs only when the closing map had read its pins. Otherwise the released record waits
   for the next login's first loaded step, which the cross-character test covers.
 - The decomp/eqoa-port oracle is not on this machine.
+
+## Fix round 4
+
+From the recheck of 313c2484: items 2 (waypoint across logout and characters), 4a and 4b confirmed fixed,
+`state.json` confirmed compatible with 0.6.0; REJECT on three points plus one leftover. Builder: Claude Opus
+5.5. Zero upstream lines.
+
+Fix round 3's CI rerun, in progress at the recheck: **run 44728527305 at 313c2484, success** (addons 604/0,
+full 3236/0). Item 4 (the report's `CI_RERUN_PLACEHOLDER`) had already been filled in a7d81722, the commit
+after the one rechecked; nothing was left to change.
+
+The reproducing tests were committed first (1a8cb9c0) and run on a7d81722: 6 run, 5 failed. The sixth,
+`round7c_name_boxes_need_only_input_text`, covers boxes that are meant to stay allowed and passes on both
+sides. Negative controls ran in batches J, K, L, K2 and L2, then `git checkout -- crates` (status clean).
+K and L first passed: `package_files` also stops past the embedded file count, a third size check. Their
+mutations had to lift that limit too (K2, L2).
+
+| Item | Red (reproduced) | Fix | Test | Negative control: mutation → failing line |
+|---|---|---|---|---|
+| 1 HIGH exact shipped package | yes: `scenario A, native: ... left: (true, false) right: (false, true)` | c36b1fee | `round7c_bundled_exemption_only_for_the_exact_shipped_package` (shipped, A native, A Forge (`arpg_ui`), B, extra file in a subfolder, missing file) | location taken from the package's own root (J) → `manager.rs:2757 scenario B: ... left: (true, false)`; set comparison and size limit off (K2) → `manager.rs:2765 an extra file in a subfolder`; also the manifest/entry check off (L2) → `manager.rs:2747 scenario A, native` |
+| 2 MEDIUM per-package staleness | yes: `P's wider grants are not adopted silently` | 7312ac75 | `round7c_older_build_toggle_keeps_other_packages_records` | per-key check back to the whole map (J) → `manager.rs:2815 P's wider grants are not adopted silently` |
+| 3 MEDIUM edit boxes | yes: channel, command and unlisted boxes all accepted (`r6d_tests.rs:88 nil req=RequestId(1) n=1 msg=nil`) | 383d53b6 | `round7c_channel_boxes_need_the_chat_grant`, `round7c_command_boxes_need_the_command_grant`, `round7c_unlisted_and_refused_boxes`, `round7c_name_boxes_need_only_input_text`, `round7c_text_boxes_label_says_what_input_text_grants` | Chat rows allowed without the grant (J) → channel test `r6d_tests.rs:88`; Command rows likewise (J) → command test `r6d_tests.rs:88`; an unlisted purpose read as a name box (K) → unlisted test `r6d_tests.rs:88`; refused rows read as name boxes (L) → the report box accepted, `r6d_tests.rs:88`; label line removed (J) → `round7c_fix_tests.rs:538 left: ["Actions: can act on its own (chat (ordinary lines))"]` |
+| 4 LOW placeholder | already filled (a7d81722) | none | none | none |
+
+How each works:
+
+- **1.** `bundled::is_shipped_package(id, root, install_root, entry)`. The manager passes its scan root as
+  `install_root`. In production that is the folder `install_bundled_mods` writes to: both come from
+  `EQOA_FORGE_MODS`, else `mods::mods_dir()`. The package counts as shipped only if:
+  - **(a) location:** `root` and `<install_root>/<id>` are the same canonical path, with no link on the way;
+  - **(b) exact files:** the files under `root`, at any depth, are exactly this build's embedded files for the
+    package, compared byte for byte, none extra and none missing; links and anything but files and folders
+    disqualify;
+  - **(c) manifest and entry:** the manifest discovery reads there (`manifest.json` before `mod.json`, as in
+    `discovery.rs:498`) and the entry it chose are among those files.
+
+  Anything else is treated like any package: widened grants block until re-enabled. Older shipped versions'
+  bytes no longer qualify; only this build's do, which is what the installer writes.
+- **2.** Each disclosure record stores its package's enabled-flag key. `disclosures.json` still keeps the
+  flags it was written with. A record is kept while its own package's flag in `state.json` equals the one
+  recorded, so only a package an older build toggled re-adopts. Records without a key (only an earlier build
+  of this branch wrote them) fall back to the whole-map comparison.
+- **3.** One table, `window_actions::EDIT_BOXES`, plus the GM command range (`admin::is_command`). Both the
+  queue-time check and the dispatch check (authoritative) use it. Each check applies whether the text is
+  submitted or left for the player to send. A missing grant is refused `permission_denied`; a purpose not in
+  the table is refused `unsupported`.
+
+### Edit boxes (`EDIT_BOXES`)
+
+| Purpose | What the game sends on submit (`Play::edit_done`, `mapsuggest`) | Grants beyond `eqoa.actions.input_text` |
+|---|---|---|
+| `0x0B0F_0000` chat editor | the typed line; a slash line is a command; from the Who list's Tell, `/t <name> <text>` | the line's: `eqoa.actions.chat`, or `eqoa.actions.command` for a slash line and any Tell |
+| `0x0B04_0000` buddy add | a buddy request to the named player | none |
+| `0x0B05_1000` guild invite | a guild invitation to the named player | none |
+| `0x0B05_3001` ignore add | the named player added to the ignore list | none |
+| `0x0B05_3002` ignore remove | the named player removed from the ignore list | none |
+| `0x0B05_1006` Guild Say | the text to the guild channel | `eqoa.actions.chat` |
+| `0x0B05_100B` guild message of the day | the text shown to every member | `eqoa.actions.chat` |
+| `0x0B05_1009` Guild Create | a new guild under the typed name | `eqoa.actions.command` |
+| `0x0B0E_000A` alarm | the text run as the `/alarm` command | `eqoa.actions.command` |
+| `0xA1xx_xxxx` GM command edit (`admin::is_command`) | the text to the GM part's `DoText` | `eqoa.actions.command` |
+| `0x0B0B_1002` report a player | a report carrying the chat log | refused `permission_denied` (a report route) |
+| `0x7E30_0001` / `0x7E30_0002` community marker name / note | the player's own suggestion to the community map service | refused `unsupported` |
+| any other purpose | not listed | refused `unsupported` |
+
+Two rows are my calls, for the lead:
+- **Guild Create** is classed as a command. It creates a guild on the server, the irreversible guild
+  operation the guild commands perform, and it names no player.
+- **The guild message of the day** is classed as chat, because it is text broadcast to every member.
+
+### Label strings
+
+- New line in Mods & Addons for any mod granted `eqoa.actions.input_text` (directly or by `eqoa.actions.*`):
+  **`Text boxes: can type into and submit the game's open text boxes`**. `input_text` no longer appears inside
+  the `Actions: can act on its own (...)` list.
+- Spec row `input_text(...)` rewritten to say the same and to give the table's rules.
+
+### Existing tests whose assertion changed
+
+None.
+
+### What a player would notice
+
+- A third-party package can no longer borrow a bundled mod's name, location or files to have wider
+  permissions accepted silently.
+- Turning a mod on or off in an older build no longer drops the permission records of the other mods.
+- A mod needs the chat permission to type into Guild Say or the guild's message of the day, and the command
+  permission for Guild Create, the alarm or a GM command box. It can never fill the player-report or
+  community-marker boxes, or any box not listed.
+- Mods & Addons says plainly that a mod can type into and submit the game's open text boxes.
+
+### Gates
+
+- Focused, with the disc (`--only round,wasm,footprint,paths --filter round7`): **104 passed, 0 failed, 1 SKIP**
+  (`round7b_without_adapter_is_an_explicit_skip`, deliberate); wasm, footprint (no budget change, no upstream
+  line), paths PASS. The support-table comparison passes: the surface did not change, so the reference files
+  were not regenerated.
+- GitHub CI: CI4_PLACEHOLDER
+
+### Not verified
+
+- No live client: no real Guild Say, alarm, GM command or report box filled by a mod, and no real update of
+  a bundled package.
+- The missing-file case is caught by two checks (the file count and the byte comparison); there is no
+  control that removes only one of them.
