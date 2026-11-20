@@ -693,6 +693,11 @@ fn round_3_stage_a_options_toggle_and_get() {
             .iter()
             .any(|(_, label)| label == "Test Option")
     );
+    assert_eq!(
+        crate::fork_ext::bindpage::dispatch_keypress("7"),
+        Some(("my_custom_mod".into(), "act".into())),
+        "the key fires while the mod is on"
+    );
     let rows_before = crate::fork_ext::bindpage::extra_rows();
     super::options::set_addon_enabled("my_custom_mod", false);
     crate::fork_ext::bindpage::set_addon_enabled("my_custom_mod", false);

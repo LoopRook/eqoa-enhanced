@@ -235,8 +235,8 @@ mod tests {
         bindpage::reset_in_memory();
         bindpage::register("eqoa_stats_box", "toggle", "b", "Toggle Stats Box");
         assert!(bindpage::set_key("eqoa_stats_box", "toggle", "f10"));
-        bindpage::register("third_party", "open", "f11", "Open");
-        assert!(bindpage::set_key("third_party", "open", "f12"));
+        bindpage::register("third_party", "open", "8", "Open");
+        assert!(bindpage::set_key("third_party", "open", "7"));
         let mut native = binds();
         let jump = crate::binds::row_named("jump").unwrap();
         native.bind_key(jump, "f6");
@@ -266,18 +266,23 @@ mod tests {
             testing::put(file, &std::fs::read(root.join(file)).unwrap());
         }
         bindpage::register("eqoa_stats_box", "toggle", "b", "Toggle Stats Box");
-        bindpage::register("third_party", "open", "f11", "Open");
+        bindpage::register("third_party", "open", "8", "Open");
         assert_eq!(
             bindpage::get_key("eqoa_stats_box", "toggle").as_deref(),
             Some("f10")
         );
         assert_eq!(
             bindpage::get_key("third_party", "open").as_deref(),
-            Some("f12")
+            Some("7")
         );
         assert_eq!(binds().key(jump), Some("f6"));
         assert_eq!(bindpage::dispatch_keypress("b"), None);
-        assert_eq!(bindpage::dispatch_keypress("f11"), None);
+        assert_eq!(bindpage::dispatch_keypress("8"), None);
+        assert_eq!(
+            bindpage::dispatch_keypress("7"),
+            Some(("third_party".into(), "open".into())),
+            "the saved key of the other mod works"
+        );
         assert_eq!(
             bindpage::dispatch_keypress("f10"),
             Some(("eqoa_stats_box".into(), "toggle".into()))
