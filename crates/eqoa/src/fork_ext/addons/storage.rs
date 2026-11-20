@@ -421,6 +421,7 @@ impl Storage {
         self.update_enable_state(Some((key, enabled)), None)
     }
 
+    /// The authority each enable was given under; none (adopt once) when unavailable or stale.
     pub(super) fn disclosures(&self) -> Result<BTreeMap<String, Disclosure>, String> {
         if self.root.is_none() {
             return Ok(BTreeMap::new());
@@ -487,19 +488,46 @@ impl Storage {
             .join("state.json"))
     }
 
+    /// The disclosures beside `state.json` (fork round 7c, fix round 3): `state.json` keeps exactly the two
+    /// keys 0.6.0 and earlier write and accept, so a player can go back to an older build and keep every
+    /// enable; the authority each enable was given under lives in this fork-owned file.
+    fn disclosures_path(&self) -> Result<PathBuf, String> {
+        Ok(self.root.as_ref()
+            .ok_or("addon configuration directory unavailable")?
+            .join("disclosures.json"))
+    }
+
     fn write_registry(&self, registry: &Registry) -> Result<(), String> {
-        let mut value = json!({"schemaVersion": 1, "enabled": registry.enabled});
-        if !registry.disclosures.is_empty() {
-            value["disclosures"] = Json::Object(registry.disclosures.iter()
-                .map(|(id, disclosure)| (id.clone(), disclosure.to_json())).collect());
+        write_json(&self.registry_path()?, &json!({"schemaVersion": 1, "enabled": registry.enabled}))?;
+        // The enabled flags the records were written with: when an older build rewrites state.json, the
+        // records no longer describe it and read as absent (each enabled package adopts its disclosure once).
+        let beside = json!({
+            "schemaVersion": 1,
+            "enabled": registry.enabled,
+            "disclosures": Json::Object(registry.disclosures.iter()
+                .map(|(id, disclosure)| (id.clone(), disclosure.to_json())).collect()),
+        });
+        write_json(&self.disclosures_path()?, &beside)
+    }
+
+    /// The records in `disclosures.json`, when that file is readable and was written with `enabled`; none
+    /// otherwise (missing, unreadable or stale), never an error.
+    fn disclosures_beside(&self, enabled: &serde_json::Map<String, Json>) -> BTreeMap<String, Disclosure> {
+        let Ok(Some(value)) = self.disclosures_path().and_then(|path| read_json(&path)) else {
+            return BTreeMap::new();
+        };
+        if value["schemaVersion"].as_u64() != Some(1) || value["enabled"].as_object() != Some(enabled) {
+            return BTreeMap::new();
         }
-        write_json(&self.registry_path()?, &value)
+        parse_disclosures(&value["disclosures"]).unwrap_or_default()
     }
 
     fn registry(&self) -> Result<Registry, String> {
         let Some(value) = read_json(&self.registry_path()?)? else {
             return Ok(Default::default());
         };
+        // Two keys, as 0.6.0 writes; a third `disclosures` key is what an earlier build of this branch wrote,
+        // read once and moved beside the file on the next write.
         let object = value
             .as_object()
             .filter(|o| o.len() == 2 || (o.len() == 3 && o.contains_key("disclosures")))
@@ -517,18 +545,21 @@ impl Storage {
                 return Err("addon enabled state must be boolean".into());
             }
         }
-        let disclosures = if let Some(value) = object.get("disclosures") {
-            value.as_object().ok_or("invalid addon disclosure registry")?.iter()
-                .map(|(id, value)| {
-                    Disclosure::from_json(value).map(|record| (id.clone(), record))
-                        .ok_or_else(|| format!("invalid addon disclosure for {id}"))
-                })
-                .collect::<Result<_, _>>()?
-        } else {
-            BTreeMap::new()
+        let disclosures = match object.get("disclosures") {
+            Some(value) => parse_disclosures(value).unwrap_or_default(),
+            None => self.disclosures_beside(enabled),
         };
         Ok(Registry { enabled: enabled.clone(), disclosures })
     }
+}
+
+fn parse_disclosures(value: &Json) -> Result<BTreeMap<String, Disclosure>, String> {
+    value.as_object().ok_or("invalid addon disclosure registry")?.iter()
+        .map(|(id, value)| {
+            Disclosure::from_json(value).map(|record| (id.clone(), record))
+                .ok_or_else(|| format!("invalid addon disclosure for {id}"))
+        })
+        .collect()
 }
 
 fn copy_dir_bounded(
