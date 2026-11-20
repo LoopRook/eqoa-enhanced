@@ -655,3 +655,120 @@ SKIP.
   usual.
 - Single-item Sell is still offered only while a merchant session is open (unchanged; a decision is
   pending).
+
+### Owner test fix 1, continued: the switch (option a), the window finding 14 hides, single-item Sell
+
+Develop merged again first (8d22cb7b; docs only).
+
+#### What the owner saw after selling (finding 14, checked)
+
+The owner calls it "the text window, where you select buy or sell". That is the game's merchant window:
+mode 10, `VIWndMerchant`, which opens on its menu, the greeting with Buy, Sell and Leave (`merchant.rs:1-8`,
+`:115`). No separate NPC dialog precedes it. In run `20261120-123924` the only packets logged are five
+`0x00B7` (the merchant list), the second "left to the game" and the next arriving "in mode 10" (log lines
+253-258, 304-307). A mod's `talk` to a merchant sends `0x004C` and is answered by `0x00B7` directly. Both
+finding 14 tests assert mode stays 0 at each re-sent `0x00B7`.
+
+#### The switch: option (a), owner decision ("an emergency override")
+
+`fork_ext/addons/window_takeover.rs` (6b0a34d6):
+- Turning "Use the game's windows" on releases only `scope = "all"` claims (`release_claims_where`) and
+  stops only the batches that hold or used one.
+- While it is on, `takeover(kind, {scope="all"})` returns `unavailable` ("the player is using the game's
+  windows: no mod replaces them"). Helper claims (`own`) are neither released nor refused.
+- `windows.taken` is unchanged.
+- The loot and merchant list graces no longer depend on the switch.
+- Zoning still releases every claim.
+
+Spec (takeover row and stop rules), design (Mods & Addons section) and FORK-UPDATE-NOTES reworded.
+FORK-UPDATE-NOTES now reads: "**Use the game's windows** is an emergency override: it turns off every mod
+that replaces a whole game window, and the game's own windows come back. Mods that only help (Bag Viewer's
+selling, Take all, Auto-loot) keep working."
+
+New tests:
+- `round7c_switch_on_leaves_helper_claims_working`: switch on, then an `all` claim is refused `unavailable`;
+  an `own` claim, a talk answered hidden and a two-sale batch run to `completed 2`, with mode 0 at every
+  merchant list.
+- `round7c_switch_on_mid_batch_leaves_a_helper_claim_batch_running`: switch on after the first sale; the
+  `own` claim is kept and the batch completes with one `completed` result.
+
+Negative controls (restored with `git checkout` of the file):
+
+| Mutation | Failing line |
+|---|---|
+| S1: the block applies to every scope again | `items_tests.rs:4606 a helper claim is not`; `native_tests.rs:320 a helper claim while the switch is on` |
+| S2: the release applies to every scope again | `native_tests.rs:308 the helper claim stays`; `items_tests.rs:4648 the helper claim is kept` |
+| S3: no block at all | `items_tests.rs:4606 a full replacement is refused`; `native_tests.rs:318 assertion failed!` (the `all` reclaim while on) |
+
+Existing assertions changed (before, after, why). Every change is the claim's scope, now `all`, because the
+switch now governs only full replacements; the expected outcome stays the same unless stated:
+
+| Test | Before | After |
+|---|---|---|
+| `round7c_native_switch_releases_every_holder_and_prevents_reclaims` | `own` claims on loot, merchant and bank all released; an `own` reclaim refused `unavailable` | `all` claims on loot and merchant released; an `own` claim on bank kept; an `all` reclaim refused `unavailable`; an `own` claim accepted while on; an `all` claim accepted again after switching off |
+| `round7c_game_windows_switch_is_saved_and_stops_a_claimed_batch` | `takeover('merchant')` | `takeover('merchant', {scope='all'})` from a manifest declaring `replaces` (outcome unchanged: stopped, the sent sale counted) |
+| `round7c_switch_stops_batch_that_reaches_a_claim_by_talking` (M1) | `takeover(claim)` | `takeover(claim, {scope='all'})` (outcome unchanged) |
+| `round7c_switch_counts_an_already_sent_step_after_its_late_reply`, `round7c_switch_discards_a_staged_unsent_step` (M2, shared fixture) | `takeover('merchant')` | `takeover('merchant', {scope='all'})` (outcomes unchanged) |
+
+#### Single-item Sell near a merchant (owner decision)
+
+Bag Viewer Lua only (`modules/bags.lua`, 84c9a590); no new API.
+- Sell 1 and Sell stack are listed for every pack item.
+- **Merchant window open** (the game's, or the mod's hidden one): sells through it, as before.
+- **Merchant in the zone scan, no window:** the click talks to the nearest merchant through the same hidden
+  session Sell junk uses (`open_talk_npc("merchant", …)`, the `own` claim), then sells.
+- **Merchant out of reach:** greyed "too far from the merchant" with try-anyway, as Deposit is.
+- **No merchant in the scan:** both greyed "no merchant nearby".
+
+The result line reads "Sell 1: …" / "Sell stack: …". `bundled-mods/SOURCE.txt` was refreshed with
+`tools/update_bundled_manifest.py` (only the `bags.lua` line). This changes the shipped Bag Viewer files.
+`round7c_bundled_exemption_only_for_the_exact_shipped_package`, `round7c_shipped_bundled_package_adopts_its_own_wider_grants`
+and `round7c_bundled_packages_keep_their_enabled_disclosures` pass against the new files.
+
+Test `round7c_bag_viewer_sells_single_items_near_a_merchant` (bag_viewer_tests; it prints SKIP without a
+GPU):
+- With no merchant in the zone, both entries are greyed "no merchant nearby".
+- Sell 1 of a potion and Sell stack of three pelts with no window open: each sends a talk, the reply stays
+  hidden (mode 0), the sale goes out, and the list the server answers with stays hidden (mode 0). The result
+  line starts with the row's name, and the claim is released afterwards.
+- With the game's merchant window open (the player's talk, mode 10): Sell 1 sells through it, no claim is
+  made, and mode stays 10.
+- Walked out of the scan's radius: greyed "no merchant nearby".
+- Red on the old Lua: `bag_viewer_tests.rs:4676 Sell 1 is offered`.
+
+| Negative control | Failing line |
+|---|---|
+| B1: always sell directly | `bag_viewer_tests.rs:4693 Sell 1 talks to the merchant first` |
+| B2: never grey for no merchant | `bag_viewer_tests.rs:4675 Sell 1 with no merchant near` |
+| N2 (finding 14's grace off) | `bag_viewer_tests.rs:4702 the list the server answers the sale with stays hidden left: 10 right: 0` (and `items_tests.rs:4522` in the finding 14 test) |
+
+FORK-UPDATE-NOTES: "**Bag Viewer sells single items near a merchant.** Sell 1 and Sell stack work whenever a
+merchant is in reach: with no merchant window open, Bag Viewer talks to the merchant for you and sells
+without opening the game's window. After a sale the game's merchant window no longer pops up."
+
+#### Timing test seen failing during this work
+
+`round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame` (round 6.5) failed once locally here (4.1
+creature-list calls a second, cap 4.0) while another build shared the PC. Run alone twice with each Bag
+Viewer version:
+- this change: 0.00 and 3.77;
+- the committed old `bags.lua`: 4.09 (failed) and 3.51.
+
+It depends on load, not on this change; see the CI note above.
+
+#### Gates
+
+- Focused, with the disc (`--only round,wasm,footprint,paths --filter round7 round65 bag_viewer bundled`):
+  **266 passed, 0 failed, 1 ignored, 4 SKIP lines**: the deliberate no-adapter test, and three bundled UI
+  picture comparisons with no reviewed goldens (unchanged from before). wasm, footprint and paths PASS. No
+  upstream path changed. The API surface is unchanged (the support-table comparison passes).
+- GitHub CI: CI_B_PLACEHOLDER
+
+#### What the owner should retest
+
+- With **Use the game's windows** on: Bag Viewer's Sell junk, Take all and Auto-loot work, and no game
+  window appears for them.
+- Selling one item or a stack from Bag Viewer's item menu, standing near a merchant with no window open: no
+  merchant window during or after.
+- The same with the merchant's window open after talking to them yourself: the sale goes through that window.
+- Away from merchants: Sell 1 and Sell stack are greyed with "no merchant nearby".
