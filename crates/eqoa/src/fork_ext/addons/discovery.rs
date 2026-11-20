@@ -766,6 +766,14 @@ fn parse_native_manifest(
             return;
         }
     };
+    if extensions.replaces.iter().any(|kind| super::window_kinds::is_window(kind))
+        && !super::native::capability_grants(&requested_capabilities, "eqoa.windows.takeover")
+    {
+        ctx.add_diagnostic(
+            manifest_path.to_path_buf(),
+            "Manifest 'replaces' lists game windows without the eqoa.windows.takeover capability",
+        );
+    }
 
     // Enabled
     let initially_enabled = match raw.get("enabled") {

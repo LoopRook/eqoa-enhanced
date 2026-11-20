@@ -859,13 +859,14 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
 
 /// The windows a manifest's `replaces` names, by the game's own window titles: first those this build can
 /// replace, then (a mod written for a later build) those it cannot replace yet.
-fn replacement_labels(replaces: &[String]) -> [Option<String>; 2] {
-    let (mut now, mut later) = (Vec::new(), Vec::new());
+fn replacement_labels(replaces: &[String], can_takeover: bool) -> [Option<String>; 3] {
+    let (mut now, mut later, mut hud) = (Vec::new(), Vec::new(), Vec::new());
     for kind in replaces {
         if super::visibility::is_hud_disclosure(kind) {
             let label = if kind == "hud.target" { "Target frame" } else { kind };
-            if !now.contains(&label) {
-                now.push(label);
+            let list = if can_takeover { &mut now } else { &mut hud };
+            if !list.contains(&label) {
+                list.push(label);
             }
             continue;
         }
@@ -873,6 +874,9 @@ fn replacement_labels(replaces: &[String]) -> [Option<String>; 2] {
             continue;
         };
         let list = if super::window_takeover::TakeoverKind::parse(kind).is_ok() {
+            if !can_takeover {
+                continue;
+            }
             &mut now
         } else {
             &mut later
@@ -884,6 +888,7 @@ fn replacement_labels(replaces: &[String]) -> [Option<String>; 2] {
     [
         (!now.is_empty()).then(|| format!("Replaces game windows: {}", now.join(", "))),
         (!later.is_empty()).then(|| format!("Not replaceable in this version: {}", later.join(", "))),
+        (!hud.is_empty()).then(|| format!("Replaces HUD: {}", hud.join(", "))),
     ]
 }
 
@@ -899,7 +904,8 @@ pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec
     };
     let mut lines = Vec::new();
     lines.extend(autonomous_action_label(caps));
-    lines.extend(replacement_labels(&addon.extensions.replaces).into_iter().flatten());
+    let can_takeover = super::native::capability_grants(caps, "eqoa.windows.takeover");
+    lines.extend(replacement_labels(&addon.extensions.replaces, can_takeover).into_iter().flatten());
     if declares_dialog_actions(caps) {
         lines.push("Can answer NPC dialogs".into());
     }
@@ -2475,17 +2481,18 @@ mod tests {
 
     #[test]
     fn round7c_manager_labels_come_from_manifest_declarations() {
-        assert_eq!(replacement_labels(&[]), [None, None]);
+        assert_eq!(replacement_labels(&[], true), [None, None, None]);
         assert_eq!(
-            replacement_labels(&["bank".into(), "spellbook".into(), "loot".into(), "bank".into()]),
+            replacement_labels(&["bank".into(), "spellbook".into(), "loot".into(), "bank".into()], true),
             [
                 Some("Replaces game windows: Bank, Loot".into()),
-                Some("Not replaceable in this version: Abilities".into())
+                Some("Not replaceable in this version: Abilities".into()),
+                None,
             ]
         );
         assert_eq!(
-            replacement_labels(&["hud.target".into()]),
-            [Some("Replaces game windows: Target frame".into()), None]
+            replacement_labels(&["hud.target".into()], true),
+            [Some("Replaces game windows: Target frame".into()), None, None]
         );
         assert!(declares_dialog_actions(&[
             "eqoa.actions.dialog_answer".into()

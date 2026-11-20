@@ -176,7 +176,9 @@ fn round7c_replaces_accepts_game_windows_and_reports_any_other_name() {
         ]
     );
     std::fs::remove_dir_all(temp.0.join("later_build")).unwrap();
-    package(&temp.0, "views_only", json!({"replaces": ["inventory"]}));
+    package(&temp.0, "views_only", json!({
+        "capabilities": ["eqoa.windows.takeover"], "replaces": ["inventory"]
+    }));
     assert_eq!(
         lines(&one(&temp.0)),
         ["Not replaceable in this version: Inventory"]
