@@ -4456,3 +4456,45 @@ fn round7c_game_windows_switch_round_trips_through_the_settings_store() {
     assert_eq!(after_off, format!("{seed}use_game_windows=off\n"), "one switch line, the others kept");
     assert!(!read_off, "the switch reads back off after a restart");
 }
+
+/// Owner test fix 1 (finding 14): the server answers each sale in the mod's hidden merchant session with the
+/// merchant's list again. That list stays hidden while the mod's sale waits for it; a list no sale of the
+/// mod's waits for (the player talking to that merchant themselves) shows the game's window.
+#[test]
+fn round7c_merchant_list_after_a_hidden_sale_stays_hidden() {
+    use crate::fork_ext::addons::{action_broker, native_events, window_takeover::{self, TakeoverKind}};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    let host = r65fix_host(&["eqoa.actions.*", "eqoa.windows.takeover", "eqoa.inventory.get"]);
+    let mut p = r65fix_world();
+    let mut a = potion();
+    a.key = 101;
+    a.equip_slot = -1;
+    let mut b = gem();
+    b.key = 102;
+    b.equip_slot = -1;
+    p.dump.inventory = list(&[a, b]);
+    p.forge_snapshot(None);
+    host.execute("assert(eqoa.windows.takeover('merchant')); assert(eqoa.actions.talk(9002, {kind = 'merchant'}))").unwrap();
+    p.bags_broker_tick();
+    apply(&mut p, opcode(0x00B7, shop_bytes(9002, 90, 110, &[sword()], "Hello")));
+    assert_eq!(p.mode, 0, "the mod's own talk is answered hidden");
+    assert!(window_takeover::is_hidden_active(TakeoverKind::Merchant));
+    native_events::dispatch(&host).unwrap();
+    p.forge_snapshot(None);
+    for item in 1..=2 {
+        host.execute(&format!("local inv = assert(eqoa.inventory.get()); assert(eqoa.actions.sell(inv.items[{item}].ref, 1))")).unwrap();
+        p.bags_broker_tick();
+        assert!(p.npcw.shop.pending, "sale {item} went out");
+        apply(&mut p, opcode(0x00B7, shop_bytes(9002, 90, 110, &[sword()], "Hello")));
+        assert_eq!(p.mode, 0, "the list sale {item} is answered with stays hidden");
+        assert!(window_takeover::is_hidden_active(TakeoverKind::Merchant), "the hidden session goes on");
+        native_events::dispatch(&host).unwrap();
+        p.forge_snapshot(None);
+    }
+    // control: no sale of the mod's waits; the player talks to the merchant themselves
+    apply(&mut p, opcode(0x00B7, shop_bytes(9002, 90, 110, &[sword()], "Hello")));
+    assert_eq!(p.mode, 10, "the player's own talk shows the game's window");
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+}
