@@ -287,13 +287,16 @@ pub(crate) fn forget_switch_for_test() {
     USE_GAME_WINDOWS.with(|value| value.set(None));
 }
 
-/// The player's "Use the game's windows" switch: saved with the fork's settings. Turning it on releases every
-/// claim and stops each running batch that worked through a released claim, as its Stop button would.
+/// The player's "Use the game's windows" switch, an emergency override for full replacements: saved with the
+/// fork's settings. It governs only `scope = "all"` claims (owner, 2026-11-20, option a): turning it on releases
+/// every `all` claim and stops each running batch that worked through one, as its Stop button would, and while
+/// it is on an `all` claim is refused `unavailable`. Helper claims (`own`, hiding only the sessions the mod
+/// itself opened) are untouched.
 pub(crate) fn set_use_game_windows(on: bool) {
     USE_GAME_WINDOWS.with(|value| value.set(Some(on)));
     save_switch(on);
     if on && has_activity() {
-        let released = release_claims("released by the player", true);
+        let released = release_claims_where("released by the player", |scope| scope == TakeoverScope::All);
         super::action_broker::stop_batches_of_released_claims(&released);
     }
 }
@@ -304,10 +307,10 @@ pub(crate) fn takeover(
     kind: TakeoverKind,
     scope: TakeoverScope,
 ) -> std::result::Result<(), (&'static str, String)> {
-    if use_game_windows() {
+    if scope == TakeoverScope::All && use_game_windows() {
         return Err((
             "unavailable",
-            "the player is using the game's windows".into(),
+            "the player is using the game's windows: no mod replaces them".into(),
         ));
     }
     with_state_mut(|s| {
@@ -374,20 +377,18 @@ pub(crate) fn release_vm(vm: u64) {
 }
 
 pub(crate) fn release_all() {
-    let _ = release_claims("zoning", false);
+    let _ = release_claims_where("zoning", |_| true);
 }
 
-/// Releases every claim; returns who held what.
-fn release_claims(reason: &'static str, clear_grace: bool) -> Vec<(u64, TakeoverKind)> {
+/// Releases every claim whose scope `which` selects; returns who held what.
+fn release_claims_where(reason: &'static str, which: impl Fn(TakeoverScope) -> bool) -> Vec<(u64, TakeoverKind)> {
     with_state_mut(|s| {
-        if clear_grace {
-            s.grace_loot = None;
-            s.grace_merchant = None;
-        }
         let mut released = Vec::new();
         for kind in TakeoverKind::ALL {
             let idx = kind as usize;
-            if let Some(holder) = s.holders[idx].take() {
+            if s.holders[idx].as_ref().is_some_and(|h| which(h.scope))
+                && let Some(holder) = s.holders[idx].take()
+            {
                 s.pending_opens[idx] = None;
                 s.pending_close[idx] = Some(reason);
                 released.push((holder.vm, kind));
@@ -727,14 +728,14 @@ pub(crate) fn end_session_for_vm(vm: u64, kind: TakeoverKind) {
             && s.hidden[idx].vm == vm
             && s.hidden[idx].scope == TakeoverScope::Own
         {
-            if kind == TakeoverKind::Loot && !use_game_windows() {
+            if kind == TakeoverKind::Loot {
                 s.grace_loot = Some(ListGrace {
                     target_id: s.hidden[idx].target_id,
                     until: Instant::now() + LIST_GRACE,
                     player_asked: false,
                 });
             }
-            if kind == TakeoverKind::Merchant && s.hidden[idx].relist_owed && !use_game_windows() {
+            if kind == TakeoverKind::Merchant && s.hidden[idx].relist_owed {
                 s.grace_merchant = Some(ListGrace {
                     target_id: s.hidden[idx].target_id,
                     until: Instant::now() + LIST_GRACE,
