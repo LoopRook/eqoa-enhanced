@@ -585,3 +585,78 @@ zero-allocation key path, H3 cancel/save.
 - Local with the disc: `--filter round7e_ fork_ext:: options:: settings:: bindpage:: binds:: play::fork_hooks::`: 1121 passed,
   0 failed, 26 ignored (unrelated SKIPs); wasm, footprint, paths PASS. CI for this and the next section runs once on the final
   commit (see Owner request 1).
+
+
+# Owner request 1: a Controls key that opens the Mods & Addons window (default F10)
+
+Separate commit: `feat(input): a Controls key (default F10) opens and closes the Mods & Addons window`. Fork-owned files
+only (`fork_ext/bindpage.rs`, `fork_ext/addons/{input,runtime,mod}.rs`, tests, notes); **no upstream line**; footprint PASS.
+
+## What it is
+
+- A row **Mods & Addons** on Controls, beside the mod-key rows, default key **F10**, held in one constant
+  (`bindpage::MANAGER_DEFAULT_KEY`; the row's id is `MANAGER_ADDON`/`MANAGER_ID` = `enhanced`/`mods_addons`).
+- It IS a mod binding like any other (`MOD_BINDS`), that no mod owns: so every rule of mod keys applies by construction: the
+  one conflict rule, swap/free notes, never-a-mod-key list, `mod-keys.opt`, Options cancel (`session_begin/cancel`), the
+  default that never takes a key in use, resolve order. It exists with no mod enabled because the runtime registers it as it
+  starts (`Runtime::from_env` -> `register_manager_row`); tests that never build a runtime are unaffected.
+- The key path: `Runtime::route_key` asks `input::manager_key_pressed` first (plain play, no menu/editor has the keyboard, not
+  a repeat or synthetic, the row's key held with its modifiers: a lock and a compare, **no allocation**; only on a match does
+  it make a name and ask `bindpage::manager_wins`, the same `firing_press` rule as for a mod). A win calls
+  `addons::request_toggle()`; the frame (`Runtime::apply_requests`, the same place the Options row's open request is taken)
+  opens the window, or closes it when it is open. A modified combination on the row is consumed like any mod's
+  (`owns_press` sees the row among the holders); a bare key (F10) is not.
+- **The existing guarantees of the Options route are untouched**: the Options row still uses `request_open()` (which also
+  closes Options and is what `play.rs`'s test about HUD elements and mode 34 covers: `Play`'s
+  `health_redraw` test still passes); the key path uses a different flag (`request_toggle`) and touches nothing else, because the
+  world is already showing.
+
+## F10: checked, as asked
+- Default rows (`binds.rs ROWS`): F1 Controls (`controls`), F5..F8 group, F9 art; no row has F10. F3/F11/F12 are
+  `binds::reserved`. Bundled mods' `default_key`: stats box `b`, map search `f2` and `f4`, bag viewer none, no other bundled
+  mod binds a key. F10 is free. A player whose saved layout already has F10 on a game control or macro, or a mod key (a mod
+  that sorts first by name), gets the row empty and the help says who has it (tests below). Existing players updating: F10
+  applies unless taken, because nothing is saved for the row until they choose.
+- **Old builds read the file safely.** 0.6.0 (`git show v0.6.0:crates/eqoa/src/fork_ext/bindpage.rs`): `load_saved_key`
+  looks up ONLY `mod.<addon>.<id>=` for a mod it has registered (`text.lines().find_map(|line| line.strip_prefix(&prefix))`);
+  `mod.enhanced.mods_addons=` is never asked for, so it is ignored; `save_mod_bind` rewrites the file keeping every line that
+  is not the mod's own prefix, so the entry survives an old build's saves too. The file's format is unchanged.
+
+## The F10 caution (Windows system key): what the code shows, and what it cannot
+- **Delivered as an ordinary key press: yes.** winit 0.30.13 (`platform_impl/windows/keyboard.rs`, the `WM_KEYDOWN | WM_SYSKEYDOWN`
+  arm of `process_message`) builds a `KeyEvent` for `WM_SYSKEYDOWN` too (only Alt+F4 is excluded) and the logical key comes from
+  `vkey_to_non_char_key` (`keyboard_layout.rs:838 VK_F10 => Key::Named(F10)`); `binds::name_of` names it `f10`
+  (`binds.rs:1418`) and `key_of` maps it back (`binds.rs:1456`). The client's own table therefore already knows F10.
+- **Menu mode / swallowing the next key: NOT established from the code.** After dispatching the event, winit's
+  `public_window_callback_inner` (`event_loop.rs:1767-1771`) sets `result = DefWindowProc` for every `WM_SYSKEYDOWN` (so Alt+F4
+  and Alt+Space work), and `WM_SYSKEYUP` returns `DefWindowProc` only when the window has a native menu
+  (`event_loop.rs:1773-1778`). What Windows then does with F10 on a window with no menu bar (it may start the keyboard menu
+  loop on the system menu) cannot be read from this code; this client's windows have no native menu. **The owner should test:**
+  press F10 in the world: the manager should open; press F10 again: it should close; then check that the next key (Space) still
+  works at once and that nothing flashes at the window's title. If it ever sticks, rebind the row (the note says so).
+
+## Tests (`round7e_mgr1_*`, real key path as far as a test reaches)
+Entry: `Runtime::scripted_key_based` (the `route_key` path a window key takes) and the real Controls page; the manager's
+open flag through `Runtime::apply_requests` and `manager_open` (the draw itself needs a graphics device).
+- a fresh install gives F10 and F10 in the world opens the manager, F10 again closes it, F9 does nothing; the row exists with
+  no mod enabled (`extra_rows() == 1`); the Options route's open request is not used;
+- not fired while not plain play (a menu) or while text capture is active (chat or an editor); fires in plain play;
+- F10 on a game row, or a macro: the row starts empty and names the control; a mod default sorts by name (a mod called `alpha`
+  has F10 first, `zeta` loses it to the row);
+- giving the row F9 (Art's) swaps like a mod key (Art takes F10); F9 now opens it, F10 does not; Alt+Enter and Ctrl+C are refused
+  as for a mod (F3/F11/F12 are refused by the page itself);
+- a saved key a game control has is kept, marked `!`, and does nothing at press time;
+- **no key set: 0 allocations over 300 presses of F10 and another key; with F10 set, other keys: 0 allocations**; a key set
+  survives a restart (`mod.enhanced.mods_addons=f9` in the file, reloaded) and an Options cancel puts it back (F10 -> F9 restored);
+- the existing zero-addon test (`performance_busy_world_zero_addons_...`) now registers the row and calls the manager's key test in
+  its key loop: still 0 allocations.
+**Not covered:** `Runtime::draw` opening the real ImGui window (needs a device), a real keyboard, and F10's system-key behaviour above.
+
+## Negative controls (`R7E_BREAK=n`, one build, one run per n)
+n=11 (the manager key never asks): 3 `mgr1` tests fail (fresh install, swap, menu/chat); n=12 (plain play not checked): the
+menu/chat test fails; n=13 (the manager acts where the game has the key): `a_saved_key_a_game_control_has_is_marked_and_does_nothing`
+fails. For the owner-fix part of this branch the same build gives: n=1 (no mod owns a press): 9 tests fail; n=2 (the game never has an
+exact key): 21 tests fail; n=4 (bare keys consumed): `a_bare_mod_key_is_never_consumed...` fails.
+
+## Gates
+(see below)
