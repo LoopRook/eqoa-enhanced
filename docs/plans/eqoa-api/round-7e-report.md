@@ -328,3 +328,82 @@ restored with `git checkout -- crates`, status clean, no `brk` left).
   passed / 0 failed / 25 ignored (17 SKIP); full 3204 passed / 0 failed / 37 ignored (378 SKIP, no disc or GPU in
   CI); wasm, footprint, paths, player-release (20), tools (199) success. `ci_gates.py cleanup` run.
 - Not verified: the live client; real Shift, Ctrl, Alt, Cmd presses on a keyboard; layouts other than US.
+
+
+# Fix round 3 (recheck of 288353f2: items 3, 4, 5 of round 2 confirmed; the root of item 1 rejected)
+
+Commits: `test(input): fix round 3 tests first ...` (the tests and one test-only accessor, run on the old
+behaviour), `fix(input): the press decides ...`, two docs commits (spec, player note, corrected claims; the
+generated surface files), then this report. No new upstream line: `options.rs` stays +2/-0, footprint PASS.
+**The tests were run against the old behaviour first: all 8 failed for the intended reasons** (`hits = 1` where
+a mod fired together with a game control on a German and a UK layout and on the numpad, a Shift+7 capture
+accepted, release names `1/1+,!/!-` where `1/1+,1/1-` was due, `ctrl+u+,ctrl+u-` where `ctrl+u+,u-` was due,
+`shift+ctrl+u` not read as `ctrl+shift+u`, the key ring holding 128 events with no mod running).
+
+## The design (binding decision A, B, C) and what it is in the code
+
+- **A. Press time is exact.** `input.rs` `route_mod_key_based` has the event's own facts: the logical key, its
+  place on the keyboard (`base`), the modifiers. `press_names` works out the name the game will act on for this
+  press exactly as `App::key_name` does (viewer.rs): the combo when the game has that combo bound
+  (`Binds::combo_bound`), else the plain name from the logical key, which is layout-aware. The `input.key` event
+  carries it as a new field `game_key` (additive; surface files updated by hand to match the generator, round 7).
+  The bind callback asks `bindpage::fires(addon, id, combo, game_key)`, which decides "the game acts on this press"
+  from `game_key` (`owner_of`: a row or a macro) with no table. So on a German layout Shift+7 (typing `/`,
+  the default command key), a UK Shift+' (typing `@`), Ctrl+Numpad1 and Shift+Numpad1 with NumLock off (arriving as
+  `end`) are decided by what the event says. Tests drive synthetic events through `Runtime::scripted_key_based`.
+- **B. A capture is exact too.** The window's key reaches the mod runtime before the Controls page sees it, so the
+  press has already been seen: `route_mod_key_based` records what a modified press typed (`bindpage::learn`,
+  combo -> typed key, in memory) while any mod has a row, and the capture's conflict decision (refuse, swap or
+  free, note) uses it: `round7e_fix3_a_capture_uses_what_the_real_press_typed` (a German Shift+7 pressed, then
+  captured on a mod row: refused naming the command key; with no press seen the US table says `&` and the key is
+  accepted).
+- **C. A static rule only where no press exists.** `game_press` (the old function, now `parse_key`-based) is the
+  fallback for defaults, keys read from a file and the marks on Controls: learned combos first, then the key's
+  own name, or with Shift the US layout's character (`shifted`). Nothing is written to `mod-keys.opt` or any file,
+  no field was added to a saved file (`round7e_fix3_the_marks_use_what_presses_showed_and_nothing_is_written`).
+  **Plainly:** on a non-US layout that static rule can give a wrong or missing mark or refusal on Controls
+  until the key has been pressed once on this machine; it can never cause a double fire or a dead key at press time,
+  because press time does not use it. (The report's earlier line that another layout's Shift symbols are not known
+  to the client was false and is retracted above.)
+
+## Findings
+
+| # | Reproduced? | Fix | Tests and negative control (`R7E_BREAK=n`, same binary, failing line) |
+|---|---|---|---|
+| 1 A, B, C | yes (see the first run above) | as above | `round7e_fix3_a_german_shift_7...`, `..._a_uk_shift_quote...`, `..._the_numpad_with_numlock_off...` (Ctrl and Shift, with controls where the mod must fire: US Shift+7 typing `&`, UK `"`, Ctrl+Digit1), `..._a_capture_uses_what_the_real_press_typed`, `..._the_marks_use_what_presses_showed...`. n=1 alone passes (the press-time decision falls back to the static function, which has by then been taught by the same press: learning and the exact name agree); **n=1,2 (the press decision on the static guess and no learning): 5 fail** (`round7e_key_tests.rs` :34 x3, :418, :1201). n=2 (nothing learned): the capture test :418 and the marks test :1201 fail |
+| 2 MED | yes: the key ring held 128 events with no mod; a mod with nothing bound or listening did the naming and event work | `route_mod_key_based` returns when no VM subscribes to `input.key` and no editor has the keyboard (`native_events::interested`); `Runtime::route_key` returns first when no mod runs (`has_consumers`), nothing is held (`Capture::is_empty`) and no editor has the keyboard | `round7e_fix3_nothing_listening_means_no_key_work`: zero mods: 0 allocations over 600 key events and an empty key ring; one enabled mod with no key bound and no listener: 0 allocations; control with a listening mod: allocations seen. n=6 (listener check removed): :1178; n=7 (`route_key`'s early return removed): :1165 |
+| 3 MED | yes: `1/1+,!/!-` | `PRESSES` keeps the names of EVERY press (plain ones too) by its own name, and a release and a repeat use them, as `key_names` does (`key`, `combo`, `game_key` all press-time) | `round7e_fix3_a_release_is_named_as_its_press_even_when_unmodified`. n=3: :1108 |
+| 4 LOW | yes: `shift+ctrl+u` never matched; `ctrl+super+c` slipped through | `bindpage::parse_key` reads Super, Ctrl, Alt, Shift in any order; `normalize_key` is applied when a name is read (file, default, set_key, capture); `never_mod_key` and `game_press` use `parse_key`. A let-go key is forgotten before the "is anyone listening, is this plain play" checks, so a menu or ImGui having the keyboard no longer leaves it behind | `round7e_fix3_modifier_order_in_a_saved_name_does_not_matter`, `round7e_fix3_a_let_go_key_is_forgotten_wherever_it_went`. n=4 (no normalising): :1138; n=5 (forgotten only where the event is sent): :1128 |
+| 5 LOW | yes | corrected: see below | |
+
+Negative-control method as before (switch compiled in with a cached env read so the switch itself allocates
+nothing; `<exe> round7e_fix3 --test-threads=1` once per n; restored with `git checkout -- crates`, status clean).
+Controls 1 and 2 are the pair that matters: press-time exactness is the second line of defence behind learning,
+which is why n=1 alone passes; with both broken the table's wrong answers fail five tests.
+
+## Corrections (item 5)
+
+- Round 2 said `game_press` followed `App::key_name` "for every key and modifier". It guessed what Shift types from
+  a US table; the game uses the real event. The line is corrected in place, and so is the sentence "another
+  layout's Shift symbols are not known to the client either", which was false.
+- Round 2 said a focus loss "uses" the remembered combo. Focus loss CLEARS the record (the window sends no release);
+  corrected in place.
+- I wrote earlier that the surface/support-table test skips in CI. It does not: CI has an adapter and runs it
+  (`round7b_support_table_matches_the_running_client`). It failed on the first CI run of this round because the
+  `game_key` field was in the code but not yet in the hand-edited docs; the docs were then edited to match the
+  generator exactly. It still cannot run on this machine (no adapter), so the lead should still regenerate after
+  merging.
+
+## Gates (fix round 3)
+
+- Local with the disc (`EQOA_ISO`): `--filter round7e_ fork_ext:: options:: settings:: bindpage:: binds::
+  play::fork_hooks::`: 1033 passed, 0 failed, 26 ignored (unrelated SKIPs: no graphics adapter, symlink privilege,
+  Wereoxxs recordings, UI goldens); 0 SKIP among the `round7e_` tests. wasm, footprint, paths PASS.
+- CI run https://github.com/LoopRook/eqoa-enhanced/actions/runs/44721739876 on 95d86cc3: success. addons 621 passed /
+  0 failed / 25 ignored (17 SKIP); full 3213 passed / 0 failed / 37 ignored (378 SKIP, no disc or GPU in CI); wasm,
+  footprint, paths, player-release (20), tools (199) success; the support-table test ran and passed with the
+  hand-edited surface files. The run before it (44718774177, code at d16ba3ad, docs not yet committed) had failed
+  only that test, for the reason given under Corrections. `ci_gates.py cleanup` run.
+- Not verified: the live client; real keyboards on German or UK layouts, a real numpad (the layouts and the numpad
+  are tested with synthetic events carrying the logical key and the key's place that those keyboards send); the
+  App's `key_input` ordering, as before.
