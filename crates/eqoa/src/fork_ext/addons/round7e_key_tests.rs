@@ -593,6 +593,20 @@ fn round7e_fix_m5_a_mod_returning_from_disabled_is_checked_again() {
 }
 
 #[test]
+fn round7e_fix_m5_a_mod_returning_is_checked_against_the_game_too() {
+    reset();
+    let _alpha = bind("alpha", "u");
+    bindpage::set_addon_enabled("alpha", false);
+    // while it is off, a game control takes the key
+    let slot = row_named("bar1_slot1").unwrap();
+    capture(&mut ControlsPage::default(), slot, "u");
+    assert_eq!(settings::binds().key(slot), Some("u"));
+    bindpage::set_addon_enabled("alpha", true);
+    assert_eq!(mod_key_of("alpha"), "", "u is the game's now");
+    assert!(controls_text(ROWS.len()).join(" ").contains("Bar 1: slot 1"), "and the row says whose");
+}
+
+#[test]
 fn round7e_fix_m5_the_defaults_button_obeys_the_rule_for_every_mod_and_keeps_its_reason() {
     reset();
     let _alpha = bind("alpha", "space");

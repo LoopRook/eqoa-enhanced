@@ -316,10 +316,11 @@ fn enabled_index(binds: &[ModBind], nth: usize) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
-/// Whose key wins when several mods have it (rule 2): a saved choice before a
-/// default, then by addon and id.
-fn priority(b: &ModBind) -> (bool, &str, &str) {
-    (b.stored.is_none(), &b.addon_id, &b.id)
+/// Whose key wins when several mods have it (rule 2): by addon, then by id. (A saved
+/// key beating a default is settled where keys are worked out, `resolve`: a default
+/// is never given a key a saved one has, so the two never share one.)
+fn priority(b: &ModBind) -> (&str, &str) {
+    (&b.addon_id, &b.id)
 }
 
 /// The enabled mod bindings with `key`, the winner first.
