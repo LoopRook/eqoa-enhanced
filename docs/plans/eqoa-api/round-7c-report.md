@@ -570,3 +570,76 @@ None.
   a bundled package.
 - The missing-file case is caught by two checks (the file count and the byte comparison); there is no
   control that removes only one of them.
+
+## Owner test fix 1 (finding 14: the merchant window opens after selling)
+
+Owner's live test of 15163407 (develop with Parts C and E), switch off: "it opens the text window after
+selling ... also i can't sell individual items without that text box being open". Builder: Claude Opus 5.5.
+Develop merged first (a fast-forward to a3da75d8); `--filter round7` after it: 156 passed, the one
+deliberate SKIP, and only the new reproducing test failing.
+
+**Cause.** The "text window" is the game's merchant window (mode 10). In the owner's log (run of
+2026-11-20 12:39), one mod talk is followed by three merchant lists (`0x00B7`), the server answering each
+sale with the merchant's list again. The first was hidden ("answers the holder's own request"). The second
+was "left to the game (no request of the holder is waiting for this window)", so the window opened, and the
+third arrived "in mode 10". `decide_open` had a "listed again" rule for loot only; a re-sent merchant list
+with the pending open already consumed was declined. The code is the same as v0.6.0 (merchant takeover, round
+6.5): long-standing, not a round 7 regression. Round 7C's fixes don't change when a hidden merchant session
+closes or which open counts as the holder's.
+
+**Fix (e47e109e, fork code only, no upstream line; the `window_taken` hook already existed).**
+- When the mod's staged sale or buy is actually sent in its hidden merchant session (`npcw_requests`), the
+  session records that a list is owed (`note_merchant_transaction_sent`).
+- While the session runs, a list for its merchant with a list owed stays hidden (and clears the debt).
+- When the session ends (the mod's action or batch finished) with a list still owed, a 3 s grace holds that
+  list hidden and closes it again quietly, as loot's list after the mod's last take is. This covers the last
+  sale of a batch and a single `sell`, whose answer can follow the action's end.
+- A list with no sale or buy of the mod's owed is the player's own talk and shows the window.
+- The guard is not a note on the player's interact, as loot's is. The game's merchant interact
+  (`Play::interact_with_target`) has no fork hook, and adding one would be an upstream line. Known limit: a
+  player who talks to the same merchant within the 3 s after the mod's last sale, or while its sale is
+  unanswered, gets that list hidden.
+- **Bank:** not covered, and it should not need to be. The client handles a deposit or withdrawal reply as
+  `0x1250`/`0x1251`/`0x1253` (`bankplay.rs:105-130`), not as a new `0x124D`, and the owner's logs have no
+  bank session. Whether the live server ever re-sends `0x124D` could not be observed.
+
+**Tests (protocol-shaped: talk, `0x00B7`, the sale sent through the native send hook, the server's
+`InvTook`).**
+
+`round7c_merchant_list_after_a_hidden_sale_stays_hidden`: a talk answered hidden, then a two-sale batch as
+Sell junk does it.
+- The list answering sale 1 arrives while the batch runs: hidden, session still up.
+- The list answering sale 2 arrives after the batch ended the session: hidden.
+- Control: a later list with nothing owed shows the window (mode 10).
+
+`round7c_player_talk_to_the_mods_hidden_merchant_shows_the_window`: during the hidden session, a list with no
+sale owed shows the window.
+
+Red on the old code (0446ddd8): `the list sale 1 is answered with stays hidden left: 10 right: 0`.
+
+**Negative controls** (mutation, focused run, then `git checkout` of the file; status clean):
+
+| Mutation | Failing line |
+|---|---|
+| N1: in-session rule off | `items_tests.rs:4502 the list answering sale 1 stays hidden left: 10 right: 0` |
+| N2: no grace after the session ends | `items_tests.rs:4515 the list answering the last sale stays hidden after the session ended left: 10 right: 0` |
+| N3: guard off (accept regardless of a sale owed) | `items_tests.rs:4540 the player's own talk to that merchant shows the game's window left: 0 right: 10` |
+
+**Gates.** Focused `--filter round7` with the disc: 158 passed, 0 failed, 1 SKIP (the deliberate no-adapter
+test). wasm, footprint and paths PASS. The surface is unchanged (the support-table comparison passes).
+GitHub CI: OWNER1_CI_PLACEHOLDER
+
+**Left as it is (owner decisions pending, or out of scope):**
+- The switch and its scope.
+- Single-item Sell near a merchant with no window open (a Bag Viewer change).
+- Auto-loot's wording "the server did not open it (window busy)" when nothing was sent. It is Bag Viewer's
+  Lua (`bundled-mods/eqoa_bag_viewer/modules/bags.lua:1266`), not client text, so it is not changed here.
+
+**What the owner should retest (switch off).**
+- Bag Viewer's Sell junk with several junk items, near a merchant with no window open: the game's merchant
+  window must not appear during or after the sale, and the count must be right.
+- A single item sold while the merchant session is up: no window afterwards.
+- Talking to the merchant yourself (Square/Q) a few seconds after the mod's sale: the game's window opens as
+  usual.
+- With an open session, single-item Sell is still only offered while a merchant session is open (unchanged;
+  pending decision).
