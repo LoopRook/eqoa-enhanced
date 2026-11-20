@@ -572,6 +572,7 @@ impl WndOptions {
         self.saved = *o;
         self.saved_client = crate::settings::client();
         self.saved_binds = crate::settings::binds();
+        crate::fork_ext::bindpage::session_begin();
         self.edit = [(o.no_faction == 0) as u8, (o.no_loot == 0) as u8, o.auto_attack, o.vibration];
         self.sel = 0;
         self.page = -1;
@@ -740,6 +741,7 @@ impl WndOptions {
                 o.no_damage = s.no_damage;
                 crate::settings::set_client(self.saved_client);
                 crate::settings::set_binds(self.saved_binds.clone());
+                crate::fork_ext::bindpage::session_cancel();
                 ups.push(OptionsUp::Volume(0, o.fx_volume));
                 ups.push(OptionsUp::Volume(1, o.music_volume));
                 ups.push(OptionsUp::Apply);

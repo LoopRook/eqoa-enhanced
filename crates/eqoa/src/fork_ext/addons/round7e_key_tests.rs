@@ -665,3 +665,132 @@ fn round7e_fix_h1_the_windows_modifier_events_reach_the_key_naming() {
     )));
     assert_eq!(input::modifiers(), NONE);
 }
+
+// ---- H3: a cancelled Options session puts the mod keys back with the game's -----------------
+//
+// Through the real Options window: open on the Controls page (F1's way), move a key, leave
+// by Triangle twice (the page to the menu, the menu closed and put back) or by Save Changes.
+
+use crate::options::{GameOptions, WndOptions};
+use crate::pointer::testing::NullRaster;
+
+struct Session {
+    w: WndOptions,
+    o: GameOptions,
+    vui: vi::ui::Vui,
+}
+
+impl Session {
+    fn open() -> Session {
+        let vui = vui();
+        let o = GameOptions::default();
+        let mut w = WndOptions::default();
+        w.open_controls(&vui, &NullRaster, &o);
+        let mut s = Session { w, o, vui };
+        s.draw();
+        s
+    }
+    fn draw(&mut self) {
+        self.w.draw(&self.vui, &mut NullRaster, &self.o, &mut Vec::new());
+    }
+    fn press(&mut self, k: i32) {
+        let (mut cues, mut ups) = (Vec::new(), Vec::new());
+        self.w.key(&self.vui, &mut NullRaster, &mut self.o, k, 0, &mut cues, &mut ups);
+        self.w.release(k);
+        self.draw();
+    }
+    /// Walks to entry `row` of the Controls page, asks for a key there and gives it.
+    fn give(&mut self, row: usize, name: &str) {
+        for _ in 0..row {
+            self.press(key::DOWN);
+        }
+        self.press(key::CROSS);
+        self.w.capture_key(&self.vui, name, &mut Vec::new());
+        self.draw();
+        for _ in 0..row {
+            self.press(key::UP);
+        }
+    }
+    /// Triangle twice: the page to the menu, the menu closed with everything put back.
+    fn cancel(&mut self) {
+        self.press(key::TRIANGLE);
+        self.press(key::TRIANGLE);
+    }
+    /// Save Changes, Yes.
+    fn save(&mut self) {
+        for k in [key::TRIANGLE, key::DOWN, key::DOWN, key::CROSS, key::LEFT, key::CROSS] {
+            self.press(k);
+        }
+        for _ in 0..3 {
+            self.draw();
+        }
+    }
+}
+
+fn mod_file() -> String {
+    String::from_utf8(testing::kept(MOD_KEYS).unwrap_or_default()).unwrap()
+}
+
+#[test]
+fn round7e_h3_a_cancel_puts_back_what_a_game_row_took_from_a_mod() {
+    reset();
+    let _alpha = bind("alpha", "b");
+    let jump = row_named("jump").unwrap();
+    let mut s = Session::open();
+    s.give(jump, "b");
+    assert_eq!(settings::binds().key(jump), Some("b"));
+    assert_eq!(mod_key_of("alpha"), "space", "swapped");
+    s.cancel();
+    assert_eq!(settings::binds().key(jump), Some("space"), "Jump is back");
+    assert_eq!(mod_key_of("alpha"), "b", "and so is the mod's key");
+    assert!(!mod_file().contains("mod.alpha.act="), "nothing of the swap is left in the file: {}", mod_file());
+}
+
+#[test]
+fn round7e_h3_a_cancel_puts_back_what_a_mod_took_from_a_game_row() {
+    reset();
+    let _alpha = bind("alpha", "b");
+    let jump = row_named("jump").unwrap();
+    let mut s = Session::open();
+    s.give(ROWS.len(), "space");
+    assert_eq!(mod_key_of("alpha"), "space");
+    assert_eq!(settings::binds().key(jump), Some("b"));
+    s.cancel();
+    assert_eq!(mod_key_of("alpha"), "b");
+    assert_eq!(settings::binds().key(jump), Some("space"));
+    assert!(!mod_file().contains("mod.alpha.act="), "{}", mod_file());
+}
+
+#[test]
+fn round7e_h3_a_cancel_after_defaults_brings_the_saved_mod_keys_back() {
+    reset();
+    let _alpha = bind("alpha", "b");
+    assert!(bindpage::set_key("alpha", "act", "u"));
+    let mut s = Session::open();
+    s.give(crate::bindpage::defaults() as usize, "unused");
+    assert_eq!(mod_key_of("alpha"), "b", "Defaults put the default back");
+    assert!(!mod_file().contains("mod.alpha.act="), "and forgot the saved one: {}", mod_file());
+    s.cancel();
+    assert_eq!(mod_key_of("alpha"), "u");
+    assert!(mod_file().contains("mod.alpha.act=u"), "{}", mod_file());
+}
+
+#[test]
+fn round7e_h3_save_changes_keeps_a_swap() {
+    reset();
+    let _alpha = bind("alpha", "b");
+    let jump = row_named("jump").unwrap();
+    let mut s = Session::open();
+    s.give(ROWS.len(), "space");
+    s.save();
+    assert_eq!(mod_key_of("alpha"), "space");
+    assert_eq!(settings::binds().key(jump), Some("b"));
+    assert!(mod_file().contains("mod.alpha.act=space"), "{}", mod_file());
+    let keys = String::from_utf8(testing::kept(KEYS).unwrap()).unwrap();
+    assert!(keys.contains("key.jump=b"), "{keys}");
+    // a later window cancels nothing of what was saved
+    let mut s = Session::open();
+    s.cancel();
+    assert_eq!(mod_key_of("alpha"), "space");
+    assert_eq!(settings::binds().key(jump), Some("b"));
+}

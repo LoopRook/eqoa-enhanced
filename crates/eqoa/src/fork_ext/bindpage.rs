@@ -206,6 +206,12 @@ pub fn draw(
     true
 }
 
+/// Options opens: the mod keys as they are now (stub, filled in with the fix).
+pub fn session_begin() {}
+
+/// Options cancelled (stub, filled in with the fix).
+pub fn session_cancel() {}
+
 pub fn reset_defaults() {
     // The game's defaults come back with these, so a default is judged against
     // them (the macros keep their triggers, `controls_defaults`). Every mod,
