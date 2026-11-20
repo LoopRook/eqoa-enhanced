@@ -1,5 +1,31 @@
 use super::host::Host;
 
+pub(crate) const ROUND7C_CHECK_FIELDS: &str = r#"
+function fields(name, record, optional)
+    local path = 'eqoa.' .. name
+    assert(type(record) == 'table', path .. ' did not produce a record')
+    local declared = {}
+    for _, field in ipairs(assert(eqoa.capabilities.get(path)).children) do
+        declared[field:sub(#path + 2)] = eqoa.capabilities.get(field).status
+    end
+    local may_be_nil = {}
+    for field in (optional or ''):gmatch('%S+') do
+        assert(declared[field], path .. '.' .. field .. ' is no longer declared')
+        may_be_nil[field] = true
+    end
+    local actual = {}
+    for key, value in pairs(record) do
+        assert(declared[key], path .. '.' .. key .. ' is undeclared')
+        actual[key] = value
+    end
+    for key, status in pairs(declared) do
+        if status == 'supported' and not may_be_nil[key] then
+            assert(actual[key] ~= nil, path .. '.' .. key .. ' is missing')
+        end
+    end
+end
+"#;
+
 #[test]
 fn round7c_refusing_members_report_the_same_capability_as_their_call() {
     let host = Host::new().unwrap();
@@ -20,6 +46,9 @@ fn round7c_refusing_members_report_the_same_capability_as_their_call() {
         assert(caps.get('eqoa.windows.takeover').round == 6)
         assert(caps.get('eqoa.entities.Entity.npc_flags').round == 6)
         assert(caps.get('eqoa.files.list').round == 7)
+        assert(caps.get('eqoa.chat.ChatMessage.sender').status == 'unsupported')
+        assert(caps.get('eqoa.events.chat.message.data.sender').status == 'unsupported')
+        assert(caps.get('eqoa.hotbar.HotbarSlot.command').status == 'unsupported')
         for _, row in ipairs(caps.list('')) do
             if row.status == 'not_yet' then
                 assert(row.reason and (row.reason:find('plan', 1, true)
@@ -100,6 +129,7 @@ fn round7c_host_service_events_reach_lua_from_their_producers() {
             'enabled', 'disabling', 'render', 'settings.render', 'timer',
             'pointer.pressed', 'pointer.wheel', 'resource.ready', 'resource.failed',
             'shared.changed', 'mod.command', 'action.result', 'batch.progress', 'batch.result',
+            'events.dropped',
         }
         seen = {}
         for _, name in ipairs(service_events) do
@@ -107,6 +137,7 @@ fn round7c_host_service_events_reach_lua_from_their_producers() {
             assert(eqoa.events.on(name, function(e) seen[name] = e end))
         end
         assert(eqoa.events.after(0, function(e) seen.timer = e end))
+        assert(eqoa.events.on('chat.message', function() end))
     "#,
     )
     .unwrap();
@@ -154,6 +185,10 @@ fn round7c_host_service_events_reach_lua_from_their_producers() {
         action_broker::dispatch_all_for_test();
         native_events::dispatch(&host).unwrap();
     }
+    for _ in 0..1050 {
+        native_core::observe_text("overflow fixture", [1.; 4]);
+    }
+    native_events::dispatch(&host).unwrap();
     host.execute(
         r#"
         local missing = {}
@@ -164,6 +199,7 @@ fn round7c_host_service_events_reach_lua_from_their_producers() {
         assert(seen['pointer.pressed'].data.x == 10)
         assert(seen['mod.command'].data.args.id == 17)
         assert(seen['batch.result'].data.completed == 1)
+        assert(seen['events.dropped'].data.count > 0)
     "#,
     )
     .unwrap();

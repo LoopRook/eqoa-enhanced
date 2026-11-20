@@ -207,7 +207,9 @@ fn world() -> (Play, Host) {
 fn round7c_item_records_and_window_events_use_projected_native_state() {
     crate::fork_ext::addons::big_stack(|| {
         let (mut p, host) = world();
-        host.execute(super::super::api_capture_tests::ROUND7C_CHECK_FIELDS)
+        p.bags_item_page(1, 0);
+        frame(&p, &host);
+        host.execute(crate::fork_ext::addons::native_tests::ROUND7C_CHECK_FIELDS)
             .unwrap();
         host.execute(
             r#"
@@ -224,13 +226,26 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
         )
         .unwrap();
 
+        p.bags_close_item_page();
+        let corpse_id = 1700;
+        p.entities.slots.push(Some(net::entity::Entity {
+            id: corpse_id,
+            p18: 3,
+            creature: Some(net::entity::Creature {
+                name: "a beetle corpse".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+        p.target = corpse_id;
+        crate::fork_ext::loot_source::requested(corpse_id);
         apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
         native_events::dispatch(&host).unwrap();
         host.execute(
             r#"
             local loot = eqoa.loot.get()
             fields('items.Container', loot, 'money view merchant')
-            fields('items.LootSource', loot.source, 'name entity_id')
+            fields('items.LootSource', loot.source)
             assert(log[#log].name == 'loot.changed', 'no loot event from the native open')
         "#,
         )
@@ -240,7 +255,8 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
             &mut p,
             opcode(0x00B7, shop_bytes(17, 90, 110, &[sword()], "Welcome")),
         );
-        native_events::dispatch(&host).unwrap();
+        p.bags_merchant_open();
+        frame(&p, &host);
         host.execute(
             r#"
             local shop = eqoa.merchant.get()

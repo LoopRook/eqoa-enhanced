@@ -189,12 +189,14 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("events.dropped", "first_seq last_seq count streams"),
     ] {
         for field in fields.split_whitespace() {
+            let payload = format!("eqoa.events.{name}.data");
+            let reason = super::native::unprojected_field(&payload, field);
             super::native::describe(
                 lua,
-                &format!("eqoa.events.{name}.data.{field}"),
-                "supported",
-                Some(event_round(name)),
-                "",
+                &format!("{payload}.{field}"),
+                if reason.is_some() { "unsupported" } else { "supported" },
+                reason.is_none().then(|| event_round(name)),
+                reason.unwrap_or_default(),
             );
         }
     }

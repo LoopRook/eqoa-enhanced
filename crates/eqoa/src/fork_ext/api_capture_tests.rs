@@ -1,5 +1,6 @@
 use super::*;
 use crate::fork_ext::addons::{
+    native_tests::ROUND7C_CHECK_FIELDS,
     host::Host,
     native_core::{CORE, Core},
     native_events,
@@ -21,6 +22,10 @@ fn round7c_play_records_match_declared_fields() {
     crate::fork_ext::addons::big_stack(|| {
         let mut p = Play::bundled_ui_fixture();
         let walker = Play::bundled_ui_walker();
+        p.map = crate::map::testing::up((640, 448));
+        p.map.open = true;
+        assert!(p.map.click([320., 224.], false));
+        p.map.open = false;
         p.pet_id = 2002;
         let me = p.self_id32().unwrap();
         p.entities.slots[0] = Some(net::entity::Entity {
@@ -34,6 +39,11 @@ fn round7c_play_records_match_declared_fields() {
                 ..Default::default()
             }),
             ..Default::default()
+        });
+        p.group.raid.push(net::session::RaidMember::default());
+        p.group.invites.push(crate::group::Invite {
+            id: 3001,
+            name: "Invite".into(),
         });
         CORE.with(|c| {
             let mut c = c.borrow_mut();
@@ -63,6 +73,9 @@ fn round7c_play_records_match_declared_fields() {
             fields('player.SevenStats', p.attributes.base)
             fields('player.SevenStats', p.attributes.total)
             fields('player.Resists', p.resists)
+            local stats = eqoa.player.stats()
+            fields('player.Stats', stats)
+            fields('player.StatItem', stats.strength, 'min max without_min without_max')
             fields('Vec3', p.position)
             fields('Vec3', p.velocity)
             fields('mastery.Mastery', p.mastery, 'stats bonuses')
@@ -74,6 +87,8 @@ fn round7c_play_records_match_declared_fields() {
             local g = eqoa.group.get()
             fields('group.Group', g)
             fields('group.Member', g.members[1], 'entity power')
+            fields('group.RaidMember', g.raid[1])
+            fields('group.Invite', g.invites[1])
             local ability = eqoa.abilities.list()[1]
             fields('abilities.Ability', ability, 'spellbook_slot')
             fields('abilities.RangeResult', eqoa.abilities.in_range(ability.ref,
@@ -81,10 +96,10 @@ fn round7c_play_records_match_declared_fields() {
             fields('cooldowns.Cooldown', eqoa.cooldowns.get(ability.ref), 'started_at estimated_remaining')
             local bar = eqoa.hotbar.list()[1]
             fields('hotbar.Hotbar', bar, 'selected_slot')
-            fields('hotbar.HotbarSlot', bar.slots[1], 'item weapon_set command icon ui_icon')
+            fields('hotbar.HotbarSlot', bar.slots[1], 'item weapon_set ui_icon')
             fields('effects.Effect', eqoa.effects.list()[1])
             local chat = eqoa.chat.history()
-            fields('chat.ChatMessage', chat[#chat], 'channel_code sender outgoing')
+            fields('chat.ChatMessage', chat[#chat])
             fields('Color', chat[#chat].color)
             local inp = eqoa.input.get()
             fields('input.InputState', inp)
@@ -97,6 +112,19 @@ fn round7c_play_records_match_declared_fields() {
             fields('quests.Quest', eqoa.quests.list()[1])
             fields('windows.Windows', eqoa.windows.get(), 'active')
             fields('combat.Counters', eqoa.combat.get_counters())
+            fields('hud.Frame', eqoa.hud.frame())
+            local layout = eqoa.hud.layout()
+            fields('hud.Layout', layout)
+            fields('hud.PlayerLayout', layout.player)
+            fields('hud.TargetLayout', layout.target)
+            fields('hud.GroupMemberLayout', layout.group_members[1])
+            fields('hud.SinglePanelLayout', layout.pet)
+            fields('hud.Rect', layout.player.panel)
+            local map = eqoa.map.get()
+            fields('map.MapState', map, 'world_name zone search_anchor')
+            fields('map.Bounds', map.bounds)
+            fields('map.Waypoint', map.waypoint, 'label owner')
+            fields('map.Marker', eqoa.map.markers(map.world_id)[1], 'level_min level_max label step')
             local _, err = eqoa.actions.move()
             fields('Error', err, 'retry_after')
             fields('capabilities.Capability', eqoa.capabilities.get('eqoa.api'), 'reason')
@@ -104,31 +132,6 @@ fn round7c_play_records_match_declared_fields() {
     });
 }
 
-pub(super) const ROUND7C_CHECK_FIELDS: &str = r#"
-function fields(name, record, optional)
-    local path = 'eqoa.' .. name
-    assert(type(record) == 'table', path .. ' did not produce a record')
-    local declared = {}
-    for _, field in ipairs(assert(eqoa.capabilities.get(path)).children) do
-        declared[field:sub(#path + 2)] = eqoa.capabilities.get(field).status
-    end
-    local may_be_nil = {}
-    for field in (optional or ''):gmatch('%S+') do
-        assert(declared[field], path .. '.' .. field .. ' is no longer declared')
-        may_be_nil[field] = true
-    end
-    local actual = {}
-    for key, value in pairs(record) do
-        assert(declared[key], path .. '.' .. key .. ' is undeclared')
-        actual[key] = value
-    end
-    for key, status in pairs(declared) do
-        if status == 'supported' and not may_be_nil[key] then
-            assert(actual[key] ~= nil, path .. '.' .. key .. ' is missing')
-        end
-    end
-end
-"#;
 
 #[test]
 fn round7c_world_events_come_from_play_changes() {
@@ -138,6 +141,7 @@ fn round7c_world_events_come_from_play_changes() {
 
         let mut p = Play::bundled_ui_fixture();
         let mut walker = Play::bundled_ui_walker();
+        native_core::fixture_demand(true);
         let host = Host::new().unwrap();
         host.execute(
             r#"
@@ -187,7 +191,7 @@ fn round7c_world_events_come_from_play_changes() {
         }
         p.cm.m.x0c += 1;
         p.mode = 13;
-        walker.cam.walk.phys.position.x = vi::fpu::F::new(10.);
+        walker.eye.position.x = vi::fpu::F::new(10.);
         p.forge_snapshot(Some(&walker));
         p.add_chat("Event audit".into(), [1.; 4]);
         crate::fork_ext::chat_history::key(19, true);

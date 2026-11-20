@@ -1219,6 +1219,9 @@ pub fn attach_icon_cache(
 ) -> LuaResult<Rc<RefCell<IconCache>>> {
     // SafeLibrary and IconProvider retain decoded RGBA pixels, not the original
     // disc surface encoding. Do not claim that encoding is available.
+    for path in ["eqoa.icons.SurfaceInfo", "eqoa.icons.SurfaceInfo.width", "eqoa.icons.SurfaceInfo.height"] {
+        super::native::describe(lua, path, "supported", Some(2), "");
+    }
     super::native::describe(
         lua,
         "eqoa.icons.SurfaceInfo.source_format",

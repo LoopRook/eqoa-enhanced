@@ -1300,6 +1300,10 @@ fn install_fields(lua: &Lua) {
         };
         describe(lua, path, "supported", round, "");
         for field in fields.split_whitespace() {
+            if let Some(reason) = unprojected_field(path, field) {
+                describe(lua, &format!("{path}.{field}"), "unsupported", None, reason);
+                continue;
+            }
             let field_round = if matches!(
                 (path, field),
                 ("eqoa.entities.Entity", "actor_position") | ("eqoa.map.MapState", "search_anchor")
@@ -1328,6 +1332,17 @@ fn install_fields(lua: &Lua) {
                 "",
             );
         }
+    }
+}
+
+pub(super) fn unprojected_field(path: &str, field: &str) -> Option<&'static str> {
+    match (path, field) {
+        ("eqoa.chat.ChatMessage" | "eqoa.events.chat.message.data", "channel_code" | "sender" | "outgoing") => {
+            Some("the chat observer retains only text, color and the channel name")
+        }
+        ("eqoa.hotbar.HotbarSlot", "command") => Some("native hotbar rows do not expose command text"),
+        ("eqoa.hotbar.HotbarSlot", "icon") => Some("use ui_icon or the referenced ability or item icon"),
+        _ => None,
     }
 }
 
