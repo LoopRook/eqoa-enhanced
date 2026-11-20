@@ -1307,7 +1307,7 @@ mod round7a_tests {
         r#"
         for _,n in ipairs({'images','load_image','set_waypoint','clear_waypoint'}) do
             local v,e = eqoa.map[n](); assert(v == nil)
-            assert(e.code == ((n == 'images' or n == 'load_image') and 'unsupported' or 'not_yet'))
+            assert(e.code == ((n == 'images' or n == 'load_image') and 'unsupported' or 'not_in_world'))
             assert(e.message ~= 'implementation pending')
         end
     "#

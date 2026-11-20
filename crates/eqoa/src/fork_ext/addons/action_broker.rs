@@ -5368,7 +5368,9 @@ mod tests {
                 .load(format!("return assert(eqoa.capabilities.get('{sym}')).status"))
                 .eval()
                 .unwrap();
-            assert_eq!(status, "supported", "{sym} must be supported");
+            // a batch never fills detail: each step reports in its own action.result (round 7C fix M1)
+            let expected = if *field == "detail" { "unsupported" } else { "supported" };
+            assert_eq!(status, expected, "{sym} must be {expected}");
         }
 
         // Batch starts autonomously; 2nd batch while 1st runs -> busy; 3-step serial execution waits for server reply.

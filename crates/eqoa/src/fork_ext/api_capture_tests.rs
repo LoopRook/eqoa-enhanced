@@ -2567,7 +2567,7 @@ fn round6b_non_item_chat_command_windows_weapon_sets_and_spellbook() {
         local drop_q = eqoa.capabilities.get("eqoa.actions.drop_quest")
         assert(drop_q and drop_q.status == "supported")
         local dest = eqoa.capabilities.get("eqoa.actions.destroy")
-        assert(dest and dest.status == "unsupported" and dest.reason == "not offered before the PR (owner)")
+        assert(dest and dest.status == "unsupported" and dest.reason == "excluded until after the upstream PR by the mod API plan")
 
         results = {}
         eqoa.events.on("action.result", function(e)

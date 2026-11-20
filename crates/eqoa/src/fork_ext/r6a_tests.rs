@@ -863,7 +863,7 @@ fn round6a_forge_icons_merchant_hint_hotbar_items_and_zero_addon() {
         assert(eqoa.capabilities.get('eqoa.windows.MenuRow.command').status == 'supported')
         assert(eqoa.capabilities.get('eqoa.windows.Dialog.options').status == 'supported')
         assert(eqoa.capabilities.get('eqoa.windows.Dialog.selection').status == 'supported')
-        assert(eqoa.capabilities.get('eqoa.textures.formats.jpeg').status == 'not_yet')
+        assert(eqoa.capabilities.get('eqoa.textures.formats.jpeg').status == 'unsupported')
         "#,
     )
     .unwrap();
