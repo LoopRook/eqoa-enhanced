@@ -29,6 +29,7 @@ mod record_raw;
 pub(crate) mod action_broker;
 pub(crate) mod actions;
 pub(crate) mod window_actions;
+pub(crate) mod window_kinds;
 pub(crate) mod window_takeover;
 pub(crate) mod gesture;
 mod async_json;
@@ -85,6 +86,7 @@ pub(crate) fn big_stack(body: fn()) {
     }
 }
 pub(crate) mod map_views;
+pub(crate) mod map_waypoint;
 pub(crate) mod named_profiles;
 pub(crate) mod native;
 pub(crate) mod native_core;
@@ -96,7 +98,7 @@ pub(crate) mod native_r6a;
 pub(crate) mod native_settings;
 mod native_state;
 #[cfg(test)]
-mod native_tests;
+pub(crate) mod native_tests;
 #[cfg(test)]
 mod perf_delta_tests;
 #[cfg(test)]
@@ -109,6 +111,8 @@ mod profile;
 pub(crate) mod quest_log;
 #[cfg(test)]
 mod round_3_picture_tests;
+#[cfg(test)]
+mod round7c_fix_tests;
 mod sandbox;
 mod spike;
 pub(crate) mod storage;

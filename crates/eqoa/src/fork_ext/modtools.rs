@@ -83,6 +83,13 @@ fn reference() -> crate::Result<Json> {
 }
 
 fn reference_with_instance(instance: render::wgpu::Instance) -> crate::Result<Json> {
+    with_reference_host(instance, collect_reference)
+}
+
+fn with_reference_host<T>(
+    instance: render::wgpu::Instance,
+    inspect: impl FnOnce(&super::host::Host) -> crate::Result<T>,
+) -> crate::Result<T> {
     use dear_imgui_rs::Context;
     use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer};
     use render::wgpu;
@@ -148,6 +155,10 @@ fn reference_with_instance(instance: render::wgpu::Instance) -> crate::Result<Js
     )));
     super::fonts::FontBank::install_for_addon(&fonts, &host.lua, addon)?;
 
+    inspect(&host)
+}
+
+fn collect_reference(host: &super::host::Host) -> crate::Result<Json> {
     // Read the public Lua API, rather than the private seed/descriptor storage.
     let list: Table = host
         .lua
@@ -274,7 +285,7 @@ fn markdown(doc: &Json) -> String {
         writeln!(out, "## {name}\n").unwrap();
         table(&mut out, &rows);
     }
-    out.push_str("## Forge compatibility\n\nEach module lists its member count and every entry whose status is not `supported`.\n\n");
+    out.push_str("## Forge compatibility\n\nForge compatibility is listed by presence, not verified per function; it is not part of the `eqoa/1` promise. Each module lists its member count and every entry whose status is not `supported`.\n\n");
     for (name, rows) in forge {
         let members: Vec<_> = rows
             .iter()
@@ -317,6 +328,77 @@ mod tests {
             }
             Err(error) => panic!("mod-api install failed: {error}"),
         }
+    }
+
+    /// The media records that need an ImGui context but no GPU: checked on every machine, CI included.
+    #[test]
+    fn round7c_media_records_without_a_gpu_match_their_fields() {
+        super::super::big_stack(|| {
+            let scratch = Scratch::new().unwrap();
+            let package = scratch.0.join("media_fields");
+            std::fs::create_dir(&package).unwrap();
+            std::fs::write(
+                package.join("mod.json"),
+                r#"{"schemaVersion":1,"runtime":"lua","api":"eqoa/1","id":"media_fields","entry":"main.lua","capabilities":[]}"#,
+            )
+            .unwrap();
+            std::fs::write(package.join("main.lua"), "-- fixture").unwrap();
+            let addon = super::super::discovery::discover(&scratch.0).addons.remove(0);
+            let mut context = dear_imgui_rs::Context::create();
+            context.set_ini_filename::<PathBuf>(None).unwrap();
+            let host = super::super::host::Host::for_addon(&addon).unwrap();
+            let _bridge = super::super::bridge::Bridge::install(&host).unwrap();
+            let fonts = Rc::new(RefCell::new(super::super::fonts::FontBank::new(
+                0,
+                super::super::fonts::current_context_epoch(),
+            )));
+            super::super::fonts::FontBank::install_for_addon(&fonts, &host.lua, &addon).unwrap();
+            super::super::native_tests::install_field_check(&host).unwrap();
+            host.execute(
+                r#"
+                fields('client.DisplayMetrics', eqoa.client.display())
+                -- reason: only a font that fell back to the default
+                fields('fonts.FontInfo', eqoa.fonts.default(), 'reason')
+            "#,
+            )
+            .unwrap();
+        });
+    }
+
+    /// The media record that needs a GPU texture. Without a GPU adapter it prints a SKIP the gate counts.
+    #[test]
+    fn round7c_texture_record_matches_its_fields() {
+        super::super::big_stack(|| {
+            match with_reference_host(render::wgpu::Instance::default(), |host| {
+                super::super::native_tests::install_field_check(host)?;
+                host.execute(
+                    "fields('textures.TextureInfo', eqoa.textures.rgba(string.char(255, 0, 0, 255), 1, 1))",
+                )?;
+                Ok(())
+            }) {
+                Ok(()) => {}
+                Err(error) if error.is::<GraphicsUnavailable>() => {
+                    eprintln!("SKIP round7c_texture_record_matches_its_fields: {error}");
+                }
+                Err(error) => panic!("{error}"),
+            }
+        });
+    }
+
+    #[test]
+    fn round7c_forge_section_says_presence_is_not_verification() {
+        let doc = json!({"metadata": {}, "capabilities": [{
+            "path": "frontiers_forge.chat.SendChatText", "status": "supported", "revision": 1,
+            "round": 2, "reason": null, "children": []
+        }]});
+        let text = markdown(&doc);
+        let forge = text.split("## Forge compatibility\n\n").nth(1).unwrap();
+        assert!(
+            forge.starts_with(
+                "Forge compatibility is listed by presence, not verified per function; it is not part of the `eqoa/1` promise."
+            ),
+            "{forge}"
+        );
     }
 
     #[test]

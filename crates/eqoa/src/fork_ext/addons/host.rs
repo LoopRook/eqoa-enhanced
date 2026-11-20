@@ -90,6 +90,7 @@ fn create_base_host() -> Result<BaseHost> {
         Default::default(),
     )?;
     lua.set_memory_limit(8 * 1024 * 1024)?;
+    super::native::init_session(&lua);
 
     // Extract original pcall before modifying globals
     let orig_pcall: Function = lua.globals().get("pcall")?;
@@ -183,8 +184,11 @@ fn create_base_host() -> Result<BaseHost> {
     )?;
     window_mod.set("Mode", ui_mode)?;
     let state = snapshot.clone();
-    window_mod.set(
-        "IsTextDialogOpen",
+    super::native::bind_compat(
+        &lua,
+        &window_mod,
+        "frontiers_forge.window.IsTextDialogOpen",
+        6,
         lua.create_function(move |_, ()| Ok(state.get().ui_mode == 9))?,
     )?;
     // Pinned window.lua:830-838 HINT_BUTTON table (exact Forge button hint escape mapping).
@@ -197,8 +201,11 @@ fn create_base_host() -> Result<BaseHost> {
         ("-", "dpad_left"),
         ("+", "dpad_right"),
     ];
-    window_mod.set(
-        "FormatButtonHint",
+    super::native::bind_compat(
+        &lua,
+        &window_mod,
+        "frontiers_forge.window.FormatButtonHint",
+        6,
         lua.create_function(|_, (button, label): (Value, Option<String>)| {
             let label = label.unwrap_or_default();
             let b = match button {
@@ -213,8 +220,11 @@ fn create_base_host() -> Result<BaseHost> {
             Ok(label)
         })?,
     )?;
-    window_mod.set(
-        "ParseButtonHint",
+    super::native::bind_compat(
+        &lua,
+        &window_mod,
+        "frontiers_forge.window.ParseButtonHint",
+        6,
         lua.create_function(|lua, hint: Value| {
             let Some(text) = hint.as_string().and_then(|s| s.to_str().ok().map(|v| v.to_string()))
             else {
@@ -242,8 +252,11 @@ fn create_base_host() -> Result<BaseHost> {
 
     // frontiers_forge.camera — pinned reference camera.lua:6-28
     let cam_mod = lua.create_table()?;
-    cam_mod.set(
-        "GetCoordinates",
+    super::native::bind_compat(
+        &lua,
+        &cam_mod,
+        "frontiers_forge.camera.GetCoordinates",
+        6,
         lua.create_function(|lua, ()| {
             let pos = super::native_core::CORE.with(|c| {
                 let c = c.borrow();
@@ -268,15 +281,21 @@ fn create_base_host() -> Result<BaseHost> {
             Ok(t)
         })?,
     )?;
-    cam_mod.set(
-        "GetFacingRadians",
+    super::native::bind_compat(
+        &lua,
+        &cam_mod,
+        "frontiers_forge.camera.GetFacingRadians",
+        6,
         lua.create_function(|_, ()| {
             let rad = super::native_core::CORE.with(|c| c.borrow().view.camera_orbit_x);
             Ok(rad.map(f64::from))
         })?,
     )?;
-    cam_mod.set(
-        "GetFacingDegrees",
+    super::native::bind_compat(
+        &lua,
+        &cam_mod,
+        "frontiers_forge.camera.GetFacingDegrees",
+        6,
         lua.create_function(|_, ()| {
             let rad = super::native_core::CORE
                 .with(|c| c.borrow().view.camera_orbit_x)
@@ -286,15 +305,21 @@ fn create_base_host() -> Result<BaseHost> {
     )?;
     package_loaded.set("frontiers_forge.camera", cam_mod.clone())?;
 
-    util.set(
-        "GetCompassRadians",
+    super::native::bind_compat(
+        &lua,
+        &util,
+        "frontiers_forge.util.GetCompassRadians",
+        6,
         lua.create_function(|_, ()| {
             let rad = super::native_core::CORE.with(|c| c.borrow().view.camera_orbit_x);
             Ok(rad.map(f64::from))
         })?,
     )?;
-    util.set(
-        "GetCompassDegrees",
+    super::native::bind_compat(
+        &lua,
+        &util,
+        "frontiers_forge.util.GetCompassDegrees",
+        6,
         lua.create_function(|_, ()| {
             let rad = super::native_core::CORE
                 .with(|c| c.borrow().view.camera_orbit_x)
@@ -339,8 +364,11 @@ fn create_base_host() -> Result<BaseHost> {
         })?,
     )?;
     // Pinned util.lua:400-403 GetWorldId: native world identity; nil outside a world.
-    util.set(
-        "GetWorldId",
+    super::native::bind_compat(
+        &lua,
+        &util,
+        "frontiers_forge.util.GetWorldId",
+        7,
         lua.create_function(|_, ()| {
             Ok(super::native_core::CORE.with(|c| {
                 let c = c.borrow();
@@ -357,7 +385,15 @@ fn create_base_host() -> Result<BaseHost> {
         lua.create_function(|_, (value, mask): (u32, u32)| Ok(value & mask == 0))?,
     )?;
     for name in ["utf8_to_utf16", "utf16_to_utf8"] {
-        util.set(name,lua.create_function(move |lua,_:Value|{let reason="unsupported: pointer-based UTF conversion is unavailable; native API strings are UTF-8";super::native::diagnose(lua,&format!("frontiers_forge.util.{name}"),"unsupported",reason);Ok((Value::Nil,reason))})?)?;
+        super::native::refuse_member(
+            &lua,
+            &util,
+            &format!("frontiers_forge.util.{name}"),
+            "unsupported",
+            None,
+            "unsupported: pointer-based UTF conversion is unavailable; native API strings are UTF-8",
+            super::native::RefusalShape::ForgeReason,
+        )?;
     }
 
     lua.set_named_registry_value("forge_callbacks", lua.create_table()?)?;
@@ -478,6 +514,17 @@ impl Host {
         self.addon
             .as_ref()
             .and_then(super::discovery::DiscoveredAddon::declared_capabilities)
+    }
+
+    /// A native `eqoa/1` package; Forge imports have no `mod.json` and so no `api`.
+    pub(crate) fn native_manifest(&self) -> bool {
+        self.addon.as_ref().is_some_and(|addon| addon.api.is_some())
+    }
+
+    pub(crate) fn replaced_windows(&self) -> &[String] {
+        self.addon
+            .as_ref()
+            .map_or(&[], |addon| &addon.extensions.replaces)
     }
 
     #[cfg(test)]

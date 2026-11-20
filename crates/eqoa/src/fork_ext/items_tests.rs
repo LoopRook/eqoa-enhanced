@@ -204,6 +204,101 @@ fn world() -> (Play, Host) {
 }
 
 #[test]
+fn round7c_item_records_and_window_events_use_projected_native_state() {
+    crate::fork_ext::addons::big_stack(|| {
+        let (mut p, host) = world();
+        let mut words = vec!["Fixture word"; 1474];
+        for (id, label) in [
+            (62, "Sell"),
+            (63, "Buy"),
+            (161, "Exit"),
+            (437, "Usable"),
+            (438, "Equipment"),
+            (439, "Misc"),
+            (1473, "Charged"),
+        ] {
+            words[id] = label;
+        }
+        CORE.with(|c| {
+            c.borrow_mut().words = vi::strtab::StringTable::parse(words.join("\n").as_bytes());
+        });
+        p.bags_item_page(1, 0);
+        frame(&p, &host);
+        crate::fork_ext::addons::native_tests::install_field_check(&host).unwrap();
+        host.execute(
+            r#"
+            local inv = eqoa.inventory.get()
+            -- merchant: only at a merchant; source: only a corpse's loot
+            fields('items.Container', inv, 'merchant source')
+            -- selected/selected_row: only while a row is selected
+            fields('items.ContainerView', inv.view, 'selected selected_row')
+            fields('items.Tab', inv.view.tabs[1])
+            local sword = inv.items[1]
+            -- quick_slot/charges: only an item that has one; damage/attack_*: only a weapon
+            fields('items.Item', sword, 'quick_slot charges damage attack_type attack_name')
+            -- name: the stat's name comes from the disc's word table
+            fields('items.ItemStat', sword.stats[1], 'name')
+            fields('items.CanUse', eqoa.items.can_use(sword.ref, 0, 0, 50))
+            fields('gems.Gem', eqoa.gems.get('Moonstone'))
+            -- name: the slot's name comes from the disc's word table
+            fields('items.SlotInfo', eqoa.items.slot_info(sword.wear_slot), 'name')
+            seen = {}
+            for _, n in ipairs({'loot.changed', 'merchant.changed'}) do
+                eqoa.events.on(n, function(e) seen[n] = e; round7c_note(n, e) end)
+            end
+        "#,
+        )
+        .unwrap();
+
+        p.bags_close_item_page();
+        let corpse_id = 1700;
+        p.entities.slots.push(Some(net::entity::Entity {
+            id: corpse_id,
+            p18: 3,
+            creature: Some(net::entity::Creature {
+                name: "a beetle corpse".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+        p.target = corpse_id;
+        crate::fork_ext::loot_source::requested(corpse_id);
+        apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+        native_events::dispatch(&host).unwrap();
+        host.execute(
+            r#"
+            local loot = eqoa.loot.get()
+            -- money: only the pack and bank; view: only while its window shows; merchant: only at a merchant
+            fields('items.Container', loot, 'money view merchant')
+            fields('items.LootSource', loot.source)
+            assert(log[#log].name == 'loot.changed', 'no loot event from the native open')
+        "#,
+        )
+        .unwrap();
+        apply(&mut p, opcode(0x0016, vec![]));
+        apply(
+            &mut p,
+            opcode(0x00B7, shop_bytes(17, 90, 110, &[sword()], "Welcome")),
+        );
+        p.bags_merchant_open();
+        frame(&p, &host);
+        host.execute(
+            r#"
+            local shop = eqoa.merchant.get()
+            fields('items.MerchantState', shop.merchant)
+            fields('items.MerchantOption', shop.merchant.options[1])
+            assert(log[#log].name == 'merchant.changed', 'no merchant event from the native open')
+        "#,
+        )
+        .unwrap();
+        p.bags_close_merchant();
+        frame(&p, &host);
+        host.execute("event_fields(seen, {'loot.changed', 'merchant.changed'})")
+            .unwrap();
+    });
+}
+
+#[test]
 fn round5_pack_and_bank_come_from_the_dump_with_real_item_fields() {
     let mut p = ready();
     let h = Host::new().unwrap();
@@ -3449,7 +3544,10 @@ fn round65_window_takeover_scopes_own_and_all() {
         entry_mode: EntryMode::Once,
         capabilities_declared: true,
         requested_capabilities: vec!["eqoa.windows.takeover".into(), "eqoa.actions.*".into()],
-        extensions: Default::default(),
+        extensions: crate::fork_ext::addons::discovery::Extensions {
+            replaces: vec!["loot".into(), "merchant".into(), "bank".into()],
+            ..Default::default()
+        },
         initially_enabled: true,
         mods_root: None,
     })
@@ -4134,4 +4232,227 @@ fn round65_fix2_merchant_uses_native_flags_and_exact_request() {
         .unwrap();
     window_takeover::reset_all_for_test();
     action_broker::reset_all_for_test();
+}
+
+/// Round 7 Part C fix L1: the "Use the game's windows" switch holds after a restart, and turning it on stops a
+/// running batch whose window claim it released, exactly as the Stop button does.
+#[test]
+fn round7c_game_windows_switch_is_saved_and_stops_a_claimed_batch() {
+    use crate::fork_ext::addons::{action_broker, native_events, window_takeover};
+    let config = std::env::temp_dir().join(format!("eqoa-r7c-switch-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&config);
+    std::fs::create_dir_all(&config).unwrap();
+    let previous = std::env::var_os("EQOA_CONFIG");
+    unsafe { std::env::set_var("EQOA_CONFIG", &config) };
+    window_takeover::reset_all_for_test();
+    window_takeover::set_use_game_windows(true);
+    window_takeover::forget_switch_for_test();
+    let kept = window_takeover::use_game_windows();
+    window_takeover::set_use_game_windows(false);
+    window_takeover::forget_switch_for_test();
+    let cleared = !window_takeover::use_game_windows();
+
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    let mut a = potion();
+    a.key = 101;
+    a.equip_slot = -1;
+    let mut b = gem();
+    b.key = 102;
+    b.equip_slot = -1;
+    p.dump.inventory = list(&[a, b]);
+    p.bags_open_merchant(88);
+    p.forge_snapshot(None);
+    let host = Host::with_test_capabilities(&["eqoa.actions.*", "eqoa.windows.takeover"]).unwrap();
+    host.execute(
+        r#"
+        bres = {}
+        eqoa.events.on('batch.result', function(e) bres[#bres + 1] = e.data end)
+        assert(eqoa.windows.takeover('merchant'))
+        local inv = assert(eqoa.inventory.get())
+        assert(eqoa.actions.batch({ steps = {
+            { kind = 'sell', item = inv.items[1].ref, count = 1 },
+            { kind = 'sell', item = inv.items[2].ref, count = 1 },
+        }, require_window = 'merchant' }))
+        "#,
+    )
+    .unwrap();
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    assert!(p.npcw.shop.pending, "the batch's first sale went out");
+    let sent = p.session.sends_lost;
+    window_takeover::set_use_game_windows(true);
+    // Fix round 2 M2: the sale already on the wire still counts once its reply arrives.
+    p.bags_sell_confirm(0, 1);
+    for _ in 0..3 {
+        p.bags_broker_tick();
+        native_events::dispatch(&host).unwrap();
+    }
+    let result = host.execute(
+        "assert(#bres == 1, 'batch results: ' .. #bres); local r = bres[1]; \
+         assert(r.state == 'stopped' and r.code == 'cancelled' and r.reason == 'stopped' and r.completed == 1, \
+         tostring(r.state) .. ' ' .. tostring(r.code) .. ' ' .. tostring(r.reason) .. ' ' .. tostring(r.completed))",
+    );
+    let later_sends = p.session.sends_lost - sent;
+    window_takeover::set_use_game_windows(false);
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+    match previous {
+        Some(value) => unsafe { std::env::set_var("EQOA_CONFIG", value) },
+        None => unsafe { std::env::remove_var("EQOA_CONFIG") },
+    }
+    let _ = std::fs::remove_dir_all(&config);
+    assert!(kept, "the switch must hold after a restart");
+    assert!(cleared, "turning it off must hold after a restart too");
+    result.unwrap();
+    assert_eq!(later_sends, 0, "no sale after the switch stopped the batch");
+}
+
+#[test]
+fn round7c_switch_stops_batch_that_reaches_a_claim_by_talking() {
+    use crate::fork_ext::addons::{action_broker, native_events, window_takeover};
+    for (claim, npc) in [("merchant", 9002), ("bank", 9003)] {
+        action_broker::reset_all_for_test();
+        window_takeover::reset_all_for_test();
+        let host = r65fix_host(&["eqoa.actions.*", "eqoa.windows.takeover"]);
+        let mut p = r65fix_world();
+        p.forge_snapshot(None);
+        host.execute(&format!(r#"
+            assert(eqoa.windows.takeover('{claim}'))
+            batch = assert(eqoa.actions.batch({{
+                {{kind='talk', entity_id={npc}}}, {{kind='chat', text='after'}}
+            }}))
+        "#)).unwrap();
+        p.bags_broker_tick();
+        assert_eq!(p.target, npc, "conversation used the resolved {claim}");
+        if claim == "merchant" {
+            apply(&mut p, opcode(0x00B7, shop_bytes(npc, 90, 110, &[sword()], "Hello")));
+        } else {
+            apply(&mut p, opcode(0x124D, vec![]));
+        }
+        native_events::dispatch(&host).unwrap();
+        host.execute("assert(eqoa.actions.status(batch).completed == 1, 'conversation confirmed')").unwrap();
+        window_takeover::set_use_game_windows(true);
+        p.bags_broker_tick();
+        native_events::dispatch(&host).unwrap();
+        host.execute(&format!(
+            "local r = eqoa.actions.status(batch); assert(r.state == 'stopped' and r.completed == 1, '{claim}: ' .. r.state)"
+        )).unwrap();
+    }
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+}
+
+fn round7c_sale_batch_for_switch() -> (Play, Host) {
+    use crate::fork_ext::addons::{action_broker, window_takeover};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    let mut a = potion();
+    a.key = 101;
+    a.equip_slot = -1;
+    let mut b = gem();
+    b.key = 102;
+    b.equip_slot = -1;
+    p.dump.inventory = list(&[a, b]);
+    p.bags_open_merchant(88);
+    p.forge_snapshot(None);
+    let host = Host::with_test_capabilities(&["eqoa.actions.*", "eqoa.windows.takeover"]).unwrap();
+    host.execute(
+        r#"
+        results = {}
+        eqoa.events.on('batch.result', function(e) results[#results + 1] = e.data end)
+        assert(eqoa.windows.takeover('merchant'))
+        local inv = assert(eqoa.inventory.get())
+        batch = assert(eqoa.actions.batch({ steps = {
+            { kind = 'sell', item = inv.items[1].ref, count = 1 },
+            { kind = 'sell', item = inv.items[2].ref, count = 1 },
+        }, require_window = 'merchant' }))
+        "#,
+    ).unwrap();
+    (p, host)
+}
+
+#[test]
+fn round7c_switch_counts_an_already_sent_step_after_its_late_reply() {
+    use crate::fork_ext::addons::{native_events, window_takeover};
+    let (mut p, host) = round7c_sale_batch_for_switch();
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    assert!(p.npcw.shop.pending, "first sale sent");
+    window_takeover::set_use_game_windows(true);
+    p.bags_sell_confirm(0, 1);
+    native_events::dispatch(&host).unwrap();
+    let sent = p.session.sends_lost;
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    assert_eq!(p.session.sends_lost, sent, "the second sale never went out");
+    host.execute(r#"
+        local r = eqoa.actions.status(batch)
+        assert(r.state == 'stopped' and r.completed == 1, 'late success count: ' .. r.completed)
+        assert(#results == 1 and results[1].completed == 1, 'Bag Viewer receives the same count once')
+    "#).unwrap();
+    window_takeover::reset_all_for_test();
+}
+
+#[test]
+fn round7c_switch_discards_a_staged_unsent_step() {
+    use crate::fork_ext::addons::{native_events, window_takeover};
+    let (mut p, host) = round7c_sale_batch_for_switch();
+    super::super::begin_iteration(&mut p, true);
+    assert!(!p.npcw.shop.pending, "sale is staged only");
+    let sent = p.session.sends_lost;
+    window_takeover::set_use_game_windows(true);
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    assert!(!p.npcw.shop.pending, "the native merchant did not consume the discarded sale");
+    assert_eq!(p.session.sends_lost, sent, "the staged sale never went out");
+    host.execute("assert(#results == 1 and results[1].state == 'stopped' and results[1].completed == 0)").unwrap();
+    window_takeover::reset_all_for_test();
+}
+
+/// Round 7 Part C fix round 2 L2: the switch goes through the settings store the client reads at start. The
+/// fork's `enhanced.opt` already holds the defaults-migration marker and an unrelated line; turning the switch on
+/// and off keeps both, and after every cache is dropped (a restart: the store alone survives) the client's own
+/// start-up read (which runs the defaults migration) leaves the text alone and the switch reads back.
+#[test]
+fn round7c_game_windows_switch_round_trips_through_the_settings_store() {
+    use crate::fork_ext::addons::window_takeover;
+    const FILE: &str = "enhanced.opt";
+    let seed = "first_run_defaults_applied=on\nunrelated=keep this line\n";
+    let restart = || {
+        let kept = crate::settings::testing::kept(FILE);
+        crate::settings::testing::reset(false);
+        crate::fork_ext::bindpage::reset_in_memory();
+        window_takeover::forget_switch_for_test();
+        match kept {
+            Some(bytes) => crate::settings::testing::put(FILE, &bytes),
+            None => crate::settings::testing::forget(FILE),
+        }
+        let _ = crate::settings::client();
+    };
+    let text = || String::from_utf8(crate::settings::read_config(FILE).unwrap_or_default()).unwrap();
+    crate::settings::testing::reset(false);
+    window_takeover::reset_all_for_test();
+    crate::settings::write_config(FILE, seed.as_bytes()).unwrap();
+
+    window_takeover::set_use_game_windows(true);
+    restart();
+    let after_on = text();
+    let read_on = window_takeover::use_game_windows();
+    window_takeover::set_use_game_windows(false);
+    restart();
+    let after_off = text();
+    let read_off = window_takeover::use_game_windows();
+
+    window_takeover::reset_all_for_test();
+    crate::settings::testing::reset(false);
+    assert_eq!(after_on, format!("{seed}use_game_windows=on\n"), "marker and unrelated line kept, switch saved");
+    assert!(read_on, "the switch reads back on after a restart");
+    assert_eq!(after_off, format!("{seed}use_game_windows=off\n"), "one switch line, the others kept");
+    assert!(!read_off, "the switch reads back off after a restart");
 }

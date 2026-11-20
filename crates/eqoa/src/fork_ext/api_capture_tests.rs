@@ -1,4 +1,5 @@
 use super::*;
+use crate::fork_ext::addons::native_tests::{PLAY_EVENTS, install_field_check};
 use crate::fork_ext::addons::{
     host::Host,
     native_core::{CORE, Core},
@@ -15,6 +16,345 @@ fn ready() -> Play {
     ));
     p
 }
+
+#[test]
+fn round7c_play_records_match_declared_fields() {
+    crate::fork_ext::addons::big_stack(|| {
+        let mut p = Play::bundled_ui_fixture();
+        let mut walker = Play::bundled_ui_walker();
+        walker.scene.grid = Some(vi::world::Grid {
+            bbox: Default::default(),
+            rows: 3,
+            cols: 3,
+            subdiv: 1,
+            cell_size: vi::fpu::F::new(1000.),
+            origin: Default::default(),
+            regions: Vec::new(),
+        });
+        p.map = crate::map::testing::up((640, 448));
+        p.map.open = true;
+        assert!(p.map.click([320., 224.], false));
+        p.map.open = false;
+        p.pet_id = 2002;
+        let me = p.self_id32().unwrap();
+        p.entities.slots[0] = Some(net::entity::Entity {
+            id: me,
+            kind: net::entity::TYPE_CREATURE,
+            p19: 192,
+            creature: Some(net::entity::Creature {
+                name: "Wereoxx".into(),
+                level: 50,
+                target: 2002,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        p.group.raid.push(net::session::RaidMember::default());
+        p.group.invites.push(crate::group::Invite {
+            id: 3001,
+            name: "Invite".into(),
+        });
+        CORE.with(|c| {
+            let mut c = c.borrow_mut();
+            c.effects_received = true;
+            c.mastery_flags.from_dump();
+        });
+        let host = Host::new().unwrap();
+        p.forge_snapshot(Some(&walker));
+        p.add_chat("Field audit".into(), [1.; 4]);
+        crate::fork_ext::addons::input::observe_report(
+            &mut crate::input::Report {
+                buttons: 0,
+                sticks: [0.25; 4],
+                triggers: [0.; 2],
+            },
+            true,
+            true,
+        );
+        install_field_check(&host).unwrap();
+        host.execute(
+            r#"
+            local p = eqoa.player.get()
+            fields('player.Player', p)
+            -- name: the place's name comes from the disc's word table (nil without the disc)
+            fields('player.Location', p.location, 'name')
+            fields('player.Vital', p.hp)
+            fields('player.Vital', p.power)
+            fields('player.Attributes', p.attributes)
+            fields('player.SevenStats', p.attributes.base)
+            fields('player.SevenStats', p.attributes.total)
+            fields('player.Resists', p.resists)
+            local stats = eqoa.player.stats()
+            fields('player.Stats', stats)
+            -- min/max/without_*: only a stat with a native range carries them
+            fields('player.StatItem', stats.strength, 'min max without_min without_max')
+            fields('Vec3', p.position)
+            fields('Vec3', p.velocity)
+            fields('mastery.Mastery', p.mastery)
+            -- disposition*: only a creature the server sent a con colour for
+            fields('entities.Entity', eqoa.entities.list()[1], 'disposition disposition_name')
+        "#,
+        )
+        .unwrap();
+        host.execute(r#"
+            local g = eqoa.group.get()
+            fields('group.Group', g)
+            -- entity: only a member in view; power: only after the server sent that member's power
+            fields('group.Member', g.members[1], 'entity power')
+            fields('group.RaidMember', g.raid[1])
+            fields('group.Invite', g.invites[1])
+            local ability = eqoa.abilities.list()[1]
+            -- spellbook_slot: only an ability placed in the spellbook
+            fields('abilities.Ability', ability, 'spellbook_slot')
+            fields('abilities.RangeResult', eqoa.abilities.in_range(ability.ref,
+                {x=0,y=0,z=0}, {x=1,y=2,z=3}))
+            -- started_at/estimated_remaining: only while a cooldown runs
+            fields('cooldowns.Cooldown', eqoa.cooldowns.get(ability.ref), 'started_at estimated_remaining')
+            local bar = eqoa.hotbar.list()[1]
+            -- selected_slot: only when the bar's cursor is on a slot
+            fields('hotbar.Hotbar', bar, 'selected_slot')
+            -- item/weapon_set: only a slot of that kind; ui_icon: only a slot the game gives a UI icon
+            fields('hotbar.HotbarSlot', bar.slots[1], 'item weapon_set ui_icon')
+            fields('effects.Effect', eqoa.effects.list()[1])
+            local chat = eqoa.chat.history()
+            fields('chat.ChatMessage', chat[#chat])
+            fields('Color', chat[#chat].color)
+            local inp = eqoa.input.get()
+            fields('input.InputState', inp)
+            fields('input.Pad', inp.pad)
+            fields('input.RawAxes', inp.pad.raw_left)
+            fields('Vec2', inp.pad.left)
+            fields('input.Pointer', eqoa.input.pointer())
+            fields('client.Client', eqoa.client.get())
+            fields('camera.Camera', eqoa.camera.get())
+            fields('quests.Quest', eqoa.quests.list()[1])
+            -- active: only while a window is focused
+            fields('windows.Windows', eqoa.windows.get(), 'active')
+            fields('combat.Counters', eqoa.combat.get_counters())
+            fields('hud.Frame', eqoa.hud.frame())
+            local layout = eqoa.hud.layout()
+            fields('hud.Layout', layout)
+            fields('hud.PlayerLayout', layout.player)
+            fields('hud.TargetLayout', layout.target)
+            fields('hud.GroupMemberLayout', layout.group_members[1])
+            fields('hud.SinglePanelLayout', layout.pet)
+            fields('hud.Rect', layout.player.panel)
+            local map = eqoa.map.get()
+            -- world_name: needs the disc's word table or a cached world; search_anchor: only while the map's search shows
+            fields('map.MapState', map, 'world_name search_anchor')
+            fields('map.Bounds', map.bounds)
+            -- label/owner: only a waypoint a mod placed; nil for the player's own
+            fields('map.Waypoint', map.waypoint, 'label owner')
+            -- level_min/level_max: only a camp; label: only a community or waypoint mark; step: only a quest mark
+            fields('map.Marker', eqoa.map.markers(map.world_id)[1], 'level_min level_max label step')
+            local _, err = eqoa.actions.move()
+            fields('Error', err)
+            -- reason: only a capability described with one
+            fields('capabilities.Capability', eqoa.capabilities.get('eqoa.api'), 'reason')
+        "#).unwrap();
+    });
+}
+
+
+#[test]
+fn round7c_world_events_come_from_play_changes() {
+    crate::fork_ext::addons::big_stack(|| {
+        use super::api_capture::updates::{Kind, capture};
+        use crate::fork_ext::addons::{input, native_core};
+
+        let mut p = Play::bundled_ui_fixture();
+        let mut walker = Play::bundled_ui_walker();
+        native_core::fixture_demand(true);
+        let host = Host::new().unwrap();
+        host.lua.globals().set("world_events", host.lua.create_sequence_from(PLAY_EVENTS.iter().copied()).unwrap()).unwrap();
+        install_field_check(&host).unwrap();
+        host.execute(
+            r#"
+            seen = {}
+            for _, name in ipairs(world_events) do
+                assert(eqoa.capabilities.has('eqoa.events.' .. name), name)
+                assert(eqoa.events.on(name, function(e) seen[name] = e; round7c_note(name, e) end))
+            end
+            "#,
+        )
+        .unwrap();
+        CORE.with(|c| c.borrow_mut().mastery_flags.from_dump());
+        p.forge_snapshot(Some(&walker));
+        host.execute("assert(eqoa.map.set_guide{world_id=0, entity_id=2002, label='Moss Snake'})")
+            .unwrap();
+
+        p.entities.slots[2] = p.entities.slots[1].clone();
+        p.entities.slots[2].as_mut().unwrap().id = 2003;
+        capture(&p, &Kind::Entity(2), None);
+        p.entities.slots[2].as_mut().unwrap().p19 = 100;
+        capture(&p, &Kind::Entity(2), None);
+        // the target moves while the old one is still in view: target.changed carries both
+        p.target = 2003;
+        capture(&p, &Kind::Player, None);
+        p.entities.slots[1] = None;
+        capture(&p, &Kind::Entity(1), None);
+        p.group.members[0].hp = 128;
+        capture(&p, &Kind::Group, None);
+        p.stats.stat[8] += 10;
+        capture(&p, &Kind::Player, None);
+        p.quests.add("A new quest".encode_utf16().collect());
+        capture(&p, &Kind::Quests, None);
+        p.effects.name[0] = "A different effect".encode_utf16().collect();
+        capture(&p, &Kind::Effects, None);
+        p.effects.name[0] = "Another effect".encode_utf16().collect();
+        capture(&p, &Kind::Effects, None);
+        p.hud_menus.defs[0].entries[0].id = 2;
+        for (old, new) in [(0., 5000), (5., 2500), (2.5, 0)] {
+            p.abilities.get_mut(&1).unwrap().lockout = new;
+            capture(&p, &Kind::Ability(1), Some((1, old)));
+        }
+        p.cm.m.x0c += 1;
+        p.mode = 13;
+        p.map.open = true;
+        walker.eye.position.x = vi::fpu::F::new(10.);
+        p.forge_snapshot(Some(&walker));
+        p.add_chat("Event audit".into(), [1.; 4]);
+        crate::fork_ext::chat_history::key(19, true);
+        native_core::observe_hit(0x100, 2003, -7, Some([255; 3]));
+        input::emit_named_key_event("f2", true);
+        input::observe_report(
+            &mut crate::input::Report {
+                buttons: 1 << 4,
+                sticks: [0.; 4],
+                triggers: [0.; 2],
+            },
+            true,
+            true,
+        );
+        native_events::dispatch(&host).unwrap();
+        input::observe_report(
+            &mut crate::input::Report {
+                buttons: 0,
+                sticks: [0.; 4],
+                triggers: [0.; 2],
+            },
+            true,
+            true,
+        );
+        native_events::dispatch(&host).unwrap();
+        p.session.self_id = None;
+        p.forge_snapshot(None);
+        native_events::dispatch(&host).unwrap();
+
+        host.execute(
+            r#"
+            local missing = {}
+            for _, name in ipairs(world_events) do
+                if not seen[name] then missing[#missing + 1] = name end
+            end
+            assert(#missing == 0, 'Play did not emit: ' .. table.concat(missing, ', '))
+            event_fields(seen, world_events)
+            fields('events.Event', seen['combat.hit'])
+            fields('combat.CombatHit', seen['combat.hit'].data)
+        "#,
+        )
+        .unwrap();
+    });
+}
+/// Round 7 Part C fix M5b: `eqoa.map.set_waypoint`/`clear_waypoint` move the player's own waypoint through the
+/// map's own waypoint path, read back through `eqoa.map.get().waypoint`.
+#[test]
+fn round7c_mod_moves_and_clears_the_players_own_waypoint() {
+    crate::fork_ext::addons::big_stack(|| {
+        use crate::fork_ext::addons::{action_broker, map_waypoint};
+        action_broker::reset_all_for_test();
+        map_waypoint::reset_for_test();
+        let mut p = Play::bundled_ui_fixture();
+        let world = p.world_id();
+        p.map = crate::map::testing::up((640, 448));
+        p.map.round4_waypoint(world, None);
+        p.forge_snapshot(None);
+        let host = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+        let tick = |p: &mut Play, host: &Host| {
+            p.bags_broker_tick();
+            native_events::dispatch(host).unwrap();
+            p.forge_snapshot(None);
+            native_events::dispatch(host).unwrap();
+        };
+        host.execute(
+            r#"
+            ares = {}
+            eqoa.events.on('action.result', function(e) ares[#ares + 1] = e.data end)
+            world = eqoa.map.get().world_id
+            local req, err = eqoa.map.set_waypoint{world_id = world, x = 12000, z = 3400, label = 'Camp'}
+            assert(req, err and (err.code .. ': ' .. err.message))
+            "#,
+        )
+        .unwrap();
+        tick(&mut p, &host);
+        assert_eq!(p.map.waypoint(world), Some([12000.0, 3400.0]), "the game's own waypoint moved");
+        host.execute(
+            r#"
+            local r = ares[#ares]
+            assert(r and r.kind == 'set_waypoint' and r.state == 'completed', r and (r.kind .. ' ' .. r.state))
+            local w = assert(eqoa.map.get().waypoint, 'waypoint read back')
+            assert(w.world_id == world and w.x == 12000 and w.z == 3400, 'position')
+            assert(w.label == 'Camp' and w.owner == 'test', tostring(w.label) .. ' ' .. tostring(w.owner))
+            assert(eqoa.map.clear_waypoint())
+            "#,
+        )
+        .unwrap();
+        tick(&mut p, &host);
+        assert_eq!(p.map.waypoint(world), None, "the mod's waypoint cleared");
+        host.execute(
+            r#"
+            local r = ares[#ares]
+            assert(r.kind == 'clear_waypoint' and r.state == 'completed', r.kind .. ' ' .. r.state)
+            assert(eqoa.map.get().waypoint == nil)
+            assert(eqoa.map.set_waypoint{world_id = world, x = 5000, z = 6000})
+            "#,
+        )
+        .unwrap();
+        tick(&mut p, &host);
+        // the player puts their own waypoint elsewhere: it is theirs, and the mod cannot clear it
+        p.map.round4_waypoint(world, Some([10000.0, 20000.0]));
+        tick(&mut p, &host);
+        host.execute(
+            r#"
+            local w = assert(eqoa.map.get().waypoint)
+            assert(w.x == 10000 and w.z == 20000 and w.owner == nil and w.label == nil, tostring(w.owner))
+            assert(eqoa.map.clear_waypoint())
+            "#,
+        )
+        .unwrap();
+        tick(&mut p, &host);
+        assert_eq!(p.map.waypoint(world), Some([10000.0, 20000.0]), "the player's waypoint stays");
+        host.execute(
+            r#"
+            local r = ares[#ares]
+            assert(r.kind == 'clear_waypoint' and r.state == 'refused' and r.code == 'busy', r.state .. ' ' .. tostring(r.code))
+            local ok, err = eqoa.map.set_waypoint{world_id = world, x = 0/0, z = 1}
+            assert(ok == nil and err.code == 'invalid_argument', 'NaN')
+            ok, err = eqoa.map.set_waypoint{world_id = world, x = 1, z = 1, label = string.rep('x', 129)}
+            assert(ok == nil and err.code == 'invalid_argument', 'label length')
+            "#,
+        )
+        .unwrap();
+        let before = crate::settings::client();
+        let mut off = before.clone();
+        off.map = false;
+        crate::settings::set_client(off);
+        let refused = host.execute(
+            r#"
+            local ok, err = eqoa.map.set_waypoint{world_id = world, x = 1, z = 1}
+            assert(ok == nil and err.code == 'unavailable', 'set with the map off')
+            ok, err = eqoa.map.clear_waypoint()
+            assert(ok == nil and err.code == 'unavailable', 'clear with the map off')
+            "#,
+        );
+        crate::settings::set_client(before);
+        refused.unwrap();
+        p.map.round4_waypoint(world, None);
+        map_waypoint::reset_for_test();
+        action_broker::reset_all_for_test();
+    });
+}
+
 // Shared bundled-UI fixture: populate the native client structures, then use
 // exactly the cached projection that Play supplies to the addon manager.
 impl Play {
@@ -2245,7 +2585,7 @@ fn round6b_non_item_chat_command_windows_weapon_sets_and_spellbook() {
         local drop_q = eqoa.capabilities.get("eqoa.actions.drop_quest")
         assert(drop_q and drop_q.status == "supported")
         local dest = eqoa.capabilities.get("eqoa.actions.destroy")
-        assert(dest and dest.status == "unsupported" and dest.reason == "not offered before the PR (owner)")
+        assert(dest and dest.status == "unsupported" and dest.reason == "excluded until after the upstream PR by the mod API plan")
 
         results = {}
         eqoa.events.on("action.result", function(e)
@@ -3153,4 +3493,191 @@ fn round7w_dialog_prompt_kind_capability_is_supported() {
         "#,
     )
     .unwrap();
+}
+
+#[test]
+fn round7c_waypoint_writes_require_a_grant() {
+    use crate::fork_ext::addons::action_broker;
+    action_broker::reset_all_for_test();
+    let mut p = ready();
+    p.map = crate::map::testing::up((640, 448));
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
+    p.forge_snapshot(None);
+    host.execute(r#"
+        local req, err = eqoa.map.set_waypoint{world_id=0, x=25300, z=15200}
+        assert(req == nil and err.code == 'permission_denied', 'set requires eqoa.map.waypoint')
+        req, err = eqoa.map.clear_waypoint()
+        assert(req == nil and err.code == 'permission_denied', 'clear requires eqoa.map.waypoint')
+    "#).unwrap();
+    p.bags_broker_tick();
+    assert_eq!(p.map.waypoint(0), None);
+}
+
+#[test]
+fn round7c_waypoint_checks_the_addressed_native_ground_at_dispatch() {
+    use crate::fork_ext::addons::{action_broker, map_waypoint};
+    action_broker::reset_all_for_test();
+    map_waypoint::reset_for_test();
+    let mut p = ready();
+    p.map = crate::map::testing::up((640, 448));
+    let host = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+    p.forge_snapshot(None);
+    let set = |p: &mut Play, lua_point: &str| {
+        host.execute(&format!("req, err = eqoa.map.set_waypoint{lua_point}")).unwrap();
+        p.bags_broker_tick();
+        host.lua.load(r#"
+            if err then return err.code end
+            local r = assert(eqoa.actions.status(req))
+            return r.code or r.state
+        "#).eval::<String>().unwrap()
+    };
+    assert_eq!(set(&mut p, "{world_id=0,x=25300,z=15200}"), "completed");
+    let good = p.map.waypoint(0);
+    assert_eq!(good, Some([25300., 15200.]));
+    for point in [
+        "{world_id=99,x=25300,z=15200}",
+        "{world_id=0,x=1000,z=15200}",
+        "{world_id=0,x=3.5e38,z=15200}",
+        "{world_id=0,x=0/0,z=15200}",
+    ] {
+        assert_eq!(set(&mut p, point), "invalid_argument", "{point}");
+        assert_eq!(p.map.waypoint(0), good, "{point} left the pin alone");
+        assert_eq!(p.map.waypoint(99), None);
+    }
+    p.map = Default::default();
+    assert_eq!(set(&mut p, "{world_id=0,x=25300,z=15200}"), "not_ready");
+    assert_eq!(p.map.waypoint(0), None);
+    map_waypoint::reset_for_test();
+}
+
+#[test]
+fn round7c_disable_clears_every_world_the_mod_still_owns() {
+    use crate::fork_ext::addons::{action_broker, map_waypoint};
+    action_broker::reset_all_for_test();
+    map_waypoint::reset_for_test();
+    let mut p = ready();
+    p.map = crate::map::testing::up((640, 448));
+    p.map.round7c_add_calibrated_world(1);
+    let host = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+    p.forge_snapshot(None);
+    for world in [0, 1] {
+        host.execute(&format!("assert(eqoa.map.set_waypoint{{world_id={world}, x=22000, z=15000}})")).unwrap();
+        p.bags_broker_tick();
+        assert_eq!(p.map.waypoint(world), Some([22000., 15000.]));
+    }
+    native_events::clear(&host);
+    p.bags_broker_tick();
+    assert_eq!(p.map.waypoint(0), None, "the earlier world's owned pin was cleared");
+    assert_eq!(p.map.waypoint(1), None, "the later world's owned pin was cleared");
+    map_waypoint::reset_for_test();
+}
+
+#[test]
+fn round7c_player_owns_a_pin_replaced_at_the_same_position() {
+    use crate::fork_ext::addons::{action_broker, map_waypoint};
+    action_broker::reset_all_for_test();
+    map_waypoint::reset_for_test();
+    let mut p = ready();
+    p.map = crate::map::testing::up((640, 448));
+    assert!(p.map.click([320., 224.], false));
+    let point = p.map.waypoint(0).unwrap();
+    assert!(p.map.click([320., 224.], false));
+    assert_eq!(p.map.waypoint(0), None);
+    let host = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+    p.forge_snapshot(None);
+    host.execute(&format!("assert(eqoa.map.set_waypoint{{world_id=0, x={}, z={}}})", point[0], point[1])).unwrap();
+    p.bags_broker_tick();
+    assert!(p.map.click([320., 224.], false));
+    assert_eq!(p.map.waypoint(0), None);
+    p.bags_broker_tick();
+    assert!(p.map.click([320., 224.], false));
+    native_events::clear(&host);
+    p.bags_broker_tick();
+    assert_eq!(p.map.waypoint(0), Some(point), "the replacement belongs to the player");
+    map_waypoint::reset_for_test();
+}
+
+#[test]
+fn round7c_other_mods_identical_pin_survives_disable_in_the_same_step() {
+    use crate::fork_ext::addons::{action_broker, map_waypoint};
+    action_broker::reset_all_for_test();
+    map_waypoint::reset_for_test();
+    let mut p = ready();
+    p.map = crate::map::testing::up((640, 448));
+    let first = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+    let second = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+    p.forge_snapshot(None);
+    let set = "assert(eqoa.map.set_waypoint{world_id=0, x=22000, z=15000})";
+    first.execute(set).unwrap();
+    p.bags_broker_tick();
+    assert_eq!(p.map.waypoint(0), Some([22000., 15000.]));
+    second.execute(set).unwrap();
+    native_events::clear(&first);
+    p.bags_broker_tick();
+    assert_eq!(p.map.waypoint(0), Some([22000., 15000.]), "the second VM put this pin");
+    native_events::clear(&second);
+    p.bags_broker_tick();
+    assert_eq!(p.map.waypoint(0), None);
+    map_waypoint::reset_for_test();
+}
+
+/// Fix round 3 item 2: a mod disabled just before a logout, with no game step between, loses its pin; the
+/// next character's fresh map (pins not read yet) does not bring it back.
+#[test]
+fn round7c_disabled_mods_pin_does_not_return_after_a_logout() {
+    use crate::fork_ext::addons::{action_broker, map_waypoint};
+    action_broker::reset_all_for_test();
+    map_waypoint::reset_for_test();
+    let host = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+    let mut a = ready();
+    a.map = crate::map::testing::up((640, 448));
+    a.forge_snapshot(None);
+    host.execute("assert(eqoa.map.set_waypoint{world_id=0, x=22000, z=15000})").unwrap();
+    a.bags_broker_tick();
+    assert_eq!(a.map.waypoint(0), Some([22000., 15000.]));
+    native_events::clear(&host);
+    drop(a);
+    assert!(crate::settings::waypoints().is_empty(), "cleared when the world closed");
+    let mut b = ready();
+    b.map = crate::map::testing::up((640, 448));
+    b.forge_snapshot(None);
+    b.bags_broker_tick();
+    b.map.round7c_read_waypoints();
+    b.bags_broker_tick();
+    assert_eq!(b.map.waypoint(0), None, "the disabled mod's pin stays gone on the next character");
+    map_waypoint::reset_for_test();
+}
+
+/// Fix round 3 item 2, the cross-character rule: the game keeps one pin file per window, shared by every
+/// character played in it, so a mod's pin and its ownership carry across a logout for the rest of the client
+/// session. A game step before the next character's pins are read changes nothing; disabling the mod then
+/// clears the pin it still owns.
+#[test]
+fn round7c_mod_pin_ownership_carries_across_characters_until_compared() {
+    use crate::fork_ext::addons::{action_broker, map_waypoint};
+    action_broker::reset_all_for_test();
+    map_waypoint::reset_for_test();
+    let host = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+    let mut a = ready();
+    a.map = crate::map::testing::up((640, 448));
+    a.forge_snapshot(None);
+    host.execute("assert(eqoa.map.set_waypoint{world_id=0, x=22000, z=15000})").unwrap();
+    a.bags_broker_tick();
+    drop(a);
+    let mut b = ready();
+    b.map = crate::map::testing::up((640, 448));
+    b.forge_snapshot(None);
+    b.bags_broker_tick();
+    b.bags_broker_tick();
+    b.map.round7c_read_waypoints();
+    b.bags_broker_tick();
+    b.forge_snapshot(None);
+    host.execute(r#"
+        local w = assert(eqoa.map.get().waypoint, 'the pin shows for the next character')
+        assert(w.owner == 'test', 'still the mod pin: ' .. tostring(w.owner))
+    "#).unwrap();
+    native_events::clear(&host);
+    b.bags_broker_tick();
+    assert_eq!(b.map.waypoint(0), None, "disabling the mod clears the pin it still owns");
+    map_waypoint::reset_for_test();
 }

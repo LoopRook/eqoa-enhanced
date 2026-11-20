@@ -236,6 +236,7 @@ fn round6a_mastery_uninitialized_dump_and_reply_subops() {
     .unwrap();
     frame(&p, Some(&w), &h);
 
+    crate::fork_ext::addons::native_tests::install_field_check(&h).unwrap();
     // 1. Uninitialized: Mastery counters are nil, skills() unavailable, selected() nil, Forge CMs nil
     h.execute(
         r#"
@@ -347,6 +348,7 @@ fn round6a_mastery_uninitialized_dump_and_reply_subops() {
         r#"
         local skills, err = eqoa.mastery.skills()
         assert(err == nil and #skills == 1)
+        fields('mastery.MasterySkill', skills[1])
         assert(skills[1].id == 10 and skills[1].rank_key == 100 and skills[1].parent_key == 0)
         assert(skills[1].name == 'Bountiful Spirit' and skills[1].category == 2 and skills[1].cost == 3)
         assert(skills[1].known == true and skills[1].owned == true and skills[1].master_class == false)
@@ -393,6 +395,7 @@ fn round6a_mastery_uninitialized_dump_and_reply_subops() {
         r#"
         local n, err = eqoa.mastery.selected()
         assert(err == nil and n ~= nil)
+        fields('mastery.MasteryNode', n)
         assert(n.id == 555 and n.skill_id == 10 and n.cost == 3)
         assert(n.name == 'Bountiful Spirit' and n.title == 'Bountiful Spirit Title' and n.text == 'Raises wisdom.')
         assert(n.level_required == 50 and n.points_spent_required == 6 and n.minimum_stats[1] == 10 and n.minimum_stats[7] == 70)
@@ -602,6 +605,7 @@ fn round6a_windows_modes_dialogs_hints_and_outside_world() {
     )
     .unwrap();
 
+    crate::fork_ext::addons::native_tests::install_field_check(&h).unwrap();
     // Enter world
     let mut p = ready();
     let w = Play::bundled_ui_walker();
@@ -630,6 +634,9 @@ fn round6a_windows_modes_dialogs_hints_and_outside_world() {
         assert(g.mode == 'start_menu' and g.native_mode == 13 and g.busy == true and g.start_menu_open == true and g.any_window_open == true)
         local sm = eqoa.windows.find('start_menu')
         assert(sm ~= nil and sm.focused == true and #sm.hints == 2)
+        -- rows/selected_row/scroll_top: only a window with a native list; tabs/tab: only a tabbed one; dialog: only a dialog
+        fields('windows.Window', sm, 'rows selected_row scroll_top tabs tab dialog')
+        fields('windows.ButtonHint', sm.hints[1])
         saved_wref = sm.ref
         local resolved, rerr = eqoa.windows.get_window(saved_wref)
         assert(rerr == nil and resolved.kind == 'start_menu')
@@ -670,6 +677,8 @@ fn round6a_windows_modes_dialogs_hints_and_outside_world() {
         r#"
         local c = eqoa.windows.find('confirm')
         assert(c.dialog.kind == 'confirm' and c.dialog.text == 'Delete item?' and c.dialog.style == 'yes_no' and c.dialog.style_id == 1 and c.dialog.selection == 2)
+        -- a confirm box has no options, and title/chat/password belong to an input box
+        fields('windows.Dialog', c.dialog, 'options title chat password')
         "#,
     )
     .unwrap();
@@ -685,6 +694,8 @@ fn round6a_windows_modes_dialogs_hints_and_outside_world() {
         r#"
         local inp = eqoa.windows.find('input')
         assert(inp.dialog.kind == 'input' and inp.dialog.text == 'Hello world' and inp.dialog.chat == true and inp.dialog.password == false)
+        -- an input box has no options, selection or confirm style (nor a confirm's prompt_kind)
+        fields('windows.Dialog', inp.dialog, 'options selection style style_id prompt_kind')
         "#,
     )
     .unwrap();
@@ -852,7 +863,7 @@ fn round6a_forge_icons_merchant_hint_hotbar_items_and_zero_addon() {
         assert(eqoa.capabilities.get('eqoa.windows.MenuRow.command').status == 'supported')
         assert(eqoa.capabilities.get('eqoa.windows.Dialog.options').status == 'supported')
         assert(eqoa.capabilities.get('eqoa.windows.Dialog.selection').status == 'supported')
-        assert(eqoa.capabilities.get('eqoa.textures.formats.jpeg').status == 'not_yet')
+        assert(eqoa.capabilities.get('eqoa.textures.formats.jpeg').status == 'unsupported')
         "#,
     )
     .unwrap();
@@ -885,6 +896,7 @@ fn round6a_seam_dialogs_privchat_response_pages_and_confirm_yes_no() {
     let mut p = ready();
     let w = Play::bundled_ui_walker();
     let h = forge_host("seam_dialogs");
+    crate::fork_ext::addons::native_tests::install_field_check(&h).unwrap();
     let mut lines = vec![String::new(); 300];
     lines[160] = "Close".into();
     lines[216] = "Back".into();
@@ -929,6 +941,10 @@ fn round6a_seam_dialogs_privchat_response_pages_and_confirm_yes_no() {
         eqoa.events.on('windows.changed', function(e) wlog[#wlog + 1] = e.data end)
         local rw = eqoa.windows.find('response_dialog')
         assert(rw.dialog.kind == 'text' and rw.dialog.text == 'Choose your path:')
+        -- item: only an item row; command: only a row that runs a command
+        fields('windows.MenuRow', rw.rows[1], 'item command')
+        -- a response dialog has options, not a selection, tag, title, input fields or confirm style/prompt_kind
+        fields('windows.Dialog', rw.dialog, 'selection tag title chat password style style_id prompt_kind')
         -- Page 1: Option 1..12, More, Close
         assert(#rw.dialog.options == 14 and rw.dialog.options[13] == 'More' and rw.dialog.options[14] == 'Close',
             (function()

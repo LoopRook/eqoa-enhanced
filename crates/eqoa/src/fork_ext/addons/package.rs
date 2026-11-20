@@ -248,18 +248,14 @@ pub(crate) fn install_package_loader(
     ] {
         let table = lua.create_table()?;
         for name in names {
-            let symbol = format!("frontiers_forge.{module}.{name}");
-            table.set(
-                *name,
-                lua.create_function(move |lua, _: mlua::MultiValue| {
-                    super::native::diagnose(
-                        lua,
-                        &symbol,
-                        "unsupported",
-                        "raw memory is excluded; use eqoa.quests for native quest records",
-                    );
-                    Ok(Value::Nil)
-                })?,
+            super::native::refuse_member(
+                lua,
+                &table,
+                &format!("frontiers_forge.{module}.{name}"),
+                "unsupported",
+                None,
+                "raw memory is excluded; use eqoa.quests for native quest records",
+                super::native::RefusalShape::ForgeNil,
             )?;
         }
         let mt = lua.create_table()?;
@@ -1311,7 +1307,7 @@ mod round7a_tests {
         r#"
         for _,n in ipairs({'images','load_image','set_waypoint','clear_waypoint'}) do
             local v,e = eqoa.map[n](); assert(v == nil)
-            assert(e.code == ((n == 'images' or n == 'load_image') and 'unsupported' or 'not_yet'))
+            assert(e.code == ((n == 'images' or n == 'load_image') and 'unsupported' or 'not_in_world'))
             assert(e.message ~= 'implementation pending')
         end
     "#
@@ -1539,6 +1535,7 @@ mod round7a_more_tests {
                 .unwrap();
             return;
         }
+        super::super::native_tests::install_field_check(&host).unwrap();
         let data = root.join("private");
         file_io::install(&host, &addon, Some(data.clone())).unwrap();
         host.lua
@@ -1552,6 +1549,9 @@ mod round7a_more_tests {
             local all=eqoa.files.list('resources')
             assert(#all==2 and all[1].path=='resources/a.txt' and all[2].path=='resources/nested')
             assert(all[2].kind=='directory' and all[2].size==nil)
+            fields('files.FileEntry', all[1])
+            -- size: a directory has none
+            fields('files.FileEntry', all[2], 'size')
             assert(#eqoa.files.list('resources','?.txt')==1)
             assert(#eqoa.files.list('sibling/resources')==0)
             local v,e=eqoa.files.list('resources','../*'); assert(v==nil and e.code=='invalid_argument')

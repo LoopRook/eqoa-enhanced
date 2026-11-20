@@ -866,15 +866,25 @@ struct FrameState {
 pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
     let mut kinds: Vec<&str> = Vec::new();
     for cap in caps {
-        if cap == "eqoa.actions.*" {
+        if cap == "eqoa.map.waypoint" {
+            if !kinds.contains(&"map waypoint") {
+                kinds.push("map waypoint");
+            }
+        } else if cap == "eqoa.actions.*" {
             if !kinds.contains(&"all actions") {
                 kinds.push("all actions");
             }
-        } else if let Some(kind) = cap.strip_prefix("eqoa.actions.")
-            && !kind.is_empty()
-            && !kinds.contains(&kind)
-        {
-            kinds.push(kind);
+        } else if let Some(kind) = cap.strip_prefix("eqoa.actions.") {
+            let label = match kind {
+                "chat" => "chat (ordinary lines)",
+                "command" => "command (slash lines)",
+                // its own line (`TEXT_BOXES_LABEL`)
+                "input_text" => continue,
+                _ => kind,
+            };
+            if !label.is_empty() && !kinds.contains(&label) {
+                kinds.push(label);
+            }
         }
     }
     if kinds.is_empty() {
@@ -882,6 +892,73 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
     } else {
         Some(format!("Actions: can act on its own ({})", kinds.join(", ")))
     }
+}
+
+/// The windows a manifest's `replaces` names, by the game's own window titles: first those this build can
+/// replace, then (a mod written for a later build) those it cannot replace yet.
+fn replacement_labels(replaces: &[String], can_takeover: bool) -> [Option<String>; 3] {
+    let (mut now, mut later, mut hud) = (Vec::new(), Vec::new(), Vec::new());
+    for kind in replaces {
+        if super::visibility::is_hud_disclosure(kind) {
+            let label = if kind == "hud.target" { "Target frame" } else { kind };
+            let list = if can_takeover { &mut now } else { &mut hud };
+            if !list.contains(&label) {
+                list.push(label);
+            }
+            continue;
+        }
+        let Some(title) = super::window_kinds::title(kind) else {
+            continue;
+        };
+        let list = if super::window_takeover::TakeoverKind::parse(kind).is_ok() {
+            if !can_takeover {
+                continue;
+            }
+            &mut now
+        } else {
+            &mut later
+        };
+        if !list.contains(&title) {
+            list.push(title);
+        }
+    }
+    [
+        (!now.is_empty()).then(|| format!("Replaces game windows: {}", now.join(", "))),
+        (!later.is_empty()).then(|| format!("Not replaceable in this version: {}", later.join(", "))),
+        (!hud.is_empty()).then(|| format!("Replaces HUD: {}", hud.join(", "))),
+    ]
+}
+
+/// What Mods & Addons tells the player about a mod before it is enabled: what it can do on its own and
+/// which game windows it replaces. Derived from the manifest only, never from what the mod says.
+pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec<String> {
+    let forge_import: Vec<String>;
+    let caps = if addon.api.is_none() {
+        forge_import = super::native::FORGE_IMPORT_ACTIONS.map(str::to_owned).to_vec();
+        &forge_import[..]
+    } else {
+        addon.declared_capabilities().unwrap_or(&[])
+    };
+    let mut lines = Vec::new();
+    lines.extend(autonomous_action_label(caps));
+    let can_takeover = super::native::capability_grants(caps, "eqoa.windows.takeover");
+    lines.extend(replacement_labels(&addon.extensions.replaces, can_takeover).into_iter().flatten());
+    if declares_dialog_actions(caps) {
+        lines.push("Can answer NPC dialogs".into());
+    }
+    if super::native::capability_grants(caps, "eqoa.actions.input_text") {
+        lines.push(TEXT_BOXES_LABEL.into());
+    }
+    lines
+}
+
+/// What `eqoa.actions.input_text` grants, said plainly in Mods & Addons (fix round 4 item 3).
+pub(crate) const TEXT_BOXES_LABEL: &str = "Text boxes: can type into and submit the game's open text boxes";
+
+fn declares_dialog_actions(caps: &[String]) -> bool {
+    super::window_actions::ANSWERS_DIALOGS
+        .iter()
+        .any(|action| super::native::capability_grants(caps, action))
 }
 
 fn controls(
@@ -896,6 +973,10 @@ fn controls(
         if let Some(readiness)=manager.health_readiness() {ui.text_wrapped(readiness);}
         if let Some(root)=root {ui.text_wrapped(root.to_string_lossy());}
         if ui.button("Rescan folder") {actions.push(Action::Rescan);}
+        let mut use_game_windows = super::window_takeover::use_game_windows();
+        if ui.checkbox("Use the game's windows", &mut use_game_windows) {
+            super::window_takeover::set_use_game_windows(use_game_windows);
+        }
         let entries=manager.entries();
         if entries.is_empty() {ui.text_wrapped("No addons found. Open Mods Folder in Options to add Lua files or addon folders, then rescan.");}
         for entry in entries {
@@ -906,8 +987,8 @@ fn controls(
             if !caps.is_empty() {
                 ui.text_wrapped(format!("Capabilities: {}", caps.join(", ")));
             }
-            if let Some(label) = autonomous_action_label(caps) {
-                ui.text_wrapped(label);
+            for line in disclosure_lines(&entry.metadata) {
+                ui.text_wrapped(line);
             }
             let id=&entry.metadata.id;
             let warnings=manager.diagnostics().iter().filter(|d|d.id.as_ref()==Some(id)).count();
@@ -2439,6 +2520,29 @@ mod tests {
             !root.0.join("imgui.ini").exists(),
             "Must never write into mods dir"
         );
+    }
+
+    #[test]
+    fn round7c_manager_labels_come_from_manifest_declarations() {
+        assert_eq!(replacement_labels(&[], true), [None, None, None]);
+        assert_eq!(
+            replacement_labels(&["bank".into(), "spellbook".into(), "loot".into(), "bank".into()], true),
+            [
+                Some("Replaces game windows: Bank, Loot".into()),
+                Some("Not replaceable in this version: Abilities".into()),
+                None,
+            ]
+        );
+        assert_eq!(
+            replacement_labels(&["hud.target".into()], true),
+            [Some("Replaces game windows: Target frame".into()), None, None]
+        );
+        assert!(declares_dialog_actions(&[
+            "eqoa.actions.dialog_answer".into()
+        ]));
+        assert!(declares_dialog_actions(&["eqoa.actions.*".into()]));
+        assert!(!declares_dialog_actions(&["eqoa.actions.talk".into()]));
+        assert!(declares_dialog_actions(&["eqoa.actions.activate_row".into()]));
     }
 
     #[test]

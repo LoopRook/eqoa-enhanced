@@ -2,6 +2,51 @@
 use super::*;
 use serde_json::{Value as Json, json};
 impl Map {
+    /// Whether this map has read the window's pins from the settings yet (a fresh map after a login has not,
+    /// until its first frame in a world): before that, an absent pin says nothing.
+    pub(crate) fn api_waypoints_loaded(&self) -> bool {
+        self.waypoints_read
+    }
+
+    /// The window's pins read from the settings now, as the map's own first use does.
+    pub(crate) fn api_load_waypoints(&mut self) {
+        self.read_waypoints();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn api_validate_waypoint(
+        &self,
+        world: i32,
+        current_world: i32,
+        [x, z]: [f32; 2],
+    ) -> Result<(), (&'static str, &'static str)> {
+        if !x.is_finite() || !z.is_finite() {
+            return Err(("invalid_argument", "waypoint coordinates must be finite"));
+        }
+        let cached = [&self.world, &self.home]
+            .into_iter()
+            .flatten()
+            .find(|map| map.index == world);
+        let Some(map) = cached else {
+            if world == current_world
+                || usize::try_from(world).is_ok_and(|index| index < self.names.names.len())
+            {
+                return Err(("not_ready", "the addressed world map is not loaded"));
+            }
+            return Err(("invalid_argument", "unknown waypoint world"));
+        };
+        let cells = &map.builder.cells;
+        if cells.len() == 0 {
+            return Err(("not_ready", "the addressed world map has no ground extent"));
+        }
+        let [xmin, zmin, xmax, zmax] = cells.extent();
+        if ee::le(xmin, x) && ee::le(x, xmax) && ee::le(zmin, z) && ee::le(z, zmax) {
+            Ok(())
+        } else {
+            Err(("invalid_argument", "waypoint is outside the world's ground extent"))
+        }
+    }
+
     /// Small allocation-free source key; dynamic records are rebuilt only on change.
     pub(crate) fn api_key(&self, world: i32) -> u64 {
         use std::hash::{Hash, Hasher};
@@ -31,7 +76,14 @@ impl Map {
             (m.world, m.at.map(f32::to_bits), &m.from).hash(&mut h);
         }
         crate::fork_ext::map_toolbar::anchor().map(|a| a.map(f32::to_bits)).hash(&mut h);
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::fork_ext::addons::map_waypoint::hash_owner(&mut h);
         h.finish()
+    }
+
+    /// `world`'s waypoint put at `at` (none: taken away) through the map's own path, as a map click does.
+    pub(crate) fn api_set_waypoint(&mut self, world: i32, at: Option<[f32; 2]>) {
+        self.set_waypoint(world, at);
     }
 
     pub(crate) fn api_state(
@@ -52,8 +104,18 @@ impl Map {
             let c = &w.builder.cells;
             json!({"x_min":ee::mul(c.col0 as f32,CELL),"z_min":ee::mul(c.row0 as f32,CELL),"x_max":ee::mul((c.col0+c.cols) as f32,CELL),"z_max":ee::mul((c.row0+c.rows) as f32,CELL)})
         });
-        json!({"search_anchor":crate::fork_ext::map_toolbar::anchor().map(|a|json!({"x":a[0],"y":a[1],"width":a[2],"height":a[3]})),"enabled":crate::settings::map(),"open":self.open,"minimap":self.mini.up,"markers_on":crate::settings::map_markers(),"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
+        json!({"search_anchor":crate::fork_ext::map_toolbar::anchor().map(|a|json!({"x":a[0],"y":a[1],"width":a[2],"height":a[3]})),"enabled":crate::settings::map(),"open":self.open,"minimap":self.mini.up,"markers_on":crate::settings::map_markers(),"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|{let (owner,label)=waypoint_owner(world,p);json!({"world_id":world,"x":p[0],"z":p[1],"owner":owner,"label":label})})})
     }
+}
+
+/// The mod that put `world`'s waypoint at `at`, and its label; none for the player's own pin.
+fn waypoint_owner(world: i32, at: [f32; 2]) -> (Option<String>, Option<String>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some((owner, label)) = crate::fork_ext::addons::map_waypoint::owner(world, Some(at)) {
+        return (Some(owner), label);
+    }
+    let _ = (world, at);
+    (None, None)
 }
 
 /// Static catalogue uses exactly the map's pinned marker arrays, built once per world.
@@ -193,6 +255,12 @@ pub(crate) fn use_real_ui(on: bool) -> bool {
 
 #[cfg(test)]
 impl Map {
+    pub(crate) fn round7c_add_calibrated_world(&mut self, index: i32) {
+        let mut world = crate::map::testing::up(self.size).world.expect("calibrated fixture");
+        world.index = index;
+        self.home = Some(world);
+    }
+
     /// Disc-free native chrome/round-minimap scene used behind addon captures.
     /// No terrain art is fabricated; tiles remain absent without a disc.
     pub(crate) fn round4_fixture(
@@ -239,6 +307,9 @@ impl Map {
     }
 
     pub(crate) fn round4_waypoint(&mut self,world:i32,at:Option<[f32;2]>){self.set_waypoint(world,at);}
+
+    /// The pins read from the settings, as the map's first frame in a world does.
+    pub(crate) fn round7c_read_waypoints(&mut self){self.api_load_waypoints();}
 
     /// A minimap frame as `Play::map_frame` makes it each frame (a moved or toggled minimap
     /// is laid out again), centred on `at` with `view`'s dots and marks, over a terrain

@@ -410,10 +410,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     "kind must be 'loot', 'merchant', or 'bank'",
                 );
             };
-            let parsed = match TakeoverKind::parse(&kind_str) {
-                Ok(k) => k,
-                Err((code, msg)) => return error(lua, "eqoa.windows.takeover", code, &msg),
-            };
+            if !super::window_kinds::is_window(&kind_str) {
+                return error(lua, "eqoa.windows.takeover", "invalid_argument", "kind must name a game window");
+            }
             let scope = match opts {
                 None | Some(Value::Nil) => TakeoverScope::Own,
                 Some(Value::Table(t)) => match t.get::<Value>("scope")? {
@@ -452,8 +451,34 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     );
                 }
             };
+            if scope == TakeoverScope::Own && super::window_kinds::is_view(&kind_str) {
+                return error(lua, "eqoa.windows.takeover", "invalid_argument", "a local view requires scope 'all'");
+            }
+            let parsed = match TakeoverKind::parse(&kind_str) {
+                Ok(k) => k,
+                Err((code, msg)) => return error(lua, "eqoa.windows.takeover", code, &msg),
+            };
+            let addon = {
+                let session = session(lua);
+                let session = session.borrow();
+                (
+                    session.addon.clone(),
+                    session.replaces.iter().any(|kind| kind == parsed.name()),
+                )
+            };
+            let (addon, declared) = addon;
+            if scope == TakeoverScope::All && !declared {
+                return error(
+                    lua,
+                    "eqoa.windows.takeover",
+                    "not_declared",
+                    &format!(
+                        "scope 'all' for '{}' requires a matching 'replaces' entry in mod.json",
+                        parsed.name()
+                    ),
+                );
+            }
             let vm = super::native_events::bus(lua).borrow().vm;
-            let addon = session(lua).borrow().addon.clone();
             match window_takeover::takeover(vm, &addon, parsed, scope) {
                 Ok(()) => lua.pack_multi((true, Value::Nil)),
                 Err((code, msg)) => {
@@ -574,9 +599,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             "id skill_id parent_key name title category cost text known owned level_required points_spent_required minimum_stats",
         ),
     ] {
-        describe(lua, path, "supported", Some(4), "");
+        describe(lua, path, "supported", Some(6), "");
         for field in fields.split_whitespace() {
-            describe(lua, &format!("{path}.{field}"), "supported", Some(4), "");
+            describe(lua, &format!("{path}.{field}"), "supported", Some(6), "");
         }
     }
 

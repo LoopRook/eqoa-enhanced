@@ -1,5 +1,383 @@
 use super::host::Host;
 
+pub(crate) const PLAY_EVENTS: &[&str] = &[
+    "world.entered",
+    "world.leaving",
+    "state.reset",
+    "player.changed",
+    "player.stats_changed",
+    "target.changed",
+    "entity.added",
+    "entity.changed",
+    "entity.removed",
+    "group.changed",
+    "map.changed",
+    "inventory.changed",
+    "bank.changed",
+    "quests.changed",
+    "camera.changed",
+    "windows.changed",
+    "mastery.changed",
+    "abilities.changed",
+    "hotbar.changed",
+    "effects.changed",
+    "cooldown.started",
+    "cooldown.updated",
+    "cooldown.ended",
+    "guide.lost",
+    "chat.message",
+    "chat.history_scroll",
+    "combat.hit",
+    "input.key",
+    "input.pad",
+];
+
+/// Events the host's own services emit, driven in `round7c_host_service_events_reach_lua_from_their_producers`.
+const SERVICE_EVENTS: &[&str] = &[
+    "timer",
+    "pointer.pressed",
+    "pointer.wheel",
+    "action.result",
+    "batch.progress",
+    "batch.result",
+    "events.dropped",
+];
+
+/// Events the mod manager's lifecycle, frames, settings page, resource loads and mod exchange emit, driven
+/// through the manager in `manager::tests::round7c_manager_events_come_from_their_production_callers`.
+pub(crate) const MANAGER_EVENTS: &[&str] = &[
+    "enabled",
+    "disabling",
+    "render",
+    "settings.render",
+    "resource.ready",
+    "resource.failed",
+    "shared.changed",
+    "mod.command",
+];
+
+
+const RECORD_FIELD_CHECK: &str = r#"
+-- Every way a record (or an event's data) differs from its declared fields, as one list. `extra` lists keys
+-- the native value carried that a lazily built record has not made yet. `payload_free`: an event's data,
+-- which may be nil when the event declares no fields; every other record must be a table.
+function field_issues(name, record, optional, extra, present, payload_free)
+    local path = 'eqoa.' .. name
+    local declared = {}
+    local described = eqoa.capabilities.get(path)
+    for _, field in ipairs(described and described.children or {}) do
+        declared[field:sub(#path + 2)] = eqoa.capabilities.get(field).status
+    end
+    local issues = {}
+    if payload_free and record == nil and next(declared) == nil then
+        return issues
+    end
+    if type(record) ~= 'table' then
+        return {path .. ' did not produce a record'}
+    end
+    local may_be_nil = {}
+    for field in (optional or ''):gmatch('%S+') do
+        if not declared[field] then
+            issues[#issues + 1] = path .. '.' .. field .. ' is no longer declared'
+        end
+        may_be_nil[field] = true
+    end
+    -- a lazily built record makes a field when it is first read
+    for key, status in pairs(declared) do
+        if status == 'supported' then local _ = record[key] end
+    end
+    local keys, listed = {}, {}
+    for _, key in ipairs(round7c_record_keys(record)) do keys[#keys + 1] = key; listed[key] = true end
+    for _, key in ipairs(extra or {}) do
+        if not listed[key] then keys[#keys + 1] = key; listed[key] = true end
+    end
+    local actual = {}
+    for _, key in ipairs(keys) do
+        if not declared[key] then
+            issues[#issues + 1] = path .. '.' .. key .. ' is undeclared'
+        elseif declared[key] ~= 'supported' then
+            issues[#issues + 1] = path .. '.' .. key .. ' is projected but marked ' .. declared[key]
+        else
+            actual[key] = record[key]
+        end
+    end
+    for key, status in pairs(declared) do
+        if status == 'supported' and not may_be_nil[key] and actual[key] == nil
+                and not (present and present[key]) then
+            issues[#issues + 1] = path .. '.' .. key .. ' is missing'
+        end
+    end
+    table.sort(issues)
+    return issues
+end
+function fields(name, record, optional)
+    local issues = field_issues(name, record, optional)
+    assert(#issues == 0, table.concat(issues, '\n'))
+end
+-- Fields an event's data may lack in every delivery of the fixtures, each with the reason it may be nil.
+EVENT_OPTIONAL = {
+    -- code/reason: only a refusal or failure; detail: only an action that reports what it did
+    ['action.result'] = 'code reason detail',
+    -- a running batch has no outcome yet: no ok, code, reason, completed_tick or failed_step
+    ['batch.progress'] = 'ok code reason completed_tick failed_step',
+    -- code/reason: only a batch that stopped or failed; failed_step: only when a step failed
+    ['batch.result'] = 'code reason failed_step',
+    -- text: only a key that types a character
+    ['input.key'] = 'text',
+    -- handle: a texture, font or sound (or a decoded JSON value); request/value/path: a file or JSON request
+    ['resource.ready'] = 'handle request value path',
+    -- handle: only a font that fell back to the default; request: only a file or JSON request
+    ['resource.failed'] = 'handle request',
+}
+-- The declared fields any delivery of each event filled (`round7c_note` records them as they arrive).
+round7c_present = {}
+function round7c_note(name, event)
+    local path = 'eqoa.events.' .. name .. '.data'
+    local described = eqoa.capabilities.get(path)
+    if not described or event.data == nil then return end
+    local present = round7c_present[name] or {}
+    round7c_present[name] = present
+    for _, field in ipairs(described.children) do
+        local key = field:sub(#path + 2)
+        if eqoa.capabilities.get(field).status == 'supported' and event.data[key] ~= nil then
+            present[key] = true
+        end
+    end
+end
+-- The data of every event in `names` (each seen in `seen`) against its declared fields.
+function event_fields(seen, names)
+    local issues = {}
+    for _, name in ipairs(names) do
+        local event = seen[name]
+        if event == nil then
+            issues[#issues + 1] = name .. ' was not seen'
+        else
+            local issues_here = field_issues('events.' .. name .. '.data', event.data, EVENT_OPTIONAL[name],
+                round7c_event_keys(name), round7c_present[name], true)
+            for _, issue in ipairs(issues_here) do
+                issues[#issues + 1] = issue
+            end
+        end
+    end
+    assert(#issues == 0, #issues .. ' event field issues:\n' .. table.concat(issues, '\n'))
+end
+"#;
+
+/// The Lua-facing proxies expose properties through their backing table.
+/// Inspect its keys without changing the public read-only table behavior.
+pub(crate) fn install_field_check(host: &Host) -> mlua::Result<()> {
+    install_field_check_lua(&host.lua)
+}
+
+/// `install_field_check` for a mod's Lua state the manager runs.
+pub(crate) fn install_field_check_lua(lua: &mlua::Lua) -> mlua::Result<()> {
+    use mlua::{Table, Value};
+
+    lua.globals().set(
+        "round7c_record_keys",
+        lua.create_function(|lua, record: Table| {
+            let backing = record
+                .metatable()
+                .and_then(|mt| mt.raw_get::<Table>("__index").ok())
+                .unwrap_or(record);
+            let keys = backing
+                .pairs::<String, Value>()
+                .map(|entry| entry.map(|(key, _)| key))
+                .collect::<mlua::Result<Vec<_>>>()?;
+            lua.create_sequence_from(keys)
+        })?,
+    )?;
+    lua.globals().set(
+        "round7c_event_keys",
+        lua.create_function(|lua, name: String| {
+            lua.create_sequence_from(super::native_events::data_keys_for_test(&name))
+        })?,
+    )?;
+    lua.load(RECORD_FIELD_CHECK).exec()
+}
+
+#[test]
+fn round7c_supported_event_inventory_has_fixture_coverage() {
+    use std::collections::BTreeSet;
+
+    let host = Host::new().unwrap();
+    let fixtures = PLAY_EVENTS.iter().chain(SERVICE_EVENTS).chain(MANAGER_EVENTS)
+        .copied().chain(["loot.changed", "merchant.changed"]).collect::<BTreeSet<_>>();
+    let rows: mlua::Table = host.lua.load("return eqoa.capabilities.list('eqoa.events')").eval().unwrap();
+    let events = rows.sequence_values::<mlua::Table>().map(|row| row.unwrap())
+        .filter(|row| row.get::<String>("status").unwrap() == "supported")
+        .filter_map(|row| row.get::<String>("path").unwrap().strip_prefix("eqoa.events.").map(str::to_owned))
+        .filter(|name| !name.contains(".data.") && !name.starts_with("Event")
+            && !matches!(name.as_str(), "on" | "off" | "once" | "after"))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(events.iter().map(String::as_str).collect::<BTreeSet<_>>(), fixtures);
+}
+
+#[test]
+fn round7c_refusing_members_report_the_same_capability_as_their_call() {
+    let host = Host::new().unwrap();
+    host.execute(
+        r#"
+        local caps = eqoa.capabilities
+        local f = require('frontiers_forge.util')
+        local value, reason = f.utf8_to_utf16('text')
+        local d = caps.get('frontiers_forge.util.utf8_to_utf16')
+        assert(value == nil and d.status == 'unsupported' and d.reason == reason, d.reason)
+        local result, err = eqoa.actions.move()
+        d = caps.get('eqoa.actions.move')
+        assert(result == nil and d.status == err.code and d.reason == err.message)
+        assert(d.reason:find('upstream PR', 1, true), d.reason)
+        assert(caps.get('eqoa.actions').status == 'partial')
+        assert(caps.get('eqoa.capabilities').status == 'supported')
+        assert(caps.get('eqoa.inventory.get').round == 5)
+        assert(caps.get('eqoa.windows.takeover').round == 6)
+        assert(caps.get('eqoa.entities.Entity.npc_flags').round == 6)
+        assert(caps.get('eqoa.files.list').round == 7)
+        assert(caps.get('eqoa.chat.ChatMessage.sender').status == 'unsupported')
+        assert(caps.get('eqoa.events.chat.message.data.sender').status == 'unsupported')
+        assert(caps.get('eqoa.hotbar.HotbarSlot.command').status == 'unsupported')
+        for _, row in ipairs(caps.list('')) do
+            if row.status == 'not_yet' then
+                assert(row.reason and (row.reason:find('plan', 1, true)
+                    or row.reason:find('upstream PR', 1, true)), row.path)
+            end
+        end
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round7c_all_scope_refuses_an_undeclared_window_without_claiming_it() {
+    let host = Host::with_test_capabilities(&["eqoa.windows.takeover"]).unwrap();
+    host.execute(
+        r#"
+        local ok, err = eqoa.windows.takeover('bank', {scope='all'})
+        assert(ok == nil and err.code == 'not_declared')
+        assert(eqoa.windows.taken('bank') == false)
+        assert(eqoa.windows.takeover('bank', {scope='own'}))
+        assert(eqoa.windows.release('bank'))
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round7c_native_switch_releases_every_holder_and_prevents_reclaims() {
+    use super::window_takeover::{
+        TakeoverKind, is_taken, reset_all_for_test, set_use_game_windows, try_accept_open,
+    };
+
+    reset_all_for_test();
+    let loot = Host::with_test_capabilities(&["eqoa.windows.takeover"]).unwrap();
+    let other = Host::with_test_capabilities(&["eqoa.windows.takeover"]).unwrap();
+    loot.execute("assert(eqoa.windows.takeover('loot'))")
+        .unwrap();
+    other
+        .execute("assert(eqoa.windows.takeover('merchant')); assert(eqoa.windows.takeover('bank'))")
+        .unwrap();
+    assert!(TakeoverKind::ALL.into_iter().all(is_taken));
+    set_use_game_windows(true);
+    assert!(!TakeoverKind::ALL.into_iter().any(is_taken));
+    assert!(!try_accept_open(
+        TakeoverKind::Loot,
+        Some(17),
+        Some(17),
+        None
+    ));
+    loot.execute(
+        "local ok,e=eqoa.windows.takeover('loot'); assert(ok==nil and e.code=='unavailable')",
+    )
+    .unwrap();
+    set_use_game_windows(false);
+    loot.execute("assert(eqoa.windows.takeover('loot'))")
+        .unwrap();
+    reset_all_for_test();
+}
+
+#[test]
+fn round7c_host_service_events_reach_lua_from_their_producers() {
+    use super::{action_broker, native_core, native_events, pointer_api};
+    use winit::event::{
+        DeviceId, ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
+    };
+
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
+    native_events::bus(&host.lua).borrow_mut().once_mode = true;
+    native_core::CORE.with(|core| {
+        let mut core = core.borrow_mut();
+        *core = native_core::Core::default();
+        core.view.in_world = true;
+    });
+    host.lua.globals().set("service_events", host.lua.create_sequence_from(SERVICE_EVENTS.iter().copied()).unwrap()).unwrap();
+    install_field_check(&host).unwrap();
+    host.execute(
+        r#"
+        seen = {}
+        for _, name in ipairs(service_events) do
+            assert(eqoa.capabilities.has('eqoa.events.' .. name), name)
+            assert(eqoa.events.on(name, function(e) seen[name] = e; round7c_note(name, e) end))
+        end
+        assert(eqoa.events.after(0, function(e) seen.timer = e end))
+        assert(eqoa.events.on('chat.message', function() end))
+    "#,
+    )
+    .unwrap();
+    pointer_api::position([10., 20.], true, (100, 100));
+    let device_id = DeviceId::dummy();
+    pointer_api::observe(
+        &WindowEvent::MouseInput {
+            device_id,
+            state: ElementState::Pressed,
+            button: MouseButton::Left,
+        },
+        (100, 100),
+    );
+    pointer_api::observe(
+        &WindowEvent::MouseWheel {
+            device_id,
+            delta: MouseScrollDelta::LineDelta(0., 1.),
+            phase: TouchPhase::Moved,
+        },
+        (100, 100),
+    );
+
+    host.execute(
+        r#"
+        assert(eqoa.actions.assist())
+        assert(eqoa.actions.batch({{kind='assist'}, {kind='assist'}}))
+    "#,
+    )
+    .unwrap();
+    for _ in 0..6 {
+        native_core::iteration(true);
+        action_broker::dispatch_all_for_test();
+        native_events::dispatch(&host).unwrap();
+    }
+    for _ in 0..1050 {
+        native_core::observe_text("overflow fixture", [1.; 4]);
+    }
+    native_events::dispatch(&host).unwrap();
+    host.execute(
+        r#"
+        local missing = {}
+        for _, name in ipairs(service_events) do
+            if not seen[name] then missing[#missing + 1] = name end
+        end
+        assert(#missing == 0, 'Host did not emit: ' .. table.concat(missing, ', '))
+        assert(seen['pointer.pressed'].data.x == 10)
+        assert(seen['batch.result'].data.completed == 2)
+        -- code/reason: only a refusal or failure; detail: only an action that reports what it did
+        fields('actions.ActionResult', seen['action.result'].data, 'code reason detail')
+        -- code/reason: only a batch that stopped or failed; failed_step: only when a step failed
+        fields('actions.BatchResult', seen['batch.result'].data, 'code reason failed_step')
+        assert(seen['events.dropped'].data.count > 0)
+        event_fields(seen, service_events)
+    "#,
+    )
+    .unwrap();
+}
+
 #[test]
 fn native_capabilities_are_probeable_and_stubs_diagnose_even_when_caught() {
     let h = Host::new().unwrap();
@@ -632,6 +1010,7 @@ fn round_3_stage_a_hud_frame_and_layout_and_visible() {
 #[test]
 fn round_3_stage_a_options_toggle_and_get() {
     let h = option_test_host("my_custom_mod");
+    install_field_check(&h).unwrap();
 
     // Negative control: invalid argument
     h.execute(
@@ -649,6 +1028,7 @@ fn round_3_stage_a_options_toggle_and_get() {
         r#"
         local t, err = eqoa.options.toggle({ id = "test_opt", label = "Test Option", default = true })
         assert(err == nil, "toggle registered")
+        fields('options.Toggle', t)
         assert(t.id == "test_opt")
         assert(t.value == true)
         local val = eqoa.options.get("test_opt")
@@ -1474,4 +1854,18 @@ fn change_event_before_and_after_are_built_only_when_read() {
     native_events::dispatch(&h).unwrap();
     h.execute("assert(added.data.before == nil and added.data.after.name == 'Fox')").unwrap();
     assert!(!h.drain_logs().unwrap().iter().any(|s| s.contains("data.before")), "an absent `before` is not a missing field");
+}
+
+#[test]
+fn round7c_only_payload_free_events_can_have_a_nil_record() {
+    let host = Host::new().unwrap();
+    install_field_check(&host).unwrap();
+    host.execute(
+        r#"
+        local issues = field_issues('TestFixture.EmptyRecord', nil)
+        assert(#issues == 1 and issues[1]:find('did not produce a record', 1, true),
+            'an ordinary record must be a table even without declared fields')
+        event_fields({enabled={}}, {'enabled'})
+        "#,
+    ).unwrap();
 }

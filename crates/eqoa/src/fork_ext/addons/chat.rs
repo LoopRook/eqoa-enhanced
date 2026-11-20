@@ -32,6 +32,14 @@ thread_local! {
     static CHAT_HISTORY: RefCell<VecDeque<(String, u32, u32)>> = const { RefCell::new(VecDeque::new()) };
 }
 
+pub(super) fn line_capability(line: &str) -> &'static str {
+    if line.starts_with('/') {
+        "eqoa.actions.command"
+    } else {
+        "eqoa.actions.chat"
+    }
+}
+
 pub(crate) fn queue_outgoing_chat(msg: String) {
     queue_owned(None, msg, None);
 }
@@ -436,6 +444,14 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
                         line = format!("{m} {line}");
                     }
                 }
+                if let Err((code, message)) = super::native::require_acting_capability(
+                    lua,
+                    "frontiers_forge.chat.SendChatText",
+                    line_capability(&line),
+                ) {
+                    super::native::diagnose(lua, "frontiers_forge.chat.SendChatText", code, &message);
+                    return Ok((false, Some(format!("{code}: {message}"))));
+                }
                 if report_route(&line) {
                     super::native::diagnose(
                         lua,
@@ -507,22 +523,26 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
     )?;
 
     // Focus & window channel inspection helpers
-    chat_mod.set(
-        "CaptureChannelTypeFromGameWindow",
-        lua.create_function(|lua, ()| {
-            let reason =
-                "unsupported: native client has no Forge custom-channel window configuration";
-            super::native::diagnose(
-                lua,
-                "frontiers_forge.chat.CaptureChannelTypeFromGameWindow",
-                "unsupported",
-                reason,
-            );
-            Ok((Value::Nil, reason, Value::Nil))
-        })?,
+    use super::native::{RefusalShape, refuse_member};
+    refuse_member(
+        lua,
+        &chat_mod,
+        "frontiers_forge.chat.CaptureChannelTypeFromGameWindow",
+        "unsupported",
+        None,
+        "unsupported: native client has no Forge custom-channel window configuration",
+        RefusalShape::ForgeReasonAndNil,
     )?;
     for name in ["DebugDumpFocusChain", "GetChannelTableInfo"] {
-        chat_mod.set(name,lua.create_function(move |lua,()|{let reason="unsupported: native client has no Forge channel-pointer table/focus-chain addresses";super::native::diagnose(lua,&format!("frontiers_forge.chat.{name}"),"unsupported",reason);Ok((Value::Nil,reason))})?)?;
+        refuse_member(
+            lua,
+            &chat_mod,
+            &format!("frontiers_forge.chat.{name}"),
+            "unsupported",
+            None,
+            "unsupported: native client has no Forge channel-pointer table/focus-chain addresses",
+            RefusalShape::ForgeReason,
+        )?;
     }
 
     host.register_host_module("frontiers_forge.chat", Value::Table(chat_mod))?;
@@ -556,9 +576,9 @@ mod tests {
             package_root: root.to_path_buf(),
             module_dirs: vec![root.to_path_buf()],
             resource_dirs: vec![],
-            api: Some("eqoa/1".to_string()),
+            api: None,
             entry_mode: Default::default(),
-            capabilities_declared: true,
+            capabilities_declared: false,
             requested_capabilities: vec![],
             extensions: Default::default(),
             initially_enabled: true,

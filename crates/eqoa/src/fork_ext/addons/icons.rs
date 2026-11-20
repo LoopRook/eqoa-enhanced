@@ -1166,33 +1166,18 @@ pub fn install_base_icon_adapter(lua: &Lua, host: &super::host::Host) -> LuaResu
         )?;
     }
 
-    // Pinned icon.lua:330-354: failure is one nil, success texture,width,height.
-    icon_mod.set(
-        "GetTexture",
-        lua.create_function(|lua, (_hash, _opts): (Value, Option<Table>)| {
-            super::native::diagnose(
-                lua,
-                "frontiers_forge.icon.GetTexture",
-                "unavailable",
-                "addon texture service is not installed on this host",
-            );
-            Ok(Value::Nil)
-        })?,
-    )?;
-
-    // Pinned icon.lua:431-443: no-texture failure is one nil.
-    icon_mod.set(
-        "GetUITexture",
-        lua.create_function(|lua, _tex_id: Value| {
-            super::native::diagnose(
-                lua,
-                "frontiers_forge.icon.GetUITexture",
-                "unavailable",
-                "addon texture service is not installed on this host",
-            );
-            Ok(Value::Nil)
-        })?,
-    )?;
+    // The pinned adapters return a nil when their texture service is absent.
+    for name in ["GetTexture", "GetUITexture"] {
+        super::native::refuse_member(
+            lua,
+            &icon_mod,
+            &format!("frontiers_forge.icon.{name}"),
+            "unavailable",
+            Some(2),
+            "addon texture service is not installed on this host",
+            super::native::RefusalShape::ForgeNil,
+        )?;
+    }
 
     icon_mod.set(
         "GetSurfaceInfo",
@@ -1234,6 +1219,9 @@ pub fn attach_icon_cache(
 ) -> LuaResult<Rc<RefCell<IconCache>>> {
     // SafeLibrary and IconProvider retain decoded RGBA pixels, not the original
     // disc surface encoding. Do not claim that encoding is available.
+    for path in ["eqoa.icons.SurfaceInfo", "eqoa.icons.SurfaceInfo.width", "eqoa.icons.SurfaceInfo.height"] {
+        super::native::describe(lua, path, "supported", Some(2), "");
+    }
     super::native::describe(
         lua,
         "eqoa.icons.SurfaceInfo.source_format",
@@ -1411,6 +1399,15 @@ pub fn attach_icon_cache(
         )?;
     }
 
+    for name in ["GetTexture", "GetUITexture"] {
+        super::native::describe(
+            lua,
+            &format!("frontiers_forge.icon.{name}"),
+            "supported",
+            Some(2),
+            "",
+        );
+    }
     if lua.named_registry_value::<Table>("eqoa_modules").is_ok() {
         install_native(lua, &cache, &textures)?;
     }
@@ -1753,8 +1750,14 @@ mod round7a_tests {
                 })
             }
         }
+        super::super::native_tests::install_field_check(&host).unwrap();
         set_custom_icon_provider(Some(Box::new(Provider)));
-        let result=host.lua.load("local i=require('frontiers_forge.icon'); local t,w,h=i.GetTexture(1); assert(t~=nil and w==1 and h==1)").exec();
+        let result = host.execute(r#"
+            local i = require('frontiers_forge.icon')
+            local t, w, h = i.GetTexture(1)
+            assert(t ~= nil and w == 1 and h == 1)
+            fields('icons.SurfaceInfo', eqoa.icons.info(1))
+        "#);
         set_custom_icon_provider(None);
         result.unwrap();
         assert!(super::super::native::drain(&host.lua).is_empty());

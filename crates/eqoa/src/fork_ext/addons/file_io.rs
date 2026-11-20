@@ -652,7 +652,7 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
         "eqoa.files.FileEntry.kind",
         "eqoa.files.FileEntry.size",
     ] {
-        super::native::describe(&host.lua, path, "supported", Some(4), "");
+        super::native::describe(&host.lua, path, "supported", Some(7), "");
     }
     super::native::bind(
         &host.lua,

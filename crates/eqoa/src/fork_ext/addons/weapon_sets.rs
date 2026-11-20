@@ -165,6 +165,12 @@ pub fn install(host: &Host) -> mlua::Result<()> {
     api.set(
         "Use",
         lua.create_function(move |lua, i: i64| {
+            const USE: &str = "eqoa.WeaponSets.Use";
+            if let Err((code, message)) =
+                super::native::require_acting_capability(lua, USE, "eqoa.actions.weapon_set")
+            {
+                return super::native::error(lua, USE, code, &message);
+            }
             let snap = state.get();
             let s = snap.weapon_sets;
             if !s.available
@@ -174,9 +180,9 @@ pub fn install(host: &Host) -> mlua::Result<()> {
                     .and_then(|i| s.slots.get(i))
                     .is_none_or(|slot| !slot.populated)
             {
-                return Ok(false);
+                return lua.pack_multi(false);
             }
-            Ok(PENDING.with(|p| {
+            lua.pack_multi(PENDING.with(|p| {
                 let mut p = p.borrow_mut();
                 if p.len() >= 32 {
                     return false;

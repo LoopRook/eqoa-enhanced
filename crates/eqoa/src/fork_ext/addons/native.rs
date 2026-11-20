@@ -7,6 +7,7 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc, time::Instant};
 #[derive(Clone)]
 struct Descriptor {
     status: &'static str,
+    module: bool,
     round: Option<u8>,
     reason: String,
 }
@@ -28,6 +29,9 @@ pub(crate) struct Session {
     start: Instant,
     pub(crate) addon: String,
     pub(crate) capabilities: Option<Vec<String>>,
+    pub(crate) replaces: Vec<String>,
+    /// The mod is a native `eqoa/1` package (a `mod.json`), not a Forge import.
+    pub(crate) native_manifest: bool,
     vm: u64,
     phase: String,
     tokens: f64,
@@ -47,13 +51,15 @@ pub(crate) struct Session {
 impl Session {
     fn new() -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let mut s = Self {
+        Self {
             descriptors: BTreeMap::new(),
             diagnostics: BTreeMap::new(),
             pending: Vec::new(),
             start: Instant::now(),
             addon: String::new(),
             capabilities: None,
+            replaces: Vec::new(),
+            native_manifest: false,
             vm: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             phase: "lua".into(),
             tokens: 32.0,
@@ -62,134 +68,58 @@ impl Session {
             guard_readonly: None,
             record_cache: std::collections::HashMap::new(),
             list_cache: std::collections::HashMap::new(),
-        };
-        // Normative function index (§2). Registration does not imply implementation.
-        for (module, names, round) in [
-            ("abilities", "list get find in_range", 2),
-            ("actions", "assist target_target toggle_stats_box", 3),
-            (
-                "actions",
-                "status cancel batch stop_batch batch_status target cycle_target assist interact attack cast use_hotbar use_item equip destroy swap_items quick_slot weapon_set prepare_weapon_set assign_ability unmemorize_ability unmemorize_all arrange_ability open_loot talk loot loot_all buy sell bank_move bank_money chat command move look autorun follow stop camera open_window close_window select_row activate_row dialog_answer input_text drop_quest mastery_share mastery_browse mastery_buy mastery_refund buttons menu_command",
-                4,
-            ),
-            ("bank", "get", 3),
-            ("binds", "get register", 3),
-            ("camera", "get compass", 4),
-            ("capabilities", "get list has", 2),
-            ("chat", "history get_channel channel_name", 2),
-            ("client", "get display", 2),
-            ("combat", "get_counters", 2),
-            ("cooldowns", "get", 2),
-            ("effects", "list", 2),
-            ("entities", "list get find named distance", 2),
-            ("events", "on off once after", 2),
-            ("files", "read write remove", 2),
-            ("files", "list load_json save_json_async import export", 4),
-            ("fonts", "load default release", 2),
-            ("gems", "get is_gem format", 3),
-            ("group", "get", 2),
-            ("hotbar", "list", 2),
-            ("hud", "hide show hidden_by", 2),
-            ("hud", "frame layout visible text gauge image panel", 3),
-            ("icons", "resource ui info", 2),
-            ("icons", "class disposition", 4),
-            ("input", "get claim release capture_text rotate_dpad", 2),
-            ("input", "bind", 3),
-            ("input", "pointer claim_pointer minimap_wheel", 4),
-            ("inventory", "get", 3),
-            (
-                "items",
-                "get can_use stat slot_info attack_name stat_name",
-                3,
-            ),
-            ("log", "write", 2),
-            ("loot", "get", 3),
-            (
-                "map",
-                "get open markers view set_guide clear_guide images load_image set_waypoint clear_waypoint",
-                4,
-            ),
-            ("mastery", "get skills selected", 4),
-            ("mods", "send", 4),
-            (
-                "math",
-                "bearing degrees radians normalize signed_angle facing is_bit_zero",
-                2,
-            ),
-            ("merchant", "get price", 3),
-            ("options", "toggle get set button", 3),
-            ("player", "get experience_for_level", 2),
-            ("player", "stats", 3),
-            ("quests", "list get", 4),
-            ("settings", "load save on_save on_load", 2),
-            ("sound", "load play stop set_volume is_playing release", 2),
-            ("target", "get", 2),
-            ("text", "localized", 2),
-            ("textures", "load rgba release", 2),
-            ("windows", "open", 3),
-            ("windows", "get find get_window format_hint parse_hint takeover release taken", 4),
-        ] {
-            s.describe(
-                &format!("eqoa.{module}"),
-                "not_yet",
-                Some(round),
-                "implementation pending",
-            );
-            for name in names.split_whitespace() {
-                s.describe(
-                    &format!("eqoa.{module}.{name}"),
-                    "not_yet",
-                    Some(round),
-                    "implementation pending",
-                );
-            }
         }
-        for symbol in [
-            "eqoa.api",
-            "eqoa.revision",
-            "eqoa.capabilities",
-            "eqoa.capabilities.get",
-            "eqoa.capabilities.has",
-            "eqoa.capabilities.list",
-        ] {
-            s.describe(symbol, "supported", Some(2), "");
-        }
-        for symbol in [
-            "frontiers_forge.cave",
-            "frontiers_forge.cave.Alloc",
-            "ffi",
-            "eqoa.textures.formats.jpeg",
-        ] {
-            let scheduled = symbol.ends_with("jpeg");
-            s.describe(
-                symbol,
-                if scheduled { "not_yet" } else { "unsupported" },
-                scheduled.then_some(4),
-                if scheduled {
-                    "JPEG arrives in round 4"
-                } else {
-                    "raw memory and FFI are excluded"
-                },
-            );
-        }
-        s
     }
     fn describe(&mut self, path: &str, status: &'static str, round: Option<u8>, reason: &str) {
         self.descriptors.insert(
             path.into(),
             Descriptor {
                 status,
+                module: false,
                 round,
                 reason: reason.into(),
             },
         );
     }
+    fn describe_module(&mut self, path: &str, round: Option<u8>, reason: &str) {
+        self.describe(path, "unsupported", round, reason);
+        self.descriptors.get_mut(path).unwrap().module = true;
+    }
+
+    fn children<'a>(&'a self, prefix: &'a str) -> impl Iterator<Item = &'a str> {
+        self.descriptors
+            .range(prefix.to_owned()..)
+            .take_while(move |(path, _)| path.starts_with(prefix))
+            .filter_map(move |(path, _)| {
+                (!path[prefix.len()..].contains('.')).then_some(path.as_str())
+            })
+    }
+
+    fn status(&self, path: &str) -> Option<&'static str> {
+        let descriptor = self.descriptors.get(path)?;
+        if !descriptor.module {
+            return Some(descriptor.status);
+        }
+        let prefix = format!("{path}.");
+        let mut statuses = self
+            .children(&prefix)
+            .filter_map(|child| self.status(child));
+        let first = statuses.next().unwrap_or(descriptor.status);
+        Some(if statuses.all(|status| status == first) {
+            first
+        } else {
+            "partial"
+        })
+    }
+
     fn capability(&self, path: &str) -> Json {
         let d = self.descriptors.get(path);
-        json!({"path":path,"status":d.map_or("unknown", |d| d.status),
-            "revision":u8::from(d.is_some_and(|d| matches!(d.status,"supported"|"partial"))),
+        let status = self.status(path).unwrap_or("unknown");
+        let prefix = format!("{path}.");
+        json!({"path":path,"status":status,
+            "revision":u8::from(matches!(status,"supported"|"partial")),
             "round":d.and_then(|d| d.round), "reason":d.filter(|d| !d.reason.is_empty()).map(|d| &d.reason),
-            "children": self.descriptors.keys().filter(|p| p.strip_prefix(&format!("{path}.")).is_some_and(|tail| !tail.contains('.'))).collect::<Vec<_>>()})
+            "children":self.children(&prefix).collect::<Vec<_>>()})
     }
     fn diagnostic(&mut self, symbol: &str, code: &str, reason: &str) {
         let time = self.start.elapsed().as_secs_f64();
@@ -258,8 +188,128 @@ pub(crate) fn describe(
         .borrow_mut()
         .describe(path, status, round, reason);
 }
+pub(super) fn bind_compat(
+    lua: &Lua,
+    table: &Table,
+    path: &str,
+    round: u8,
+    function: Function,
+) -> Result<()> {
+    let (_, name) = path.rsplit_once('.').expect("qualified member path");
+    table.raw_set(name, function)?;
+    describe(lua, path, "supported", Some(round), "");
+    Ok(())
+}
+
+pub(crate) fn describe_module(lua: &Lua, path: &str, round: Option<u8>, reason: &str) {
+    session(lua)
+        .borrow_mut()
+        .describe_module(path, round, reason);
+}
+
+pub(crate) fn init_session(lua: &Lua) {
+    lua.set_app_data(Rc::new(RefCell::new(Session::new())));
+}
+
 pub(crate) fn status(lua: &Lua, path: &str) -> Option<&'static str> {
-    session(lua).borrow().descriptors.get(path).map(|d| d.status)
+    session(lua).borrow().status(path)
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum RefusalShape {
+    Native,
+    ForgeNil,
+    ForgeReason,
+    ForgeReasonAndNil,
+}
+
+impl RefusalShape {
+    #[cfg(test)]
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Native => "native",
+            Self::ForgeNil => "forge_nil",
+            Self::ForgeReason => "forge_reason",
+            Self::ForgeReasonAndNil => "forge_reason_and_nil",
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Each refusal's declared code and return shape by member path, for the refusal-contract test.
+    static DECLARED_REFUSALS: RefCell<std::collections::HashMap<String, (&'static str, RefusalShape)>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+
+/// The code and return shape `path`'s refusal was declared with on this thread.
+#[cfg(test)]
+pub(crate) fn declared_refusal(path: &str) -> Option<(&'static str, &'static str)> {
+    DECLARED_REFUSALS.with(|d| d.borrow().get(path).map(|(code, shape)| (*code, shape.name())))
+}
+
+/// Installs a refusal and its capability from the same declaration. A service
+/// installer can later replace the member and mark that real binding supported.
+pub(crate) fn refuse_member(
+    lua: &Lua,
+    table: &Table,
+    path: &str,
+    code: &'static str,
+    round: Option<u8>,
+    reason: &'static str,
+    shape: RefusalShape,
+) -> Result<()> {
+    let (module, name) = path.rsplit_once(['.', ':']).expect("qualified member path");
+    let symbol = path.to_owned();
+    table.raw_set(
+        name,
+        lua.create_function(move |lua, _: MultiValue| {
+            if matches!(shape, RefusalShape::Native) {
+                return error(lua, &symbol, code, reason);
+            }
+            diagnose(lua, &symbol, code, reason);
+            match shape {
+                RefusalShape::ForgeNil => lua.pack_multi(Value::Nil),
+                RefusalShape::ForgeReason => lua.pack_multi((Value::Nil, reason)),
+                RefusalShape::ForgeReasonAndNil => lua.pack_multi((Value::Nil, reason, Value::Nil)),
+                RefusalShape::Native => unreachable!(),
+            }
+        })?,
+    )?;
+    let status = if code == "not_yet" {
+        "not_yet"
+    } else {
+        "unsupported"
+    };
+    describe(lua, path, status, round, reason);
+    #[cfg(test)]
+    DECLARED_REFUSALS.with(|d| d.borrow_mut().insert(path.to_owned(), (code, shape)));
+    if module == "ImGui" {
+        describe(lua, &format!("eqoa.imgui.{name}"), status, round, reason);
+        #[cfg(test)]
+        DECLARED_REFUSALS.with(|d| d.borrow_mut().insert(format!("eqoa.imgui.{name}"), (code, shape)));
+    }
+    Ok(())
+}
+
+pub(crate) fn refuse_native(
+    lua: &Lua,
+    module: &str,
+    name: &str,
+    code: &'static str,
+    round: Option<u8>,
+    reason: &'static str,
+) -> Result<()> {
+    let modules: Table = lua.named_registry_value("eqoa_modules")?;
+    refuse_member(
+        lua,
+        &modules.get(module)?,
+        &format!("eqoa.{module}.{name}"),
+        code,
+        round,
+        reason,
+        RefusalShape::Native,
+    )
 }
 pub(crate) fn capability_grants(caps: &[String], cap: &str) -> bool {
     caps.iter()
@@ -286,6 +336,32 @@ pub(crate) fn require_capability(
         format!("{symbol} requires capability '{cap}' in mod.json"),
     ))
 }
+/// What a Forge import can make the game do on its own through the helpers it keeps (Forge chat sends, slash
+/// commands and the weapon-set alias). Forge imports declare no capabilities, so these are not gated for them
+/// (compatibility first); Mods & Addons labels every Forge import with them instead.
+pub(crate) const FORGE_IMPORT_ACTIONS: [&str; 3] =
+    ["eqoa.actions.chat", "eqoa.actions.command", "eqoa.actions.weapon_set"];
+
+/// The gate for a legacy alias or Forge helper that acts: a native `eqoa/1` mod (or a test host given
+/// capabilities) passes the same capability gate as the typed action `cap`; a Forge import keeps today's
+/// behaviour and carries the label instead.
+pub(crate) fn require_acting_capability(
+    lua: &Lua,
+    symbol: &str,
+    cap: &str,
+) -> std::result::Result<(), (&'static str, String)> {
+    let gated = {
+        let s = session(lua);
+        let s = s.borrow();
+        s.native_manifest || s.capabilities.is_some()
+    };
+    if gated {
+        require_capability(lua, symbol, cap)
+    } else {
+        Ok(())
+    }
+}
+
 pub(crate) fn annotate_host(host: &Host) -> Result<()> {
     let lua = &host.lua;
     let root: Table = lua.named_registry_value("eqoa_root")?;
@@ -315,96 +391,17 @@ pub(crate) fn annotate_host(host: &Host) -> Result<()> {
     }
     for (name, value) in host.registered_modules() {
         if name.starts_with("frontiers_forge.") {
-            describe(
-                lua,
-                &name,
-                "partial",
-                Some(2),
-                "native Forge compatibility adapter",
-            );
-            if let Value::Table(t) = value {
-                for pair in t.pairs::<String, Value>() {
+            describe_module(lua, &name, Some(2), "native Forge compatibility adapter");
+            if let Value::Table(table) = value {
+                for pair in table.pairs::<String, Value>() {
                     let (key, _) = pair?;
-                    describe(lua, &format!("{name}.{key}"), "supported", Some(2), "");
+                    let path = format!("{name}.{key}");
+                    if status(lua, &path).is_none() {
+                        describe(lua, &path, "supported", Some(2), "");
+                    }
                 }
             }
         }
-    }
-    for path in [
-        "frontiers_forge.chat.CaptureChannelTypeFromGameWindow",
-        "frontiers_forge.chat.GetChannelTableInfo",
-        "frontiers_forge.chat.DebugDumpFocusChain",
-        "frontiers_forge.combat.ReadForeignCave",
-        "frontiers_forge.util.utf8_to_utf16",
-        "frontiers_forge.util.utf16_to_utf8",
-    ] {
-        describe(
-            lua,
-            path,
-            "unsupported",
-            None,
-            "the native client has no matching pointer/config payload",
-        );
-    }
-    // Temporary hand list until Part C derives this metadata from bindings.
-    for path in [
-        "frontiers_forge.quest",
-        "frontiers_forge.quest.new",
-        "frontiers_forge.quest.GetName",
-        "frontiers_forge.cave",
-        "frontiers_forge.cave.IsRegionZero",
-        "frontiers_forge.cave.Alloc",
-        "frontiers_forge.cave.Reserve",
-        "frontiers_forge.cave.Get",
-        "frontiers_forge.cave.Free",
-        "frontiers_forge.cave.Release",
-        "frontiers_forge.cave.Info",
-    ] {
-        describe(
-            lua,
-            path,
-            "unsupported",
-            None,
-            "raw memory is excluded; use eqoa.quests for native quest records",
-        );
-    }
-    for path in ["eqoa.icons.SurfaceInfo.source_format"] {
-        describe(
-            lua,
-            path,
-            "unsupported",
-            None,
-            "icon provider retains decoded RGBA pixels without original source format",
-        );
-    }
-    for path in [
-        "frontiers_forge.player.GetCMs",
-        "frontiers_forge.player.GetCMsSpent",
-        "frontiers_forge.player.GetCMPct",
-        "frontiers_forge.ui.GetDispositionFaceTexId",
-        "frontiers_forge.ui.GetClassIconTexId",
-        "frontiers_forge.ui.GetClassIconTexture",
-        "frontiers_forge.ui.DrawClassIcon",
-        "frontiers_forge.ui.DrawDispositionIcon",
-        "frontiers_forge.camera.GetCoordinates",
-        "frontiers_forge.camera.GetFacingRadians",
-        "frontiers_forge.camera.GetFacingDegrees",
-        "frontiers_forge.window.FormatButtonHint",
-        "frontiers_forge.window.ParseButtonHint",
-        "frontiers_forge.window.IsTextDialogOpen",
-        "frontiers_forge.util.GetCompassRadians",
-        "frontiers_forge.merchant.GetButtonHint",
-    ] {
-        describe(lua, path, "supported", Some(4), "");
-    }
-    for path in super::items_forge::DEFERRED {
-        describe(
-            lua,
-            path,
-            "not_yet",
-            Some(6),
-            "needs read access to the item or merchant window's private selection state (a seam the owner approves first)",
-        );
     }
     let forge: Table = lua.globals().get("UiForge")?;
     for pair in forge.pairs::<String, Value>() {
@@ -776,21 +773,30 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
     let modules: Table = lua.named_registry_value("eqoa_modules")?;
     let table: Table = modules.get(module)?;
     let symbol = format!("eqoa.{module}.{name}");
-    let blocked = !cfg!(windows)
+    if !cfg!(windows)
         && (module == "files"
             || module == "sound"
-            || matches!((module, name), ("textures", "load") | ("fonts", "load")));
+            || matches!((module, name), ("textures", "load") | ("fonts", "load")))
+    {
+        let round = declared_round(lua, &symbol);
+        let reason = if module == "sound" {
+            "no native sound backend on this platform"
+        } else {
+            "secure file backend is not implemented on this platform"
+        };
+        return refuse_member(
+            lua,
+            &table,
+            &symbol,
+            "unsupported",
+            round,
+            reason,
+            RefusalShape::Native,
+        );
+    }
     table.set(
         name,
         lua.create_function(move |lua, args: MultiValue| {
-            if blocked {
-                return error(
-                    lua,
-                    &symbol,
-                    "unsupported",
-                    "secure file or sound backend is not implemented on this platform",
-                );
-            }
             if matches!(
                 symbol.as_str(),
                 "eqoa.client.get"
@@ -829,7 +835,8 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
             }
         })?,
     )?;
-    register_descriptor(lua, module, name, blocked)
+    register_descriptor(lua, module, name);
+    Ok(())
 }
 
 /// `bind` for hot, never-blocked calls: the body runs inside the one Lua
@@ -854,98 +861,148 @@ where
             }
         })?,
     )?;
-    register_descriptor(lua, module, name, false)
+    register_descriptor(lua, module, name);
+    Ok(())
 }
 
-fn register_descriptor(lua: &Lua, module: &str, name: &str, blocked: bool) -> Result<()> {
-    let mut s = session(lua).borrow().descriptors.clone();
+fn declared_round(lua: &Lua, path: &str) -> Option<u8> {
+    session(lua)
+        .borrow()
+        .descriptors
+        .get(path)
+        .and_then(|d| d.round)
+        .or(Some(2))
+}
+
+fn register_descriptor(lua: &Lua, module: &str, name: &str) {
     let path = format!("eqoa.{module}.{name}");
-    let round = s.get(&path).and_then(|d| d.round).or(Some(2));
-    s.insert(
-        path,
-        Descriptor {
-            status: if blocked { "unsupported" } else { "supported" },
-            round,
-            reason: if blocked {
-                "secure file or sound backend is not implemented on this platform".into()
-            } else {
-                String::new()
-            },
-        },
-    );
-    let children = s
-        .iter()
-        .filter(|(p, _)| {
-            p.starts_with(&format!("eqoa.{module}.")) && !p[6 + module.len()..].contains('.')
-        })
-        .map(|(_, d)| d.status)
-        .collect::<Vec<_>>();
-    let status = if children.iter().all(|s| *s == "unsupported") {
-        "unsupported"
-    } else if children.iter().all(|s| *s == "supported") {
-        "supported"
-    } else {
-        "partial"
-    };
-    let mod_path = format!("eqoa.{module}");
-    let mod_round = s.get(&mod_path).and_then(|d| d.round).or(Some(2));
-    s.insert(
-        mod_path,
-        Descriptor {
-            status,
-            round: mod_round,
-            reason: String::new(),
-        },
-    );
-    session(lua).borrow_mut().descriptors = s;
-    Ok(())
+    describe(lua, &path, "supported", declared_round(lua, &path), "");
 }
 
 pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
-    lua.set_app_data(Rc::new(RefCell::new(Session::new())));
     let s_ref = session(lua);
     let mut s = s_ref.borrow_mut();
     s.addon = host.addon_id();
     s.capabilities = host.requested_capabilities().map(<[String]>::to_vec);
+    s.replaces = host.replaced_windows().to_vec();
+    s.native_manifest = host.native_manifest();
     drop(s);
     let root: Table = lua.globals().get("eqoa").unwrap_or(lua.create_table()?);
     lua.set_named_registry_value("eqoa_root", root.clone())?;
     root.set("api", "eqoa/1")?;
     root.set("revision", 1)?;
     let modules = lua.create_table()?;
-    let descriptors = session(lua).borrow().descriptors.clone();
-    for (path, d) in &descriptors {
-        let Some(tail) = path.strip_prefix("eqoa.") else {
-            continue;
-        };
-        let Some((module, name)) = tail.split_once('.') else {
-            continue;
-        };
-        if name.contains('.') {
-            continue;
-        }
+    // Planned native entry points carry a callable refusal until their service binds them.
+    for (module, names, round) in [
+        ("abilities", "list get find in_range", 2),
+        ("actions", "assist target_target toggle_stats_box", 3),
+        (
+            "actions",
+            "status cancel batch stop_batch batch_status target cycle_target interact attack cast use_hotbar use_item equip swap_items quick_slot weapon_set prepare_weapon_set assign_ability unmemorize_ability unmemorize_all arrange_ability open_loot talk loot loot_all buy sell bank_move bank_money chat command autorun follow stop camera open_window close_window select_row activate_row dialog_answer input_text drop_quest mastery_share mastery_browse mastery_buy mastery_refund menu_command",
+            6,
+        ),
+        ("bank", "get", 5),
+        ("binds", "get register", 3),
+        ("camera", "get compass", 6),
+        ("capabilities", "get list has", 2),
+        ("chat", "history get_channel channel_name", 2),
+        ("client", "get display", 2),
+        ("combat", "get_counters", 2),
+        ("cooldowns", "get", 2),
+        ("effects", "list", 2),
+        ("entities", "list get find named distance", 2),
+        ("entities", "pick_dot dots", 4),
+        ("events", "on off once after", 2),
+        ("files", "read write remove", 2),
+        ("files", "load_json save_json_async import export", 4),
+        ("files", "list", 7),
+        ("fonts", "load default release", 2),
+        ("gems", "get is_gem format", 5),
+        ("group", "get", 2),
+        ("hotbar", "list", 2),
+        ("hud", "hide show hidden_by", 2),
+        ("hud", "frame layout visible text gauge image panel", 3),
+        ("icons", "resource ui info", 2),
+        ("icons", "class disposition", 6),
+        ("input", "get claim release capture_text rotate_dpad", 2),
+        ("input", "bind", 3),
+        ("input", "pointer claim_pointer minimap_wheel", 4),
+        ("inventory", "get", 5),
+        (
+            "items",
+            "get can_use stat slot_info attack_name stat_name",
+            5,
+        ),
+        ("log", "write", 2),
+        ("loot", "get", 5),
+        ("map", "get open markers view set_guide clear_guide", 4),
+        ("map", "set_waypoint clear_waypoint", 7),
+        ("mastery", "get skills selected", 6),
+        ("mods", "send", 4),
+        (
+            "math",
+            "bearing degrees radians normalize signed_angle facing is_bit_zero",
+            2,
+        ),
+        ("merchant", "get price", 5),
+        ("options", "toggle get set", 3),
+        ("options", "button", 4),
+        ("player", "get experience_for_level", 2),
+        ("player", "stats", 3),
+        ("quests", "list get", 6),
+        ("settings", "load save on_save on_load", 2),
+        ("sound", "load play stop set_volume is_playing release", 2),
+        ("target", "get", 2),
+        ("text", "localized", 2),
+        ("textures", "load rgba release", 2),
+        ("windows", "open", 3),
+        (
+            "windows",
+            "get find get_window format_hint parse_hint takeover release taken",
+            6,
+        ),
+    ] {
+        let module_path = format!("eqoa.{module}");
         let backing = match modules.get::<Value>(module)? {
-            Value::Table(t) => t,
+            Value::Table(table) => table,
             _ => {
-                let t = lua.create_table()?;
-                modules.set(module, t.clone())?;
-                root.set(
-                    module,
-                    guard(lua, t.clone(), &format!("eqoa.{module}"), None)?,
-                )?;
-                t
+                let table = lua.create_table()?;
+                modules.set(module, table.clone())?;
+                root.set(module, guard(lua, table.clone(), &module_path, None)?)?;
+                describe_module(lua, &module_path, Some(round), "");
+                table
             }
         };
-        let symbol = path.clone();
-        let code = d.status;
-        let reason = d.reason.clone();
-        backing.set(
-            name,
-            lua.create_function(move |lua, _: MultiValue| error(lua, &symbol, code, &reason))?,
-        )?;
+        for name in names.split_whitespace() {
+            refuse_member(
+                lua,
+                &backing,
+                &format!("{module_path}.{name}"),
+                "unsupported",
+                Some(round),
+                "this function has no implementation on this host",
+                RefusalShape::Native,
+            )?;
+        }
     }
     lua.set_named_registry_value("eqoa_modules", modules)?;
+    describe(lua, "eqoa.api", "supported", Some(2), "");
+    describe(lua, "eqoa.revision", "supported", Some(2), "");
+    describe(
+        lua,
+        "ffi",
+        "unsupported",
+        None,
+        "raw memory and FFI are excluded",
+    );
+    describe(
+        lua,
+        "eqoa.textures.formats.jpeg",
+        "unsupported",
+        None,
+        "the client decodes PNG only; convert JPEG to PNG or pass RGBA pixels",
+    );
     bind(
         lua,
         "capabilities",
@@ -962,13 +1019,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua,
         "capabilities",
         "has",
-        lua.create_function(|lua, path: String| {
-            Ok(session(lua)
-                .borrow()
-                .descriptors
-                .get(&path)
-                .is_some_and(|d| d.status == "supported"))
-        })?,
+        lua.create_function(|lua, path: String| Ok(status(lua, &path) == Some("supported")))?,
     )?;
     bind(
         lua,
@@ -994,78 +1045,46 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             Ok(t)
         })?,
     )?;
-    bind(
+    refuse_native(
         lua,
         "fonts",
         "game",
-        lua.create_function(|lua, _: MultiValue| {
-            error(
-                lua,
-                "eqoa.fonts.game",
-                "unsupported",
-                "game bitmap font cannot be represented by the existing ImGui font service",
-            )
-        })?,
-    )?;
-    describe(
-        lua,
-        "eqoa.fonts.game",
         "unsupported",
-        None,
+        Some(7),
         "game bitmap font cannot be represented by the existing ImGui font service",
-    );
+    )?;
     bind(lua,"client","get",lua.create_function(|lua,()| record(lua,"eqoa.client.Client",&json!({"in_world":false,"phase":"pregame","generation":0,"tick":0,"frame":0,"time":0})))?)?;
-    bind(
+    refuse_native(
         lua,
         "player",
         "get",
-        lua.create_function(|lua, ()| {
-            error(
-                lua,
-                "eqoa.player.get",
-                "not_in_world",
-                "enter a loaded world first",
-            )
-        })?,
+        "not_in_world",
+        Some(2),
+        "enter a loaded world first",
     )?;
-    bind(
+    refuse_native(
         lua,
         "hud",
         "hide",
-        lua.create_function(|lua, _: Value| {
-            error(
-                lua,
-                "eqoa.hud.hide",
-                "not_in_world",
-                "enter a loaded world first",
-            )
-        })?,
+        "not_in_world",
+        Some(2),
+        "enter a loaded world first",
     )?;
-    bind(
+    refuse_native(
         lua,
         "hud",
         "hidden_by",
-        lua.create_function(|lua, _: Value| {
-            error(
-                lua,
-                "eqoa.hud.hidden_by",
-                "unavailable",
-                "no visibility lease on this host",
-            )
-        })?,
+        "unavailable",
+        Some(2),
+        "no visibility lease on this host",
     )?;
-    bind(
+    refuse_native(
         lua,
         "input",
         "get",
-        lua.create_function(|lua, ()| {
-            error(
-                lua,
-                "eqoa.input.get",
-                "unavailable",
-                "native input service is not installed on this host",
-            )
-        })?,
+        "unavailable",
+        Some(2),
+        "native input service is not installed on this host",
     )?;
     let root = guard(lua, root, "eqoa", None)?;
     lua.globals().set("eqoa", root.clone())?;
@@ -1339,7 +1358,9 @@ fn install_fields(lua: &Lua) {
         ("eqoa.hud.SinglePanelLayout", "panel"),
         ("eqoa.options.Toggle", "id label default value item_id"),
     ] {
-        let round = if path.starts_with("eqoa.hud.")
+        let round = if path.starts_with("eqoa.map.") || path == "eqoa.input.Pointer" {
+            Some(4)
+        } else if path.starts_with("eqoa.hud.")
             || path.starts_with("eqoa.options.")
             || matches!(path, "eqoa.player.Stats" | "eqoa.player.StatItem")
         {
@@ -1349,14 +1370,22 @@ fn install_fields(lua: &Lua) {
         };
         describe(lua, path, "supported", round, "");
         for field in fields.split_whitespace() {
+            if let Some(reason) = unprojected_field(path, field) {
+                describe(lua, &format!("{path}.{field}"), "unsupported", None, reason);
+                continue;
+            }
             let field_round = if matches!(
                 (path, field),
-                ("eqoa.entities.Entity", "actor_position")
-                    | ("eqoa.map.MapState", "search_anchor")
-                    | ("eqoa.player.Player", "mastery")
-                    | ("eqoa.hotbar.HotbarSlot", "item")
+                ("eqoa.entities.Entity", "actor_position") | ("eqoa.map.MapState", "search_anchor")
             ) {
                 Some(4)
+            } else if matches!(
+                (path, field),
+                ("eqoa.entities.Entity", "npc_flags") | ("eqoa.player.Player", "mastery")
+            ) {
+                Some(6)
+            } else if (path, field) == ("eqoa.hotbar.HotbarSlot", "item") {
+                Some(5)
             } else if matches!(
                 (path, field),
                 ("eqoa.entities.Entity", "power") | ("eqoa.group.Member", "power")
@@ -1373,6 +1402,24 @@ fn install_fields(lua: &Lua) {
                 "",
             );
         }
+    }
+}
+
+pub(super) fn unprojected_field(path: &str, field: &str) -> Option<&'static str> {
+    match (path, field) {
+        ("eqoa.Error", "retry_after") => {
+            Some("no refusal in this client knows how long to wait: rate_limited and quota carry no wait")
+        }
+        (
+            "eqoa.actions.BatchResult" | "eqoa.events.batch.progress.data" | "eqoa.events.batch.result.data",
+            "detail",
+        ) => Some("a batch reports what each step did in that step's action.result"),
+        ("eqoa.chat.ChatMessage" | "eqoa.events.chat.message.data", "channel_code" | "sender" | "outgoing") => {
+            Some("the chat observer retains only text, color and the channel name")
+        }
+        ("eqoa.hotbar.HotbarSlot", "command") => Some("native hotbar rows do not expose command text"),
+        ("eqoa.hotbar.HotbarSlot", "icon") => Some("use ui_icon or the referenced ability or item icon"),
+        _ => None,
     }
 }
 

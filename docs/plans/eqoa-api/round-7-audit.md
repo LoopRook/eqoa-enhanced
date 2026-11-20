@@ -511,3 +511,26 @@ which is a named deliverable of round 7 in `docs/plans/EQOA-MOD-API-PLAN.md:340-
   `player.rs` already registered the module, so the full table wins. If the install order is
   ever reversed, `frontiers_forge.player` silently degrades to two functions; that ordering is
   worth a test rather than a doc note.
+
+## 5. Round 6.5 delta (Part C)
+
+The earlier tables describe the round 6 tip. Round 6.5 added five functions,
+one entity field and a manifest permission check. These verdicts use the
+production registration and Play paths on the Part C branch. The tests named
+here are the regression cases for each contract.
+
+| Path or gate | Verdict | Runtime behavior and evidence |
+|---|---|---|
+| `eqoa.windows.takeover` | REAL | Claims loot, merchant or bank for one VM. `own` matches the holder's request, and `all` includes player-opened windows. `round65_window_takeover_scopes_own_and_all` drives the three native open packets. Part C adds the manifest check and native switch below. |
+| `eqoa.windows.takeover` without permission | DIAGNOSTIC | An absent capability list returns `not_declared`. An explicit list without the takeover capability returns `permission_denied`. `round65_undeclared_capabilities_refuses_actions_and_takeover_with_not_declared` covers the declarations. |
+| `eqoa.windows.takeover` with undeclared `all` | DIAGNOSTIC | The existing takeover capability and the matching kind in `mod.json`'s `replaces` list are both required. Without the kind, the call returns `not_declared` before acquiring a claim. `round7c_all_scope_refuses_an_undeclared_window_without_claiming_it` and `round7c_manifest_declares_full_takeover_for_the_named_window_only` cover both outcomes. |
+| `eqoa.windows.release` | REAL | Releases a kind held by the calling VM, or all its kinds with no argument. The native lifecycle closes its hidden session through the existing Play cleanup. See `round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases` and `round65_loot_release_clears_corpse_visibility_and_master_loot`. |
+| `eqoa.windows.taken` | REAL | Returns whether a kind is held, or the per-kind booleans and named holders without an argument. `round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases` observes contention and release. |
+| `eqoa.actions.open_loot` | REAL | Validates the current-world corpse and uses the native loot request path. `round65_open_loot_talk_npc_flags_and_strict_target_guards` checks the request and refuses a living or stale target. |
+| `eqoa.actions.talk` | REAL | Validates the live merchant or banker and takes the native interact path. `round65_open_loot_talk_npc_flags_and_strict_target_guards` covers target validation and native requests. |
+| `eqoa.entities.Entity.npc_flags` | REAL | The native entity projection exposes the received creature channel flags. The field is absent on a non-creature. `round65_open_loot_talk_npc_flags_and_strict_target_guards` also checks the field used by the actions. |
+| `eqoa.actions.*` manifest gate | REAL | Enabling a native mod gives its declared action capabilities authority to issue those actions outside a gesture. Missing and unrelated declarations refuse visibly. `round65_broker_allows_autonomous_actions_with_capability_and_refuses_without` and `round65_undeclared_capabilities_refuses_actions_and_takeover_with_not_declared` cover exact and wildcard grants. |
+| Use the game's windows | REAL | The native manager clears all claims and stops addons from acquiring new ones while the switch is on. `round7c_native_switch_releases_every_holder_and_prevents_reclaims` uses two VMs and all three window kinds. |
+
+The round 6.5 entries carry round 6 in the reference. Use the capability's
+`revision` to feature-test a supported name after the `eqoa/1` freeze.

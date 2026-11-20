@@ -57,6 +57,13 @@ impl TakeoverKind {
             "loot" => Ok(Self::Loot),
             "merchant" => Ok(Self::Merchant),
             "bank" => Ok(Self::Bank),
+            _ if super::window_kinds::is_window(s) => Err((
+                "unsupported",
+                format!(
+                    "the game's '{s}' window cannot be taken over in this version (only 'loot', 'merchant' \
+                     and 'bank'); more windows follow the window-replacement roadmap"
+                ),
+            )),
             _ => Err((
                 "invalid_argument",
                 format!("window takeover kind must be 'loot', 'merchant', or 'bank', got '{s}'"),
@@ -194,6 +201,8 @@ impl TakeoverState {
 thread_local! {
     static STATE: RefCell<TakeoverState> = RefCell::new(TakeoverState::default());
     static HAS_ACTIVITY: Cell<bool> = const { Cell::new(false) };
+    /// The "Use the game's windows" switch; none until first read from the fork's settings.
+    static USE_GAME_WINDOWS: Cell<Option<bool>> = const { Cell::new(None) };
     #[cfg(test)]
     static STATE_BORROWS: Cell<usize> = const { Cell::new(0) };
 }
@@ -227,12 +236,71 @@ pub(crate) fn take_state_borrows_for_test() -> usize {
     STATE_BORROWS.with(|n| n.replace(0))
 }
 
+/// The fork's own settings file (`fork_ext/settings.rs`); the switch is its `use_game_windows` line, and
+/// every other line in it is kept as it is.
+const SETTINGS_FILE: &str = "enhanced.opt";
+const SWITCH_KEY: &str = "use_game_windows=";
+
+pub(crate) fn use_game_windows() -> bool {
+    USE_GAME_WINDOWS.with(|value| {
+        value.get().unwrap_or_else(|| {
+            let saved = crate::settings::read_config(SETTINGS_FILE).is_some_and(|bytes| {
+                String::from_utf8_lossy(&bytes)
+                    .lines()
+                    .any(|line| line.strip_prefix(SWITCH_KEY) == Some("on"))
+            });
+            value.set(Some(saved));
+            saved
+        })
+    })
+}
+
+fn save_switch(on: bool) {
+    let old = crate::settings::read_config(SETTINGS_FILE).unwrap_or_default();
+    let mut text = String::new();
+    for line in String::from_utf8_lossy(&old).lines() {
+        if !line.starts_with(SWITCH_KEY) {
+            text.push_str(line);
+            text.push('\n');
+        }
+    }
+    text.push_str(SWITCH_KEY);
+    text.push_str(if on { "on" } else { "off" });
+    text.push('\n');
+    if let Err(error) = crate::settings::write_config(SETTINGS_FILE, text.as_bytes()) {
+        log(format!("takeover: the game's windows switch was not saved: {error}"));
+    }
+}
+
+/// What a restart does to the switch's in-memory value: forgotten, read again on first use.
+#[cfg(test)]
+pub(crate) fn forget_switch_for_test() {
+    USE_GAME_WINDOWS.with(|value| value.set(None));
+}
+
+/// The player's "Use the game's windows" switch: saved with the fork's settings. Turning it on releases every
+/// claim and stops each running batch that worked through a released claim, as its Stop button would.
+pub(crate) fn set_use_game_windows(on: bool) {
+    USE_GAME_WINDOWS.with(|value| value.set(Some(on)));
+    save_switch(on);
+    if on && has_activity() {
+        let released = release_claims("released by the player", true);
+        super::action_broker::stop_batches_of_released_claims(&released);
+    }
+}
+
 pub(crate) fn takeover(
     vm: u64,
     addon_id: &str,
     kind: TakeoverKind,
     scope: TakeoverScope,
 ) -> std::result::Result<(), (&'static str, String)> {
+    if use_game_windows() {
+        return Err((
+            "unavailable",
+            "the player is using the game's windows".into(),
+        ));
+    }
     with_state_mut(|s| {
         let idx = kind as usize;
         if let Some(existing) = &mut s.holders[idx] {
@@ -297,14 +365,26 @@ pub(crate) fn release_vm(vm: u64) {
 }
 
 pub(crate) fn release_all() {
+    let _ = release_claims("zoning", false);
+}
+
+/// Releases every claim; returns who held what.
+fn release_claims(reason: &'static str, clear_grace: bool) -> Vec<(u64, TakeoverKind)> {
     with_state_mut(|s| {
-        for idx in 0..3 {
-            if s.holders[idx].take().is_some() {
+        if clear_grace {
+            s.grace_loot = None;
+        }
+        let mut released = Vec::new();
+        for kind in TakeoverKind::ALL {
+            let idx = kind as usize;
+            if let Some(holder) = s.holders[idx].take() {
                 s.pending_opens[idx] = None;
-                s.pending_close[idx] = Some("zoning");
+                s.pending_close[idx] = Some(reason);
+                released.push((holder.vm, kind));
             }
         }
-    });
+        released
+    })
 }
 
 pub(crate) fn is_taken(kind: TakeoverKind) -> bool {
@@ -581,7 +661,7 @@ pub(crate) fn end_session_for_vm(vm: u64, kind: TakeoverKind) {
             && s.hidden[idx].vm == vm
             && s.hidden[idx].scope == TakeoverScope::Own
         {
-            if kind == TakeoverKind::Loot {
+            if kind == TakeoverKind::Loot && !use_game_windows() {
                 s.grace_loot = Some(ListGrace {
                     target_id: s.hidden[idx].target_id,
                     until: Instant::now() + LIST_GRACE,
@@ -738,6 +818,7 @@ pub(crate) fn expire_hidden_session_for_test(kind: TakeoverKind) {
 }
 
 pub(crate) fn reset_all_for_test() {
+    USE_GAME_WINDOWS.with(|value| value.set(Some(false)));
     STATE.with(|s| *s.borrow_mut() = TakeoverState::default());
     HAS_ACTIVITY.with(|a| a.set(false));
     #[cfg(test)]

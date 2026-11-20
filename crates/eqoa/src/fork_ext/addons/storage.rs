@@ -15,6 +15,7 @@ use mlua::{Lua, Value};
 use serde_json::{Value as Json, json};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeMap,
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -96,6 +97,90 @@ fn is_hidden_or_system(entry: &fs::DirEntry) -> bool {
         }
     }
     false
+}
+
+/// The authority the player saw when enabling a package.
+#[derive(Clone, Debug)]
+pub(super) struct Disclosure {
+    native: bool,
+    capabilities: Vec<String>,
+    replaces: Vec<String>,
+    permissions: Vec<String>,
+    pub(super) blocked: bool,
+    /// The package's enabled-flag key in `state.json`, so staleness is judged per package (fix round 4
+    /// item 2); none in records an earlier build of this branch wrote.
+    key: Option<String>,
+}
+
+impl Disclosure {
+    pub(super) fn for_addon(addon: &DiscoveredAddon) -> Self {
+        let native = addon.api.is_some();
+        let capabilities = if native {
+            addon.declared_capabilities().unwrap_or(&[]).to_vec()
+        } else {
+            super::native::FORGE_IMPORT_ACTIONS.map(str::to_owned).to_vec()
+        };
+        let can_takeover = super::native::capability_grants(&capabilities, "eqoa.windows.takeover");
+        let replaces = addon.extensions.replaces.iter()
+            .filter(|kind| can_takeover || super::visibility::is_hud_disclosure(kind))
+            .cloned().collect();
+        Self {
+            native,
+            capabilities,
+            replaces,
+            permissions: addon.extensions.permissions.clone(),
+            blocked: false,
+            key: Storage::key(addon).ok(),
+        }
+    }
+
+    /// What an earlier release with no grants would have recorded for `addon`, for the update tests.
+    #[cfg(test)]
+    pub(super) fn narrower_for_test(addon: &DiscoveredAddon) -> Self {
+        Self { capabilities: Vec::new(), replaces: Vec::new(), permissions: Vec::new(), ..Self::for_addon(addon) }
+    }
+
+    pub(super) fn allows(&self, new: &Self) -> bool {
+        !self.blocked
+            && self.native == new.native
+            && new.capabilities.iter().all(|cap| super::native::capability_grants(&self.capabilities, cap))
+            && new.replaces.iter().all(|kind| self.replaces.contains(kind))
+            && new.permissions.iter().all(|permission| self.permissions.contains(permission))
+    }
+
+    fn to_json(&self) -> Json {
+        let mut value = json!({
+            "native": self.native,
+            "capabilities": self.capabilities,
+            "replaces": self.replaces,
+            "permissions": self.permissions,
+            "blocked": self.blocked,
+        });
+        if let Some(key) = &self.key {
+            value["key"] = json!(key);
+        }
+        value
+    }
+
+    fn from_json(value: &Json) -> Option<Self> {
+        let strings = |key: &str| -> Option<Vec<String>> {
+            value[key].as_array()?.iter().map(|value| value.as_str().map(str::to_owned)).collect()
+        };
+        Some(Self {
+            native: value["native"].as_bool()?,
+            capabilities: strings("capabilities")?,
+            replaces: strings("replaces")?,
+            permissions: strings("permissions")?,
+            blocked: value["blocked"].as_bool()?,
+            key: value["key"].as_str().map(str::to_owned),
+        })
+    }
+}
+
+#[derive(Default)]
+struct Registry {
+    enabled: serde_json::Map<String, Json>,
+    disclosures: BTreeMap<String, Disclosure>,
 }
 
 #[derive(Clone)]
@@ -292,9 +377,9 @@ impl Storage {
 
         // Migrate state.json enabled flags from the SAME candidate as profile (most recent)
         if let Ok(mut registry) = self.registry() {
-            if !registry.contains_key(new_key) {
+            if !registry.enabled.contains_key(new_key) {
                 let chosen = if let Some((best_key, _)) = &best_candidate {
-                    registry
+                    registry.enabled
                         .get(best_key)
                         .and_then(Json::as_bool)
                         .map(|v| (best_key.clone(), v))
@@ -305,7 +390,7 @@ impl Storage {
                 // Fallback to other candidates only if best_candidate had no enabled flag or no profile existed
                 let chosen = chosen.or_else(|| {
                     for cand in candidates {
-                        if let Some(val) = registry.get(cand).and_then(Json::as_bool) {
+                        if let Some(val) = registry.enabled.get(cand).and_then(Json::as_bool) {
                             return Some((cand.clone(), val));
                         }
                     }
@@ -317,15 +402,9 @@ impl Storage {
                         "migrated enabled flag ({val}) from legacy v1 key {} to {}",
                         best_key, new_key
                     ));
-                    registry.insert(new_key.to_string(), Json::Bool(val));
-                    let target = self
-                        .root
-                        .as_ref()
-                        .ok_or("addon configuration directory unavailable")?
-                        .join("state.json");
-                    write_json(&target, &json!({"schemaVersion":1,"enabled":registry})).map_err(
-                        |e| format!("failed to update state.json during migration: {e}"),
-                    )?;
+                    registry.enabled.insert(new_key.to_string(), Json::Bool(val));
+                    self.write_registry(&registry)
+                        .map_err(|e| format!("failed to update state.json during migration: {e}"))?;
                 }
             }
         }
@@ -343,19 +422,39 @@ impl Storage {
 
     pub fn enabled(&self, key: &str) -> Result<Option<bool>, String> {
         validate_key(key)?;
-        Ok(self.registry()?.get(key).and_then(Json::as_bool))
+        Ok(self.registry()?.enabled.get(key).and_then(Json::as_bool))
     }
 
+    #[cfg(test)]
     pub fn set_enabled(&self, key: &str, enabled: bool) -> Result<(), String> {
-        validate_key(key)?;
+        self.update_enable_state(Some((key, enabled)), None)
+    }
+
+    /// The authority each enable was given under; none (adopt once) when unavailable or stale.
+    pub(super) fn disclosures(&self) -> Result<BTreeMap<String, Disclosure>, String> {
+        if self.root.is_none() {
+            return Ok(BTreeMap::new());
+        }
+        Ok(self.registry()?.disclosures)
+    }
+
+    pub(super) fn update_enable_state(
+        &self,
+        enabled: Option<(&str, bool)>,
+        disclosure: Option<(&str, &Disclosure)>,
+    ) -> Result<(), String> {
+        if enabled.is_none() && (disclosure.is_none() || self.root.is_none()) {
+            return Ok(());
+        }
         let mut registry = self.registry()?;
-        registry.insert(key.to_owned(), Json::Bool(enabled));
-        let target = self
-            .root
-            .as_ref()
-            .ok_or("addon configuration directory unavailable")?
-            .join("state.json");
-        write_json(&target, &json!({"schemaVersion":1,"enabled":registry}))
+        if let Some((key, value)) = enabled {
+            validate_key(key)?;
+            registry.enabled.insert(key.to_owned(), Json::Bool(value));
+        }
+        if let Some((id, record)) = disclosure {
+            registry.disclosures.insert(id.to_owned(), record.clone());
+        }
+        self.write_registry(&registry)
     }
 
     pub fn save_profile(&self, key: &str, value: Value) -> Result<(), String> {
@@ -392,18 +491,61 @@ impl Storage {
             .join(format!("{key}-files")))
     }
 
-    fn registry(&self) -> Result<serde_json::Map<String, Json>, String> {
-        let path = self
-            .root
-            .as_ref()
+    fn registry_path(&self) -> Result<PathBuf, String> {
+        Ok(self.root.as_ref()
             .ok_or("addon configuration directory unavailable")?
-            .join("state.json");
-        let Some(value) = read_json(&path)? else {
+            .join("state.json"))
+    }
+
+    /// The disclosures beside `state.json` (fork round 7c, fix round 3): `state.json` keeps exactly the two
+    /// keys 0.6.0 and earlier write and accept, so a player can go back to an older build and keep every
+    /// enable; the authority each enable was given under lives in this fork-owned file.
+    fn disclosures_path(&self) -> Result<PathBuf, String> {
+        Ok(self.root.as_ref()
+            .ok_or("addon configuration directory unavailable")?
+            .join("disclosures.json"))
+    }
+
+    fn write_registry(&self, registry: &Registry) -> Result<(), String> {
+        write_json(&self.registry_path()?, &json!({"schemaVersion": 1, "enabled": registry.enabled}))?;
+        // The enabled flags the records were written with: when an older build rewrites state.json, the
+        // records no longer describe it and read as absent (each enabled package adopts its disclosure once).
+        let beside = json!({
+            "schemaVersion": 1,
+            "enabled": registry.enabled,
+            "disclosures": Json::Object(registry.disclosures.iter()
+                .map(|(id, disclosure)| (id.clone(), disclosure.to_json())).collect()),
+        });
+        write_json(&self.disclosures_path()?, &beside)
+    }
+
+    /// The records in `disclosures.json` that still describe `state.json`: a record is kept while its package's
+    /// enabled flag is what it was when the record was written; one an older build changed since reads as
+    /// absent (that package adopts its disclosure once). A missing or unreadable file: none, never an error.
+    fn disclosures_beside(&self, enabled: &serde_json::Map<String, Json>) -> BTreeMap<String, Disclosure> {
+        let Ok(Some(value)) = self.disclosures_path().and_then(|path| read_json(&path)) else {
+            return BTreeMap::new();
+        };
+        let (Some(1), Some(written)) = (value["schemaVersion"].as_u64(), value["enabled"].as_object()) else {
+            return BTreeMap::new();
+        };
+        let mut records = parse_disclosures(&value["disclosures"]).unwrap_or_default();
+        records.retain(|_, record| match &record.key {
+            Some(key) => written.get(key) == enabled.get(key),
+            None => written == enabled,
+        });
+        records
+    }
+
+    fn registry(&self) -> Result<Registry, String> {
+        let Some(value) = read_json(&self.registry_path()?)? else {
             return Ok(Default::default());
         };
+        // Two keys, as 0.6.0 writes; a third `disclosures` key is what an earlier build of this branch wrote,
+        // read once and moved beside the file on the next write.
         let object = value
             .as_object()
-            .filter(|o| o.len() == 2)
+            .filter(|o| o.len() == 2 || (o.len() == 3 && o.contains_key("disclosures")))
             .ok_or("invalid addon state registry")?;
         if object.get("schemaVersion").and_then(Json::as_u64) != Some(1) {
             return Err("unsupported addon state schemaVersion".into());
@@ -418,8 +560,21 @@ impl Storage {
                 return Err("addon enabled state must be boolean".into());
             }
         }
-        Ok(enabled.clone())
+        let disclosures = match object.get("disclosures") {
+            Some(value) => parse_disclosures(value).unwrap_or_default(),
+            None => self.disclosures_beside(enabled),
+        };
+        Ok(Registry { enabled: enabled.clone(), disclosures })
     }
+}
+
+fn parse_disclosures(value: &Json) -> Result<BTreeMap<String, Disclosure>, String> {
+    value.as_object().ok_or("invalid addon disclosure registry")?.iter()
+        .map(|(id, value)| {
+            Disclosure::from_json(value).map(|record| (id.clone(), record))
+                .ok_or_else(|| format!("invalid addon disclosure for {id}"))
+        })
+        .collect()
 }
 
 fn copy_dir_bounded(
@@ -681,6 +836,82 @@ mod tests {
             );
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    /// 0.6.0's acceptance rule for `state.json`, copied from `Storage::registry` at 0e35c35e
+    /// (`crates/eqoa/src/fork_ext/addons/storage.rs:395-420`): exactly two keys, schema 1, boolean flags.
+    fn accepted_by_0_6_0(bytes: &[u8]) -> Result<serde_json::Map<String, Json>, String> {
+        let value: Json = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+        let object = value
+            .as_object()
+            .filter(|o| o.len() == 2)
+            .ok_or("invalid addon state registry")?;
+        if object.get("schemaVersion").and_then(Json::as_u64) != Some(1) {
+            return Err("unsupported addon state schemaVersion".into());
+        }
+        let enabled = object
+            .get("enabled")
+            .and_then(Json::as_object)
+            .ok_or("invalid addon enabled registry")?;
+        for (key, value) in enabled {
+            validate_key(key)?;
+            if !value.is_boolean() {
+                return Err("addon enabled state must be boolean".into());
+            }
+        }
+        Ok(enabled.clone())
+    }
+
+    /// 0.6.0's writer (`Storage::set_enabled` at 0e35c35e): the whole file, two keys.
+    fn write_as_0_6_0(state: &Path, enabled: serde_json::Map<String, Json>) {
+        fs::write(state, serde_json::to_vec(&json!({"schemaVersion": 1, "enabled": enabled})).unwrap()).unwrap();
+    }
+
+    /// Fix round 3 item 1: a downgrade reads what this build wrote, and this build reads what 0.6.0 wrote.
+    #[test]
+    fn round7c_state_json_stays_compatible_with_0_6_0_both_ways() {
+        let s = Scratch::new();
+        let addon = s.addon();
+        let key = s.key();
+        let storage = Storage::new(Some(s.0.clone()));
+        let record = Disclosure::for_addon(&addon);
+        storage.update_enable_state(Some((&key, true)), Some((&addon.id, &record))).unwrap();
+        let state = s.0.join("addons/state.json");
+
+        // this build -> 0.6.0: the old reader accepts the file and keeps the enable
+        let old_view = accepted_by_0_6_0(&fs::read(&state).unwrap())
+            .expect("0.6.0 must accept the state.json this build writes");
+        assert_eq!(old_view.get(&key), Some(&Json::Bool(true)));
+        assert!(storage.disclosures().unwrap().contains_key(&addon.id), "the disclosure is kept beside it");
+
+        // 0.6.0 -> this build: the old build rewrites state.json (the player toggles the mod there)
+        let mut toggled = old_view.clone();
+        toggled.insert(key.clone(), Json::Bool(false));
+        write_as_0_6_0(&state, toggled);
+        assert_eq!(storage.enabled(&key).unwrap(), Some(false), "this build reads 0.6.0's file");
+        assert!(
+            storage.disclosures().unwrap().is_empty(),
+            "a disclosure record older than the enabled flags is stale: adopt again, never block"
+        );
+
+        // a missing or unreadable disclosure file reads as no records (adopt once), never an error
+        storage.update_enable_state(Some((&key, true)), Some((&addon.id, &record))).unwrap();
+        let beside = s.0.join("addons/disclosures.json");
+        fs::write(&beside, b"{not json").unwrap();
+        assert!(storage.disclosures().unwrap().is_empty());
+        fs::remove_file(&beside).unwrap();
+        assert!(storage.disclosures().unwrap().is_empty());
+        assert_eq!(storage.enabled(&key).unwrap(), Some(true));
+
+        // the three-key file an earlier build of this branch wrote still loads, and the next write repairs it
+        let mut legacy = json!({"schemaVersion": 1, "enabled": {key.clone(): true}});
+        legacy["disclosures"] = json!({addon.id.clone(): record.to_json()});
+        fs::write(&state, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        assert_eq!(storage.enabled(&key).unwrap(), Some(true));
+        assert!(storage.disclosures().unwrap().contains_key(&addon.id));
+        storage.update_enable_state(Some((&key, true)), None).unwrap();
+        accepted_by_0_6_0(&fs::read(&state).unwrap()).expect("rewritten in 0.6.0's shape");
+        assert!(storage.disclosures().unwrap().contains_key(&addon.id), "its records moved beside it");
     }
 
     #[test]

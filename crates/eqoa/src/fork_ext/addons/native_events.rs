@@ -137,9 +137,9 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("player.changed", "before after changed"),
         ("player.stats_changed", ""),
         ("target.changed", "before after"),
-        ("entity.added", "ref before after changed"),
+        ("entity.added", "ref after changed"),
         ("entity.changed", "ref before after changed"),
-        ("entity.removed", "ref before after changed"),
+        ("entity.removed", "ref before changed"),
         ("group.changed", "before after changed"),
         ("map.changed", "before after changed"),
         ("inventory.changed", "before after changed cause"),
@@ -170,10 +170,10 @@ fn install_event_fields(lua: &mlua::Lua) {
         ),
         ("input.key", "key down repeat synthetic text"),
         ("input.pad", "before after"),
-        ("pointer.pressed", "x y inside_window button steps"),
-        ("pointer.wheel", "x y inside_window button steps"),
-        ("resource.ready", "kind handle error request value path"),
-        ("resource.failed", "kind handle error request value path"),
+        ("pointer.pressed", "x y inside_window button"),
+        ("pointer.wheel", "x y inside_window steps"),
+        ("resource.ready", "kind handle request value path"),
+        ("resource.failed", "kind handle error request"),
         (
             "action.result",
             "request_id kind state phase ok code reason queued_tick dispatched_tick completed_tick detail",
@@ -188,13 +188,15 @@ fn install_event_fields(lua: &mlua::Lua) {
         ),
         ("events.dropped", "first_seq last_seq count streams"),
     ] {
+        let payload = format!("eqoa.events.{name}.data");
         for field in fields.split_whitespace() {
+            let reason = super::native::unprojected_field(&payload, field);
             super::native::describe(
                 lua,
-                &format!("eqoa.events.{name}.data.{field}"),
-                "supported",
-                Some(2),
-                "",
+                &format!("{payload}.{field}"),
+                if reason.is_some() { "unsupported" } else { "supported" },
+                reason.is_none().then(|| event_round(name)),
+                reason.unwrap_or_default(),
             );
         }
     }
@@ -202,16 +204,17 @@ fn install_event_fields(lua: &mlua::Lua) {
     // ("ctrl+u"): what a key binding is matched by (round 7).
     super::native::describe(lua, "eqoa.events.input.key.data.combo", "supported", Some(7), "");
     super::native::describe(lua, "eqoa.events.input.key.data.game_key", "supported", Some(7), "");
-    for (round, names) in [(4, "")] {
-        for name in names.split_whitespace() {
-            super::native::describe(
-                lua,
-                &format!("eqoa.events.{name}"),
-                "not_yet",
-                Some(round),
-                "scheduled for a later round",
-            );
-        }
+}
+
+fn event_round(name: &str) -> u8 {
+    match name {
+        "player.stats_changed" => 3,
+        "map.changed" | "shared.changed" | "mod.command" | "guide.lost" | "pointer.pressed"
+        | "pointer.wheel" => 4,
+        "inventory.changed" | "bank.changed" | "loot.changed" | "merchant.changed" => 5,
+        "action.result" | "batch.progress" | "batch.result" | "quests.changed"
+        | "camera.changed" | "windows.changed" | "mastery.changed" => 6,
+        _ => 2,
     }
 }
 pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
@@ -255,17 +258,12 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
             lua,
             &format!("eqoa.events.{name}"),
             "supported",
-            Some(match *name {
-                "player.stats_changed" => 3,
-                "action.result" | "batch.progress" | "batch.result" | "quests.changed"
-                | "camera.changed" | "windows.changed" | "mastery.changed" => 4,
-                _ => 2,
-            }),
+            Some(event_round(name)),
             "",
         );
     }
+    install_event_fields(lua);
     for (name, once) in [("on", false), ("once", true)] {
-        install_event_fields(lua);
         bind(
             lua,
             "events",
@@ -570,12 +568,32 @@ pub(super) fn envelope_readonly(lua: &mlua::Lua, e: &Event) -> Result<mlua::Tabl
 fn deliver(lua: &mlua::Lua, e: &Event, only: Option<&Token>) -> Result<()> {
     deliver_data(lua, e, only, None)
 }
+#[cfg(test)]
+thread_local! {
+    static DATA_KEYS: RefCell<std::collections::BTreeMap<String, std::collections::BTreeSet<String>>> =
+        RefCell::new(Default::default());
+}
+
+/// The non-null top-level keys the native data of every delivered `name` event carried (tests only).
+#[cfg(test)]
+pub(crate) fn data_keys_for_test(name: &str) -> Vec<String> {
+    DATA_KEYS.with(|k| k.borrow().get(name).map(|keys| keys.iter().cloned().collect()).unwrap_or_default())
+}
+
 fn deliver_data(
     lua: &mlua::Lua,
     e: &Event,
     only: Option<&Token>,
     data: Option<mlua::Table>,
 ) -> Result<()> {
+    #[cfg(test)]
+    if let Json::Object(fields) = &*e.data {
+        DATA_KEYS.with(|k| {
+            k.borrow_mut().entry(e.name.clone()).or_default().extend(
+                fields.iter().filter(|(_, v)| !v.is_null()).map(|(key, _)| key.clone()),
+            )
+        });
+    }
     let _timed = super::addon_perf::section("events.deliver");
     let shared = bus(lua);
     {
@@ -786,6 +804,7 @@ pub(crate) fn clear(host: &Host) {
     let vm = bus(&host.lua).borrow().vm;
     super::map_views::release_vm(vm);
     super::guides::release_vm(vm);
+    super::map_waypoint::release_vm(vm);
     super::pointer_api::release_vm(vm);
     super::chat::cancel_vm(vm);
     super::weapon_sets::cancel_vm(vm);

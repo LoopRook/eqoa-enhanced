@@ -1,5 +1,5 @@
 use super::{
-    native::{bind, describe, error},
+    native::{RefusalShape, bind, describe, describe_module, error, refuse_member},
     textures::{Handle, Textures},
 };
 use mlua::{AnyUserData, Function, Lua, Result, Table, UserData, Value};
@@ -22,52 +22,46 @@ pub(crate) fn imgui(lua: &Lua, imgui: &Table) -> Result<()> {
             }
         }
     }
-    describe(
-        lua,
-        "eqoa.imgui",
-        "partial",
-        Some(2),
-        "bounded native bridge; unbound members are unsupported",
-    );
-    for name in [
-        "BeginTooltip",
-        "EndTooltip",
-        "BeginItemTooltip",
-        "GetMousePos",
-        "GetMousePosOnOpeningCurrentPopup",
-        "GetMouseWheel",
-        "GetMouseDragDelta",
-        "ResetMouseDragDelta",
-        "IsMouseDown",
-        "IsMouseClicked",
-        "IsMouseReleased",
-        "IsMouseDoubleClicked",
-        "IsMousePosValid",
-        "SetMousePos",
-        "SetMouseCursor",
-        "PushStyleVar",
-        "PopStyleVar",
-        "PushItemWidth",
-        "PopItemWidth",
-        "SetNextWindowFocus",
-        "SetWindowFocus",
-        "GetForegroundDrawList",
+    for module in ["eqoa.imgui", "ImGui"] {
+        describe_module(lua, module, Some(2), "bounded native bridge");
+    }
+    // Not in the bounded ImGui bridge of `eqoa/1`, and not scheduled: each answers `unsupported` with what
+    // to use instead.
+    const MOUSE: &str = "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events";
+    const NOT_BRIDGED: &str = "not part of the ImGui bridge in eqoa/1";
+    for (name, reason) in [
+        ("BeginTooltip", NOT_BRIDGED),
+        ("EndTooltip", NOT_BRIDGED),
+        ("BeginItemTooltip", NOT_BRIDGED),
+        ("GetMousePos", MOUSE),
+        ("GetMousePosOnOpeningCurrentPopup", MOUSE),
+        ("GetMouseWheel", MOUSE),
+        ("GetMouseDragDelta", MOUSE),
+        ("ResetMouseDragDelta", MOUSE),
+        ("IsMouseDown", MOUSE),
+        ("IsMouseClicked", MOUSE),
+        ("IsMouseReleased", MOUSE),
+        ("IsMouseDoubleClicked", MOUSE),
+        ("IsMousePosValid", MOUSE),
+        ("SetMousePos", MOUSE),
+        ("SetMouseCursor", MOUSE),
+        ("PushStyleVar", NOT_BRIDGED),
+        ("PopStyleVar", NOT_BRIDGED),
+        ("PushItemWidth", NOT_BRIDGED),
+        ("PopItemWidth", NOT_BRIDGED),
+        ("SetNextWindowFocus", NOT_BRIDGED),
+        ("SetWindowFocus", NOT_BRIDGED),
+        ("GetForegroundDrawList", NOT_BRIDGED),
     ] {
         if imgui.raw_get::<Value>(name)?.is_nil() {
-            let path = format!("ImGui.{name}");
-            describe(lua, &path, "not_yet", Some(4), "scheduled for round 4");
-            describe(
+            refuse_member(
                 lua,
-                &format!("eqoa.imgui.{name}"),
-                "not_yet",
-                Some(4),
-                "scheduled for round 4",
-            );
-            imgui.set(
-                name,
-                lua.create_function(move |lua, _: mlua::MultiValue| {
-                    error(lua, &path, "not_yet", "scheduled for round 4")
-                })?,
+                imgui,
+                &format!("ImGui.{name}"),
+                "unsupported",
+                None,
+                reason,
+                RefusalShape::Native,
             )?;
         }
     }
@@ -264,14 +258,6 @@ pub(crate) fn sound(lua: &Lua, owner: &Rc<RefCell<super::sound::SoundBank>>) -> 
         "sound",
         "load",
         lua.create_function(move |lua, path: Value| {
-            if !cfg!(windows) {
-                return error(
-                    lua,
-                    "eqoa.sound.load",
-                    "unsupported",
-                    "no native sound backend on this platform",
-                );
-            }
             let Some(path) = path
                 .as_string()
                 .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
@@ -320,14 +306,6 @@ pub(crate) fn sound(lua: &Lua, owner: &Rc<RefCell<super::sound::SoundBank>>) -> 
             name,
             lua.create_function(move |lua, (value, option): (Value, Option<Value>)| {
                 let symbol = format!("eqoa.sound.{name}");
-                if !cfg!(windows) {
-                    return error(
-                        lua,
-                        &symbol,
-                        "unsupported",
-                        "no native sound backend on this platform",
-                    );
-                }
                 if value.is_nil() && matches!(name, "stop" | "release" | "is_playing") {
                     return lua.pack_multi((name != "is_playing", Value::Nil));
                 }
@@ -426,23 +404,6 @@ pub(crate) fn sound(lua: &Lua, owner: &Rc<RefCell<super::sound::SoundBank>>) -> 
                 }
             })?,
         )?;
-    }
-    #[cfg(not(windows))]
-    for name in [
-        "load",
-        "play",
-        "stop",
-        "set_volume",
-        "is_playing",
-        "release",
-    ] {
-        describe(
-            lua,
-            &format!("eqoa.sound.{name}"),
-            "unsupported",
-            None,
-            "no native sound backend on this platform",
-        );
     }
     Ok(())
 }

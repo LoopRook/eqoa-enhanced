@@ -215,7 +215,6 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         })?,
     )?;
     // Pick directly from this frame's compact dots: no per-creature Lua allocation or call.
-    super::native::describe(lua, "eqoa.entities.pick_dot", "supported", Some(4), "");
     bind_fn(lua, "entities", "pick_dot", |lua, q: Table| {
         let x: f32 = q.get("x")?;
         let y: f32 = q.get("y")?;
@@ -295,7 +294,6 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     // `eqoa.entities.dots()`: what the native minimap draws, as bare values. A caller that
     // hit-tests or maps the dots every frame cannot afford a guarded record per creature per
     // frame, so this returns plain columns built from the frame's own list.
-    super::native::describe(lua, "eqoa.entities.dots", "supported", Some(4), "");
     bind_fn(lua, "entities", "dots", |lua, ()| {
         let dots = CORE.with(|c| {
             let c = c.borrow();

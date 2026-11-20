@@ -31,61 +31,61 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.actions` | partial | 4 |  |
-| `eqoa.actions.activate_row` | supported | 4 | native key/window/handler path, revalidated at dispatch |
-| `eqoa.actions.arrange_ability` | supported | 4 |  |
-| `eqoa.actions.assign_ability` | supported | 4 |  |
-| `eqoa.actions.assist` | supported | 4 |  |
-| `eqoa.actions.attack` | supported | 4 |  |
-| `eqoa.actions.autorun` | supported | 4 |  |
-| `eqoa.actions.bank_money` | supported | 4 |  |
-| `eqoa.actions.bank_move` | supported | 4 |  |
-| `eqoa.actions.batch` | supported | 4 |  |
-| `eqoa.actions.batch_status` | supported | 4 |  |
-| `eqoa.actions.buttons` | not_yet | 4 | continuous controls come after the PR |
-| `eqoa.actions.buy` | supported | 4 |  |
-| `eqoa.actions.camera` | supported | 4 | native WalkCamera/camstyle setter applied at Play::frame |
-| `eqoa.actions.cancel` | supported | 4 |  |
-| `eqoa.actions.cast` | supported | 4 |  |
-| `eqoa.actions.chat` | supported | 4 |  |
-| `eqoa.actions.close_window` | supported | 4 | native key/window/handler path, revalidated at dispatch |
-| `eqoa.actions.command` | supported | 4 |  |
-| `eqoa.actions.cycle_target` | supported | 4 |  |
-| `eqoa.actions.destroy` | unsupported |  | not offered before the PR (owner) |
-| `eqoa.actions.dialog_answer` | supported | 4 | native key/window/handler path, revalidated at dispatch |
-| `eqoa.actions.drop_quest` | supported | 4 | native key/window/handler path, revalidated at dispatch |
-| `eqoa.actions.equip` | supported | 4 |  |
-| `eqoa.actions.follow` | supported | 4 |  |
-| `eqoa.actions.input_text` | supported | 4 | native key/window/handler path, revalidated at dispatch |
-| `eqoa.actions.interact` | supported | 4 |  |
-| `eqoa.actions.look` | not_yet | 4 | continuous controls come after the PR |
-| `eqoa.actions.loot` | supported | 4 |  |
-| `eqoa.actions.loot_all` | supported | 4 |  |
-| `eqoa.actions.mastery_browse` | supported | 4 | native key/window/handler path, revalidated at dispatch |
-| `eqoa.actions.mastery_buy` | supported | 4 | native key/window/handler path, revalidated at dispatch |
-| `eqoa.actions.mastery_refund` | supported | 4 | native key/window/handler path, revalidated at dispatch |
-| `eqoa.actions.mastery_share` | supported | 4 | native key/window/handler path, revalidated at dispatch |
-| `eqoa.actions.menu_command` | supported | 4 | native key/window/handler path, revalidated at dispatch |
-| `eqoa.actions.move` | not_yet | 4 | continuous controls come after the PR |
-| `eqoa.actions.open_loot` | supported | 4 |  |
-| `eqoa.actions.open_window` | supported | 4 |  |
-| `eqoa.actions.prepare_weapon_set` | supported | 4 |  |
-| `eqoa.actions.quick_slot` | supported | 4 |  |
-| `eqoa.actions.select_row` | supported | 4 | native key/window/handler path, revalidated at dispatch |
-| `eqoa.actions.sell` | supported | 4 |  |
-| `eqoa.actions.status` | supported | 4 |  |
-| `eqoa.actions.stop` | supported | 4 |  |
-| `eqoa.actions.stop_batch` | supported | 4 |  |
-| `eqoa.actions.swap_items` | supported | 4 |  |
-| `eqoa.actions.talk` | supported | 4 |  |
-| `eqoa.actions.target` | supported | 4 |  |
+| `eqoa.actions` | partial | 3 |  |
+| `eqoa.actions.activate_row` | supported | 6 |  |
+| `eqoa.actions.arrange_ability` | supported | 6 |  |
+| `eqoa.actions.assign_ability` | supported | 6 |  |
+| `eqoa.actions.assist` | supported | 3 |  |
+| `eqoa.actions.attack` | supported | 6 |  |
+| `eqoa.actions.autorun` | supported | 6 |  |
+| `eqoa.actions.bank_money` | supported | 6 |  |
+| `eqoa.actions.bank_move` | supported | 6 |  |
+| `eqoa.actions.batch` | supported | 6 |  |
+| `eqoa.actions.batch_status` | supported | 6 |  |
+| `eqoa.actions.buttons` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 8) |
+| `eqoa.actions.buy` | supported | 6 |  |
+| `eqoa.actions.camera` | supported | 6 |  |
+| `eqoa.actions.cancel` | supported | 6 |  |
+| `eqoa.actions.cast` | supported | 6 |  |
+| `eqoa.actions.chat` | supported | 6 |  |
+| `eqoa.actions.close_window` | supported | 6 |  |
+| `eqoa.actions.command` | supported | 6 |  |
+| `eqoa.actions.cycle_target` | supported | 6 |  |
+| `eqoa.actions.destroy` | unsupported |  | excluded until after the upstream PR by the mod API plan |
+| `eqoa.actions.dialog_answer` | supported | 6 |  |
+| `eqoa.actions.drop_quest` | supported | 6 |  |
+| `eqoa.actions.equip` | supported | 6 |  |
+| `eqoa.actions.follow` | supported | 6 |  |
+| `eqoa.actions.input_text` | supported | 6 |  |
+| `eqoa.actions.interact` | supported | 6 |  |
+| `eqoa.actions.look` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 8) |
+| `eqoa.actions.loot` | supported | 6 |  |
+| `eqoa.actions.loot_all` | supported | 6 |  |
+| `eqoa.actions.mastery_browse` | supported | 6 |  |
+| `eqoa.actions.mastery_buy` | supported | 6 |  |
+| `eqoa.actions.mastery_refund` | supported | 6 |  |
+| `eqoa.actions.mastery_share` | supported | 6 |  |
+| `eqoa.actions.menu_command` | supported | 6 |  |
+| `eqoa.actions.move` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 8) |
+| `eqoa.actions.open_loot` | supported | 6 |  |
+| `eqoa.actions.open_window` | supported | 6 |  |
+| `eqoa.actions.prepare_weapon_set` | supported | 6 |  |
+| `eqoa.actions.quick_slot` | supported | 6 |  |
+| `eqoa.actions.select_row` | supported | 6 |  |
+| `eqoa.actions.sell` | supported | 6 |  |
+| `eqoa.actions.status` | supported | 6 |  |
+| `eqoa.actions.stop` | supported | 6 |  |
+| `eqoa.actions.stop_batch` | supported | 6 |  |
+| `eqoa.actions.swap_items` | supported | 6 |  |
+| `eqoa.actions.talk` | supported | 6 |  |
+| `eqoa.actions.target` | supported | 6 |  |
 | `eqoa.actions.target_target` | supported | 3 |  |
 | `eqoa.actions.toggle_stats_box` | supported | 3 |  |
-| `eqoa.actions.unmemorize_ability` | supported | 4 |  |
-| `eqoa.actions.unmemorize_all` | supported | 4 |  |
-| `eqoa.actions.use_hotbar` | supported | 4 |  |
-| `eqoa.actions.use_item` | supported | 4 |  |
-| `eqoa.actions.weapon_set` | supported | 4 |  |
+| `eqoa.actions.unmemorize_ability` | supported | 6 |  |
+| `eqoa.actions.unmemorize_all` | supported | 6 |  |
+| `eqoa.actions.use_hotbar` | supported | 6 |  |
+| `eqoa.actions.use_item` | supported | 6 |  |
+| `eqoa.actions.weapon_set` | supported | 6 |  |
 
 ## eqoa.api
 
@@ -97,8 +97,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.bank` | supported | 3 |  |
-| `eqoa.bank.get` | supported | 3 |  |
+| `eqoa.bank` | supported | 5 |  |
+| `eqoa.bank.get` | supported | 5 |  |
 
 ## eqoa.binds
 
@@ -112,9 +112,9 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.camera` | supported | 4 |  |
-| `eqoa.camera.compass` | supported | 4 |  |
-| `eqoa.camera.get` | supported | 4 |  |
+| `eqoa.camera` | supported | 6 |  |
+| `eqoa.camera.compass` | supported | 6 |  |
+| `eqoa.camera.get` | supported | 6 |  |
 
 ## eqoa.capabilities
 
@@ -193,10 +193,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.files` | supported | 4 |  |
+| `eqoa.files` | supported | 2 |  |
 | `eqoa.files.export` | supported | 4 |  |
 | `eqoa.files.import` | supported | 4 |  |
-| `eqoa.files.list` | supported | 4 |  |
+| `eqoa.files.list` | supported | 7 |  |
 | `eqoa.files.load_json` | supported | 4 |  |
 | `eqoa.files.null` | supported | 4 |  |
 | `eqoa.files.read` | supported | 2 |  |
@@ -210,7 +210,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 |---|---|---|---|
 | `eqoa.fonts` | partial | 2 |  |
 | `eqoa.fonts.default` | supported | 2 |  |
-| `eqoa.fonts.game` | unsupported |  | game bitmap font cannot be represented by the existing ImGui font service |
+| `eqoa.fonts.game` | unsupported | 7 | game bitmap font cannot be represented by the existing ImGui font service |
 | `eqoa.fonts.load` | supported | 2 |  |
 | `eqoa.fonts.release` | supported | 2 |  |
 
@@ -218,10 +218,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.gems` | supported | 3 |  |
-| `eqoa.gems.format` | supported | 3 |  |
-| `eqoa.gems.get` | supported | 3 |  |
-| `eqoa.gems.is_gem` | supported | 3 |  |
+| `eqoa.gems` | supported | 5 |  |
+| `eqoa.gems.format` | supported | 5 |  |
+| `eqoa.gems.get` | supported | 5 |  |
+| `eqoa.gems.is_gem` | supported | 5 |  |
 
 ## eqoa.group
 
@@ -241,7 +241,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.hud` | supported | 3 |  |
+| `eqoa.hud` | supported | 2 |  |
 | `eqoa.hud.frame` | supported | 3 |  |
 | `eqoa.hud.gauge` | supported | 3 |  |
 | `eqoa.hud.hidden_by` | supported | 2 |  |
@@ -257,9 +257,9 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.icons` | supported | 4 |  |
-| `eqoa.icons.class` | supported | 4 |  |
-| `eqoa.icons.disposition` | supported | 4 |  |
+| `eqoa.icons` | supported | 2 |  |
+| `eqoa.icons.class` | supported | 6 |  |
+| `eqoa.icons.disposition` | supported | 6 |  |
 | `eqoa.icons.info` | supported | 2 |  |
 | `eqoa.icons.resource` | supported | 2 |  |
 | `eqoa.icons.ui` | supported | 2 |  |
@@ -268,7 +268,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.input` | supported | 4 |  |
+| `eqoa.input` | supported | 2 |  |
 | `eqoa.input.bind` | supported | 3 |  |
 | `eqoa.input.capture_text` | supported | 2 |  |
 | `eqoa.input.claim` | supported | 2 |  |
@@ -283,15 +283,15 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.inventory` | supported | 3 |  |
-| `eqoa.inventory.get` | supported | 3 |  |
+| `eqoa.inventory` | supported | 5 |  |
+| `eqoa.inventory.get` | supported | 5 |  |
 
 ## eqoa.items
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.items` | supported | 3 |  |
-| `eqoa.items.attack_name` | supported | 3 |  |
+| `eqoa.items` | supported | 5 |  |
+| `eqoa.items.attack_name` | supported | 5 |  |
 | `eqoa.items.attack_types` | supported | 5 |  |
 | `eqoa.items.attack_types.bow` | supported | 5 |  |
 | `eqoa.items.attack_types.none` | supported | 5 |  |
@@ -304,9 +304,9 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.items.attack_types.two_hand_crossbow` | supported | 5 |  |
 | `eqoa.items.attack_types.two_hand_pierce` | supported | 5 |  |
 | `eqoa.items.attack_types.two_hand_slash` | supported | 5 |  |
-| `eqoa.items.can_use` | supported | 3 |  |
-| `eqoa.items.get` | supported | 3 |  |
-| `eqoa.items.slot_info` | supported | 3 |  |
+| `eqoa.items.can_use` | supported | 5 |  |
+| `eqoa.items.get` | supported | 5 |  |
+| `eqoa.items.slot_info` | supported | 5 |  |
 | `eqoa.items.slots` | supported | 5 |  |
 | `eqoa.items.slots.alchemy` | supported | 5 |  |
 | `eqoa.items.slots.armor_craft` | supported | 5 |  |
@@ -336,8 +336,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.items.slots.two_hand` | supported | 5 |  |
 | `eqoa.items.slots.waist` | supported | 5 |  |
 | `eqoa.items.slots.weapon_craft` | supported | 5 |  |
-| `eqoa.items.stat` | supported | 3 |  |
-| `eqoa.items.stat_name` | supported | 3 |  |
+| `eqoa.items.stat` | supported | 5 |  |
+| `eqoa.items.stat_name` | supported | 5 |  |
 | `eqoa.items.stats` | supported | 5 |  |
 | `eqoa.items.stats.ac` | supported | 5 |  |
 | `eqoa.items.stats.agi` | supported | 5 |  |
@@ -370,8 +370,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.loot` | supported | 3 |  |
-| `eqoa.loot.get` | supported | 3 |  |
+| `eqoa.loot` | supported | 5 |  |
+| `eqoa.loot.get` | supported | 5 |  |
 
 ## eqoa.map
 
@@ -379,24 +379,25 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 |---|---|---|---|
 | `eqoa.map` | partial | 4 |  |
 | `eqoa.map.clear_guide` | supported | 4 |  |
-| `eqoa.map.clear_waypoint` | not_yet | 4 | not built; use eqoa.map.set_guide |
+| `eqoa.map.clear_waypoint` | supported | 7 |  |
 | `eqoa.map.get` | supported | 4 |  |
 | `eqoa.map.images` | unsupported |  | replaced by eqoa.map.view |
 | `eqoa.map.load_image` | unsupported |  | replaced by eqoa.map.view |
 | `eqoa.map.markers` | supported | 4 |  |
 | `eqoa.map.open` | supported | 4 |  |
 | `eqoa.map.set_guide` | supported | 4 |  |
-| `eqoa.map.set_waypoint` | not_yet | 4 | not built; use eqoa.map.set_guide |
+| `eqoa.map.set_waypoint` | supported | 7 |  |
 | `eqoa.map.view` | supported | 4 |  |
+| `eqoa.map.waypoint` | supported | 7 | capability to set or clear a personal waypoint |
 
 ## eqoa.mastery
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.mastery` | supported | 4 |  |
-| `eqoa.mastery.get` | supported | 4 |  |
-| `eqoa.mastery.selected` | supported | 4 |  |
-| `eqoa.mastery.skills` | supported | 4 |  |
+| `eqoa.mastery` | supported | 6 |  |
+| `eqoa.mastery.get` | supported | 6 |  |
+| `eqoa.mastery.selected` | supported | 6 |  |
+| `eqoa.mastery.skills` | supported | 6 |  |
 
 ## eqoa.math
 
@@ -415,9 +416,9 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.merchant` | supported | 3 |  |
-| `eqoa.merchant.get` | supported | 3 |  |
-| `eqoa.merchant.price` | supported | 3 |  |
+| `eqoa.merchant` | supported | 5 |  |
+| `eqoa.merchant.get` | supported | 5 |  |
+| `eqoa.merchant.price` | supported | 5 |  |
 
 ## eqoa.mods
 
@@ -431,7 +432,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | Path | Status | Since round | Reason |
 |---|---|---|---|
 | `eqoa.options` | supported | 3 |  |
-| `eqoa.options.button` | supported | 3 |  |
+| `eqoa.options.button` | supported | 4 |  |
 | `eqoa.options.get` | supported | 3 |  |
 | `eqoa.options.set` | supported | 3 |  |
 | `eqoa.options.toggle` | supported | 3 |  |
@@ -440,7 +441,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.player` | supported | 3 |  |
+| `eqoa.player` | supported | 2 |  |
 | `eqoa.player.experience_for_level` | supported | 2 |  |
 | `eqoa.player.get` | supported | 2 |  |
 | `eqoa.player.stats` | supported | 3 |  |
@@ -449,9 +450,9 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.quests` | supported | 4 |  |
-| `eqoa.quests.get` | supported | 4 |  |
-| `eqoa.quests.list` | supported | 4 |  |
+| `eqoa.quests` | supported | 6 |  |
+| `eqoa.quests.get` | supported | 6 |  |
+| `eqoa.quests.list` | supported | 6 |  |
 
 ## eqoa.revision
 
@@ -500,7 +501,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | Path | Status | Since round | Reason |
 |---|---|---|---|
 | `eqoa.textures` | supported | 2 |  |
-| `eqoa.textures.formats.jpeg` | not_yet | 4 | JPEG arrives in round 4 |
+| `eqoa.textures.formats.jpeg` | unsupported |  | the client decodes PNG only; convert JPEG to PNG or pass RGBA pixels |
 | `eqoa.textures.formats.png` | supported | 2 |  |
 | `eqoa.textures.formats.rgba` | supported | 2 |  |
 | `eqoa.textures.load` | supported | 2 |  |
@@ -511,27 +512,27 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.windows` | supported | 4 |  |
-| `eqoa.windows.find` | supported | 4 |  |
-| `eqoa.windows.format_hint` | supported | 4 |  |
-| `eqoa.windows.get` | supported | 4 |  |
-| `eqoa.windows.get_window` | supported | 4 |  |
+| `eqoa.windows` | supported | 3 |  |
+| `eqoa.windows.find` | supported | 6 |  |
+| `eqoa.windows.format_hint` | supported | 6 |  |
+| `eqoa.windows.get` | supported | 6 |  |
+| `eqoa.windows.get_window` | supported | 6 |  |
 | `eqoa.windows.open` | supported | 3 |  |
-| `eqoa.windows.parse_hint` | supported | 4 |  |
-| `eqoa.windows.release` | supported | 4 |  |
-| `eqoa.windows.taken` | supported | 4 |  |
-| `eqoa.windows.takeover` | supported | 4 |  |
+| `eqoa.windows.parse_hint` | supported | 6 |  |
+| `eqoa.windows.release` | supported | 6 |  |
+| `eqoa.windows.taken` | supported | 6 |  |
+| `eqoa.windows.takeover` | supported | 6 |  |
 
 ## Events
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
 | `eqoa.events.abilities.changed` | supported | 2 |  |
-| `eqoa.events.action.result` | supported | 4 |  |
-| `eqoa.events.bank.changed` | supported | 2 |  |
-| `eqoa.events.batch.progress` | supported | 4 |  |
-| `eqoa.events.batch.result` | supported | 4 |  |
-| `eqoa.events.camera.changed` | supported | 4 |  |
+| `eqoa.events.action.result` | supported | 6 |  |
+| `eqoa.events.bank.changed` | supported | 5 |  |
+| `eqoa.events.batch.progress` | supported | 6 |  |
+| `eqoa.events.batch.result` | supported | 6 |  |
+| `eqoa.events.camera.changed` | supported | 6 |  |
 | `eqoa.events.chat.history_scroll` | supported | 2 |  |
 | `eqoa.events.chat.message` | supported | 2 |  |
 | `eqoa.events.combat.hit` | supported | 2 |  |
@@ -546,30 +547,30 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.entity.removed` | supported | 2 |  |
 | `eqoa.events.events.dropped` | supported | 2 |  |
 | `eqoa.events.group.changed` | supported | 2 |  |
-| `eqoa.events.guide.lost` | supported | 2 |  |
+| `eqoa.events.guide.lost` | supported | 4 |  |
 | `eqoa.events.hotbar.changed` | supported | 2 |  |
 | `eqoa.events.input.key` | supported | 2 |  |
 | `eqoa.events.input.pad` | supported | 2 |  |
-| `eqoa.events.inventory.changed` | supported | 2 |  |
-| `eqoa.events.loot.changed` | supported | 2 |  |
-| `eqoa.events.map.changed` | supported | 2 |  |
-| `eqoa.events.mastery.changed` | supported | 4 |  |
-| `eqoa.events.merchant.changed` | supported | 2 |  |
-| `eqoa.events.mod.command` | supported | 2 |  |
+| `eqoa.events.inventory.changed` | supported | 5 |  |
+| `eqoa.events.loot.changed` | supported | 5 |  |
+| `eqoa.events.map.changed` | supported | 4 |  |
+| `eqoa.events.mastery.changed` | supported | 6 |  |
+| `eqoa.events.merchant.changed` | supported | 5 |  |
+| `eqoa.events.mod.command` | supported | 4 |  |
 | `eqoa.events.player.changed` | supported | 2 |  |
 | `eqoa.events.player.stats_changed` | supported | 3 |  |
-| `eqoa.events.pointer.pressed` | supported | 2 |  |
-| `eqoa.events.pointer.wheel` | supported | 2 |  |
-| `eqoa.events.quests.changed` | supported | 4 |  |
+| `eqoa.events.pointer.pressed` | supported | 4 |  |
+| `eqoa.events.pointer.wheel` | supported | 4 |  |
+| `eqoa.events.quests.changed` | supported | 6 |  |
 | `eqoa.events.render` | supported | 2 |  |
 | `eqoa.events.resource.failed` | supported | 2 |  |
 | `eqoa.events.resource.ready` | supported | 2 |  |
 | `eqoa.events.settings.render` | supported | 2 |  |
-| `eqoa.events.shared.changed` | supported | 2 |  |
+| `eqoa.events.shared.changed` | supported | 4 |  |
 | `eqoa.events.state.reset` | supported | 2 |  |
 | `eqoa.events.target.changed` | supported | 2 |  |
 | `eqoa.events.timer` | supported | 2 |  |
-| `eqoa.events.windows.changed` | supported | 4 |  |
+| `eqoa.events.windows.changed` | supported | 6 |  |
 | `eqoa.events.world.entered` | supported | 2 |  |
 | `eqoa.events.world.leaving` | supported | 2 |  |
 
@@ -586,7 +587,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.Error.capability` | supported | 2 |  |
 | `eqoa.Error.code` | supported | 2 |  |
 | `eqoa.Error.message` | supported | 2 |  |
-| `eqoa.Error.retry_after` | supported | 2 |  |
+| `eqoa.Error.retry_after` | unsupported |  | no refusal in this client knows how long to wait: rate_limited and quota carry no wait |
 | `eqoa.Vec2` | supported | 2 |  |
 | `eqoa.Vec2.x` | supported | 2 |  |
 | `eqoa.Vec2.y` | supported | 2 |  |
@@ -615,39 +616,39 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.abilities.RangeResult` | supported | 2 |  |
 | `eqoa.abilities.RangeResult.distance` | supported | 2 |  |
 | `eqoa.abilities.RangeResult.in_range` | supported | 2 |  |
-| `eqoa.actions.ActionResult` | supported | 4 | action status and result record |
-| `eqoa.actions.ActionResult.code` | supported | 4 | ActionResult field |
-| `eqoa.actions.ActionResult.completed_tick` | supported | 4 | ActionResult field |
-| `eqoa.actions.ActionResult.detail` | supported | 4 | ActionResult field |
-| `eqoa.actions.ActionResult.dispatched_tick` | supported | 4 | ActionResult field |
-| `eqoa.actions.ActionResult.kind` | supported | 4 | ActionResult field |
-| `eqoa.actions.ActionResult.ok` | supported | 4 | ActionResult field |
-| `eqoa.actions.ActionResult.phase` | supported | 4 | ActionResult field |
-| `eqoa.actions.ActionResult.queued_tick` | supported | 4 | ActionResult field |
-| `eqoa.actions.ActionResult.reason` | supported | 4 | ActionResult field |
-| `eqoa.actions.ActionResult.request_id` | supported | 4 | ActionResult field |
-| `eqoa.actions.ActionResult.state` | supported | 4 | ActionResult field |
-| `eqoa.actions.BatchId` | supported | 4 | opaque action batch handle |
-| `eqoa.actions.BatchResult` | supported | 4 | batch progress and completion record |
-| `eqoa.actions.BatchResult.batch_id` | supported | 4 | BatchResult field |
-| `eqoa.actions.BatchResult.code` | supported | 4 | BatchResult field |
-| `eqoa.actions.BatchResult.completed` | supported | 4 | BatchResult field |
-| `eqoa.actions.BatchResult.completed_tick` | supported | 4 | BatchResult field |
-| `eqoa.actions.BatchResult.current_step` | supported | 4 | BatchResult field |
-| `eqoa.actions.BatchResult.detail` | supported | 4 | BatchResult field |
-| `eqoa.actions.BatchResult.failed_step` | supported | 4 | BatchResult field |
-| `eqoa.actions.BatchResult.ok` | supported | 4 | BatchResult field |
-| `eqoa.actions.BatchResult.queued_tick` | supported | 4 | BatchResult field |
-| `eqoa.actions.BatchResult.reason` | supported | 4 | BatchResult field |
-| `eqoa.actions.BatchResult.state` | supported | 4 | BatchResult field |
-| `eqoa.actions.BatchResult.total` | supported | 4 | BatchResult field |
-| `eqoa.actions.RequestId` | supported | 4 | opaque action request handle |
-| `eqoa.camera.Camera` | supported | 4 |  |
-| `eqoa.camera.Camera.distance` | supported | 4 |  |
-| `eqoa.camera.Camera.heading` | supported | 4 |  |
-| `eqoa.camera.Camera.mode` | supported | 4 |  |
-| `eqoa.camera.Camera.pitch` | supported | 4 |  |
-| `eqoa.camera.Camera.position` | supported | 4 |  |
+| `eqoa.actions.ActionResult` | supported | 6 | action status and result record |
+| `eqoa.actions.ActionResult.code` | supported | 6 | ActionResult field |
+| `eqoa.actions.ActionResult.completed_tick` | supported | 6 | ActionResult field |
+| `eqoa.actions.ActionResult.detail` | supported | 6 | ActionResult field |
+| `eqoa.actions.ActionResult.dispatched_tick` | supported | 6 | ActionResult field |
+| `eqoa.actions.ActionResult.kind` | supported | 6 | ActionResult field |
+| `eqoa.actions.ActionResult.ok` | supported | 6 | ActionResult field |
+| `eqoa.actions.ActionResult.phase` | supported | 6 | ActionResult field |
+| `eqoa.actions.ActionResult.queued_tick` | supported | 6 | ActionResult field |
+| `eqoa.actions.ActionResult.reason` | supported | 6 | ActionResult field |
+| `eqoa.actions.ActionResult.request_id` | supported | 6 | ActionResult field |
+| `eqoa.actions.ActionResult.state` | supported | 6 | ActionResult field |
+| `eqoa.actions.BatchId` | supported | 6 | opaque action batch handle |
+| `eqoa.actions.BatchResult` | supported | 6 | batch progress and completion record |
+| `eqoa.actions.BatchResult.batch_id` | supported | 6 | BatchResult field |
+| `eqoa.actions.BatchResult.code` | supported | 6 | BatchResult field |
+| `eqoa.actions.BatchResult.completed` | supported | 6 | BatchResult field |
+| `eqoa.actions.BatchResult.completed_tick` | supported | 6 | BatchResult field |
+| `eqoa.actions.BatchResult.current_step` | supported | 6 | BatchResult field |
+| `eqoa.actions.BatchResult.detail` | unsupported |  | a batch reports what each step did in that step's action.result |
+| `eqoa.actions.BatchResult.failed_step` | supported | 6 | BatchResult field |
+| `eqoa.actions.BatchResult.ok` | supported | 6 | BatchResult field |
+| `eqoa.actions.BatchResult.queued_tick` | supported | 6 | BatchResult field |
+| `eqoa.actions.BatchResult.reason` | supported | 6 | BatchResult field |
+| `eqoa.actions.BatchResult.state` | supported | 6 | BatchResult field |
+| `eqoa.actions.BatchResult.total` | supported | 6 | BatchResult field |
+| `eqoa.actions.RequestId` | supported | 6 | opaque action request handle |
+| `eqoa.camera.Camera` | supported | 6 |  |
+| `eqoa.camera.Camera.distance` | supported | 6 |  |
+| `eqoa.camera.Camera.heading` | supported | 6 |  |
+| `eqoa.camera.Camera.mode` | supported | 6 |  |
+| `eqoa.camera.Camera.pitch` | supported | 6 |  |
+| `eqoa.camera.Camera.position` | supported | 6 |  |
 | `eqoa.capabilities.Capability` | supported | 2 |  |
 | `eqoa.capabilities.Capability.children` | supported | 2 |  |
 | `eqoa.capabilities.Capability.path` | supported | 2 |  |
@@ -657,10 +658,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.capabilities.Capability.status` | supported | 2 |  |
 | `eqoa.chat.ChatMessage` | supported | 2 |  |
 | `eqoa.chat.ChatMessage.channel` | supported | 2 |  |
-| `eqoa.chat.ChatMessage.channel_code` | supported | 2 |  |
+| `eqoa.chat.ChatMessage.channel_code` | unsupported |  | the chat observer retains only text, color and the channel name |
 | `eqoa.chat.ChatMessage.color` | supported | 2 |  |
-| `eqoa.chat.ChatMessage.outgoing` | supported | 2 |  |
-| `eqoa.chat.ChatMessage.sender` | supported | 2 |  |
+| `eqoa.chat.ChatMessage.outgoing` | unsupported |  | the chat observer retains only text, color and the channel name |
+| `eqoa.chat.ChatMessage.sender` | unsupported |  | the chat observer retains only text, color and the channel name |
 | `eqoa.chat.ChatMessage.seq` | supported | 2 |  |
 | `eqoa.chat.ChatMessage.text` | supported | 2 |  |
 | `eqoa.chat.ChatMessage.time` | supported | 2 |  |
@@ -712,7 +713,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.entities.Entity.kind` | supported | 2 |  |
 | `eqoa.entities.Entity.level` | supported | 2 |  |
 | `eqoa.entities.Entity.name` | supported | 2 |  |
-| `eqoa.entities.Entity.npc_flags` | supported | 2 |  |
+| `eqoa.entities.Entity.npc_flags` | supported | 6 |  |
 | `eqoa.entities.Entity.poisoned` | supported | 2 |  |
 | `eqoa.entities.Entity.position` | supported | 2 |  |
 | `eqoa.entities.Entity.power` | supported | 3 |  |
@@ -732,55 +733,55 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.abilities.changed.data.after` | supported | 2 |  |
 | `eqoa.events.abilities.changed.data.before` | supported | 2 |  |
 | `eqoa.events.abilities.changed.data.changed` | supported | 2 |  |
-| `eqoa.events.action.result.data.code` | supported | 2 |  |
-| `eqoa.events.action.result.data.completed_tick` | supported | 2 |  |
-| `eqoa.events.action.result.data.detail` | supported | 2 |  |
-| `eqoa.events.action.result.data.dispatched_tick` | supported | 2 |  |
-| `eqoa.events.action.result.data.kind` | supported | 2 |  |
-| `eqoa.events.action.result.data.ok` | supported | 2 |  |
-| `eqoa.events.action.result.data.phase` | supported | 2 |  |
-| `eqoa.events.action.result.data.queued_tick` | supported | 2 |  |
-| `eqoa.events.action.result.data.reason` | supported | 2 |  |
-| `eqoa.events.action.result.data.request_id` | supported | 2 |  |
-| `eqoa.events.action.result.data.state` | supported | 2 |  |
-| `eqoa.events.bank.changed.data.after` | supported | 2 |  |
-| `eqoa.events.bank.changed.data.before` | supported | 2 |  |
-| `eqoa.events.bank.changed.data.cause` | supported | 2 |  |
-| `eqoa.events.bank.changed.data.changed` | supported | 2 |  |
-| `eqoa.events.batch.progress.data.batch_id` | supported | 2 |  |
-| `eqoa.events.batch.progress.data.code` | supported | 2 |  |
-| `eqoa.events.batch.progress.data.completed` | supported | 2 |  |
-| `eqoa.events.batch.progress.data.completed_tick` | supported | 2 |  |
-| `eqoa.events.batch.progress.data.current_step` | supported | 2 |  |
-| `eqoa.events.batch.progress.data.detail` | supported | 2 |  |
-| `eqoa.events.batch.progress.data.failed_step` | supported | 2 |  |
-| `eqoa.events.batch.progress.data.ok` | supported | 2 |  |
-| `eqoa.events.batch.progress.data.queued_tick` | supported | 2 |  |
-| `eqoa.events.batch.progress.data.reason` | supported | 2 |  |
-| `eqoa.events.batch.progress.data.state` | supported | 2 |  |
-| `eqoa.events.batch.progress.data.total` | supported | 2 |  |
-| `eqoa.events.batch.result.data.batch_id` | supported | 2 |  |
-| `eqoa.events.batch.result.data.code` | supported | 2 |  |
-| `eqoa.events.batch.result.data.completed` | supported | 2 |  |
-| `eqoa.events.batch.result.data.completed_tick` | supported | 2 |  |
-| `eqoa.events.batch.result.data.current_step` | supported | 2 |  |
-| `eqoa.events.batch.result.data.detail` | supported | 2 |  |
-| `eqoa.events.batch.result.data.failed_step` | supported | 2 |  |
-| `eqoa.events.batch.result.data.ok` | supported | 2 |  |
-| `eqoa.events.batch.result.data.queued_tick` | supported | 2 |  |
-| `eqoa.events.batch.result.data.reason` | supported | 2 |  |
-| `eqoa.events.batch.result.data.state` | supported | 2 |  |
-| `eqoa.events.batch.result.data.total` | supported | 2 |  |
-| `eqoa.events.camera.changed.data.after` | supported | 2 |  |
-| `eqoa.events.camera.changed.data.before` | supported | 2 |  |
-| `eqoa.events.camera.changed.data.changed` | supported | 2 |  |
+| `eqoa.events.action.result.data.code` | supported | 6 |  |
+| `eqoa.events.action.result.data.completed_tick` | supported | 6 |  |
+| `eqoa.events.action.result.data.detail` | supported | 6 |  |
+| `eqoa.events.action.result.data.dispatched_tick` | supported | 6 |  |
+| `eqoa.events.action.result.data.kind` | supported | 6 |  |
+| `eqoa.events.action.result.data.ok` | supported | 6 |  |
+| `eqoa.events.action.result.data.phase` | supported | 6 |  |
+| `eqoa.events.action.result.data.queued_tick` | supported | 6 |  |
+| `eqoa.events.action.result.data.reason` | supported | 6 |  |
+| `eqoa.events.action.result.data.request_id` | supported | 6 |  |
+| `eqoa.events.action.result.data.state` | supported | 6 |  |
+| `eqoa.events.bank.changed.data.after` | supported | 5 |  |
+| `eqoa.events.bank.changed.data.before` | supported | 5 |  |
+| `eqoa.events.bank.changed.data.cause` | supported | 5 |  |
+| `eqoa.events.bank.changed.data.changed` | supported | 5 |  |
+| `eqoa.events.batch.progress.data.batch_id` | supported | 6 |  |
+| `eqoa.events.batch.progress.data.code` | supported | 6 |  |
+| `eqoa.events.batch.progress.data.completed` | supported | 6 |  |
+| `eqoa.events.batch.progress.data.completed_tick` | supported | 6 |  |
+| `eqoa.events.batch.progress.data.current_step` | supported | 6 |  |
+| `eqoa.events.batch.progress.data.detail` | unsupported |  | a batch reports what each step did in that step's action.result |
+| `eqoa.events.batch.progress.data.failed_step` | supported | 6 |  |
+| `eqoa.events.batch.progress.data.ok` | supported | 6 |  |
+| `eqoa.events.batch.progress.data.queued_tick` | supported | 6 |  |
+| `eqoa.events.batch.progress.data.reason` | supported | 6 |  |
+| `eqoa.events.batch.progress.data.state` | supported | 6 |  |
+| `eqoa.events.batch.progress.data.total` | supported | 6 |  |
+| `eqoa.events.batch.result.data.batch_id` | supported | 6 |  |
+| `eqoa.events.batch.result.data.code` | supported | 6 |  |
+| `eqoa.events.batch.result.data.completed` | supported | 6 |  |
+| `eqoa.events.batch.result.data.completed_tick` | supported | 6 |  |
+| `eqoa.events.batch.result.data.current_step` | supported | 6 |  |
+| `eqoa.events.batch.result.data.detail` | unsupported |  | a batch reports what each step did in that step's action.result |
+| `eqoa.events.batch.result.data.failed_step` | supported | 6 |  |
+| `eqoa.events.batch.result.data.ok` | supported | 6 |  |
+| `eqoa.events.batch.result.data.queued_tick` | supported | 6 |  |
+| `eqoa.events.batch.result.data.reason` | supported | 6 |  |
+| `eqoa.events.batch.result.data.state` | supported | 6 |  |
+| `eqoa.events.batch.result.data.total` | supported | 6 |  |
+| `eqoa.events.camera.changed.data.after` | supported | 6 |  |
+| `eqoa.events.camera.changed.data.before` | supported | 6 |  |
+| `eqoa.events.camera.changed.data.changed` | supported | 6 |  |
 | `eqoa.events.chat.history_scroll.data.active` | supported | 2 |  |
 | `eqoa.events.chat.history_scroll.data.steps` | supported | 2 |  |
 | `eqoa.events.chat.message.data.channel` | supported | 2 |  |
-| `eqoa.events.chat.message.data.channel_code` | supported | 2 |  |
+| `eqoa.events.chat.message.data.channel_code` | unsupported |  | the chat observer retains only text, color and the channel name |
 | `eqoa.events.chat.message.data.color` | supported | 2 |  |
-| `eqoa.events.chat.message.data.outgoing` | supported | 2 |  |
-| `eqoa.events.chat.message.data.sender` | supported | 2 |  |
+| `eqoa.events.chat.message.data.outgoing` | unsupported |  | the chat observer retains only text, color and the channel name |
+| `eqoa.events.chat.message.data.sender` | unsupported |  | the chat observer retains only text, color and the channel name |
 | `eqoa.events.chat.message.data.seq` | supported | 2 |  |
 | `eqoa.events.chat.message.data.text` | supported | 2 |  |
 | `eqoa.events.chat.message.data.time` | supported | 2 |  |
@@ -809,14 +810,12 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.effects.changed.data.before` | supported | 2 |  |
 | `eqoa.events.effects.changed.data.changed` | supported | 2 |  |
 | `eqoa.events.entity.added.data.after` | supported | 2 |  |
-| `eqoa.events.entity.added.data.before` | supported | 2 |  |
 | `eqoa.events.entity.added.data.changed` | supported | 2 |  |
 | `eqoa.events.entity.added.data.ref` | supported | 2 |  |
 | `eqoa.events.entity.changed.data.after` | supported | 2 |  |
 | `eqoa.events.entity.changed.data.before` | supported | 2 |  |
 | `eqoa.events.entity.changed.data.changed` | supported | 2 |  |
 | `eqoa.events.entity.changed.data.ref` | supported | 2 |  |
-| `eqoa.events.entity.removed.data.after` | supported | 2 |  |
 | `eqoa.events.entity.removed.data.before` | supported | 2 |  |
 | `eqoa.events.entity.removed.data.changed` | supported | 2 |  |
 | `eqoa.events.entity.removed.data.ref` | supported | 2 |  |
@@ -827,11 +826,11 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.group.changed.data.after` | supported | 2 |  |
 | `eqoa.events.group.changed.data.before` | supported | 2 |  |
 | `eqoa.events.group.changed.data.changed` | supported | 2 |  |
-| `eqoa.events.guide.lost.data.entity_id` | supported | 2 |  |
-| `eqoa.events.guide.lost.data.label` | supported | 2 |  |
-| `eqoa.events.guide.lost.data.owner` | supported | 2 |  |
-| `eqoa.events.guide.lost.data.reason` | supported | 2 |  |
-| `eqoa.events.guide.lost.data.world_id` | supported | 2 |  |
+| `eqoa.events.guide.lost.data.entity_id` | supported | 4 |  |
+| `eqoa.events.guide.lost.data.label` | supported | 4 |  |
+| `eqoa.events.guide.lost.data.owner` | supported | 4 |  |
+| `eqoa.events.guide.lost.data.reason` | supported | 4 |  |
+| `eqoa.events.guide.lost.data.world_id` | supported | 4 |  |
 | `eqoa.events.hotbar.changed.data.after` | supported | 2 |  |
 | `eqoa.events.hotbar.changed.data.before` | supported | 2 |  |
 | `eqoa.events.hotbar.changed.data.changed` | supported | 2 |  |
@@ -844,75 +843,70 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.input.key.data.text` | supported | 2 |  |
 | `eqoa.events.input.pad.data.after` | supported | 2 |  |
 | `eqoa.events.input.pad.data.before` | supported | 2 |  |
-| `eqoa.events.inventory.changed.data.after` | supported | 2 |  |
-| `eqoa.events.inventory.changed.data.before` | supported | 2 |  |
-| `eqoa.events.inventory.changed.data.cause` | supported | 2 |  |
-| `eqoa.events.inventory.changed.data.changed` | supported | 2 |  |
-| `eqoa.events.loot.changed.data.after` | supported | 2 |  |
-| `eqoa.events.loot.changed.data.before` | supported | 2 |  |
-| `eqoa.events.loot.changed.data.cause` | supported | 2 |  |
-| `eqoa.events.loot.changed.data.changed` | supported | 2 |  |
-| `eqoa.events.map.changed.data.after` | supported | 2 |  |
-| `eqoa.events.map.changed.data.before` | supported | 2 |  |
-| `eqoa.events.map.changed.data.changed` | supported | 2 |  |
-| `eqoa.events.mastery.changed.data.after` | supported | 2 |  |
-| `eqoa.events.mastery.changed.data.before` | supported | 2 |  |
-| `eqoa.events.mastery.changed.data.changed` | supported | 2 |  |
-| `eqoa.events.merchant.changed.data.after` | supported | 2 |  |
-| `eqoa.events.merchant.changed.data.before` | supported | 2 |  |
-| `eqoa.events.merchant.changed.data.cause` | supported | 2 |  |
-| `eqoa.events.merchant.changed.data.changed` | supported | 2 |  |
-| `eqoa.events.mod.command.data.args` | supported | 2 |  |
-| `eqoa.events.mod.command.data.command` | supported | 2 |  |
-| `eqoa.events.mod.command.data.from` | supported | 2 |  |
+| `eqoa.events.inventory.changed.data.after` | supported | 5 |  |
+| `eqoa.events.inventory.changed.data.before` | supported | 5 |  |
+| `eqoa.events.inventory.changed.data.cause` | supported | 5 |  |
+| `eqoa.events.inventory.changed.data.changed` | supported | 5 |  |
+| `eqoa.events.loot.changed.data.after` | supported | 5 |  |
+| `eqoa.events.loot.changed.data.before` | supported | 5 |  |
+| `eqoa.events.loot.changed.data.cause` | supported | 5 |  |
+| `eqoa.events.loot.changed.data.changed` | supported | 5 |  |
+| `eqoa.events.map.changed.data.after` | supported | 4 |  |
+| `eqoa.events.map.changed.data.before` | supported | 4 |  |
+| `eqoa.events.map.changed.data.changed` | supported | 4 |  |
+| `eqoa.events.mastery.changed.data.after` | supported | 6 |  |
+| `eqoa.events.mastery.changed.data.before` | supported | 6 |  |
+| `eqoa.events.mastery.changed.data.changed` | supported | 6 |  |
+| `eqoa.events.merchant.changed.data.after` | supported | 5 |  |
+| `eqoa.events.merchant.changed.data.before` | supported | 5 |  |
+| `eqoa.events.merchant.changed.data.cause` | supported | 5 |  |
+| `eqoa.events.merchant.changed.data.changed` | supported | 5 |  |
+| `eqoa.events.mod.command.data.args` | supported | 4 |  |
+| `eqoa.events.mod.command.data.command` | supported | 4 |  |
+| `eqoa.events.mod.command.data.from` | supported | 4 |  |
 | `eqoa.events.player.changed.data.after` | supported | 2 |  |
 | `eqoa.events.player.changed.data.before` | supported | 2 |  |
 | `eqoa.events.player.changed.data.changed` | supported | 2 |  |
-| `eqoa.events.pointer.pressed.data.button` | supported | 2 |  |
-| `eqoa.events.pointer.pressed.data.inside_window` | supported | 2 |  |
-| `eqoa.events.pointer.pressed.data.steps` | supported | 2 |  |
-| `eqoa.events.pointer.pressed.data.x` | supported | 2 |  |
-| `eqoa.events.pointer.pressed.data.y` | supported | 2 |  |
-| `eqoa.events.pointer.wheel.data.button` | supported | 2 |  |
-| `eqoa.events.pointer.wheel.data.inside_window` | supported | 2 |  |
-| `eqoa.events.pointer.wheel.data.steps` | supported | 2 |  |
-| `eqoa.events.pointer.wheel.data.x` | supported | 2 |  |
-| `eqoa.events.pointer.wheel.data.y` | supported | 2 |  |
-| `eqoa.events.quests.changed.data.after` | supported | 2 |  |
-| `eqoa.events.quests.changed.data.before` | supported | 2 |  |
-| `eqoa.events.quests.changed.data.changed` | supported | 2 |  |
+| `eqoa.events.pointer.pressed.data.button` | supported | 4 |  |
+| `eqoa.events.pointer.pressed.data.inside_window` | supported | 4 |  |
+| `eqoa.events.pointer.pressed.data.x` | supported | 4 |  |
+| `eqoa.events.pointer.pressed.data.y` | supported | 4 |  |
+| `eqoa.events.pointer.wheel.data.inside_window` | supported | 4 |  |
+| `eqoa.events.pointer.wheel.data.steps` | supported | 4 |  |
+| `eqoa.events.pointer.wheel.data.x` | supported | 4 |  |
+| `eqoa.events.pointer.wheel.data.y` | supported | 4 |  |
+| `eqoa.events.quests.changed.data.after` | supported | 6 |  |
+| `eqoa.events.quests.changed.data.before` | supported | 6 |  |
+| `eqoa.events.quests.changed.data.changed` | supported | 6 |  |
 | `eqoa.events.render.data.dt` | supported | 2 |  |
 | `eqoa.events.resource.failed.data.error` | supported | 2 |  |
 | `eqoa.events.resource.failed.data.handle` | supported | 2 |  |
 | `eqoa.events.resource.failed.data.kind` | supported | 2 |  |
-| `eqoa.events.resource.failed.data.path` | supported | 2 |  |
 | `eqoa.events.resource.failed.data.request` | supported | 2 |  |
-| `eqoa.events.resource.failed.data.value` | supported | 2 |  |
-| `eqoa.events.resource.ready.data.error` | supported | 2 |  |
 | `eqoa.events.resource.ready.data.handle` | supported | 2 |  |
 | `eqoa.events.resource.ready.data.kind` | supported | 2 |  |
 | `eqoa.events.resource.ready.data.path` | supported | 2 |  |
 | `eqoa.events.resource.ready.data.request` | supported | 2 |  |
 | `eqoa.events.resource.ready.data.value` | supported | 2 |  |
 | `eqoa.events.settings.render.data.dt` | supported | 2 |  |
-| `eqoa.events.shared.changed.data.mod` | supported | 2 |  |
-| `eqoa.events.shared.changed.data.path` | supported | 2 |  |
+| `eqoa.events.shared.changed.data.mod` | supported | 4 |  |
+| `eqoa.events.shared.changed.data.path` | supported | 4 |  |
 | `eqoa.events.state.reset.data.in_world` | supported | 2 |  |
 | `eqoa.events.state.reset.data.initial` | supported | 2 |  |
 | `eqoa.events.target.changed.data.after` | supported | 2 |  |
 | `eqoa.events.target.changed.data.before` | supported | 2 |  |
 | `eqoa.events.timer.data.token` | supported | 2 |  |
-| `eqoa.events.windows.changed.data.after` | supported | 2 |  |
-| `eqoa.events.windows.changed.data.before` | supported | 2 |  |
-| `eqoa.events.windows.changed.data.changed` | supported | 2 |  |
+| `eqoa.events.windows.changed.data.after` | supported | 6 |  |
+| `eqoa.events.windows.changed.data.before` | supported | 6 |  |
+| `eqoa.events.windows.changed.data.changed` | supported | 6 |  |
 | `eqoa.events.world.entered.data.initial` | supported | 2 |  |
 | `eqoa.events.world.entered.data.world_id` | supported | 2 |  |
 | `eqoa.events.world.leaving.data.reason` | supported | 2 |  |
 | `eqoa.events.world.leaving.data.world_id` | supported | 2 |  |
-| `eqoa.files.FileEntry` | supported | 4 |  |
-| `eqoa.files.FileEntry.kind` | supported | 4 |  |
-| `eqoa.files.FileEntry.path` | supported | 4 |  |
-| `eqoa.files.FileEntry.size` | supported | 4 |  |
+| `eqoa.files.FileEntry` | supported | 7 |  |
+| `eqoa.files.FileEntry.kind` | supported | 7 |  |
+| `eqoa.files.FileEntry.path` | supported | 7 |  |
+| `eqoa.files.FileEntry.size` | supported | 7 |  |
 | `eqoa.fonts.FontInfo` | supported | 2 |  |
 | `eqoa.fonts.FontInfo.font` | supported | 2 |  |
 | `eqoa.fonts.FontInfo.reason` | supported | 2 |  |
@@ -952,10 +946,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.hotbar.Hotbar.slots` | supported | 2 |  |
 | `eqoa.hotbar.HotbarSlot` | supported | 2 |  |
 | `eqoa.hotbar.HotbarSlot.ability` | supported | 2 |  |
-| `eqoa.hotbar.HotbarSlot.command` | supported | 2 |  |
-| `eqoa.hotbar.HotbarSlot.icon` | supported | 2 |  |
+| `eqoa.hotbar.HotbarSlot.command` | unsupported |  | native hotbar rows do not expose command text |
+| `eqoa.hotbar.HotbarSlot.icon` | unsupported |  | use ui_icon or the referenced ability or item icon |
 | `eqoa.hotbar.HotbarSlot.index` | supported | 2 |  |
-| `eqoa.hotbar.HotbarSlot.item` | supported | 4 |  |
+| `eqoa.hotbar.HotbarSlot.item` | supported | 5 |  |
 | `eqoa.hotbar.HotbarSlot.kind` | supported | 2 |  |
 | `eqoa.hotbar.HotbarSlot.ui_icon` | supported | 2 |  |
 | `eqoa.hotbar.HotbarSlot.weapon_set` | supported | 2 |  |
@@ -1002,7 +996,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.hud.TargetLayout.panel` | supported | 3 |  |
 | `eqoa.hud.TargetLayout.power` | supported | 3 |  |
 | `eqoa.icons.IconOptions.trim_color` | supported | 2 |  |
+| `eqoa.icons.SurfaceInfo` | supported | 2 |  |
+| `eqoa.icons.SurfaceInfo.height` | supported | 2 |  |
 | `eqoa.icons.SurfaceInfo.source_format` | unsupported |  | icon provider retains decoded RGBA pixels without original source format |
+| `eqoa.icons.SurfaceInfo.width` | supported | 2 |  |
 | `eqoa.input.InputState` | supported | 2 |  |
 | `eqoa.input.InputState.focused` | supported | 2 |  |
 | `eqoa.input.InputState.pad` | supported | 2 |  |
@@ -1013,10 +1010,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.input.Pad.raw_left` | supported | 2 |  |
 | `eqoa.input.Pad.raw_right` | supported | 2 |  |
 | `eqoa.input.Pad.right` | supported | 2 |  |
-| `eqoa.input.Pointer` | supported | 2 |  |
-| `eqoa.input.Pointer.inside_window` | supported | 2 |  |
-| `eqoa.input.Pointer.x` | supported | 2 |  |
-| `eqoa.input.Pointer.y` | supported | 2 |  |
+| `eqoa.input.Pointer` | supported | 4 |  |
+| `eqoa.input.Pointer.inside_window` | supported | 4 |  |
+| `eqoa.input.Pointer.x` | supported | 4 |  |
+| `eqoa.input.Pointer.y` | supported | 4 |  |
 | `eqoa.input.RawAxes` | supported | 2 |  |
 | `eqoa.input.RawAxes.x` | supported | 2 |  |
 | `eqoa.input.RawAxes.y` | supported | 2 |  |
@@ -1107,70 +1104,70 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.items.Tab.index` | supported | 5 |  |
 | `eqoa.items.Tab.key` | supported | 5 |  |
 | `eqoa.items.Tab.label` | supported | 5 |  |
-| `eqoa.map.Bounds` | supported | 2 |  |
-| `eqoa.map.Bounds.x_max` | supported | 2 |  |
-| `eqoa.map.Bounds.x_min` | supported | 2 |  |
-| `eqoa.map.Bounds.z_max` | supported | 2 |  |
-| `eqoa.map.Bounds.z_min` | supported | 2 |  |
-| `eqoa.map.MapState` | supported | 2 |  |
-| `eqoa.map.MapState.bounds` | supported | 2 |  |
-| `eqoa.map.MapState.enabled` | supported | 2 |  |
-| `eqoa.map.MapState.markers_on` | supported | 2 |  |
-| `eqoa.map.MapState.minimap` | supported | 2 |  |
-| `eqoa.map.MapState.open` | supported | 2 |  |
-| `eqoa.map.MapState.revision` | supported | 2 |  |
+| `eqoa.map.Bounds` | supported | 4 |  |
+| `eqoa.map.Bounds.x_max` | supported | 4 |  |
+| `eqoa.map.Bounds.x_min` | supported | 4 |  |
+| `eqoa.map.Bounds.z_max` | supported | 4 |  |
+| `eqoa.map.Bounds.z_min` | supported | 4 |  |
+| `eqoa.map.MapState` | supported | 4 |  |
+| `eqoa.map.MapState.bounds` | supported | 4 |  |
+| `eqoa.map.MapState.enabled` | supported | 4 |  |
+| `eqoa.map.MapState.markers_on` | supported | 4 |  |
+| `eqoa.map.MapState.minimap` | supported | 4 |  |
+| `eqoa.map.MapState.open` | supported | 4 |  |
+| `eqoa.map.MapState.revision` | supported | 4 |  |
 | `eqoa.map.MapState.search_anchor` | supported | 4 |  |
-| `eqoa.map.MapState.waypoint` | supported | 2 |  |
-| `eqoa.map.MapState.world_id` | supported | 2 |  |
-| `eqoa.map.MapState.world_name` | supported | 2 |  |
-| `eqoa.map.MapState.zone` | supported | 2 |  |
-| `eqoa.map.Marker` | supported | 2 |  |
-| `eqoa.map.Marker.kind` | supported | 2 |  |
-| `eqoa.map.Marker.label` | supported | 2 |  |
-| `eqoa.map.Marker.level_max` | supported | 2 |  |
-| `eqoa.map.Marker.level_min` | supported | 2 |  |
-| `eqoa.map.Marker.name` | supported | 2 |  |
-| `eqoa.map.Marker.step` | supported | 2 |  |
-| `eqoa.map.Marker.x` | supported | 2 |  |
-| `eqoa.map.Marker.z` | supported | 2 |  |
-| `eqoa.map.Waypoint` | supported | 2 |  |
-| `eqoa.map.Waypoint.label` | supported | 2 |  |
-| `eqoa.map.Waypoint.owner` | supported | 2 |  |
-| `eqoa.map.Waypoint.world_id` | supported | 2 |  |
-| `eqoa.map.Waypoint.x` | supported | 2 |  |
-| `eqoa.map.Waypoint.z` | supported | 2 |  |
-| `eqoa.mastery.Mastery` | supported | 4 |  |
-| `eqoa.mastery.Mastery.available` | supported | 4 |  |
-| `eqoa.mastery.Mastery.bonuses` | supported | 4 |  |
-| `eqoa.mastery.Mastery.experience_share` | supported | 4 |  |
-| `eqoa.mastery.Mastery.pending` | supported | 4 |  |
-| `eqoa.mastery.Mastery.progress_raw` | supported | 4 |  |
-| `eqoa.mastery.Mastery.spent` | supported | 4 |  |
-| `eqoa.mastery.Mastery.stats` | supported | 4 |  |
-| `eqoa.mastery.MasteryNode` | supported | 4 |  |
-| `eqoa.mastery.MasteryNode.category` | supported | 4 |  |
-| `eqoa.mastery.MasteryNode.cost` | supported | 4 |  |
-| `eqoa.mastery.MasteryNode.id` | supported | 4 |  |
-| `eqoa.mastery.MasteryNode.known` | supported | 4 |  |
-| `eqoa.mastery.MasteryNode.level_required` | supported | 4 |  |
-| `eqoa.mastery.MasteryNode.minimum_stats` | supported | 4 |  |
-| `eqoa.mastery.MasteryNode.name` | supported | 4 |  |
-| `eqoa.mastery.MasteryNode.owned` | supported | 4 |  |
-| `eqoa.mastery.MasteryNode.parent_key` | supported | 4 |  |
-| `eqoa.mastery.MasteryNode.points_spent_required` | supported | 4 |  |
-| `eqoa.mastery.MasteryNode.skill_id` | supported | 4 |  |
-| `eqoa.mastery.MasteryNode.text` | supported | 4 |  |
-| `eqoa.mastery.MasteryNode.title` | supported | 4 |  |
-| `eqoa.mastery.MasterySkill` | supported | 4 |  |
-| `eqoa.mastery.MasterySkill.category` | supported | 4 |  |
-| `eqoa.mastery.MasterySkill.cost` | supported | 4 |  |
-| `eqoa.mastery.MasterySkill.id` | supported | 4 |  |
-| `eqoa.mastery.MasterySkill.known` | supported | 4 |  |
-| `eqoa.mastery.MasterySkill.master_class` | supported | 4 |  |
-| `eqoa.mastery.MasterySkill.name` | supported | 4 |  |
-| `eqoa.mastery.MasterySkill.owned` | supported | 4 |  |
-| `eqoa.mastery.MasterySkill.parent_key` | supported | 4 |  |
-| `eqoa.mastery.MasterySkill.rank_key` | supported | 4 |  |
+| `eqoa.map.MapState.waypoint` | supported | 4 |  |
+| `eqoa.map.MapState.world_id` | supported | 4 |  |
+| `eqoa.map.MapState.world_name` | supported | 4 |  |
+| `eqoa.map.MapState.zone` | supported | 4 |  |
+| `eqoa.map.Marker` | supported | 4 |  |
+| `eqoa.map.Marker.kind` | supported | 4 |  |
+| `eqoa.map.Marker.label` | supported | 4 |  |
+| `eqoa.map.Marker.level_max` | supported | 4 |  |
+| `eqoa.map.Marker.level_min` | supported | 4 |  |
+| `eqoa.map.Marker.name` | supported | 4 |  |
+| `eqoa.map.Marker.step` | supported | 4 |  |
+| `eqoa.map.Marker.x` | supported | 4 |  |
+| `eqoa.map.Marker.z` | supported | 4 |  |
+| `eqoa.map.Waypoint` | supported | 4 |  |
+| `eqoa.map.Waypoint.label` | supported | 4 |  |
+| `eqoa.map.Waypoint.owner` | supported | 4 |  |
+| `eqoa.map.Waypoint.world_id` | supported | 4 |  |
+| `eqoa.map.Waypoint.x` | supported | 4 |  |
+| `eqoa.map.Waypoint.z` | supported | 4 |  |
+| `eqoa.mastery.Mastery` | supported | 6 |  |
+| `eqoa.mastery.Mastery.available` | supported | 6 |  |
+| `eqoa.mastery.Mastery.bonuses` | supported | 6 |  |
+| `eqoa.mastery.Mastery.experience_share` | supported | 6 |  |
+| `eqoa.mastery.Mastery.pending` | supported | 6 |  |
+| `eqoa.mastery.Mastery.progress_raw` | supported | 6 |  |
+| `eqoa.mastery.Mastery.spent` | supported | 6 |  |
+| `eqoa.mastery.Mastery.stats` | supported | 6 |  |
+| `eqoa.mastery.MasteryNode` | supported | 6 |  |
+| `eqoa.mastery.MasteryNode.category` | supported | 6 |  |
+| `eqoa.mastery.MasteryNode.cost` | supported | 6 |  |
+| `eqoa.mastery.MasteryNode.id` | supported | 6 |  |
+| `eqoa.mastery.MasteryNode.known` | supported | 6 |  |
+| `eqoa.mastery.MasteryNode.level_required` | supported | 6 |  |
+| `eqoa.mastery.MasteryNode.minimum_stats` | supported | 6 |  |
+| `eqoa.mastery.MasteryNode.name` | supported | 6 |  |
+| `eqoa.mastery.MasteryNode.owned` | supported | 6 |  |
+| `eqoa.mastery.MasteryNode.parent_key` | supported | 6 |  |
+| `eqoa.mastery.MasteryNode.points_spent_required` | supported | 6 |  |
+| `eqoa.mastery.MasteryNode.skill_id` | supported | 6 |  |
+| `eqoa.mastery.MasteryNode.text` | supported | 6 |  |
+| `eqoa.mastery.MasteryNode.title` | supported | 6 |  |
+| `eqoa.mastery.MasterySkill` | supported | 6 |  |
+| `eqoa.mastery.MasterySkill.category` | supported | 6 |  |
+| `eqoa.mastery.MasterySkill.cost` | supported | 6 |  |
+| `eqoa.mastery.MasterySkill.id` | supported | 6 |  |
+| `eqoa.mastery.MasterySkill.known` | supported | 6 |  |
+| `eqoa.mastery.MasterySkill.master_class` | supported | 6 |  |
+| `eqoa.mastery.MasterySkill.name` | supported | 6 |  |
+| `eqoa.mastery.MasterySkill.owned` | supported | 6 |  |
+| `eqoa.mastery.MasterySkill.parent_key` | supported | 6 |  |
+| `eqoa.mastery.MasterySkill.rank_key` | supported | 6 |  |
 | `eqoa.options.Toggle` | supported | 3 |  |
 | `eqoa.options.Toggle.default` | supported | 3 |  |
 | `eqoa.options.Toggle.id` | supported | 3 |  |
@@ -1206,7 +1203,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.player.Player.id` | supported | 2 |  |
 | `eqoa.player.Player.level` | supported | 2 |  |
 | `eqoa.player.Player.location` | supported | 2 |  |
-| `eqoa.player.Player.mastery` | supported | 4 |  |
+| `eqoa.player.Player.mastery` | supported | 6 |  |
 | `eqoa.player.Player.name` | supported | 2 |  |
 | `eqoa.player.Player.pet_id` | supported | 2 |  |
 | `eqoa.player.Player.position` | supported | 2 |  |
@@ -1273,56 +1270,56 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.player.Vital.base` | supported | 2 |  |
 | `eqoa.player.Vital.current` | supported | 2 |  |
 | `eqoa.player.Vital.maximum` | supported | 2 |  |
-| `eqoa.quests.Quest` | supported | 4 |  |
-| `eqoa.quests.Quest.index` | supported | 4 |  |
-| `eqoa.quests.Quest.ref` | supported | 4 |  |
-| `eqoa.quests.Quest.title` | supported | 4 |  |
+| `eqoa.quests.Quest` | supported | 6 |  |
+| `eqoa.quests.Quest.index` | supported | 6 |  |
+| `eqoa.quests.Quest.ref` | supported | 6 |  |
+| `eqoa.quests.Quest.title` | supported | 6 |  |
 | `eqoa.textures.TextureInfo` | supported | 2 |  |
 | `eqoa.textures.TextureInfo.height` | supported | 2 |  |
 | `eqoa.textures.TextureInfo.texture` | supported | 2 |  |
 | `eqoa.textures.TextureInfo.width` | supported | 2 |  |
-| `eqoa.windows.ButtonHint` | supported | 4 |  |
-| `eqoa.windows.ButtonHint.button` | supported | 4 |  |
-| `eqoa.windows.ButtonHint.label` | supported | 4 |  |
-| `eqoa.windows.Dialog` | supported | 4 |  |
-| `eqoa.windows.Dialog.chat` | supported | 4 |  |
-| `eqoa.windows.Dialog.kind` | supported | 4 |  |
-| `eqoa.windows.Dialog.options` | supported | 4 |  |
-| `eqoa.windows.Dialog.password` | supported | 4 |  |
-| `eqoa.windows.Dialog.prompt_kind` | supported | 4 |  |
-| `eqoa.windows.Dialog.selection` | supported | 4 |  |
-| `eqoa.windows.Dialog.style` | supported | 4 |  |
-| `eqoa.windows.Dialog.style_id` | supported | 4 |  |
-| `eqoa.windows.Dialog.tag` | supported | 4 |  |
-| `eqoa.windows.Dialog.text` | supported | 4 |  |
-| `eqoa.windows.Dialog.title` | supported | 4 |  |
-| `eqoa.windows.MenuRow` | supported | 4 |  |
-| `eqoa.windows.MenuRow.command` | supported | 4 |  |
-| `eqoa.windows.MenuRow.enabled` | supported | 4 |  |
-| `eqoa.windows.MenuRow.index` | supported | 4 |  |
-| `eqoa.windows.MenuRow.item` | supported | 4 |  |
-| `eqoa.windows.MenuRow.text` | supported | 4 |  |
-| `eqoa.windows.Window` | supported | 4 |  |
-| `eqoa.windows.Window.dialog` | supported | 4 |  |
-| `eqoa.windows.Window.focused` | supported | 4 |  |
-| `eqoa.windows.Window.hints` | supported | 4 |  |
-| `eqoa.windows.Window.kind` | supported | 4 |  |
-| `eqoa.windows.Window.ref` | supported | 4 |  |
-| `eqoa.windows.Window.rows` | supported | 4 |  |
-| `eqoa.windows.Window.scroll_top` | supported | 4 |  |
-| `eqoa.windows.Window.selected_row` | supported | 4 |  |
-| `eqoa.windows.Window.tab` | supported | 4 |  |
-| `eqoa.windows.Window.tabs` | supported | 4 |  |
-| `eqoa.windows.Window.title` | supported | 4 |  |
-| `eqoa.windows.Window.visible` | supported | 4 |  |
-| `eqoa.windows.Windows` | supported | 4 |  |
-| `eqoa.windows.Windows.active` | supported | 4 |  |
-| `eqoa.windows.Windows.any_window_open` | supported | 4 |  |
-| `eqoa.windows.Windows.busy` | supported | 4 |  |
-| `eqoa.windows.Windows.mode` | supported | 4 |  |
-| `eqoa.windows.Windows.native_mode` | supported | 4 |  |
-| `eqoa.windows.Windows.start_menu_open` | supported | 4 |  |
-| `eqoa.windows.Windows.windows` | supported | 4 |  |
+| `eqoa.windows.ButtonHint` | supported | 6 |  |
+| `eqoa.windows.ButtonHint.button` | supported | 6 |  |
+| `eqoa.windows.ButtonHint.label` | supported | 6 |  |
+| `eqoa.windows.Dialog` | supported | 6 |  |
+| `eqoa.windows.Dialog.chat` | supported | 6 |  |
+| `eqoa.windows.Dialog.kind` | supported | 6 |  |
+| `eqoa.windows.Dialog.options` | supported | 6 |  |
+| `eqoa.windows.Dialog.password` | supported | 6 |  |
+| `eqoa.windows.Dialog.prompt_kind` | supported | 6 |  |
+| `eqoa.windows.Dialog.selection` | supported | 6 |  |
+| `eqoa.windows.Dialog.style` | supported | 6 |  |
+| `eqoa.windows.Dialog.style_id` | supported | 6 |  |
+| `eqoa.windows.Dialog.tag` | supported | 6 |  |
+| `eqoa.windows.Dialog.text` | supported | 6 |  |
+| `eqoa.windows.Dialog.title` | supported | 6 |  |
+| `eqoa.windows.MenuRow` | supported | 6 |  |
+| `eqoa.windows.MenuRow.command` | supported | 6 |  |
+| `eqoa.windows.MenuRow.enabled` | supported | 6 |  |
+| `eqoa.windows.MenuRow.index` | supported | 6 |  |
+| `eqoa.windows.MenuRow.item` | supported | 6 |  |
+| `eqoa.windows.MenuRow.text` | supported | 6 |  |
+| `eqoa.windows.Window` | supported | 6 |  |
+| `eqoa.windows.Window.dialog` | supported | 6 |  |
+| `eqoa.windows.Window.focused` | supported | 6 |  |
+| `eqoa.windows.Window.hints` | supported | 6 |  |
+| `eqoa.windows.Window.kind` | supported | 6 |  |
+| `eqoa.windows.Window.ref` | supported | 6 |  |
+| `eqoa.windows.Window.rows` | supported | 6 |  |
+| `eqoa.windows.Window.scroll_top` | supported | 6 |  |
+| `eqoa.windows.Window.selected_row` | supported | 6 |  |
+| `eqoa.windows.Window.tab` | supported | 6 |  |
+| `eqoa.windows.Window.tabs` | supported | 6 |  |
+| `eqoa.windows.Window.title` | supported | 6 |  |
+| `eqoa.windows.Window.visible` | supported | 6 |  |
+| `eqoa.windows.Windows` | supported | 6 |  |
+| `eqoa.windows.Windows.active` | supported | 6 |  |
+| `eqoa.windows.Windows.any_window_open` | supported | 6 |  |
+| `eqoa.windows.Windows.busy` | supported | 6 |  |
+| `eqoa.windows.Windows.mode` | supported | 6 |  |
+| `eqoa.windows.Windows.native_mode` | supported | 6 |  |
+| `eqoa.windows.Windows.start_menu_open` | supported | 6 |  |
+| `eqoa.windows.Windows.windows` | supported | 6 |  |
 
 ## ImGui / DrawList
 
@@ -1332,14 +1329,14 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `ImGui.BeginChild` | supported | 2 |  |
 | `ImGui.BeginCombo` | supported | 2 |  |
 | `ImGui.BeginGroup` | supported | 2 |  |
-| `ImGui.BeginItemTooltip` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.BeginItemTooltip` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.BeginMainMenuBar` | supported | 2 |  |
 | `ImGui.BeginMenu` | supported | 2 |  |
 | `ImGui.BeginMenuBar` | supported | 2 |  |
 | `ImGui.BeginPopup` | supported | 2 |  |
 | `ImGui.BeginTabBar` | supported | 2 |  |
 | `ImGui.BeginTabItem` | supported | 2 |  |
-| `ImGui.BeginTooltip` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.BeginTooltip` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.BulletText` | supported | 2 |  |
 | `ImGui.Button` | supported | 2 |  |
 | `ImGui.CalcTextSize` | supported | 2 |  |
@@ -1359,19 +1356,19 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `ImGui.EndPopup` | supported | 2 |  |
 | `ImGui.EndTabBar` | supported | 2 |  |
 | `ImGui.EndTabItem` | supported | 2 |  |
-| `ImGui.EndTooltip` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.EndTooltip` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.GetBackgroundDrawList` | supported | 2 |  |
 | `ImGui.GetColorU32` | supported | 2 |  |
 | `ImGui.GetContentRegionAvail` | supported | 2 |  |
 | `ImGui.GetCursorPos` | supported | 2 |  |
 | `ImGui.GetCursorScreenPos` | supported | 2 |  |
 | `ImGui.GetDisplaySize` | supported | 2 |  |
-| `ImGui.GetForegroundDrawList` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.GetForegroundDrawList` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.GetFrameHeight` | supported | 2 |  |
-| `ImGui.GetMouseDragDelta` | not_yet | 4 | scheduled for round 4 |
-| `ImGui.GetMousePos` | not_yet | 4 | scheduled for round 4 |
-| `ImGui.GetMousePosOnOpeningCurrentPopup` | not_yet | 4 | scheduled for round 4 |
-| `ImGui.GetMouseWheel` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.GetMouseDragDelta` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.GetMousePos` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.GetMousePosOnOpeningCurrentPopup` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.GetMouseWheel` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `ImGui.GetScrollMaxY` | supported | 2 |  |
 | `ImGui.GetScrollY` | supported | 2 |  |
 | `ImGui.GetTextLineHeight` | supported | 2 |  |
@@ -1387,13 +1384,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `ImGui.InvisibleButton` | supported | 2 |  |
 | `ImGui.IsItemActive` | supported | 2 |  |
 | `ImGui.IsItemHovered` | supported | 2 |  |
-| `ImGui.IsMouseClicked` | not_yet | 4 | scheduled for round 4 |
-| `ImGui.IsMouseDoubleClicked` | not_yet | 4 | scheduled for round 4 |
-| `ImGui.IsMouseDown` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.IsMouseClicked` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.IsMouseDoubleClicked` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.IsMouseDown` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `ImGui.IsMouseDragging` | supported | 2 |  |
 | `ImGui.IsMouseHoveringRect` | supported | 2 |  |
-| `ImGui.IsMousePosValid` | not_yet | 4 | scheduled for round 4 |
-| `ImGui.IsMouseReleased` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.IsMousePosValid` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.IsMouseReleased` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `ImGui.IsWindowFocused` | supported | 2 |  |
 | `ImGui.IsWindowHovered` | supported | 2 |  |
 | `ImGui.MenuItem` | supported | 2 |  |
@@ -1401,36 +1398,36 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `ImGui.PopClipRect` | supported | 2 |  |
 | `ImGui.PopFont` | supported | 2 |  |
 | `ImGui.PopID` | supported | 2 |  |
-| `ImGui.PopItemWidth` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.PopItemWidth` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.PopStyleColor` | supported | 2 |  |
-| `ImGui.PopStyleVar` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.PopStyleVar` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.PopTextWrapPos` | supported | 2 |  |
 | `ImGui.ProgressBar` | supported | 2 |  |
 | `ImGui.PushClipRect` | supported | 2 |  |
 | `ImGui.PushFont` | supported | 2 |  |
 | `ImGui.PushID` | supported | 2 |  |
-| `ImGui.PushItemWidth` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.PushItemWidth` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.PushStyleColor` | supported | 2 |  |
-| `ImGui.PushStyleVar` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.PushStyleVar` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.PushTextWrapPos` | supported | 2 |  |
 | `ImGui.RadioButton` | supported | 2 |  |
-| `ImGui.ResetMouseDragDelta` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.ResetMouseDragDelta` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `ImGui.SameLine` | supported | 2 |  |
 | `ImGui.Selectable` | supported | 2 |  |
 | `ImGui.Separator` | supported | 2 |  |
 | `ImGui.SetCursorPos` | supported | 2 |  |
 | `ImGui.SetCursorScreenPos` | supported | 2 |  |
 | `ImGui.SetKeyboardFocusHere` | supported | 2 |  |
-| `ImGui.SetMouseCursor` | not_yet | 4 | scheduled for round 4 |
-| `ImGui.SetMousePos` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.SetMouseCursor` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.SetMousePos` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `ImGui.SetNextItemWidth` | supported | 2 |  |
-| `ImGui.SetNextWindowFocus` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.SetNextWindowFocus` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.SetNextWindowPos` | supported | 2 |  |
 | `ImGui.SetNextWindowSize` | supported | 2 |  |
 | `ImGui.SetScrollHereY` | supported | 2 |  |
 | `ImGui.SetScrollY` | supported | 2 |  |
 | `ImGui.SetTooltip` | supported | 2 |  |
-| `ImGui.SetWindowFocus` | not_yet | 4 | scheduled for round 4 |
+| `ImGui.SetWindowFocus` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.SetWindowFontScale` | supported | 2 |  |
 | `ImGui.SetWindowPos` | supported | 2 |  |
 | `ImGui.SliderFloat` | supported | 2 |  |
@@ -1445,19 +1442,19 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `ImGui.Unindent` | supported | 2 |  |
 | `ImGui.vec2` | supported | 2 |  |
 | `ImGui.vec4` | supported | 2 |  |
-| `eqoa.imgui` | partial | 2 | bounded native bridge; unbound members are unsupported |
+| `eqoa.imgui` | partial | 2 | bounded native bridge |
 | `eqoa.imgui.Begin` | supported | 2 |  |
 | `eqoa.imgui.BeginChild` | supported | 2 |  |
 | `eqoa.imgui.BeginCombo` | supported | 2 |  |
 | `eqoa.imgui.BeginGroup` | supported | 2 |  |
-| `eqoa.imgui.BeginItemTooltip` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.BeginItemTooltip` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.BeginMainMenuBar` | supported | 2 |  |
 | `eqoa.imgui.BeginMenu` | supported | 2 |  |
 | `eqoa.imgui.BeginMenuBar` | supported | 2 |  |
 | `eqoa.imgui.BeginPopup` | supported | 2 |  |
 | `eqoa.imgui.BeginTabBar` | supported | 2 |  |
 | `eqoa.imgui.BeginTabItem` | supported | 2 |  |
-| `eqoa.imgui.BeginTooltip` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.BeginTooltip` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.BulletText` | supported | 2 |  |
 | `eqoa.imgui.Button` | supported | 2 |  |
 | `eqoa.imgui.CalcTextSize` | supported | 2 |  |
@@ -1477,19 +1474,19 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.imgui.EndPopup` | supported | 2 |  |
 | `eqoa.imgui.EndTabBar` | supported | 2 |  |
 | `eqoa.imgui.EndTabItem` | supported | 2 |  |
-| `eqoa.imgui.EndTooltip` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.EndTooltip` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.GetBackgroundDrawList` | supported | 2 |  |
 | `eqoa.imgui.GetColorU32` | supported | 2 |  |
 | `eqoa.imgui.GetContentRegionAvail` | supported | 2 |  |
 | `eqoa.imgui.GetCursorPos` | supported | 2 |  |
 | `eqoa.imgui.GetCursorScreenPos` | supported | 2 |  |
 | `eqoa.imgui.GetDisplaySize` | supported | 2 |  |
-| `eqoa.imgui.GetForegroundDrawList` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.GetForegroundDrawList` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.GetFrameHeight` | supported | 2 |  |
-| `eqoa.imgui.GetMouseDragDelta` | not_yet | 4 | scheduled for round 4 |
-| `eqoa.imgui.GetMousePos` | not_yet | 4 | scheduled for round 4 |
-| `eqoa.imgui.GetMousePosOnOpeningCurrentPopup` | not_yet | 4 | scheduled for round 4 |
-| `eqoa.imgui.GetMouseWheel` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.GetMouseDragDelta` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.GetMousePos` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.GetMousePosOnOpeningCurrentPopup` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.GetMouseWheel` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `eqoa.imgui.GetScrollMaxY` | supported | 2 |  |
 | `eqoa.imgui.GetScrollY` | supported | 2 |  |
 | `eqoa.imgui.GetTextLineHeight` | supported | 2 |  |
@@ -1505,13 +1502,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.imgui.InvisibleButton` | supported | 2 |  |
 | `eqoa.imgui.IsItemActive` | supported | 2 |  |
 | `eqoa.imgui.IsItemHovered` | supported | 2 |  |
-| `eqoa.imgui.IsMouseClicked` | not_yet | 4 | scheduled for round 4 |
-| `eqoa.imgui.IsMouseDoubleClicked` | not_yet | 4 | scheduled for round 4 |
-| `eqoa.imgui.IsMouseDown` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.IsMouseClicked` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.IsMouseDoubleClicked` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.IsMouseDown` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `eqoa.imgui.IsMouseDragging` | supported | 2 |  |
 | `eqoa.imgui.IsMouseHoveringRect` | supported | 2 |  |
-| `eqoa.imgui.IsMousePosValid` | not_yet | 4 | scheduled for round 4 |
-| `eqoa.imgui.IsMouseReleased` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.IsMousePosValid` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.IsMouseReleased` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `eqoa.imgui.IsWindowFocused` | supported | 2 |  |
 | `eqoa.imgui.IsWindowHovered` | supported | 2 |  |
 | `eqoa.imgui.MenuItem` | supported | 2 |  |
@@ -1519,36 +1516,36 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.imgui.PopClipRect` | supported | 2 |  |
 | `eqoa.imgui.PopFont` | supported | 2 |  |
 | `eqoa.imgui.PopID` | supported | 2 |  |
-| `eqoa.imgui.PopItemWidth` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.PopItemWidth` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.PopStyleColor` | supported | 2 |  |
-| `eqoa.imgui.PopStyleVar` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.PopStyleVar` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.PopTextWrapPos` | supported | 2 |  |
 | `eqoa.imgui.ProgressBar` | supported | 2 |  |
 | `eqoa.imgui.PushClipRect` | supported | 2 |  |
 | `eqoa.imgui.PushFont` | supported | 2 |  |
 | `eqoa.imgui.PushID` | supported | 2 |  |
-| `eqoa.imgui.PushItemWidth` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.PushItemWidth` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.PushStyleColor` | supported | 2 |  |
-| `eqoa.imgui.PushStyleVar` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.PushStyleVar` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.PushTextWrapPos` | supported | 2 |  |
 | `eqoa.imgui.RadioButton` | supported | 2 |  |
-| `eqoa.imgui.ResetMouseDragDelta` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.ResetMouseDragDelta` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `eqoa.imgui.SameLine` | supported | 2 |  |
 | `eqoa.imgui.Selectable` | supported | 2 |  |
 | `eqoa.imgui.Separator` | supported | 2 |  |
 | `eqoa.imgui.SetCursorPos` | supported | 2 |  |
 | `eqoa.imgui.SetCursorScreenPos` | supported | 2 |  |
 | `eqoa.imgui.SetKeyboardFocusHere` | supported | 2 |  |
-| `eqoa.imgui.SetMouseCursor` | not_yet | 4 | scheduled for round 4 |
-| `eqoa.imgui.SetMousePos` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.SetMouseCursor` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.SetMousePos` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `eqoa.imgui.SetNextItemWidth` | supported | 2 |  |
-| `eqoa.imgui.SetNextWindowFocus` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.SetNextWindowFocus` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.SetNextWindowPos` | supported | 2 |  |
 | `eqoa.imgui.SetNextWindowSize` | supported | 2 |  |
 | `eqoa.imgui.SetScrollHereY` | supported | 2 |  |
 | `eqoa.imgui.SetScrollY` | supported | 2 |  |
 | `eqoa.imgui.SetTooltip` | supported | 2 |  |
-| `eqoa.imgui.SetWindowFocus` | not_yet | 4 | scheduled for round 4 |
+| `eqoa.imgui.SetWindowFocus` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.SetWindowFontScale` | supported | 2 |  |
 | `eqoa.imgui.SetWindowPos` | supported | 2 |  |
 | `eqoa.imgui.SliderFloat` | supported | 2 |  |
@@ -1568,6 +1565,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
+| `ImGui` | partial | 2 | bounded native bridge |
 | `UiForge.CallbackType` | supported | 2 |  |
 | `UiForge.Log` | supported | 2 |  |
 | `UiForge.RegisterCallback` | supported | 2 |  |
@@ -1596,7 +1594,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 ## Forge compatibility
 
-Each module lists its member count and every entry whose status is not `supported`.
+Forge compatibility is listed by presence, not verified per function; it is not part of the `eqoa/1` promise. Each module lists its member count and every entry whose status is not `supported`.
 
 ### frontiers_forge.ability
 
@@ -1604,7 +1602,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.ability` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.ability_bar
 
@@ -1612,7 +1609,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.ability_bar` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.ability_list
 
@@ -1620,7 +1616,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.ability_list` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.bank
 
@@ -1628,7 +1623,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.bank` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.camera
 
@@ -1636,7 +1630,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.camera` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.cave
 
@@ -1644,7 +1637,7 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.cave` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
+| `frontiers_forge.cave` | unsupported | 2 | native Forge compatibility adapter |
 | `frontiers_forge.cave.Alloc` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
 | `frontiers_forge.cave.Free` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
 | `frontiers_forge.cave.Get` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
@@ -1660,9 +1653,9 @@ Each module lists its member count and every entry whose status is not `supporte
 | Path | Status | Since round | Reason |
 |---|---|---|---|
 | `frontiers_forge.chat` | partial | 2 | native Forge compatibility adapter |
-| `frontiers_forge.chat.CaptureChannelTypeFromGameWindow` | unsupported |  | the native client has no matching pointer/config payload |
-| `frontiers_forge.chat.DebugDumpFocusChain` | unsupported |  | the native client has no matching pointer/config payload |
-| `frontiers_forge.chat.GetChannelTableInfo` | unsupported |  | the native client has no matching pointer/config payload |
+| `frontiers_forge.chat.CaptureChannelTypeFromGameWindow` | unsupported |  | unsupported: native client has no Forge custom-channel window configuration |
+| `frontiers_forge.chat.DebugDumpFocusChain` | unsupported |  | unsupported: native client has no Forge channel-pointer table/focus-chain addresses |
+| `frontiers_forge.chat.GetChannelTableInfo` | unsupported |  | unsupported: native client has no Forge channel-pointer table/focus-chain addresses |
 
 ### frontiers_forge.combat
 
@@ -1671,7 +1664,7 @@ Each module lists its member count and every entry whose status is not `supporte
 | Path | Status | Since round | Reason |
 |---|---|---|---|
 | `frontiers_forge.combat` | partial | 2 | native Forge compatibility adapter |
-| `frontiers_forge.combat.ReadForeignCave` | unsupported |  | the native client has no matching pointer/config payload |
+| `frontiers_forge.combat.ReadForeignCave` | unsupported |  | native client has no foreign code cave |
 
 ### frontiers_forge.effects
 
@@ -1679,7 +1672,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.effects` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.entity
 
@@ -1687,7 +1679,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.entity` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.entity_list
 
@@ -1695,7 +1686,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.entity_list` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.gems
 
@@ -1703,7 +1693,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.gems` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.group
 
@@ -1711,7 +1700,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.group` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.icon
 
@@ -1719,7 +1707,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.icon` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.input
 
@@ -1727,7 +1714,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.input` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.inventory
 
@@ -1735,7 +1721,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.inventory` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.item
 
@@ -1743,7 +1728,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.item` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.loot
 
@@ -1751,7 +1735,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.loot` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.merchant
 
@@ -1759,7 +1742,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.merchant` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.player
 
@@ -1767,7 +1749,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.player` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.quest
 
@@ -1775,7 +1756,7 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.quest` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
+| `frontiers_forge.quest` | unsupported | 2 | native Forge compatibility adapter |
 | `frontiers_forge.quest.GetName` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
 | `frontiers_forge.quest.new` | unsupported |  | raw memory is excluded; use eqoa.quests for native quest records |
 
@@ -1785,7 +1766,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.quest_log` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.ui
 
@@ -1793,7 +1773,6 @@ Each module lists its member count and every entry whose status is not `supporte
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `frontiers_forge.ui` | partial | 2 | native Forge compatibility adapter |
 
 ### frontiers_forge.util
 
@@ -1802,13 +1781,22 @@ Each module lists its member count and every entry whose status is not `supporte
 | Path | Status | Since round | Reason |
 |---|---|---|---|
 | `frontiers_forge.util` | partial | 2 | native Forge compatibility adapter |
-| `frontiers_forge.util.utf16_to_utf8` | unsupported |  | the native client has no matching pointer/config payload |
-| `frontiers_forge.util.utf8_to_utf16` | unsupported |  | the native client has no matching pointer/config payload |
+| `frontiers_forge.util.utf16_to_utf8` | unsupported |  | unsupported: pointer-based UTF conversion is unavailable; native API strings are UTF-8 |
+| `frontiers_forge.util.utf8_to_utf16` | unsupported |  | unsupported: pointer-based UTF conversion is unavailable; native API strings are UTF-8 |
 
 ### frontiers_forge.window
 
-7 members; 7 supported.
+16 members; 7 supported.
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
 | `frontiers_forge.window` | partial | 2 | native Forge compatibility adapter |
+| `frontiers_forge.window.WindowObject:Child` | unsupported |  | a native window has no emulator memory to read; its rows and lit row are GetMenu and GetSelectedRow |
+| `frontiers_forge.window.WindowObject:GetChildWindows` | unsupported |  | a native window has no emulator memory to read; its rows and lit row are GetMenu and GetSelectedRow |
+| `frontiers_forge.window.WindowObject:GetDrawAddress` | unsupported |  | a native window has no emulator memory to read; its rows and lit row are GetMenu and GetSelectedRow |
+| `frontiers_forge.window.WindowObject:GetDrawSlotAddress` | unsupported |  | a native window has no emulator memory to read; its rows and lit row are GetMenu and GetSelectedRow |
+| `frontiers_forge.window.WindowObject:IsActive` | unsupported |  | a native window has no emulator memory to read; its rows and lit row are GetMenu and GetSelectedRow |
+| `frontiers_forge.window.WindowObject:Parent` | unsupported |  | a native window has no emulator memory to read; its rows and lit row are GetMenu and GetSelectedRow |
+| `frontiers_forge.window.WindowObject:Read` | unsupported |  | a native window has no emulator memory to read; its rows and lit row are GetMenu and GetSelectedRow |
+| `frontiers_forge.window.WindowObject:ReadText` | unsupported |  | a native window has no emulator memory to read; its rows and lit row are GetMenu and GetSelectedRow |
+| `frontiers_forge.window.WindowObject:ReadTextPointer` | unsupported |  | a native window has no emulator memory to read; its rows and lit row are GetMenu and GetSelectedRow |

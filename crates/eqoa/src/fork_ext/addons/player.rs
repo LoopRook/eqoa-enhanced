@@ -484,8 +484,11 @@ pub fn install_player_adapter(host: &Host) -> LuaResult<()> {
     // 5. Class Mastery (CM) — pinned reference player.lua:148-158
     {
         let s = snapshot_cell.clone();
-        player.set(
-            "GetCMs",
+        super::native::bind_compat(
+            lua,
+            &player,
+            "frontiers_forge.player.GetCMs",
+            6,
             lua.create_function(move |_, ()| {
                 let snap = s.get().player;
                 if snap.available && (snap.cm_available || snap.cms != 0 || snap.cms_spent != 0) {
@@ -498,8 +501,11 @@ pub fn install_player_adapter(host: &Host) -> LuaResult<()> {
     }
     {
         let s = snapshot_cell.clone();
-        player.set(
-            "GetCMsSpent",
+        super::native::bind_compat(
+            lua,
+            &player,
+            "frontiers_forge.player.GetCMsSpent",
+            6,
             lua.create_function(move |_, ()| {
                 let snap = s.get().player;
                 if snap.available && (snap.cm_available || snap.cms != 0 || snap.cms_spent != 0) {
@@ -512,8 +518,11 @@ pub fn install_player_adapter(host: &Host) -> LuaResult<()> {
     }
     {
         let s = snapshot_cell.clone();
-        player.set(
-            "GetCMPct",
+        super::native::bind_compat(
+            lua,
+            &player,
+            "frontiers_forge.player.GetCMPct",
+            6,
             lua.create_function(move |_, ()| {
                 let snap = s.get().player;
                 if snap.available && (snap.cm_pct_available || snap.cm_pct != 0) {

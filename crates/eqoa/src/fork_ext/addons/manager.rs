@@ -18,13 +18,13 @@ use super::{
     discovery::DiscoveredAddon,
     host::{Host, Snapshot},
     sound::SoundBank,
-    storage::Storage,
+    storage::{Disclosure, Storage},
     textures::Textures,
 };
 use dear_imgui_wgpu::WgpuRenderer;
 use mlua::{Function, Value};
 use render::wgpu;
-use std::{cell::RefCell, collections::VecDeque, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, collections::{BTreeMap, VecDeque}, path::PathBuf, rc::Rc};
 
 /// A line a mod wrote with `eqoa.log.write`. Every one goes to the game's log (eqoa.log, as `addon <id>: [level]
 /// text`). "info" and "debug" are the mod's own record of what it did, not a problem: they stop there and stay out of
@@ -126,6 +126,7 @@ pub(crate) struct Manager {
     named: Option<named::NamedSession>,
     root: PathBuf,
     storage: Storage,
+    disclosures: BTreeMap<String, Disclosure>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     renderer: Rc<RefCell<WgpuRenderer>>,
@@ -155,6 +156,7 @@ impl Manager {
             named: None,
             root,
             storage: Storage::new(storage_root),
+            disclosures: BTreeMap::new(),
             device: device.clone(),
             queue: queue.clone(),
             renderer,
@@ -170,6 +172,10 @@ impl Manager {
             health_claims: Rc::new(RefCell::new(super::health::HealthBarClaimsRegistry::new())),
             hud_claims: Rc::new(RefCell::new(super::visibility::HudClaimsRegistry::new())),
         };
+        match manager.storage.disclosures() {
+            Ok(disclosures) => manager.disclosures = disclosures,
+            Err(error) => manager.diagnostic(None, "storage", error),
+        }
         manager.rescan(false);
         manager
     }
@@ -852,13 +858,23 @@ impl Manager {
                     entry.enabled_intent = enabled;
                     super::options::set_addon_enabled(&entry.metadata.id, enabled);
                     crate::fork_ext::bindpage::set_addon_enabled(&entry.metadata.id, enabled);
-                    let result = if let Some(s) = &mut self.named {
+                    let grant = enabled.then(|| Disclosure::for_addon(&entry.metadata));
+                    let legacy_enable = if let Some(s) = &mut self.named {
                         s.data.enabled.insert(entry.key.clone(), enabled);
                         s.dirty = true;
-                        Ok(())
+                        None
                     } else {
-                        self.storage.set_enabled(&entry.key, enabled)
+                        Some((entry.key.as_str(), enabled))
                     };
+                    let id = &entry.metadata.id;
+                    let result = self.storage.update_enable_state(
+                        legacy_enable,
+                        grant.as_ref().map(|grant| (id.as_str(), grant)),
+                    );
+                    if let Some(grant) = grant {
+                        self.disclosures.insert(id.clone(), grant);
+                        self.diagnostics.retain(|d| d.phase != "permissions" || d.id.as_ref() != Some(id));
+                    }
                     if let Err(e) = result {
                         self.diagnostic(Some(&entry.metadata.id), "storage", e);
                     }
@@ -913,6 +929,51 @@ impl Manager {
             Command::Rescan => unreachable!(),
         }
         self.entries.insert(index, entry);
+    }
+
+    /// Bind a remembered enable to its disclosure before any VM can start.
+    fn check_enabled_disclosure(&mut self, addon: &DiscoveredAddon, requested: bool) -> bool {
+        let new = Disclosure::for_addon(addon);
+        let (allowed, update) = match self.disclosures.get(&addon.id) {
+            Some(old) if old.allows(&new) => return requested,
+            // A bundled package exactly as a release of this client shipped it carries that release's own
+            // grants: re-adopted silently, the player's choice kept (fix round 3 item 5).
+            Some(_)
+                if crate::fork_ext::bundled::is_shipped_package(
+                    &addon.id,
+                    &addon.package_root,
+                    &self.root,
+                    &addon.entry,
+                ) =>
+            {
+                (true, Some(new))
+            }
+            // The player's off stays off: its new labels show, with nothing to accept (fix round 3 item 4a).
+            _ if !requested => return false,
+            Some(old) => {
+                let mut blocked = old.clone();
+                blocked.blocked = true;
+                (false, (!old.blocked).then_some(blocked))
+            }
+            None => (true, Some(new)),
+        };
+        if let Some(record) = update {
+            let persisted = self.storage.update_enable_state(None, Some((&addon.id, &record)));
+            self.disclosures.insert(addon.id.clone(), record);
+            if let Err(error) = persisted {
+                self.diagnostic(Some(&addon.id), "storage", error);
+            }
+        }
+        if !allowed && !self.diagnostics.iter().any(|d| {
+            d.phase == "permissions" && d.id.as_deref() == Some(addon.id.as_str())
+        }) {
+            self.diagnostic(
+                Some(&addon.id), "permissions",
+                "its permissions changed; enable it again to accept".into(),
+            );
+        }
+        // `allowed` is false only for a blocked enable; a shipped package keeps the player's choice
+        allowed && requested
     }
 
     fn rescan(&mut self, rendering: bool) {
@@ -980,7 +1041,8 @@ impl Manager {
                     None
                 }
             };
-            let enabled_intent = intent.or(persisted).unwrap_or(metadata.initially_enabled);
+            let requested = intent.or(persisted).unwrap_or(metadata.initially_enabled);
+            let enabled_intent = self.check_enabled_disclosure(&metadata, requested);
             super::options::set_addon_enabled(&metadata.id, enabled_intent);
             crate::fork_ext::bindpage::set_addon_enabled(&metadata.id, enabled_intent);
             if !enabled_intent {
@@ -1098,6 +1160,8 @@ mod tests {
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
+            // a folder with this process id is left by an earlier process that had the same id
+            let _ = fs::remove_dir_all(&path);
             fs::create_dir(&path).unwrap();
             Self(path)
         }
@@ -2459,6 +2523,324 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn round7c_enabled_native_package_cannot_gain_forge_grants() {
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("changing", false, "loaded = true");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        manager.queue(Command::Enable("changing".into(), true));
+        gpu.frame(&mut manager);
+        assert_eq!(manager.entries()[0].status, Status::Enabled);
+
+        fs::remove_file(scripts.0.join("changing/mod.json")).unwrap();
+        manager.queue(Command::Rescan);
+        gpu.frame(&mut manager);
+        let entry = &manager.entries()[0];
+        assert!(entry.metadata.api.is_none());
+        assert!(!entry.enabled_intent, "native enable must not authorize a Forge import");
+        assert!(!entry.initialized);
+        assert!(manager.diagnostics().iter().any(|d| {
+            d.id.as_deref() == Some("changing")
+                && d.message.contains("its permissions changed; enable it again to accept")
+        }));
+
+        drop(manager);
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        assert!(!manager.entries()[0].enabled_intent, "the refusal survives restart");
+        manager.queue(Command::Enable("changing".into(), true));
+        gpu.frame(&mut manager);
+        assert_eq!(manager.entries()[0].status, Status::Enabled);
+    }
+
+    #[test]
+    fn round7c_legacy_enable_adopts_once_then_refuses_new_grants_on_restart() {
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("expanding", false, "loaded = true");
+        let found = super::super::discovery::discover(&scripts.0);
+        let key = Storage::key(&found.addons[0]).unwrap();
+        let storage = Storage::new(Some(config.0.clone()));
+        storage.set_enabled(&key, true).unwrap();
+
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        assert_eq!(manager.entries()[0].status, Status::Enabled);
+        assert!(manager.diagnostics().is_empty(), "{:?}", manager.diagnostics());
+        drop(manager);
+        let manifest = scripts.0.join("expanding/mod.json");
+        let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        raw["capabilities"] = serde_json::json!(["eqoa.actions.command"]);
+        fs::write(&manifest, serde_json::to_vec(&raw).unwrap()).unwrap();
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        assert!(!manager.entries()[0].enabled_intent, "the legacy enable was already adopted");
+        assert!(manager.diagnostics().iter().any(|d| {
+            d.id.as_deref() == Some("expanding")
+                && d.message.contains("its permissions changed; enable it again to accept")
+        }));
+    }
+
+    /// Fix round 3 item 4a: a mod the player turned off that widens its grants just shows its new labels and
+    /// stays off: no "permissions changed" line and no blocked record, so enabling it later is one click.
+    #[test]
+    fn round7c_disabled_mod_widening_its_grants_gets_no_permissions_line() {
+        let Some(mut gpu) = Gpu::new() else {
+            eprintln!("SKIP round7c disabled-mod grants: no GPU adapter");
+            return;
+        };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("quiet", false, "loaded = true");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        manager.queue(Command::Enable("quiet".into(), true));
+        gpu.frame(&mut manager);
+        manager.queue(Command::Enable("quiet".into(), false));
+        gpu.frame(&mut manager);
+        drop(manager);
+        let manifest = scripts.0.join("quiet/mod.json");
+        let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        raw["capabilities"] = serde_json::json!(["eqoa.actions.command"]);
+        fs::write(&manifest, serde_json::to_vec(&raw).unwrap()).unwrap();
+
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        assert!(!manager.entries()[0].enabled_intent, "the player's off stays off");
+        assert!(
+            !manager.diagnostics().iter().any(|d| d.message.contains("its permissions changed")),
+            "{:?}",
+            manager.diagnostics()
+        );
+        manager.queue(Command::Enable("quiet".into(), true));
+        gpu.frame(&mut manager);
+        assert_eq!(manager.entries()[0].status, Status::Enabled, "one enable accepts the new grants");
+        drop(manager);
+        let manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        assert!(manager.entries()[0].enabled_intent, "and that choice holds on restart");
+    }
+
+    /// Stores, for every package found in `mods`, an enable of `enabled` bound to a narrower disclosure than its
+    /// manifest's (what an earlier release with fewer grants would have recorded).
+    fn round7c_bind_older_release(config: &Path, mods: &Path, enabled: &[(&str, bool)]) {
+        let storage = Storage::new(Some(config.to_path_buf()));
+        for addon in super::super::discovery::discover(mods).addons {
+            let Some((_, on)) = enabled.iter().find(|(id, _)| *id == addon.id) else { continue };
+            let older = super::super::storage::Disclosure::narrower_for_test(&addon);
+            storage
+                .update_enable_state(Some((&Storage::key(&addon).unwrap(), *on)), Some((&addon.id, &older)))
+                .unwrap();
+        }
+    }
+
+    fn round7c_permissions_line(manager: &Manager, id: &str) -> bool {
+        manager.diagnostics().iter().any(|d| {
+            d.id.as_deref() == Some(id) && d.message.contains("its permissions changed; enable it again to accept")
+        })
+    }
+
+    /// Fix round 3 item 5: a bundled package whose files are the shipped ones re-adopts the wider grants a new
+    /// release gives it, silently, and stays as the player had it; the same package with an edited file, or a
+    /// third-party package borrowing a bundled id, is asked again like any other.
+    #[test]
+    fn round7c_shipped_bundled_package_adopts_its_own_wider_grants() {
+        let Some(gpu) = Gpu::new() else {
+            eprintln!("SKIP round7c bundled exemption: no GPU adapter");
+            return;
+        };
+        let config = Scratch::new();
+        let mods = Scratch::new();
+        crate::fork_ext::bundled::install_bundled_mods(&mods.0, Some(&config.0)).unwrap();
+        round7c_bind_older_release(&config.0, &mods.0, &[("eqoa_bag_viewer", true), ("eqoa_stats_box", false)]);
+        let manager = gpu.manager(&mods.0, Some(config.0.clone()));
+        let entry = |id: &str| manager.entries().iter().find(|e| e.metadata.id == id).unwrap().enabled_intent;
+        assert!(entry("eqoa_bag_viewer"), "the shipped package stays enabled");
+        assert!(!entry("eqoa_stats_box"), "and a disabled one stays disabled");
+        assert!(!round7c_permissions_line(&manager, "eqoa_bag_viewer"), "{:?}", manager.diagnostics());
+        assert!(!round7c_permissions_line(&manager, "eqoa_stats_box"), "{:?}", manager.diagnostics());
+        drop(manager);
+
+        // the player edited a shipped file: no longer the shipped package
+        let edited = crate::fork_ext::bundled::EMBEDDED_FILES
+            .iter()
+            .find(|f| f.package == "eqoa_bag_viewer" && f.path.ends_with(".lua"))
+            .unwrap();
+        let path = mods.0.join(edited.path);
+        let mut bytes = fs::read(&path).unwrap();
+        bytes.extend_from_slice(b"\n-- edited by the player\n");
+        fs::write(&path, bytes).unwrap();
+        round7c_bind_older_release(&config.0, &mods.0, &[("eqoa_bag_viewer", true)]);
+        let manager = gpu.manager(&mods.0, Some(config.0.clone()));
+        let bag = manager.entries().into_iter().find(|e| e.metadata.id == "eqoa_bag_viewer").unwrap();
+        assert!(!bag.enabled_intent, "an edited bundled package is asked again");
+        assert!(round7c_permissions_line(&manager, "eqoa_bag_viewer"), "{:?}", manager.diagnostics());
+        drop(manager);
+
+        // a third-party package that copies the shipped files and id into its own folder
+        let other_config = Scratch::new();
+        let other = Scratch::new();
+        let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods/eqoa_bag_viewer");
+        copy_tree(&from, &other.0.join("bag_viewer_copy"));
+        round7c_bind_older_release(&other_config.0, &other.0, &[("eqoa_bag_viewer", true)]);
+        let manager = gpu.manager(&other.0, Some(other_config.0.clone()));
+        let copy = manager.entries().into_iter().find(|e| e.metadata.id == "eqoa_bag_viewer").unwrap();
+        assert!(!copy.enabled_intent, "a borrowed bundled id gets no exemption");
+        assert!(round7c_permissions_line(&manager, "eqoa_bag_viewer"), "{:?}", manager.diagnostics());
+    }
+
+    fn copy_tree(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_tree(&entry.path(), &target);
+            } else {
+                fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+
+    /// One bundled-exemption case: the bundled set installed in a fresh mods folder (`install`), `setup`
+    /// changes it, an earlier release's narrower enable is bound for `id`, and a manager starts on it.
+    /// Returns whether `id` came back enabled and whether it got the permissions line.
+    fn round7c_bundle_case(gpu: &Gpu, id: &str, install: bool, setup: impl FnOnce(&Path)) -> (bool, bool) {
+        let config = Scratch::new();
+        let mods = Scratch::new();
+        if install {
+            crate::fork_ext::bundled::install_bundled_mods(&mods.0, Some(&config.0)).unwrap();
+        }
+        setup(&mods.0);
+        round7c_bind_older_release(&config.0, &mods.0, &[(id, true)]);
+        let manager = gpu.manager(&mods.0, Some(config.0.clone()));
+        let entry = manager.entries().into_iter().find(|e| e.metadata.id == id).expect("package found");
+        (entry.enabled_intent, round7c_permissions_line(&manager, id))
+    }
+
+    /// A manifest that takes over a bundled package's id with its own entry and wide grants.
+    fn round7c_hijack(folder: &Path, id: &str) {
+        fs::write(
+            folder.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schemaVersion": 1, "runtime": "lua", "api": "eqoa/1", "id": id, "name": id,
+                "entry": "evil.lua", "capabilities": ["eqoa.actions.*"]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(folder.join("evil.lua"), "-- not shipped\n").unwrap();
+    }
+
+    /// Fix round 4 item 1: the exemption holds only for the exact shipped package, at the bundled install
+    /// location, with exactly the shipped files, and with discovery's manifest and entry among them.
+    #[test]
+    fn round7c_bundled_exemption_only_for_the_exact_shipped_package() {
+        let Some(gpu) = Gpu::new() else {
+            eprintln!("SKIP round7c exact shipped package: no GPU adapter");
+            return;
+        };
+        let asked = (false, true);
+        assert_eq!(round7c_bundle_case(&gpu, "eqoa_bag_viewer", true, |_| {}), (true, false), "the shipped package");
+        assert_eq!(
+            round7c_bundle_case(&gpu, "eqoa_bag_viewer", true, |m| round7c_hijack(&m.join("eqoa_bag_viewer"), "eqoa_bag_viewer")),
+            asked,
+            "scenario A, native: shipped files untouched, a manifest.json and entry added"
+        );
+        assert_eq!(
+            round7c_bundle_case(&gpu, "arpg_ui", true, |m| round7c_hijack(&m.join("arpg_ui"), "arpg_ui")),
+            asked,
+            "scenario A, Forge import: its shipped set has no manifest"
+        );
+        assert_eq!(
+            round7c_bundle_case(&gpu, "eqoa_bag_viewer", false, |m| {
+                let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods/eqoa_bag_viewer");
+                copy_tree(&from, &m.join("other/scripts/eqoa_bag_viewer"));
+            }),
+            asked,
+            "scenario B: the shipped files in a pack's scripts folder, not the bundled install location"
+        );
+        assert_eq!(
+            round7c_bundle_case(&gpu, "eqoa_bag_viewer", true, |m| {
+                fs::write(m.join("eqoa_bag_viewer/modules/extra.lua"), "-- added\n").unwrap()
+            }),
+            asked,
+            "an extra file in a subfolder"
+        );
+        assert_eq!(
+            round7c_bundle_case(&gpu, "eqoa_bag_viewer", true, |m| {
+                fs::remove_file(m.join("eqoa_bag_viewer/README.md")).unwrap()
+            }),
+            asked,
+            "a shipped file missing"
+        );
+    }
+
+    /// Fix round 4 item 2: an older build that toggles one package (Q) leaves every other package's record
+    /// standing, so another package (P) that widens its grants in an update is still asked again.
+    #[test]
+    fn round7c_older_build_toggle_keeps_other_packages_records() {
+        let Some(mut gpu) = Gpu::new() else {
+            eprintln!("SKIP round7c per-package staleness: no GPU adapter");
+            return;
+        };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("p_mod", false, "loaded = true");
+        scripts.package("q_mod", false, "loaded = true");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        manager.queue(Command::Enable("p_mod".into(), true));
+        manager.queue(Command::Enable("q_mod".into(), true));
+        gpu.frame(&mut manager);
+        drop(manager);
+
+        // 0.6.0 turns Q off: its writer rewrites state.json whole, two keys
+        let found = super::super::discovery::discover(&scripts.0);
+        let q_key = Storage::key(found.addons.iter().find(|a| a.id == "q_mod").unwrap()).unwrap();
+        let state = config.0.join("addons/state.json");
+        let mut enabled = serde_json::from_slice::<serde_json::Value>(&fs::read(&state).unwrap()).unwrap()["enabled"].clone();
+        enabled[&q_key] = serde_json::json!(false);
+        fs::write(&state, serde_json::to_vec(&serde_json::json!({"schemaVersion": 1, "enabled": enabled})).unwrap()).unwrap();
+        // P's update widens its grants
+        let manifest = scripts.0.join("p_mod/mod.json");
+        let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        raw["capabilities"] = serde_json::json!(["eqoa.actions.command"]);
+        fs::write(&manifest, serde_json::to_vec(&raw).unwrap()).unwrap();
+
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        let entry = |id: &str| manager.entries().into_iter().find(|e| e.metadata.id == id).unwrap();
+        assert!(!entry("p_mod").enabled_intent, "P's wider grants are not adopted silently");
+        assert!(round7c_permissions_line(&manager, "p_mod"), "{:?}", manager.diagnostics());
+        assert!(!entry("q_mod").enabled_intent, "Q is as the older build left it");
+        assert!(!round7c_permissions_line(&manager, "q_mod"), "{:?}", manager.diagnostics());
+    }
+
+    #[test]
+    fn round7c_bundled_packages_keep_their_enabled_disclosures() {
+        let Some(gpu) = Gpu::new() else { return };
+        let config = Scratch::new();
+        let bundled = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods");
+        let storage = Storage::new(Some(config.0.clone()));
+        let found = super::super::discovery::discover(&bundled);
+        assert!(found.diagnostics.is_empty(), "{:?}", found.diagnostics);
+        for addon in &found.addons {
+            storage.set_enabled(&Storage::key(addon).unwrap(), true).unwrap();
+        }
+        let mut manager = gpu.manager(&bundled, Some(config.0.clone()));
+        assert!(manager.entries().iter().all(|entry| entry.enabled_intent));
+        assert!(manager.diagnostics().is_empty(), "{:?}", manager.diagnostics());
+        manager.rescan(false);
+        assert!(manager.entries().iter().all(|entry| entry.enabled_intent));
+        drop(manager);
+        let manager = gpu.manager(&bundled, Some(config.0.clone()));
+        assert_eq!(manager.entries().len(), found.addons.len());
+        assert!(manager.entries().iter().all(|entry| entry.enabled_intent));
+        assert!(manager.diagnostics().is_empty(), "{:?}", manager.diagnostics());
+    }
+
     #[test]
     fn forge_manager_successful_migration_is_silent_and_failed_migration_surfaces_diagnostic() {
         let Some(mut gpu) = Gpu::new() else {
@@ -2748,5 +3130,105 @@ mod tests {
 
         manager.shutdown();
         super::super::action_broker::reset_all_for_test();
+    }
+
+    /// Round 7 Part C fix M4: the eight events the manager's own work emits, each driven through its production
+    /// caller: enabling (a mod's first frame), a frame, the settings page, a texture made from memory that
+    /// succeeds and one that fails, a write to a declared shared file, a declared command sent between mods,
+    /// and disabling.
+    #[test]
+    fn round7c_manager_events_come_from_their_production_callers() {
+        let Some(mut gpu) = Gpu::new() else {
+            eprintln!("SKIP round7c_manager_events_come_from_their_production_callers: no GPU adapter");
+            return;
+        };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package(
+            "probe",
+            true,
+            r#"
+            seen, problems, frames = {}, {}, 0
+            for _, name in ipairs({'enabled', 'disabling', 'settings.render', 'resource.ready',
+                    'resource.failed', 'shared.changed', 'mod.command'}) do
+                assert(eqoa.events.on(name, function(e) seen[name] = e end))
+            end
+            local function try(what, ok, ...)
+                if not ok then problems[#problems + 1] = what .. ': ' .. tostring((...)) end
+            end
+            assert(eqoa.events.on('render', function(e)
+                seen.render = e
+                frames = frames + 1
+                if frames == 2 then
+                    try('texture', pcall(UiForge.CreateTextureFromMemory, string.char(255, 0, 0, 255), 1, 1))
+                    if pcall(UiForge.CreateTextureFromMemory, 'xx', 2, 2) then
+                        problems[#problems + 1] = 'a 2x2 texture from 2 bytes was accepted'
+                    end
+                    try('write', pcall(function() assert(eqoa.files.write('journal.json', '{}')) end))
+                    try('send', pcall(function() assert(eqoa.mods.send('probe', 'refresh', {id = 17})) end))
+                end
+            end))
+        "#,
+        );
+        let manifest = scripts.0.join("probe/mod.json");
+        let mut meta: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        meta["entryMode"] = serde_json::json!("once");
+        meta["shares"] = serde_json::json!(["data/journal.json"]);
+        meta["commands"] = serde_json::json!(["refresh"]);
+        fs::write(&manifest, serde_json::to_vec(&meta).unwrap()).unwrap();
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        for _ in 0..4 {
+            gpu.frame(&mut manager);
+        }
+        let probe = lua(&manager, "probe");
+        manager.queue(Command::Settings("probe".into()));
+        gpu.begin();
+        manager.frame(Snapshot {
+            in_game: false,
+            start_menu: true,
+            ..Snapshot::default()
+        });
+        gpu.render();
+        manager.after_render();
+        gpu.frame(&mut manager);
+        manager.queue(Command::Enable("probe".into(), false));
+        gpu.frame(&mut manager);
+        super::super::native_tests::install_field_check_lua(&probe).unwrap();
+        probe
+            .globals()
+            .set(
+                "manager_events",
+                probe
+                    .create_sequence_from(super::super::native_tests::MANAGER_EVENTS.iter().copied())
+                    .unwrap(),
+            )
+            .unwrap();
+        let diagnostics = manager
+            .diagnostics()
+            .iter()
+            .map(|d| d.message.clone())
+            .collect::<Vec<_>>()
+            .join("; ");
+        probe.globals().set("diagnostics", diagnostics).unwrap();
+        let checked = probe
+            .load(
+                r#"
+                assert(#problems == 0, table.concat(problems, '; ') .. ' | ' .. diagnostics)
+                local missing = {}
+                for _, name in ipairs(manager_events) do
+                    if not seen[name] then missing[#missing + 1] = name end
+                end
+                assert(#missing == 0, 'the manager did not emit: ' .. table.concat(missing, ', ') .. ' | ' .. diagnostics)
+                assert(seen['mod.command'].data.args.id == 17)
+                assert(seen['shared.changed'].data.path == 'data/journal.json', seen['shared.changed'].data.path)
+                assert(seen['resource.ready'].data.kind == 'texture')
+                assert(seen['resource.failed'].data.kind == 'texture')
+                event_fields(seen, manager_events)
+            "#,
+            )
+            .exec();
+        manager.shutdown();
+        checked.unwrap();
     }
 }

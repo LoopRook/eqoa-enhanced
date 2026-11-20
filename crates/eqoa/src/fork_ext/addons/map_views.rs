@@ -178,39 +178,93 @@ fn info(lua: &Lua, lease: &Lease) -> Result<Value> {
     )?;
     Ok(Value::Table(t))
 }
+/// The player's waypoint can be moved: in a world, with the Map on.
+fn waypoint_ready(lua: &mlua::Lua, symbol: &str) -> std::result::Result<(), (&'static str, String)> {
+    if !CORE.with(|c| c.borrow().view.in_world) {
+        return Err(("not_in_world", "enter a loaded world first".into()));
+    }
+    if !crate::settings::map() {
+        return Err(("unavailable", "Map is turned off".into()));
+    }
+    super::native::require_capability(lua, symbol, "eqoa.map.waypoint")
+}
+
 pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
+    super::native::describe(lua, "eqoa.map.waypoint", "supported", Some(7), "capability to set or clear a personal waypoint");
     for (name, status, reason) in [
         ("images", "unsupported", "replaced by eqoa.map.view"),
         ("load_image", "unsupported", "replaced by eqoa.map.view"),
-        (
-            "set_waypoint",
-            "not_yet",
-            "not built; use eqoa.map.set_guide",
-        ),
-        (
-            "clear_waypoint",
-            "not_yet",
-            "not built; use eqoa.map.set_guide",
-        ),
     ] {
-        let symbol = format!("eqoa.map.{name}");
-        bind(
+        super::native::refuse_native(
             lua,
             "map",
             name,
-            lua.create_function(move |lua, _: mlua::MultiValue| {
-                error(lua, &symbol, status, reason)
-            })?,
-        )?;
-        super::native::describe(
-            lua,
-            &format!("eqoa.map.{name}"),
             status,
-            if status == "not_yet" { Some(4) } else { None },
+            (status == "not_yet").then_some(7),
             reason,
-        );
+        )?;
     }
+
+    bind(
+        lua,
+        "map",
+        "set_waypoint",
+        lua.create_function(|lua, point: Value| {
+            super::action_broker::enqueue_map_lua(lua, "eqoa.map.set_waypoint", |vm, addon| {
+                waypoint_ready(lua, "eqoa.map.set_waypoint")?;
+                let Value::Table(point) = point else {
+                    return Err(("invalid_argument", "point must be {world_id, x, z, label?}".into()));
+                };
+                let field = |name: &str| point.get::<Value>(name).unwrap_or(Value::Nil);
+                let world = match field("world_id") {
+                    Value::Integer(w) => i32::try_from(w).ok(),
+                    Value::Number(w) if w.fract() == 0.0 && w.abs() <= i32::MAX as f64 => Some(w as i32),
+                    _ => None,
+                }
+                .ok_or(("invalid_argument", "world_id must be a whole number".to_string()))?;
+                let coordinate = |name: &str| match field(name) {
+                    Value::Integer(v) => Ok(v as f32),
+                    Value::Number(v) if v.is_finite() => Ok(v as f32),
+                    _ => Err(("invalid_argument", format!("{name} must be a finite number"))),
+                };
+                let (x, z) = (coordinate("x")?, coordinate("z")?);
+                let label = match field("label") {
+                    Value::Nil => None,
+                    Value::String(s) if s.as_bytes().len() <= 128 => Some(
+                        s.to_str()
+                            .map_err(|_| ("invalid_argument", "label must be UTF-8".to_string()))?
+                            .to_string(),
+                    ),
+                    _ => {
+                        return Err((
+                            "invalid_argument",
+                            "label must be a string of at most 128 bytes".into(),
+                        ));
+                    }
+                };
+                Ok(super::action_broker::ActionKind::SetWaypoint {
+                    vm,
+                    addon: addon.to_owned(),
+                    world,
+                    x,
+                    z,
+                    label,
+                })
+            })
+        })?,
+    )?;
+    bind(
+        lua,
+        "map",
+        "clear_waypoint",
+        lua.create_function(|lua, ()| {
+            super::action_broker::enqueue_map_lua(lua, "eqoa.map.clear_waypoint", |vm, _| {
+                waypoint_ready(lua, "eqoa.map.clear_waypoint")?;
+                Ok(super::action_broker::ActionKind::ClearWaypoint { vm })
+            })
+        })?,
+    )?;
 
     bind(
         lua,

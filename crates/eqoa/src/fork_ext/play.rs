@@ -746,6 +746,10 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         crate::fork_ext::addons::action_broker::update_native_snapshot(snapshot);
         crate::fork_ext::addons::native_core::iteration(_game_step);
         if _game_step {
+            // only against pins the map has read: a fresh map after a login holds none yet
+            if _play.map.api_waypoints_loaded() {
+                crate::fork_ext::addons::map_waypoint::reconcile(|world| _play.map.waypoint(world));
+            }
             if let Some(pending) = PENDING_BANK_TX.with(|b| {
                 if !bank_session_open(_play) {
                     b.borrow_mut().take()
@@ -837,10 +841,9 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
             crate::fork_ext::addons::action_broker::step_tick(snapshot, |kind| {
                 dispatch_broker_action(_play, kind)
             });
-            for expired_kind in crate::fork_ext::addons::action_broker::take_expired_staged_kinds() {
-                clear_staged_for_kind(expired_kind);
-            }
+            discard_expired_staged();
             let reqs = crate::fork_ext::addons::actions::take_action_requests();
+            drain_released_waypoints(_play);
             if ready {
                 if reqs.map && crate::settings::map() && _play.addon_input_available() {
                     _play.map.show();
@@ -885,6 +888,31 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
 pub(super) fn dropped(_play: &mut Play) {
     #[cfg(not(target_arch = "wasm32"))]
     net::fork_record::drain(&mut _play.session);
+    // a mod disabled since the last game step: its pins go before the world does (a logout)
+    #[cfg(not(target_arch = "wasm32"))]
+    drain_released_waypoints(_play);
+}
+
+/// Clears the pins disabled mods still own, once the map has read the window's pins; until then the
+/// released records wait (for this map's first frame, or the next login's).
+#[cfg(not(target_arch = "wasm32"))]
+fn drain_released_waypoints(play: &mut Play) {
+    if !play.map.api_waypoints_loaded() {
+        return;
+    }
+    for world in crate::fork_ext::addons::map_waypoint::take_released(|world| play.map.waypoint(world)) {
+        play.map.api_set_waypoint(world, None);
+    }
+}
+
+/// Drops staged native sends whose broker request already ended (cancelled, timed out, its batch stopped).
+/// Runs each step and again right before the merchant, loot and bank send hooks, so a stop that lands
+/// between the step and the native window's frame is not sent anyway.
+#[cfg(not(target_arch = "wasm32"))]
+fn discard_expired_staged() {
+    for expired_kind in crate::fork_ext::addons::action_broker::take_expired_staged_kinds() {
+        clear_staged_for_kind(expired_kind);
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -955,6 +983,7 @@ pub(crate) fn npcw_requests(
         if !_merch_out.is_empty() {
             mark_player_activity(Subsystem::Merchant);
         }
+        discard_expired_staged();
         let Some(req) = PENDING_NPCW_TX.with(|p| *p.borrow()) else {
             return;
         };
@@ -1097,6 +1126,7 @@ pub(crate) fn bank_requests(_play: &Play, _out: &mut Vec<crate::bank::BankOut>) 
         if !_out.is_empty() {
             mark_player_activity(Subsystem::Bank);
         }
+        discard_expired_staged();
         let Some(req) = PENDING_BANK_TX.with(|b| *b.borrow()) else {
             return;
         };
@@ -1700,15 +1730,17 @@ fn dispatch_broker_action(
                 .map_or(0, |c| c.npc_flags);
             if let Some(vm) = crate::fork_ext::addons::action_broker::current_dispatch_vm() {
                 use crate::fork_ext::addons::window_takeover::{self, TakeoverKind};
-                if *kind == TalkKind::Merchant
-                    || (*kind == TalkKind::AnyFriendly && target_flags & 1 != 0)
+                if (*kind == TalkKind::Merchant
+                    || (*kind == TalkKind::AnyFriendly && target_flags & 1 != 0))
+                    && window_takeover::arm_pending_open(TakeoverKind::Merchant, vm, npc_id)
                 {
-                    let _ = window_takeover::arm_pending_open(TakeoverKind::Merchant, vm, npc_id);
+                    crate::fork_ext::addons::action_broker::note_dispatch_claim(TakeoverKind::Merchant);
                 }
-                if *kind == TalkKind::Bank
-                    || (*kind == TalkKind::AnyFriendly && target_flags & 2 != 0)
+                if (*kind == TalkKind::Bank
+                    || (*kind == TalkKind::AnyFriendly && target_flags & 2 != 0))
+                    && window_takeover::arm_pending_open(TakeoverKind::Bank, vm, npc_id)
                 {
-                    let _ = window_takeover::arm_pending_open(TakeoverKind::Bank, vm, npc_id);
+                    crate::fork_ext::addons::action_broker::note_dispatch_claim(TakeoverKind::Bank);
                 }
             }
             {
@@ -1972,6 +2004,45 @@ fn dispatch_broker_action(
                 }
             }
             DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::SetWaypoint { vm, addon, world, x, z, label } => {
+            if !crate::settings::map() {
+                return DispatchOutcome::Refused {
+                    code: "unavailable",
+                    reason: "Map is turned off".into(),
+                };
+            }
+            if let Err((code, reason)) = play.map.api_validate_waypoint(*world, play.world_id(), [*x, *z]) {
+                return DispatchOutcome::Refused { code, reason: reason.into() };
+            }
+            play.map.api_set_waypoint(*world, Some([*x, *z]));
+            crate::fork_ext::addons::map_waypoint::placed(*vm, addon, *world, [*x, *z], label.clone());
+            DispatchOutcome::Completed {
+                detail: Some(serde_json::json!({"world_id": world, "x": x, "z": z})),
+            }
+        }
+        ActionKind::ClearWaypoint { vm } => {
+            if !crate::settings::map() {
+                return DispatchOutcome::Refused {
+                    code: "unavailable",
+                    reason: "Map is turned off".into(),
+                };
+            }
+            play.map.api_load_waypoints();
+            match crate::fork_ext::addons::map_waypoint::owned_by(*vm, |world| play.map.waypoint(world)) {
+                Some(world) => {
+                    play.map.api_set_waypoint(world, None);
+                    crate::fork_ext::addons::map_waypoint::cleared(world);
+                    DispatchOutcome::Completed {
+                        detail: Some(serde_json::json!({"world_id": world})),
+                    }
+                }
+                None => DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "the waypoint is not this mod's: the player or another mod moved it, or it was reached"
+                        .into(),
+                },
+            }
         }
         ActionKind::Stop => {
             play.auto_attack = false;
@@ -3120,7 +3191,7 @@ fn dispatch_window_action(
                 Err(e) => e,
             }
         }
-        ActionKind::InputText { win, text, submit } => {
+        ActionKind::InputText { win, text, submit, grants } => {
             let w = match live(play, win) {
                 Ok(w) => w,
                 Err(e) => return e,
@@ -3136,6 +3207,31 @@ fn dispatch_window_action(
             }
             if crate::editbox::paste_chars(text, true) != *text {
                 return refuse("invalid_argument", "the text has characters the game's keyboard cannot type");
+            }
+            // What the open box sends on submit (`EDIT_BOXES`, `Play::edit_done`) decides what more it needs,
+            // judged now, submitted or left to send. The chat editor's line: the Who list's Tell sends
+            // `/t <name> <text>`, otherwise the text itself.
+            {
+                use crate::fork_ext::addons::window_actions::{EditBoxNeed, edit_box_allows, edit_box_need};
+                let need = match edit_box_need(play.edit.purpose) {
+                    None => return refuse("unsupported", "this text box is not one a mod can fill"),
+                    Some(EditBoxNeed::Refused(code)) => return refuse(code, "this text box is never filled by a mod"),
+                    Some(need) => need,
+                };
+                let line = match (&play.who_tell, need) {
+                    (Some(name), EditBoxNeed::Line) => format!("/t {name} {text}"),
+                    _ => text.clone(),
+                };
+                if !text.is_empty() && !edit_box_allows(need, *grants, &line) {
+                    return refuse(
+                        "permission_denied",
+                        match need {
+                            EditBoxNeed::Chat => "this box sends chat to a channel: requires eqoa.actions.chat",
+                            EditBoxNeed::Line if !line.starts_with('/') => "the editor would send chat: requires eqoa.actions.chat",
+                            _ => "this box sends a command: requires eqoa.actions.command",
+                        },
+                    );
+                }
             }
             let old = play.edit.text.clone();
             let now = play.session.now() as i64;

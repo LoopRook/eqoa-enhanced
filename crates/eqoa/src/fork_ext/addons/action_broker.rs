@@ -153,10 +153,16 @@ pub(crate) enum ActionKind {
     SelectRow { win: WinTarget, row: usize },
     ActivateRow { win: WinTarget, row: usize },
     DialogAnswer { win: WinTarget, option: usize },
-    InputText { win: WinTarget, text: String, submit: bool },
+    /// `grants`: whether the mod holds `eqoa.actions.chat` and `eqoa.actions.command`, taken when queued, so
+    /// dispatch can judge the line the chat editor will send then (H1's rule, fix round 3 item 3).
+    InputText { win: WinTarget, text: String, submit: bool, grants: LineGrants },
     MenuCommand { win: WinTarget, command: String },
     OpenLoot { entity_id: Option<u32> },
     Talk { entity_id: Option<u32>, kind: TalkKind },
+    /// `eqoa.map.set_waypoint`: the player's own waypoint of `world` moved to (`x`, `z`) by mod `addon`.
+    SetWaypoint { vm: u64, addon: String, world: i32, x: f32, z: f32, label: Option<String> },
+    /// `eqoa.map.clear_waypoint`: VM `vm`'s own waypoint taken away.
+    ClearWaypoint { vm: u64 },
 }
 
 impl ActionKind {
@@ -205,6 +211,8 @@ impl ActionKind {
             Self::MenuCommand { .. } => "menu_command",
             Self::OpenLoot { .. } => "open_loot",
             Self::Talk { .. } => "talk",
+            Self::SetWaypoint { .. } => "set_waypoint",
+            Self::ClearWaypoint { .. } => "clear_waypoint",
         }
     }
 
@@ -249,7 +257,9 @@ impl ActionKind {
             | Self::InputText { .. }
             | Self::MenuCommand { .. }
             | Self::OpenLoot { .. }
-            | Self::Talk { .. } => None,
+            | Self::Talk { .. }
+            | Self::SetWaypoint { .. }
+            | Self::ClearWaypoint { .. } => None,
         }
     }
 
@@ -303,6 +313,20 @@ impl NativeSnapshot {
             Subsystem::Loot => self.loot_busy,
             Subsystem::Inventory => self.inventory_busy,
         }
+    }
+}
+
+/// The line grants a mod held when it queued text for a chat editor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LineGrants {
+    pub chat: bool,
+    pub command: bool,
+}
+
+impl LineGrants {
+    /// Whether these grants cover a line the game sends: a slash line is a command, any other line chat.
+    pub(crate) fn allow(self, line: &str) -> bool {
+        if super::chat::line_capability(line) == "eqoa.actions.command" { self.command } else { self.chat }
     }
 }
 
@@ -431,6 +455,9 @@ struct ActiveBatch {
     corpse_target_id: Option<u32>,
     corpse_reopen: Option<CorpseReopen>,
     takeover_kinds: [bool; 3],
+    /// Claims a step actually used once dispatched (a `talk` that armed a merchant or bank open): the
+    /// game-windows switch stops this batch when it releases one of them (M1).
+    used_claims: [bool; 3],
 }
 
 #[derive(Default)]
@@ -443,6 +470,10 @@ struct VmBroker {
     active_batch: Option<ActiveBatch>,
     retained_batches: VecDeque<BatchResultRecord>,
     pending_batch_events: VecDeque<(bool, BatchResultRecord)>,
+    /// A stopped batch whose step was already on the wire: its terminal result waits for that step's
+    /// server reply (request id, record), so the count it reports includes a late success (M2).
+    /// Every one still waiting (fix round 3 item 4b): a later stop never drops an earlier one's result.
+    stopped_awaiting: Vec<(u64, BatchResultRecord)>,
     tokens: u32,
     last_refill_tick: u64,
 }
@@ -458,6 +489,7 @@ impl VmBroker {
             active_batch: None,
             retained_batches: VecDeque::new(),
             pending_batch_events: VecDeque::new(),
+            stopped_awaiting: Vec::new(),
             tokens: TOKEN_BUCKET_BURST,
             last_refill_tick: now_tick,
         }
@@ -483,10 +515,8 @@ impl VmBroker {
         now_tick: u64,
         failed_step: Option<usize>,
         emit_event: bool,
-    ) {
-        let Some(batch) = self.active_batch.take() else {
-            return;
-        };
+    ) -> Option<BatchResultRecord> {
+        let batch = self.active_batch.take()?;
         let rec = BatchResultRecord {
             id: batch.id,
             vm: batch.vm,
@@ -504,13 +534,14 @@ impl VmBroker {
         };
         self.upsert_batch_retained(rec.clone());
         if emit_event {
-            self.pending_batch_events.push_back((true, rec));
+            self.pending_batch_events.push_back((true, rec.clone()));
         }
         for kind in super::window_takeover::TakeoverKind::ALL {
             if batch.takeover_kinds[kind as usize] {
                 super::window_takeover::end_session_for_vm(batch.vm, kind);
             }
         }
+        Some(rec)
     }
 
     fn emit_batch_progress(&mut self) {
@@ -545,6 +576,16 @@ impl VmBroker {
         code: Option<&str>,
         reason: Option<String>,
     ) {
+        if let Some(at) = self.stopped_awaiting.iter().position(|(waiting, _)| *waiting == req_id) {
+            let (_, mut rec) = self.stopped_awaiting.swap_remove(at);
+            if ok == Some(true) {
+                rec.completed += 1;
+            }
+            rec.completed_tick = Some(now_tick);
+            self.upsert_batch_retained(rec.clone());
+            self.pending_batch_events.push_back((true, rec));
+            return;
+        }
         let Some(batch) = self.active_batch.as_mut() else {
             return;
         };
@@ -811,6 +852,7 @@ impl BrokerState {
                 .flatten(),
             corpse_reopen: None,
             takeover_kinds,
+            used_claims: [false; 3],
         };
         vm_state.active_batch = Some(batch);
         vm_state.upsert_batch_retained(BatchResultRecord {
@@ -861,16 +903,68 @@ impl BrokerState {
         if target_id.is_some_and(|want| want != active.id) {
             return Ok(false);
         }
-        vm_state.finish_batch(
+        // A step already sent keeps its in-flight record: its server reply still counts (M2). A step only
+        // staged for the native send is discarded here, so nothing later consumes it.
+        let mut sent_step = None;
+        if let Some(req_id) = active.waiting_req_id {
+            match vm_state.in_flight.get(&req_id).map(|f| f.native_sent) {
+                Some(true) => sent_step = Some(req_id),
+                Some(false) => {
+                    let staged = vm_state.in_flight.remove(&req_id).expect("checked above");
+                    self.expired_staged_kinds.push(staged.kind);
+                    let rec = ActionResultRecord {
+                        id: staged.id,
+                        vm: staged.vm,
+                        kind: staged.kind,
+                        state: "cancelled",
+                        phase: "dispatch",
+                        ok: Some(false),
+                        code: Some("cancelled".into()),
+                        reason: Some("the batch stopped before this step was sent".into()),
+                        queued_tick: staged.queued_tick,
+                        dispatched_tick: None,
+                        completed_tick: Some(now_tick),
+                        detail: staged.detail,
+                    };
+                    vm_state.upsert_retained(rec.clone());
+                    vm_state.pending_events.push_back(rec);
+                }
+                None => {}
+            }
+        }
+        let rec = vm_state.finish_batch(
             "stopped",
             Some(false),
             Some("cancelled"),
             Some("stopped".into()),
             now_tick,
             None,
-            true,
+            sent_step.is_none(),
         );
+        if let (Some(req_id), Some(rec)) = (sent_step, rec) {
+            vm_state.stopped_awaiting.push((req_id, rec));
+        }
         Ok(true)
+    }
+
+    /// Stops every running batch whose mod held, in `released`, a claim on a window that batch works in.
+    fn stop_batches_of_released_claims(&mut self, released: &[(u64, super::window_takeover::TakeoverKind)]) {
+        let stopping: Vec<u64> = self
+            .vms
+            .iter()
+            .filter(|(vm, state)| {
+                state.active_batch.as_ref().is_some_and(|batch| {
+                    released.iter().any(|(holder, kind)| {
+                        holder == *vm
+                            && (batch.takeover_kinds[*kind as usize] || batch.used_claims[*kind as usize])
+                    })
+                })
+            })
+            .map(|(vm, _)| *vm)
+            .collect();
+        for vm in stopping {
+            let _ = self.stop_batch(vm, None);
+        }
     }
 
     fn status(&self, req: RequestId) -> std::result::Result<Option<ActionResultRecord>, (&'static str, String)> {
@@ -1628,14 +1722,19 @@ impl BrokerState {
                         }
                         let step_req_id = self.next_id;
                         self.next_id = self.next_id.wrapping_add(1).max(1);
+                        DISPATCH_CLAIMS.with(|c| c.set([false; 3]));
                         let outcome = {
                             let _vm_guard = DispatchVmGuard::enter(vm_id);
                             dispatch(&step_kind)
                         };
+                        let used = DISPATCH_CLAIMS.with(|c| c.replace([false; 3]));
                         let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
                         if let Some(batch) = vm_state.active_batch.as_mut() {
                             let _ = batch.steps.pop_front();
                             batch.rate_wait_start_tick = None;
+                            for (seen, now) in batch.used_claims.iter_mut().zip(used) {
+                                *seen |= now;
+                            }
                         }
                         match outcome {
                             DispatchOutcome::Completed { detail } => {
@@ -1969,6 +2068,8 @@ thread_local! {
     static CURRENT_CORPSE_TARGET: Cell<Option<u32>> = const { Cell::new(None) };
     static EXPIRED_LOOT_TIMEOUT: Cell<bool> = const { Cell::new(false) };
     static DISPATCHING_VM: Cell<Option<u64>> = const { Cell::new(None) };
+    /// Claims the action being dispatched armed (indexed by `TakeoverKind`), read back by a batch step.
+    static DISPATCH_CLAIMS: Cell<[bool; 3]> = const { Cell::new([false; 3]) };
 }
 
 struct DispatchVmGuard(Option<u64>);
@@ -1982,6 +2083,15 @@ impl Drop for DispatchVmGuard {
     fn drop(&mut self) {
         DISPATCHING_VM.with(|d| d.set(self.0));
     }
+}
+
+/// The action being dispatched armed `kind`'s claim (a `talk` reaching a merchant or bank, an `open_loot`).
+pub(crate) fn note_dispatch_claim(kind: super::window_takeover::TakeoverKind) {
+    DISPATCH_CLAIMS.with(|c| {
+        let mut used = c.get();
+        used[kind as usize] = true;
+        c.set(used);
+    });
 }
 
 pub(crate) fn current_dispatch_vm() -> Option<u64> {
@@ -3000,9 +3110,18 @@ pub(crate) fn enqueue_lua_with(
     symbol: &str,
     build: impl FnOnce() -> std::result::Result<ActionKind, (&'static str, String)>,
 ) -> Result<mlua::MultiValue> {
+    enqueue_lua_with_grant(lua, symbol, symbol, build)
+}
+
+fn enqueue_lua_with_grant(
+    lua: &Lua,
+    symbol: &str,
+    capability: &str,
+    build: impl FnOnce() -> std::result::Result<ActionKind, (&'static str, String)>,
+) -> Result<mlua::MultiValue> {
     let vm = super::native_events::bus(lua).borrow().vm;
     let addon = session(lua).borrow().addon.clone();
-    if let Err((code, msg)) = require_capability(lua, symbol, symbol) {
+    if let Err((code, msg)) = require_capability(lua, symbol, capability) {
         return error(lua, symbol, code, &msg);
     }
     let kind = match build() {
@@ -3021,6 +3140,25 @@ pub(crate) fn enqueue_lua(
     kind: ActionKind,
 ) -> Result<mlua::MultiValue> {
     enqueue_lua_with(lua, symbol, move || Ok(kind))
+}
+
+/// Queues a map alias (`eqoa.map.set_waypoint` / `clear_waypoint`, spec §7): the same request and result
+/// contract as `eqoa.actions.*`. The map binding checks the waypoint grant and world readiness.
+pub(crate) fn enqueue_map_lua(
+    lua: &Lua,
+    symbol: &str,
+    build: impl FnOnce(u64, &str) -> std::result::Result<ActionKind, (&'static str, String)>,
+) -> Result<mlua::MultiValue> {
+    let vm = super::native_events::bus(lua).borrow().vm;
+    let addon = session(lua).borrow().addon.clone();
+    let kind = match build(vm, &addon) {
+        Ok(kind) => kind,
+        Err((code, msg)) => return error(lua, symbol, code, &msg),
+    };
+    match BROKER.with(|b| b.borrow_mut().enqueue(vm, &addon, kind)) {
+        Ok(req) => lua.pack_multi((lua.create_userdata(req)?, Value::Nil)),
+        Err((code, msg)) => error(lua, symbol, code, &msg),
+    }
 }
 
 fn current_generation() -> u64 {
@@ -3162,8 +3300,8 @@ fn validate_chat_string(raw: Value, command_mode: bool) -> std::result::Result<S
         .map_err(|_| ("invalid_argument", "message text must be UTF-8".into()))?
         .trim()
         .to_string();
-    if text.is_empty() || text.len() > 255 {
-        return Err(("invalid_argument", "message length must be 1..=255 bytes".into()));
+    if text.is_empty() {
+        return Err(("invalid_argument", "message text is empty".into()));
     }
     if text.contains('\0') || text.contains('\r') || text.contains('\n') {
         return Err(("invalid_argument", "message cannot contain control newlines or NUL".into()));
@@ -3173,6 +3311,9 @@ fn validate_chat_string(raw: Value, command_mode: bool) -> std::result::Result<S
     } else {
         text
     };
+    if normalized.encode_utf16().count() >= 128 {
+        return Err(("invalid_argument", "message must be shorter than 128 UTF-16 units".into()));
+    }
     if gesture::is_forbidden_report_text(&normalized) {
         return Err((
             "permission_denied",
@@ -3180,6 +3321,18 @@ fn validate_chat_string(raw: Value, command_mode: bool) -> std::result::Result<S
         ));
     }
     Ok(normalized)
+}
+
+fn enqueue_chat_line(lua: &Lua, text: Value, command: bool) -> Result<mlua::MultiValue> {
+    let symbol = if command { "eqoa.actions.command" } else { "eqoa.actions.chat" };
+    let text = match validate_chat_string(text, command) {
+        Ok(text) => text,
+        Err((code, reason)) => return error(lua, symbol, code, &reason),
+    };
+    let capability = super::chat::line_capability(&text);
+    enqueue_lua_with_grant(lua, symbol, capability, || {
+        Ok(if command { ActionKind::Command { text } } else { ActionKind::Chat { text } })
+    })
 }
 
 fn parse_weapon_set(raw: Value) -> std::result::Result<i64, (&'static str, String)> {
@@ -3554,14 +3707,14 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua,
         "eqoa.actions.RequestId",
         "supported",
-        Some(4),
+        Some(6),
         "opaque action request handle",
     );
     describe(
         lua,
         "eqoa.actions.ActionResult",
         "supported",
-        Some(4),
+        Some(6),
         "action status and result record",
     );
     for field in [
@@ -3581,7 +3734,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             lua,
             &format!("eqoa.actions.ActionResult.{field}"),
             "supported",
-            Some(4),
+            Some(6),
             "ActionResult field",
         );
     }
@@ -3590,41 +3743,41 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua,
         "eqoa.actions.BatchId",
         "supported",
-        Some(4),
+        Some(6),
         "opaque action batch handle",
     );
     describe(
         lua,
         "eqoa.actions.BatchResult",
         "supported",
-        Some(4),
+        Some(6),
         "batch progress and completion record",
     );
     for field in BATCH_RESULT_KEYS {
-        describe(
-            lua,
-            &format!("eqoa.actions.BatchResult.{field}"),
-            "supported",
-            Some(4),
-            "BatchResult field",
-        );
+        let path = format!("eqoa.actions.BatchResult.{field}");
+        match super::native::unprojected_field("eqoa.actions.BatchResult", field) {
+            Some(reason) => describe(lua, &path, "unsupported", None, reason),
+            None => describe(lua, &path, "supported", Some(6), "BatchResult field"),
+        }
     }
 
-    describe(
+    super::native::refuse_native(
         lua,
-        "eqoa.actions.destroy",
+        "actions",
+        "destroy",
         "unsupported",
         None,
-        "not offered before the PR (owner)",
-    );
+        "excluded until after the upstream PR by the mod API plan",
+    )?;
     for name in ["move", "look", "buttons"] {
-        describe(
+        super::native::refuse_native(
             lua,
-            &format!("eqoa.actions.{name}"),
+            "actions",
+            name,
             "not_yet",
-            Some(4),
-            "continuous controls come after the PR",
-        );
+            Some(6),
+            "continuous controls come after the upstream PR (mod API plan, round 8)",
+        )?;
     }
     bind(
         lua,
@@ -3785,7 +3938,12 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 Err((code, msg)) => return error(lua, "eqoa.actions.batch", code, &msg),
             };
             for step in &steps {
-                let cap = format!("eqoa.actions.{}", step.name());
+                let cap = match step {
+                    ActionKind::Chat { text } | ActionKind::Command { text } => {
+                        super::chat::line_capability(text).to_owned()
+                    }
+                    _ => format!("eqoa.actions.{}", step.name()),
+                };
                 if let Err((code, msg)) = require_capability(lua, "eqoa.actions.batch", &cap) {
                     return error(lua, "eqoa.actions.batch", code, &msg);
                 }
@@ -3950,14 +4108,6 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             })
         })?,
     )?;
-    describe(
-        lua,
-        "eqoa.actions.camera",
-        "supported",
-        Some(4),
-        "native WalkCamera/camstyle setter applied at Play::frame",
-    );
-
     install_non_item_actions(lua)?;
     install_item_actions(lua)?;
     super::window_actions::install(lua)?;
@@ -4395,12 +4545,16 @@ fn install_non_item_actions(lua: &Lua) -> Result<()> {
         lua,
         "actions",
         "chat",
-        lua.create_function(|lua, text: Value| {
-            enqueue_lua_with(lua, "eqoa.actions.chat", || {
-                Ok(ActionKind::Chat {
-                    text: validate_chat_string(text, false)?,
-                })
-            })
+        lua.create_function(|lua, (text, channel): (Value, Value)| {
+            if !channel.is_nil() {
+                return error(
+                    lua,
+                    "eqoa.actions.chat",
+                    "unsupported",
+                    "use eqoa.actions.command with the channel's slash command to select a channel",
+                );
+            }
+            enqueue_chat_line(lua, text, false)
         })?,
     )?;
 
@@ -4408,13 +4562,7 @@ fn install_non_item_actions(lua: &Lua) -> Result<()> {
         lua,
         "actions",
         "command",
-        lua.create_function(|lua, cmd: Value| {
-            enqueue_lua_with(lua, "eqoa.actions.command", || {
-                Ok(ActionKind::Command {
-                    text: validate_chat_string(cmd, true)?,
-                })
-            })
-        })?,
+        lua.create_function(|lua, cmd: Value| enqueue_chat_line(lua, cmd, true))?,
     )?;
 
     bind(
@@ -4617,6 +4765,14 @@ fn install_non_item_actions(lua: &Lua) -> Result<()> {
     )?;
 
     Ok(())
+}
+
+/// The player turned on "Use the game's windows": batches that worked through a claim it released stop.
+pub(crate) fn stop_batches_of_released_claims(released: &[(u64, super::window_takeover::TakeoverKind)]) {
+    if released.is_empty() {
+        return;
+    }
+    BROKER.with(|b| b.borrow_mut().stop_batches_of_released_claims(released));
 }
 
 #[cfg(test)]
@@ -5328,7 +5484,9 @@ mod tests {
                 .load(format!("return assert(eqoa.capabilities.get('{sym}')).status"))
                 .eval()
                 .unwrap();
-            assert_eq!(status, "supported", "{sym} must be supported");
+            // a batch never fills detail: each step reports in its own action.result (round 7C fix M1)
+            let expected = if *field == "detail" { "unsupported" } else { "supported" };
+            assert_eq!(status, expected, "{sym} must be {expected}");
         }
 
         // Batch starts autonomously; 2nd batch while 1st runs -> busy; 3-step serial execution waits for server reply.
@@ -5438,6 +5596,63 @@ mod tests {
 
         reset_all_for_test();
         crate::fork_ext::bindpage::reset_in_memory();
+    }
+
+    /// Fix round 3 item 4b: two batches of one mod stopped while each had a step on the wire both report,
+    /// each once, when their replies land; the second stop does not lose the first's result.
+    #[test]
+    fn round7c_every_stopped_batch_reports_its_late_reply() {
+        reset_all_for_test();
+        crate::fork_ext::bindpage::reset_in_memory();
+        CORE.with(|c| {
+            let mut core = Core::default();
+            core.view.in_world = true;
+            *c.borrow_mut() = core;
+        });
+        let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
+        host.execute(
+            r#"
+            bres = {}
+            eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
+            eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+                batches[#batches + 1] = assert(eqoa.actions.batch({ steps = { { kind = "assist" }, { kind = "assist" } } }))
+            end)
+            batches = {}
+        "#,
+        )
+        .unwrap();
+        let in_world = NativeSnapshot { in_world: true, mode: 0, ..Default::default() };
+        for _ in 0..2 {
+            CORE.with(|c| {
+                c.borrow_mut().emit(
+                    "input.key",
+                    json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                )
+            });
+            native_events::dispatch(&host).unwrap();
+            BROKER.with(|b| {
+                b.borrow_mut().step_tick(in_world, &mut |_: &ActionKind| DispatchOutcome::AwaitingServer {
+                    matcher: ServerMatcher::Assist,
+                    detail: None,
+                })
+            });
+            host.execute("assert(eqoa.actions.stop_batch(batches[#batches]))").unwrap();
+        }
+        native_events::dispatch(&host).unwrap();
+        host.execute("assert(#bres == 0, 'each result waits for its reply: ' .. #bres)").unwrap();
+        resolve_server_assist(7);
+        resolve_server_assist(7);
+        native_events::dispatch(&host).unwrap();
+        host.execute(
+            r#"
+            assert(#bres == 2, 'both stopped batches report: ' .. #bres)
+            for i, r in ipairs(bres) do
+                assert(r.state == 'stopped' and r.completed == 1, i .. ': ' .. r.state .. ' ' .. r.completed)
+            end
+        "#,
+        )
+        .unwrap();
+        reset_all_for_test();
     }
 
     #[test]
