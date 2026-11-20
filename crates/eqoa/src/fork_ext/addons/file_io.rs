@@ -816,6 +816,91 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn map_search_retries_pending_journal_after_first_render() {
+        let lua = mlua::Lua::new();
+        lua.load(
+            r#"
+            renders, attempts = {}, 0
+            require = function() return {step=function() end, close=function() end} end
+            eqoa = {
+              files = {load_json=function(path)
+                if path:sub(1,1) ~= '@' then return 1 end
+                attempts = attempts + 1
+                if attempts == 1 then return nil, {code='not_yet'} end
+                return 2
+              end},
+              fonts = {load=function() end},
+              input = {bind=function() end},
+              events = {on=function(name, callback) renders[name] = callback end},
+              map = {get=function() end},
+            }
+        "#,
+        )
+        .exec()
+        .unwrap();
+        lua.load(include_str!(
+            "../../../../../bundled-mods/eqoa_map_search/main.lua"
+        ))
+        .exec()
+        .unwrap();
+        lua.load(
+            r#"
+            assert(attempts == 0, 'journal requested during entry')
+            renders.render({time=1})
+            assert(attempts == 1)
+            renders.render({time=1.5})
+            assert(attempts == 1)
+            renders.render({time=2})
+            renders.render({time=3})
+            assert(attempts == 2, 'closed panel must retry once the owner is ready')
+        "#,
+        )
+        .exec()
+        .unwrap();
+    }
+
+    #[test]
+    fn shared_json_waits_for_enabled_owner_before_loading() {
+        use super::super::{exchange, native, native_events};
+        let (dir, owner, mut addon) = fixture();
+        addon.id = "pending_owner".into();
+        addon.extensions.shares = vec!["data/journal.json".into()];
+        install(&owner, &addon, Some(dir.0.join("config"))).unwrap();
+        owner
+            .execute("assert(eqoa.files.write('journal.json','{}'))")
+            .unwrap();
+        native_events::bus(&owner.lua).borrow_mut().active = false;
+        let (_dir, reader, _) = fixture();
+        {
+            let _scope = exchange::pending_owners(["pending_owner"]);
+            reader
+                .execute(
+                    r#"
+                local path = '@pending_owner/data/journal.json'
+                local request, err = eqoa.files.load_json(path)
+                assert(request == nil and err.code == 'not_yet', err and err.code)
+            "#,
+                )
+                .unwrap();
+            assert!(native::finish(&reader.lua).is_empty());
+            native_events::prime(&owner);
+            reader
+                .execute("assert(eqoa.files.load_json('@pending_owner/data/journal.json'))")
+                .unwrap();
+        }
+        native_events::bus(&owner.lua).borrow_mut().active = false;
+        reader
+            .execute(
+                r#"
+            local request, err = eqoa.files.load_json('@pending_owner/data/journal.json')
+            assert(request == nil and err.code == 'permission_denied')
+        "#,
+            )
+            .unwrap();
+        assert_eq!(native::finish(&reader.lua).len(), 1);
+    }
+
+    #[test]
     fn round4b_export_waits_for_accepted_async_snapshot_before_first_file_exists() {
         use super::super::{json_save, native_events, options, player_files::TestIo};
         struct Release(Option<std::sync::mpsc::Sender<()>>);

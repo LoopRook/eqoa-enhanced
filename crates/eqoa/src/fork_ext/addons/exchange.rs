@@ -13,7 +13,23 @@ struct Owner {
 }
 thread_local! {
     static OWNERS: RefCell<Vec<Owner>> = const { RefCell::new(Vec::new()) };
+    static PENDING_OWNERS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
+
+/// Enabled owners in the current manager frame whose VMs have yet to start.
+pub(super) struct PendingOwners(Vec<String>);
+impl Drop for PendingOwners {
+    fn drop(&mut self) {
+        PENDING_OWNERS.with(|pending| pending.replace(std::mem::take(&mut self.0)));
+    }
+}
+pub(super) fn pending_owners<'a>(ids: impl IntoIterator<Item = &'a str>) -> PendingOwners {
+    PendingOwners(
+        PENDING_OWNERS
+            .with(|pending| pending.replace(ids.into_iter().map(str::to_owned).collect())),
+    )
+}
+
 pub(crate) fn register(lua: &mlua::Lua) {
     let Some(mounts) = lua.app_data_ref::<Mounts>().map(|m| m.clone()) else {
         return;
@@ -28,18 +44,22 @@ pub(crate) fn register(lua: &mlua::Lua) {
         owners.push(Owner { mounts, bus });
     });
 }
-pub(crate) fn read(path: &str) -> Result<PathBuf, String> {
+/// A pending owner returns `Ok(None)` until its live VM can authorize the read.
+pub(super) fn read(path: &str) -> Result<Option<PathBuf>, String> {
     let (id, key) = path
         .strip_prefix('@')
         .and_then(|s| s.split_once('/'))
         .ok_or("shared JSON path must be @mod_id/data/path")?;
     OWNERS.with(|owners| {
         let owners = owners.borrow();
-        let owner = owners
-            .iter()
-            .rev()
-            .find(|o| o.mounts.addon.id == id && o.bus.upgrade().is_some_and(|b| b.borrow().active))
-            .ok_or("shared file owner is missing or disabled")?;
+        let Some(owner) = owners.iter().rev().find(|o| {
+            o.mounts.addon.id == id && o.bus.upgrade().is_some_and(|b| b.borrow().active)
+        }) else {
+            if PENDING_OWNERS.with(|pending| pending.borrow().iter().any(|owner| owner == id)) {
+                return Ok(None);
+            }
+            return Err("shared file owner is missing or disabled".into());
+        };
         if !owner
             .mounts
             .addon
@@ -59,7 +79,7 @@ pub(crate) fn read(path: &str) -> Result<PathBuf, String> {
         }
         let path = owner.mounts.read_path(&normalized)?;
         super::file_io::no_links(&path)?;
-        Ok(path)
+        Ok(Some(path))
     })
 }
 pub(crate) fn saved(mounts: &Mounts, key: &Path) {

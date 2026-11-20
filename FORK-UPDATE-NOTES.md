@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## Unreleased
+
+- Map Search waits for the Creature Journal to start before reading its shared data.
+
 ## 2026-11-19 · Enhanced 0.6.0
 
 The mod API (`eqoa/1`) is not frozen yet. Bundled mods and client updates ship in this release; third-party mod authors should wait for the freeze before building on it.

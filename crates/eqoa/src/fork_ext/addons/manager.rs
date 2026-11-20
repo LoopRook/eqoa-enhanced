@@ -295,6 +295,17 @@ impl Manager {
                         && (bootstrap_due || staged_next)
                 }),
         );
+        let _pending_shares =
+            super::exchange::pending_owners(self.entries.iter().filter_map(|entry| {
+                (entry.enabled_intent
+                    && entry.status != Status::Failed
+                    && !entry.metadata.extensions.shares.is_empty()
+                    && entry
+                        .instance
+                        .as_ref()
+                        .is_none_or(|instance| !super::native_events::active(&instance.host.lua)))
+                .then_some(entry.metadata.id.as_str())
+            }));
         drop(_prologue);
         let mut entries = std::mem::take(&mut self.entries);
         let mut count = entries.iter().filter(|e| e.instance.is_some()).count();

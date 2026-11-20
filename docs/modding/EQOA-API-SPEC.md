@@ -904,7 +904,10 @@ paths, commands use nonempty ASCII identifiers, and permissions are limited to
 
 `eqoa.files.load_json("@mod_id/data/journal.json")` uses the existing 16 MiB
 worker and sliced materialisation limits. Only a running owner's explicitly
-shared file is readable. `shared.changed{mod,path}` follows a successful save.
+shared file is readable. Before an enabled owner starts, the load returns
+`nil, Error` with code `not_yet` and produces no diagnostic. Retry after the
+owner starts. A missing or disabled owner returns `permission_denied`.
+`shared.changed{mod,path}` follows a successful save.
 
 `eqoa.mods.send(mod_id, command, args?)` queues `mod.command{from,command,args}`
 for the next event boundary. Missing/disabled targets and undeclared commands
