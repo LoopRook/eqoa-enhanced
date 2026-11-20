@@ -132,6 +132,12 @@ fn row_count(w: &Json) -> i64 {
     w["rows"].as_array().map_or(0, |r| r.len() as i64)
 }
 
+/// The actions that can answer an NPC dialog: `dialog_answer` picks one of its options, and `activate_row`
+/// walks to a row of any live window and presses confirm (a response dialog's options are its rows).
+/// `select_row` only moves the cursor, and `menu_command` presses only rows that carry a command, which
+/// dialog rows never do. Mods & Addons labels a mod "Can answer NPC dialogs" from this list.
+pub(crate) const ANSWERS_DIALOGS: [&str; 2] = ["eqoa.actions.dialog_answer", "eqoa.actions.activate_row"];
+
 pub(crate) fn install(lua: &Lua) -> Result<()> {
     bind(
         lua,

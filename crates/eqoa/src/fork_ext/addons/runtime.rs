@@ -896,7 +896,9 @@ pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec
 }
 
 fn declares_dialog_actions(caps: &[String]) -> bool {
-    super::native::capability_grants(caps, "eqoa.actions.dialog_answer")
+    super::window_actions::ANSWERS_DIALOGS
+        .iter()
+        .any(|action| super::native::capability_grants(caps, action))
 }
 
 fn controls(
@@ -2475,6 +2477,7 @@ mod tests {
         ]));
         assert!(declares_dialog_actions(&["eqoa.actions.*".into()]));
         assert!(!declares_dialog_actions(&["eqoa.actions.talk".into()]));
+        assert!(declares_dialog_actions(&["eqoa.actions.activate_row".into()]));
     }
 
     #[test]
