@@ -471,8 +471,18 @@ impl Runtime {
             plain_play,
             keyboard,
         );
-        let wants_capture =
-            super::input::wants_key_capture(keyboard, code, event.synthetic, plain_play);
+        // A press a mod owns (a modifier combination it holds) is the mod's alone: consumed, so
+        // the game does not also act on the plain key (`bindpage`, the rule).
+        let wants_capture = super::input::wants_key_capture(keyboard, code, event.synthetic, plain_play)
+            || super::input::mod_owns_press(
+                event.logical,
+                event.base,
+                event.down,
+                event.repeat,
+                event.synthetic,
+                plain_play,
+                keyboard,
+            );
         if event.down {
             self.capture.press(event.button, wants_capture) == Owner::Addon
         } else {

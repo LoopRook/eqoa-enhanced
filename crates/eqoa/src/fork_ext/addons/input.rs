@@ -200,45 +200,68 @@ pub(crate) fn route_mod_key(
     route_mod_key_based(key, None, down, repeat, synthetic, plain_play, keyboard);
 }
 
-/// What a key press was named, at the press: the key as it typed (`key`), how mods name it
-/// (`combo`, the modifiers held written before the key) and the name the game acts on for
-/// the same press (`game`, as `App::key_name` works it out).
+/// What a key press was named, at the press: the key as it typed (`key`) and how mods name
+/// it (`combo`: the modifiers held written before the key, Super first).
 #[derive(Clone)]
 struct Press {
     key: String,
     combo: String,
-    game: String,
 }
 
 impl Press {
     /// A key with nothing known of its press: just the key.
     fn plain(plain: &str) -> Press {
-        Press { key: plain.to_string(), combo: plain.to_string(), game: plain.to_string() }
+        Press { key: plain.to_string(), combo: plain.to_string() }
     }
 }
 
 /// The names of the press of a key that typed `plain` and is `own` by its place on the
-/// keyboard, from the modifiers held now. The game's name is `App::key_name`'s rule (viewer.rs)
-/// worked out from this press's own facts: the combo when the game has that combo bound, else
-/// `plain`, which the event's logical key gave, so it is right on any layout and for the
-/// numpad with NumLock off. Super is no modifier the game names.
+/// keyboard, from the modifiers held now. A mod's key is that name: Shift+Space is a key of
+/// its own, whatever the layout types (`bindpage`, the rule).
 fn press_names(plain: &str, own: &str, editor: bool) -> Press {
     let (ctrl, alt, shift) = modifiers();
     let sup = SUPER.with(|m| m.get());
-    let held = ctrl || alt || shift;
-    let combo = if (held || sup) && !editor {
+    let combo = if (ctrl || alt || shift || sup) && !editor {
         let named = crate::binds::combo_name(ctrl, alt, shift, own);
         if sup { format!("super+{named}") } else { named }
     } else {
         plain.to_string()
     };
-    let game = if held {
-        let named = crate::binds::combo_name(ctrl, alt, shift, own);
-        if crate::settings::with_binds(|b| b.combo_bound(&named)) { named } else { plain.to_string() }
-    } else {
-        plain.to_string()
+    Press { key: plain.to_string(), combo }
+}
+
+/// Whether this key going down is a mod's alone: it has a modifier on it, a mod holds that
+/// combination and would fire (`bindpage::owns_press`), and nothing keeps it from firing (a
+/// menu or an editor has the keyboard, it is a repeat or synthetic). The mod runtime then
+/// consumes the event, so the game does not also act on the plain key (Shift+Space is not a
+/// jump while a mod has it). Its release and repeats follow the ownership the press took.
+pub(crate) fn mod_owns_press(
+    key: &Key,
+    base: Option<&'static str>,
+    down: bool,
+    repeat: bool,
+    synthetic: bool,
+    plain_play: bool,
+    keyboard: bool,
+) -> bool {
+    if !down || repeat || synthetic || !plain_play || keyboard {
+        return false;
+    }
+    let (ctrl, alt, shift) = modifiers();
+    if !(ctrl || alt || shift || SUPER.with(|m| m.get())) || is_text_capture_active() {
+        return false;
+    }
+    if !crate::fork_ext::bindpage::has_rows() {
+        return false;
+    }
+    let Some(plain) = crate::binds::name_of(key) else {
+        return false;
     };
-    Press { key: plain.to_string(), combo, game }
+    let own: &str = match base {
+        Some(base) => base,
+        None => &plain,
+    };
+    crate::fork_ext::bindpage::owns_press(&press_names(&plain, own, false).combo)
 }
 
 /// A key let go is forgotten, whoever had the keyboard when it went (a menu, an ImGui window):
@@ -269,18 +292,6 @@ pub(crate) fn route_mod_key_based(
     keyboard: bool,
 ) {
     let remembered = if down { None } else { take_press(key, base) };
-    // What a modified press typed, kept for the Controls page, where a capture has only the
-    // combo's name (`bindpage::learn`): only while a mod has a row there.
-    let (ctrl, alt, shift) = modifiers();
-    if down && !repeat && (ctrl || alt || shift) && crate::fork_ext::bindpage::has_rows() {
-        if let Some(typed) = crate::binds::name_of(key) {
-            let own: &str = match base {
-                Some(base) => base,
-                None => &typed,
-            };
-            crate::fork_ext::bindpage::learn(&crate::binds::combo_name(ctrl, alt, shift, own), &typed);
-        }
-    }
     // Nothing is listening: no name made, no event built.
     let editor = is_text_capture_active();
     if !(editor || super::native_events::interested("input.key")) {
@@ -325,7 +336,7 @@ pub(crate) fn route_mod_key_based(
         press
     };
     super::native_core::defer(256 + text.as_ref().map_or(0, String::len), move |c| {
-        c.emit("input.key", serde_json::json!({"key":press.key,"combo":press.combo,"game_key":press.game,"down":down,"repeat":repeat,"synthetic":false,"text":text}));
+        c.emit("input.key", serde_json::json!({"key":press.key,"combo":press.combo,"down":down,"repeat":repeat,"synthetic":false,"text":text}));
     });
 }
 
@@ -344,7 +355,7 @@ pub fn emit_named_key_event(key_name: &str, is_down: bool) {
     super::native_core::defer(256, move |c| {
         c.emit(
             "input.key",
-            serde_json::json!({"key": key_str, "combo": key_str, "game_key": key_str, "down": is_down, "repeat": false, "synthetic": false}),
+            serde_json::json!({"key": key_str, "combo": key_str, "down": is_down, "repeat": false, "synthetic": false}),
         )
     });
 }

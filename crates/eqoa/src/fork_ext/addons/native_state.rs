@@ -1357,8 +1357,6 @@ fn install_math(lua: &Lua) -> Result<()> {
                             Some(combo) => combo,
                             None => data.get::<Option<String>>("key")?.unwrap_or_default(),
                         };
-                        // and the name the game acts on for the same press (`game_key`)
-                        let game_key = data.get::<Option<String>>("game_key")?.unwrap_or_else(|| key.clone());
                         if down
                             && !rep
                             && !synthetic
@@ -1370,7 +1368,7 @@ fn install_math(lua: &Lua) -> Result<()> {
                             // a winning mod has is not this binding's (round 7).
                             if bound.is_some_and(|bound| {
                                 !bound.is_empty() && key.eq_ignore_ascii_case(&bound)
-                            }) && crate::fork_ext::bindpage::fires(&addon_for_cb, &id_for_cb, &key, &game_key)
+                            }) && crate::fork_ext::bindpage::fires(&addon_for_cb, &id_for_cb, &key)
                             {
                                 super::gesture::arm_mod_key(vm_for_cb);
                                 cb.call::<()>(ev)?;
