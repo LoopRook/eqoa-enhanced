@@ -59,8 +59,9 @@ pub(crate) const MANAGER_EVENTS: &[&str] = &[
 
 const RECORD_FIELD_CHECK: &str = r#"
 -- Every way a record (or an event's data) differs from its declared fields, as one list. `extra` lists keys
--- the native value carried that a lazily built record has not made yet.
-function field_issues(name, record, optional, extra, present)
+-- the native value carried that a lazily built record has not made yet. `payload_free`: an event's data,
+-- which may be nil when the event declares no fields; every other record must be a table.
+function field_issues(name, record, optional, extra, present, payload_free)
     local path = 'eqoa.' .. name
     local declared = {}
     local described = eqoa.capabilities.get(path)
@@ -68,7 +69,7 @@ function field_issues(name, record, optional, extra, present)
         declared[field:sub(#path + 2)] = eqoa.capabilities.get(field).status
     end
     local issues = {}
-    if record == nil and next(declared) == nil then
+    if payload_free and record == nil and next(declared) == nil then
         return issues
     end
     if type(record) ~= 'table' then
@@ -152,7 +153,7 @@ function event_fields(seen, names)
             issues[#issues + 1] = name .. ' was not seen'
         else
             local issues_here = field_issues('events.' .. name .. '.data', event.data, EVENT_OPTIONAL[name],
-                round7c_event_keys(name), round7c_present[name])
+                round7c_event_keys(name), round7c_present[name], true)
             for _, issue in ipairs(issues_here) do
                 issues[#issues + 1] = issue
             end
