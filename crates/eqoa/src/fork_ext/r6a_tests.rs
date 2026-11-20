@@ -694,8 +694,8 @@ fn round6a_windows_modes_dialogs_hints_and_outside_world() {
         r#"
         local inp = eqoa.windows.find('input')
         assert(inp.dialog.kind == 'input' and inp.dialog.text == 'Hello world' and inp.dialog.chat == true and inp.dialog.password == false)
-        -- an input box has no options, selection or confirm style
-        fields('windows.Dialog', inp.dialog, 'options selection style style_id')
+        -- an input box has no options, selection or confirm style (nor a confirm's prompt_kind)
+        fields('windows.Dialog', inp.dialog, 'options selection style style_id prompt_kind')
         "#,
     )
     .unwrap();
@@ -943,8 +943,8 @@ fn round6a_seam_dialogs_privchat_response_pages_and_confirm_yes_no() {
         assert(rw.dialog.kind == 'text' and rw.dialog.text == 'Choose your path:')
         -- item: only an item row; command: only a row that runs a command
         fields('windows.MenuRow', rw.rows[1], 'item command')
-        -- a response dialog has options, not a selection, tag, title, input fields or confirm style
-        fields('windows.Dialog', rw.dialog, 'selection tag title chat password style style_id')
+        -- a response dialog has options, not a selection, tag, title, input fields or confirm style/prompt_kind
+        fields('windows.Dialog', rw.dialog, 'selection tag title chat password style style_id prompt_kind')
         -- Page 1: Option 1..12, More, Close
         assert(#rw.dialog.options == 14 and rw.dialog.options[13] == 'More' and rw.dialog.options[14] == 'Close',
             (function()
