@@ -207,6 +207,21 @@ fn world() -> (Play, Host) {
 fn round7c_item_records_and_window_events_use_projected_native_state() {
     crate::fork_ext::addons::big_stack(|| {
         let (mut p, host) = world();
+        let mut words = vec!["Fixture word"; 1474];
+        for (id, label) in [
+            (62, "Sell"),
+            (63, "Buy"),
+            (161, "Exit"),
+            (437, "Usable"),
+            (438, "Equipment"),
+            (439, "Misc"),
+            (1473, "Charged"),
+        ] {
+            words[id] = label;
+        }
+        CORE.with(|c| {
+            c.borrow_mut().words = vi::strtab::StringTable::parse(words.join("\n").as_bytes());
+        });
         p.bags_item_page(1, 0);
         frame(&p, &host);
         crate::fork_ext::addons::native_tests::install_field_check(&host).unwrap();
@@ -214,7 +229,7 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
             r#"
             local inv = eqoa.inventory.get()
             fields('items.Container', inv, 'merchant source')
-            fields('items.ContainerView', inv.view, 'selected selected_row rows')
+            fields('items.ContainerView', inv.view, 'selected selected_row')
             fields('items.Tab', inv.view.tabs[1])
             local sword = inv.items[1]
             fields('items.Item', sword, 'quick_slot charges damage attack_type attack_name')
@@ -256,13 +271,6 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
             opcode(0x00B7, shop_bytes(17, 90, 110, &[sword()], "Welcome")),
         );
         p.bags_merchant_open();
-        let mut words = vec![""; 162];
-        words[62] = "Sell";
-        words[63] = "Buy";
-        words[161] = "Exit";
-        CORE.with(|c| {
-            c.borrow_mut().words = vi::strtab::StringTable::parse(words.join("\n").as_bytes());
-        });
         frame(&p, &host);
         host.execute(
             r#"
