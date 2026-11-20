@@ -1361,9 +1361,12 @@ fn install_math(lua: &Lua) -> Result<()> {
                         {
                             let bound =
                                 crate::fork_ext::bindpage::get_key(&addon_for_cb, &id_for_cb);
+                            // One press does one thing: a key the game, a macro or
+                            // a winning mod has is not this binding's (round 7).
                             if bound.is_some_and(|bound| {
                                 !bound.is_empty() && key.eq_ignore_ascii_case(&bound)
-                            }) {
+                            }) && crate::fork_ext::bindpage::fires(&addon_for_cb, &id_for_cb, &key)
+                            {
                                 super::gesture::arm_mod_key(vm_for_cb);
                                 cb.call::<()>(ev)?;
                             }
