@@ -768,6 +768,22 @@ fn shipped_hashes(file: &BundledFile) -> BTreeSet<String> {
     hashes
 }
 
+/// Whether `root` holds bundled `package` as a release of this client shipped it: the folder and the id both
+/// name the bundled package, and every file this build embeds for it hashes to a shipped version of that file
+/// (`shipped_hashes`: this build's bytes and earlier releases'). A player-edited or third-party copy is not.
+pub fn is_shipped_package(package: &str, root: &Path) -> bool {
+    if !PACKAGES.contains(&package) || root.file_name().and_then(|n| n.to_str()) != Some(package) {
+        return false;
+    }
+    let Some(mods_dir) = root.parent() else { return false };
+    let mut files = EMBEDDED_FILES.iter().filter(|f| f.package == package).peekable();
+    files.peek().is_some()
+        && files.all(|file| {
+            matches!(read_bounded(&mods_dir.join(file.path), MAX_BUNDLE_FILE_BYTES),
+                Ok(Some(bytes)) if shipped_hashes(file).contains(&hash(&bytes)))
+        })
+}
+
 /// Update installed packages, complete first installs, remember package deletions.
 pub fn install_bundled_mods(
     mods_dir: &Path,

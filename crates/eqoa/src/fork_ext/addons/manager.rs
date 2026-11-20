@@ -933,12 +933,16 @@ impl Manager {
 
     /// Bind a remembered enable to its disclosure before any VM can start.
     fn check_enabled_disclosure(&mut self, addon: &DiscoveredAddon, requested: bool) -> bool {
-        if !requested && !self.disclosures.contains_key(&addon.id) {
-            return false;
-        }
         let new = Disclosure::for_addon(addon);
         let (allowed, update) = match self.disclosures.get(&addon.id) {
             Some(old) if old.allows(&new) => return requested,
+            // A bundled package exactly as a release of this client shipped it carries that release's own
+            // grants: re-adopted silently, the player's choice kept (fix round 3 item 5).
+            Some(_) if crate::fork_ext::bundled::is_shipped_package(&addon.id, &addon.package_root) => {
+                (requested, Some(new))
+            }
+            // The player's off stays off: its new labels show, with nothing to accept (fix round 3 item 4a).
+            _ if !requested => return false,
             Some(old) => {
                 let mut blocked = old.clone();
                 blocked.blocked = true;
@@ -946,6 +950,7 @@ impl Manager {
             }
             None => (true, Some(new)),
         };
+        let blocked = requested && !allowed;
         if let Some(record) = update {
             let persisted = self.storage.update_enable_state(None, Some((&addon.id, &record)));
             self.disclosures.insert(addon.id.clone(), record);
@@ -953,7 +958,7 @@ impl Manager {
                 self.diagnostic(Some(&addon.id), "storage", error);
             }
         }
-        if !allowed && !self.diagnostics.iter().any(|d| {
+        if blocked && !self.diagnostics.iter().any(|d| {
             d.phase == "permissions" && d.id.as_deref() == Some(addon.id.as_str())
         }) {
             self.diagnostic(
