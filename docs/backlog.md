@@ -371,3 +371,9 @@ A font restored after going missing is retried after a face or size change or af
   in between, is blocked until re-enabled here instead of being adopted once.
 - Waypoints: a player who clears and re-pins the identical point within one game step is not seen as the new owner;
   the one hook line it would take in the native waypoint setter is in the round 7C report (for the upstream-seam round).
+
+## Mods & Addons window: look and reach (owner, 2026-11-20)
+
+- **Status:** Wanted, not scheduled; needs a 5-line "what you'll see" first. The window is busy with text and does not
+  look good; revisit its layout. It is also slow to reach while testing (Options, the Enhanced page, then the manager,
+  every session): consider a Controls key for it and remembering that it was open.
