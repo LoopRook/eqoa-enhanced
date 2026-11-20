@@ -635,3 +635,19 @@ fn round7e_fix_l9_a_key_that_cannot_be_kept_is_said_not_hidden() {
     assert!(said(&mut page).contains("Key not kept"), "{}", said(&mut page));
     assert_eq!(mod_key_of("alpha"), "", "the old key stays");
 }
+
+#[test]
+fn round7e_fix_h1_the_windows_modifier_events_reach_the_key_naming() {
+    use winit::event::{Modifiers, WindowEvent};
+    use winit::keyboard::ModifiersState;
+    reset();
+    assert_eq!(input::modifiers(), NONE);
+    input::observe_modifiers(&WindowEvent::ModifiersChanged(Modifiers::from(
+        ModifiersState::CONTROL | ModifiersState::SHIFT,
+    )));
+    assert_eq!(input::modifiers(), (true, false, true));
+    input::observe_modifiers(&WindowEvent::ModifiersChanged(Modifiers::from(
+        ModifiersState::empty(),
+    )));
+    assert_eq!(input::modifiers(), NONE);
+}
