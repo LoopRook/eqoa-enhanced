@@ -157,6 +157,10 @@ pub(crate) enum ActionKind {
     MenuCommand { win: WinTarget, command: String },
     OpenLoot { entity_id: Option<u32> },
     Talk { entity_id: Option<u32>, kind: TalkKind },
+    /// `eqoa.map.set_waypoint`: the player's own waypoint of `world` moved to (`x`, `z`) by mod `addon`.
+    SetWaypoint { vm: u64, addon: String, world: i32, x: f32, z: f32, label: Option<String> },
+    /// `eqoa.map.clear_waypoint`: VM `vm`'s own waypoint taken away.
+    ClearWaypoint { vm: u64 },
 }
 
 impl ActionKind {
@@ -205,6 +209,8 @@ impl ActionKind {
             Self::MenuCommand { .. } => "menu_command",
             Self::OpenLoot { .. } => "open_loot",
             Self::Talk { .. } => "talk",
+            Self::SetWaypoint { .. } => "set_waypoint",
+            Self::ClearWaypoint { .. } => "clear_waypoint",
         }
     }
 
@@ -249,7 +255,9 @@ impl ActionKind {
             | Self::InputText { .. }
             | Self::MenuCommand { .. }
             | Self::OpenLoot { .. }
-            | Self::Talk { .. } => None,
+            | Self::Talk { .. }
+            | Self::SetWaypoint { .. }
+            | Self::ClearWaypoint { .. } => None,
         }
     }
 
@@ -3040,6 +3048,25 @@ pub(crate) fn enqueue_lua(
     kind: ActionKind,
 ) -> Result<mlua::MultiValue> {
     enqueue_lua_with(lua, symbol, move || Ok(kind))
+}
+
+/// Queues a map alias (`eqoa.map.set_waypoint` / `clear_waypoint`, spec §7): the same request and result
+/// contract as `eqoa.actions.*`. The spec gives these no capability: any mod logic may move the waypoint.
+pub(crate) fn enqueue_map_lua(
+    lua: &Lua,
+    symbol: &str,
+    build: impl FnOnce(u64, &str) -> std::result::Result<ActionKind, (&'static str, String)>,
+) -> Result<mlua::MultiValue> {
+    let vm = super::native_events::bus(lua).borrow().vm;
+    let addon = session(lua).borrow().addon.clone();
+    let kind = match build(vm, &addon) {
+        Ok(kind) => kind,
+        Err((code, msg)) => return error(lua, symbol, code, &msg),
+    };
+    match BROKER.with(|b| b.borrow_mut().enqueue(vm, &addon, kind)) {
+        Ok(req) => lua.pack_multi((lua.create_userdata(req)?, Value::Nil)),
+        Err((code, msg)) => error(lua, symbol, code, &msg),
+    }
 }
 
 fn current_generation() -> u64 {

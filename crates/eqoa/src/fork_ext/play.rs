@@ -841,6 +841,11 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                 clear_staged_for_kind(expired_kind);
             }
             let reqs = crate::fork_ext::addons::actions::take_action_requests();
+            for (world, at) in crate::fork_ext::addons::map_waypoint::take_orphaned() {
+                if _play.map.waypoint(world) == Some(at) {
+                    _play.map.api_set_waypoint(world, None);
+                }
+            }
             if ready {
                 if reqs.map && crate::settings::map() && _play.addon_input_available() {
                     _play.map.show();
@@ -1972,6 +1977,41 @@ fn dispatch_broker_action(
                 }
             }
             DispatchOutcome::Completed { detail: None }
+        }
+        ActionKind::SetWaypoint { vm, addon, world, x, z, label } => {
+            if !crate::settings::map() {
+                return DispatchOutcome::Refused {
+                    code: "unavailable",
+                    reason: "Map is turned off".into(),
+                };
+            }
+            play.map.api_set_waypoint(*world, Some([*x, *z]));
+            crate::fork_ext::addons::map_waypoint::placed(*vm, addon, *world, [*x, *z], label.clone());
+            DispatchOutcome::Completed {
+                detail: Some(serde_json::json!({"world_id": world, "x": x, "z": z})),
+            }
+        }
+        ActionKind::ClearWaypoint { vm } => {
+            if !crate::settings::map() {
+                return DispatchOutcome::Refused {
+                    code: "unavailable",
+                    reason: "Map is turned off".into(),
+                };
+            }
+            match crate::fork_ext::addons::map_waypoint::owned_by(*vm, |world| play.map.waypoint(world)) {
+                Some(world) => {
+                    play.map.api_set_waypoint(world, None);
+                    crate::fork_ext::addons::map_waypoint::cleared(*vm);
+                    DispatchOutcome::Completed {
+                        detail: Some(serde_json::json!({"world_id": world})),
+                    }
+                }
+                None => DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "the waypoint is not this mod's: the player or another mod moved it, or it was reached"
+                        .into(),
+                },
+            }
         }
         ActionKind::Stop => {
             play.auto_attack = false;

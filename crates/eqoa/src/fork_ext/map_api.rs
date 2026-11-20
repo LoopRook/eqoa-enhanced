@@ -31,7 +31,14 @@ impl Map {
             (m.world, m.at.map(f32::to_bits), &m.from).hash(&mut h);
         }
         crate::fork_ext::map_toolbar::anchor().map(|a| a.map(f32::to_bits)).hash(&mut h);
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::fork_ext::addons::map_waypoint::hash_owner(&mut h);
         h.finish()
+    }
+
+    /// `world`'s waypoint put at `at` (none: taken away) through the map's own path, as a map click does.
+    pub(crate) fn api_set_waypoint(&mut self, world: i32, at: Option<[f32; 2]>) {
+        self.set_waypoint(world, at);
     }
 
     pub(crate) fn api_state(
@@ -52,8 +59,18 @@ impl Map {
             let c = &w.builder.cells;
             json!({"x_min":ee::mul(c.col0 as f32,CELL),"z_min":ee::mul(c.row0 as f32,CELL),"x_max":ee::mul((c.col0+c.cols) as f32,CELL),"z_max":ee::mul((c.row0+c.rows) as f32,CELL)})
         });
-        json!({"search_anchor":crate::fork_ext::map_toolbar::anchor().map(|a|json!({"x":a[0],"y":a[1],"width":a[2],"height":a[3]})),"enabled":crate::settings::map(),"open":self.open,"minimap":self.mini.up,"markers_on":crate::settings::map_markers(),"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|json!({"world_id":world,"x":p[0],"z":p[1],"owner":null,"label":null}))})
+        json!({"search_anchor":crate::fork_ext::map_toolbar::anchor().map(|a|json!({"x":a[0],"y":a[1],"width":a[2],"height":a[3]})),"enabled":crate::settings::map(),"open":self.open,"minimap":self.mini.up,"markers_on":crate::settings::map_markers(),"world_id":world,"world_name":world_name,"zone":zone,"bounds":bounds,"waypoint":self.waypoint(world).map(|p|{let (owner,label)=waypoint_owner(world,p);json!({"world_id":world,"x":p[0],"z":p[1],"owner":owner,"label":label})})})
     }
+}
+
+/// The mod that put `world`'s waypoint at `at`, and its label; none for the player's own pin.
+fn waypoint_owner(world: i32, at: [f32; 2]) -> (Option<String>, Option<String>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some((owner, label)) = crate::fork_ext::addons::map_waypoint::owner(world, Some(at)) {
+        return (Some(owner), label);
+    }
+    let _ = (world, at);
+    (None, None)
 }
 
 /// Static catalogue uses exactly the map's pinned marker arrays, built once per world.

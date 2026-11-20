@@ -800,6 +800,7 @@ pub(crate) fn clear(host: &Host) {
     let vm = bus(&host.lua).borrow().vm;
     super::map_views::release_vm(vm);
     super::guides::release_vm(vm);
+    super::map_waypoint::release_vm(vm);
     super::pointer_api::release_vm(vm);
     super::chat::cancel_vm(vm);
     super::weapon_sets::cancel_vm(vm);

@@ -899,6 +899,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ("log", "write", 2),
         ("loot", "get", 5),
         ("map", "get open markers view set_guide clear_guide", 4),
+        ("map", "set_waypoint clear_waypoint", 7),
         ("mastery", "get skills selected", 6),
         ("mods", "send", 4),
         (

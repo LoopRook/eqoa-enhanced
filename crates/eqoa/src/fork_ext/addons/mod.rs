@@ -86,6 +86,7 @@ pub(crate) fn big_stack(body: fn()) {
     }
 }
 pub(crate) mod map_views;
+pub(crate) mod map_waypoint;
 pub(crate) mod named_profiles;
 pub(crate) mod native;
 pub(crate) mod native_core;
