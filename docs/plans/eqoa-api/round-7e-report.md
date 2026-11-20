@@ -133,8 +133,9 @@ capture left waiting, a default taken in one load order).
 
 ## What changed
 
-- A mod key is matched by the key name the game gives the press: the modifiers held written before the key
-  (`binds::combo_name`). `Runtime::event` keeps the window's modifiers (`input::observe_modifiers`) and the
+- A mod key is matched by the key with the modifiers held written before it (`binds::combo_name`); whether the
+  game acts on the same press is decided by `game_press` (fix round 2; this bullet first said the match equalled
+  `App::key_name`, which was not true for shifted named keys until then). `Runtime::event` keeps the window's modifiers (`input::observe_modifiers`) and the
   key's place on the keyboard; `route_mod_key_based` names the press; the `input.key` event gets a new field
   `combo` (additive; `key` is unchanged); the bind callback in `native_state.rs` matches by it (a bare event
   without `combo` is its `key`).
@@ -233,8 +234,9 @@ do something (a gesture, a count, `dispatch_keypress` Some), so a refused bindin
 - "Tests drive the real dispatch": they drove `ControlsPage` and `KeyEdge` but not the window path. The App
   itself (`window_event`, `key_input`, `key_name`) cannot be built in a test (it owns the window, the renderer
   and the session). The closest real seam is `Runtime::scripted_key` -> `route_key` -> `route_mod_key_based`,
-  which `Runtime::event` also calls for a window key; the game's side of a press is `game_sends` in the tests:
-  `App::key_name`'s rule written out (viewer.rs) and fed to the real `KeyEdge`. Not covered by any test:
+  which `Runtime::event` also calls for a window key; the game's side of a press is `game_sends` in the tests,
+  which in the first fix round was a shortcut of `App::key_name` that left out `ev.base`, the `key_names`
+  press/release cache, capture and typing; since fix round 2 it is the branch-by-branch `GameKeys` mirror below. Not covered by any test:
   `Runtime::event` itself (needs a `Window`), `App::key_name` and `key_input` (that mod dispatch runs before the
   game's handling is read from `report_viewer.rs`, not run).
 
@@ -275,3 +277,54 @@ do something (a gesture, a count, `dispatch_keypress` Some), so a refused bindin
 - CI run https://github.com/LoopRook/eqoa-enhanced/actions/runs/44706426719 on e16e8895: success. addons 604
   passed / 0 failed / 25 ignored (17 SKIP); full 3195 passed / 0 failed / 37 ignored (378 SKIP, no disc or GPU
   in CI); wasm, footprint, paths, player-release (20), tools (199) success. `ci_gates.py cleanup` run.
+
+
+# Fix round 2 (recheck of b72b197f: H3, H4, M5, M6, L9 confirmed; the rest of H1 rejected)
+
+Commits: `test(input): fix round 2 tests first ...` (tests plus the seams they drive, on the old behaviour),
+then `fix(input): the game's own rule for a press decides ...`, then this report. Upstream files: no new line
+(`options.rs` stays +2/-0; footprint PASS). Order kept as briefed: **the tests were run against the old
+behaviour first: 9 of the 10 new tests failed for the intended reasons** (refusals missing for Shift+Space,
+Shift+Tab, Shift+F5, Shift+Up, Shift+`, Shift+1 over `!`; `hits = 1` where a mod fired with Jump; release
+combos `ctrl+u+,u-,u+,ctrl+u-` against the expected `ctrl+u+,ctrl+u-,u+,u-`; Super ignored; the cancel
+set memory to `b` while the file kept `u`; 3600 allocations for 1200 key events with nothing listening). The
+10th, `round7e_fix2_m2_the_game_names_a_release_the_same_way`, passes on both: it checks the test mirror of the
+game's own release naming, not the fix.
+
+| # | Reproduced? | Fix | Tests and negative control (`R7E_BREAK=n`, same binary, failing line) |
+|---|---|---|---|
+| 1 HIGH | yes: no refusal for the shifted named keys, and a mod fired together with Jump | `bindpage.rs` `game_press`: the single function for the game's side of a press, `App::key_name`'s rule for every key and modifier: the combo when the game has it bound (`Binds::combo_bound`), else the plain name (the key's own, or with Shift the character it types: `shifted`, US layout). `game_owner`, Controls (marks, refusal, swap/free: the mods now "shadowed" by a game capture are found with it), `default_in_use`, `can_take` and press-time `firing` all go through it. The letter/non-letter special cases are gone | `round7e_fix2_h1_*` (4: five shifted named keys refused; Shift+Space does not fire with Jump while a Shift+U mod fires; a game row on `!` vs Shift+1; a macro on `!`). n=1 (the old rule restored): 4 fail (`round7e_key_tests.rs` :418 x3, :34) |
+| 2a MED | yes: `ctrl+u+,u-,u+,ctrl+u-` | `input.rs`: `PRESS_COMBOS` remembers the combo a key went down with (by its own name) and a release, a repeat and the focus loss use it, as the game's `key_names` does; a plain press clears it | `round7e_fix2_m2_a_release_is_named_as_its_press_was`. n=2 (release named from the current modifiers): :956 |
+| 2b MED | yes: 3 allocations per key event with no listener | `route_mod_key_based` returns first when `native_core::capture_requested()` is false: no name made, no map touched, no event built | the zero-addon test `performance_busy_world_zero_addons_frame_and_packet_allocation_bound` now has a key case (modifiers held, press and release x 600): 0 allocations. n=3 (guard removed): 3601 allocations, `api_capture_tests.rs` :730. (The control build used a cached env switch so that the switch itself allocates nothing; with an allocating switch the 0 would not have held, which is how I found out) |
+| 3 LOW | yes: Super ignored | `input.rs` tracks Super (`set_super`, `observe_modifiers`); a press with Super held is named `super+...`, which no bare binding matches; `never_mod_key` treats `super+c/v/x/,` like their Ctrl forms; `game_press` drops Super, as the game does | `round7e_fix2_l3_*` (2: Cmd+U does not fire a bare-U mod, window `ModifiersChanged` carries Super; `super+c`, `super+v`, `super+x`, `super+,` refused, a default on `super+c` refused). n=4 (Super ignored in the press name): both fail (:34); n=5 (`never_mod_key` without the Super forms): :418 |
+| 4 LOW | yes: memory set though the write failed | `restore_session(write)` (the seam `session_cancel` uses): a key whose write fails keeps its in-memory value (memory and file agree) and the failure is said (`crate::say`) | unit test in `bindpage.rs` `round7e_fix2_a_cancel_whose_write_fails_leaves_memory_and_file_agreeing`, with a working-write control. n=6 (memory set anyway): `bindpage.rs` :1235 |
+| 5 LOW | yes | claims corrected (below); `game_sends` is now `GameKeys::press`, a branch-by-branch mirror of `App::key_name` | see below |
+
+Negative-control method as before (switch compiled in, `<exe> round7e_fix2 --test-threads=1` once per n,
+restored with `git checkout -- crates`, status clean, no `brk` left).
+
+## Corrections (item 5)
+
+- The "What changed" bullet of the first fix round said the match equalled `App::key_name`. That was false for
+  shifted named keys, shifted symbols and Super until this round; the bullet is corrected in place.
+- The first fix round described the test helper `game_sends` as "`App::key_name`'s rule written out". It was a
+  shortcut that left out `ev.base`, the `key_names` press/release cache, `capture` and `typing`. It is now
+  `GameKeys` in `round7e_key_tests.rs`: `name()` is the body of `App::key_name` (viewer.rs) one branch at a time
+  with the upstream line quoted in a comment beside each, `ev.base` and the cache included; `capture` and
+  `typing` are arguments. It leaves out where the App gets those two flags and the window events, and
+  `KeyEdge`'s typing mode. `GameKeys::press` feeds the name to the real `KeyEdge`.
+- Still true and still not covered by a test: `Runtime::event` (needs a `Window`), the App's `key_input`, and that
+  mod dispatch runs before the game's handling (read from `report_viewer.rs`, not run). The US layout is assumed for
+  what Shift types (`shifted`); another layout's Shift symbols are not known to the client either (it uses the
+  key's physical place, `ev.base`, for the combo, and the typed character for the plain name).
+
+## Gates (fix round 2)
+
+- Local with the disc (`EQOA_ISO` set), through `run_gates.py`: `--filter round7e_ fork_ext:: options:: settings::
+  bindpage:: binds:: play::fork_hooks::`: 1024 passed, 0 failed, 26 ignored (11 distinct SKIP lines, unrelated: no
+  graphics adapter, symlink privilege, Wereoxxs recordings, UI goldens); 0 SKIP among the `round7e_` tests. wasm
+  PASS, footprint PASS, paths PASS.
+- CI run https://github.com/LoopRook/eqoa-enhanced/actions/runs/44712307407 on 885297f9: success. addons 612
+  passed / 0 failed / 25 ignored (17 SKIP); full 3204 passed / 0 failed / 37 ignored (378 SKIP, no disc or GPU in
+  CI); wasm, footprint, paths, player-release (20), tools (199) success. `ci_gates.py cleanup` run.
+- Not verified: the live client; real Shift, Ctrl, Alt, Cmd presses on a keyboard; layouts other than US.
