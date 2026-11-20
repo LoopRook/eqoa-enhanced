@@ -1398,3 +1398,16 @@ fn round7e_owner1_a_game_control_on_shift_space_is_a_real_conflict_and_swaps_as_
     assert!(press_consumed(&mut rt, SHIFT, &space, None, &[&host]));
     hits(&host, 1);
 }
+
+#[test]
+fn round7e_owner1_a_bare_mod_key_is_never_consumed_only_a_modifier_combination_is() {
+    reset();
+    let host = bind("alpha", "u");
+    let mut rt = runtime();
+    let u = Key::Character("u".into());
+    assert!(!press_consumed(&mut rt, NONE, &u, Some("u"), &[&host]), "a bare key reaches the game as always");
+    hits(&host, 1);
+    assert!(bindpage::set_key("alpha", "act", "ctrl+u"));
+    assert!(press_consumed(&mut rt, CTRL, &u, Some("u"), &[&host]), "Ctrl+U is the mod's alone");
+    hits(&host, 2);
+}
