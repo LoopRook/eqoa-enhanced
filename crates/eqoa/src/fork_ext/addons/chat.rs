@@ -32,6 +32,14 @@ thread_local! {
     static CHAT_HISTORY: RefCell<VecDeque<(String, u32, u32)>> = const { RefCell::new(VecDeque::new()) };
 }
 
+pub(super) fn line_capability(line: &str) -> &'static str {
+    if line.starts_with('/') {
+        "eqoa.actions.command"
+    } else {
+        "eqoa.actions.chat"
+    }
+}
+
 pub(crate) fn queue_outgoing_chat(msg: String) {
     queue_owned(None, msg, None);
 }
@@ -436,15 +444,10 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
                         line = format!("{m} {line}");
                     }
                 }
-                let cap = if line.starts_with('/') {
-                    "eqoa.actions.command"
-                } else {
-                    "eqoa.actions.chat"
-                };
                 if let Err((code, message)) = super::native::require_acting_capability(
                     lua,
                     "frontiers_forge.chat.SendChatText",
-                    cap,
+                    line_capability(&line),
                 ) {
                     super::native::diagnose(lua, "frontiers_forge.chat.SendChatText", code, &message);
                     return Ok((false, Some(format!("{code}: {message}"))));

@@ -270,14 +270,14 @@ fn round7c_forge_imports_are_labelled_and_keep_their_acting_calls() {
     for addon in &forge {
         assert_eq!(
             lines(addon),
-            ["Actions: can act on its own (chat, command, weapon_set)"],
+            ["Actions: can act on its own (chat (ordinary lines), command (slash lines), weapon_set)"],
             "{}",
             addon.id
         );
     }
     for addon in addons.iter().filter(|a| a.api.is_some()) {
         assert!(
-            !lines(addon).iter().any(|l| l.contains("chat, command, weapon_set")),
+            !lines(addon).iter().any(|l| l.contains("chat (ordinary lines), command (slash lines), weapon_set")),
             "{} is native; its label comes from its own capabilities",
             addon.id
         );

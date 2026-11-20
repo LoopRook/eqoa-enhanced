@@ -6,7 +6,7 @@
 use super::{
     action_broker::{ActionKind, WinTarget, enqueue_lua_with},
     gesture::is_forbidden_report_text,
-    native::bind,
+    native::{bind, require_capability},
     native_core::CORE,
     native_r6a::resolve_in,
     native_state::Ref,
@@ -300,10 +300,15 @@ pub(crate) fn install(lua: &Lua) -> Result<()> {
                 if text.contains('\0') || text.chars().count() > 512 {
                     return Err(("out_of_range", "text must be at most 512 characters without NUL".into()));
                 }
+                let submit = submit.unwrap_or(false);
+                // Dispatch revalidates the editor purpose in the window signature.
+                if submit && w["dialog"]["chat"] == true && !text.is_empty() {
+                    require_capability(lua, "eqoa.actions.input_text", super::chat::line_capability(&text))?;
+                }
                 Ok(ActionKind::InputText {
                     win,
                     text,
-                    submit: submit.unwrap_or(false),
+                    submit,
                 })
             })
         })?,

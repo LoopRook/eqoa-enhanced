@@ -839,11 +839,15 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
             if !kinds.contains(&"all actions") {
                 kinds.push("all actions");
             }
-        } else if let Some(kind) = cap.strip_prefix("eqoa.actions.")
-            && !kind.is_empty()
-            && !kinds.contains(&kind)
-        {
-            kinds.push(kind);
+        } else if let Some(kind) = cap.strip_prefix("eqoa.actions.") {
+            let label = match kind {
+                "chat" => "chat (ordinary lines)",
+                "command" => "command (slash lines)",
+                _ => kind,
+            };
+            if !label.is_empty() && !kinds.contains(&label) {
+                kinds.push(label);
+            }
         }
     }
     if kinds.is_empty() {

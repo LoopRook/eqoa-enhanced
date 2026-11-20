@@ -3027,9 +3027,18 @@ pub(crate) fn enqueue_lua_with(
     symbol: &str,
     build: impl FnOnce() -> std::result::Result<ActionKind, (&'static str, String)>,
 ) -> Result<mlua::MultiValue> {
+    enqueue_lua_with_grant(lua, symbol, symbol, build)
+}
+
+fn enqueue_lua_with_grant(
+    lua: &Lua,
+    symbol: &str,
+    capability: &str,
+    build: impl FnOnce() -> std::result::Result<ActionKind, (&'static str, String)>,
+) -> Result<mlua::MultiValue> {
     let vm = super::native_events::bus(lua).borrow().vm;
     let addon = session(lua).borrow().addon.clone();
-    if let Err((code, msg)) = require_capability(lua, symbol, symbol) {
+    if let Err((code, msg)) = require_capability(lua, symbol, capability) {
         return error(lua, symbol, code, &msg);
     }
     let kind = match build() {
@@ -3226,6 +3235,18 @@ fn validate_chat_string(raw: Value, command_mode: bool) -> std::result::Result<S
         ));
     }
     Ok(normalized)
+}
+
+fn enqueue_chat_line(lua: &Lua, text: Value, command: bool) -> Result<mlua::MultiValue> {
+    let symbol = if command { "eqoa.actions.command" } else { "eqoa.actions.chat" };
+    let text = match validate_chat_string(text, command) {
+        Ok(text) => text,
+        Err((code, reason)) => return error(lua, symbol, code, &reason),
+    };
+    let capability = super::chat::line_capability(&text);
+    enqueue_lua_with_grant(lua, symbol, capability, || {
+        Ok(if command { ActionKind::Command { text } } else { ActionKind::Chat { text } })
+    })
 }
 
 fn parse_weapon_set(raw: Value) -> std::result::Result<i64, (&'static str, String)> {
@@ -3831,7 +3852,12 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 Err((code, msg)) => return error(lua, "eqoa.actions.batch", code, &msg),
             };
             for step in &steps {
-                let cap = format!("eqoa.actions.{}", step.name());
+                let cap = match step {
+                    ActionKind::Chat { text } | ActionKind::Command { text } => {
+                        super::chat::line_capability(text).to_owned()
+                    }
+                    _ => format!("eqoa.actions.{}", step.name()),
+                };
                 if let Err((code, msg)) = require_capability(lua, "eqoa.actions.batch", &cap) {
                     return error(lua, "eqoa.actions.batch", code, &msg);
                 }
@@ -4433,26 +4459,14 @@ fn install_non_item_actions(lua: &Lua) -> Result<()> {
         lua,
         "actions",
         "chat",
-        lua.create_function(|lua, text: Value| {
-            enqueue_lua_with(lua, "eqoa.actions.chat", || {
-                Ok(ActionKind::Chat {
-                    text: validate_chat_string(text, false)?,
-                })
-            })
-        })?,
+        lua.create_function(|lua, text: Value| enqueue_chat_line(lua, text, false))?,
     )?;
 
     bind(
         lua,
         "actions",
         "command",
-        lua.create_function(|lua, cmd: Value| {
-            enqueue_lua_with(lua, "eqoa.actions.command", || {
-                Ok(ActionKind::Command {
-                    text: validate_chat_string(cmd, true)?,
-                })
-            })
-        })?,
+        lua.create_function(|lua, cmd: Value| enqueue_chat_line(lua, cmd, true))?,
     )?;
 
     bind(
