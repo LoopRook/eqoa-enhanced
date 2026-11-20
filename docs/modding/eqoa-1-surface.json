@@ -9393,7 +9393,8 @@
         "eqoa.map.open",
         "eqoa.map.set_guide",
         "eqoa.map.set_waypoint",
-        "eqoa.map.view"
+        "eqoa.map.view",
+        "eqoa.map.waypoint"
       ],
       "path": "eqoa.map",
       "reason": null,
@@ -9767,6 +9768,14 @@
       "reason": null,
       "revision": 1,
       "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.map.waypoint",
+      "reason": "capability to set or clear a personal waypoint",
+      "revision": 1,
+      "round": 7,
       "status": "supported"
     },
     {
@@ -11641,7 +11650,7 @@
       "path": "eqoa.windows.Dialog.prompt_kind",
       "reason": null,
       "revision": 1,
-      "round": 4,
+      "round": 6,
       "status": "supported"
     },
     {

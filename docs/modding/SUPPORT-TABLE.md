@@ -388,6 +388,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.map.set_guide` | supported | 4 |  |
 | `eqoa.map.set_waypoint` | supported | 7 |  |
 | `eqoa.map.view` | supported | 4 |  |
+| `eqoa.map.waypoint` | supported | 7 | capability to set or clear a personal waypoint |
 
 ## eqoa.mastery
 
@@ -1283,6 +1284,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.windows.Dialog.kind` | supported | 6 |  |
 | `eqoa.windows.Dialog.options` | supported | 6 |  |
 | `eqoa.windows.Dialog.password` | supported | 6 |  |
+| `eqoa.windows.Dialog.prompt_kind` | supported | 6 |  |
 | `eqoa.windows.Dialog.selection` | supported | 6 |  |
 | `eqoa.windows.Dialog.style` | supported | 6 |  |
 | `eqoa.windows.Dialog.style_id` | supported | 6 |  |
