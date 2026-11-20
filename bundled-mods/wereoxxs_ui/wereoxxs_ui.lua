@@ -177,7 +177,7 @@ local FONT_WINDOWS = {
 }
 
 font_configs = font_configs or {}
-window_fonts = window_fonts or {}
+window_fonts = window_fonts or {} -- EQOA Enhanced perf: cache handles between frames
 for _, entry in ipairs(FONT_WINDOWS) do
     font_configs[entry.key] = font_configs[entry.key]
         or { font = "Default", size = DEFAULT_FONT_SIZE }
@@ -436,7 +436,7 @@ local function GridEdit(now_ms)
 end
 
 -- Pushes a window's chosen font for everything drawn until the matching pop.
--- The host caches fonts per file and size, so pushing every frame is cheap.
+-- Enhanced reuses each window's loaded handle while its face and size match.
 local function PushWindowFont(key)
     local fc = font_configs[key]
     for _, entry in ipairs(FONTS) do
@@ -1346,7 +1346,7 @@ local function Load(saved)
 end
 
 local function Cleanup()
-    window_fonts = {}
+    window_fonts = {} -- EQOA Enhanced perf: discard handles on cleanup
     Input.ReleaseDpadRotation(HOOK_OWNER)
     dpad_claimed = false
     RestoreGameUi()

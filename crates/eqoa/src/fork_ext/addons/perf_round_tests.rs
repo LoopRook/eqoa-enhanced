@@ -317,7 +317,11 @@ fn wereoxxs_busy_frame(rm: &mut Rm, tick: usize) {
 
 #[test]
 fn wereoxxs_custom_font_load_budget() {
+    big_stack(wereoxxs_custom_font_load_budget_body)
+}
+fn wereoxxs_custom_font_load_budget_body() {
     let Some(mut rm) = Rm::with(|p| matches!(p, WEREOXXS | "resources"), 0) else {
+        eprintln!("SKIP wereoxxs_custom_font_load_budget: no GPU available");
         return;
     };
     if let Some(path) = std::env::var_os("EQOA_WEREOXXS_REFERENCE_ENTRY") {
