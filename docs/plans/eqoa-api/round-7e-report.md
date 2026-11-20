@@ -660,3 +660,13 @@ exact key): 21 tests fail; n=4 (bare keys consumed): `a_bare_mod_key_is_never_co
 
 ## Gates
 (see below)
+- Local with the disc: `--filter round7e_ fork_ext:: options:: settings:: bindpage:: binds:: play::fork_hooks::`: 1127 passed,
+  0 failed, 26 ignored (unrelated SKIPs; 0 SKIP among `round7e_`). wasm, footprint, paths PASS.
+- CI covers both parts (owner test fix 1 part 2 and owner request 1) on one commit. First run 44807567399 on 09f44a34: only
+  `round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame` failed ("the open window asks for the zone's creature list
+  4.2 times a second", limit 4.0): a timing-rate test in the Bag Viewer, untouched by this work (the same kind of runner flake as
+  b8e63048's "3.4/s"); it passes locally. Second run **44814404090 on 0dae9fd1: success**: addons 670 passed / 0 failed / 25 ignored
+  (17 SKIP); full 3307 / 0 failed (378 SKIP, no disc or GPU in CI); wasm, footprint, paths, player-release (20), tools (201)
+  success. `ci_gates.py cleanup` run.
+- Not verified: the live client (the real window key path, `Runtime::draw` opening the ImGui window, F10 as a Windows system key
+  and whether it leaves the next key alone), real German/UK keyboards.
