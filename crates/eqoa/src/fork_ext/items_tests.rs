@@ -4292,8 +4292,8 @@ fn round7c_game_windows_switch_is_saved_and_stops_a_claimed_batch() {
     }
     let result = host.execute(
         "assert(#bres == 1, 'batch results: ' .. #bres); local r = bres[1]; \
-         assert(r.state == 'stopped' and r.code == 'cancelled' and r.reason == 'stopped', \
-         tostring(r.state) .. ' ' .. tostring(r.code) .. ' ' .. tostring(r.reason))",
+         assert(r.state == 'stopped' and r.code == 'cancelled' and r.reason == 'stopped' and r.completed == 1, \
+         tostring(r.state) .. ' ' .. tostring(r.code) .. ' ' .. tostring(r.reason) .. ' ' .. tostring(r.completed))",
     );
     let later_sends = p.session.sends_lost - sent;
     window_takeover::set_use_game_windows(false);
@@ -4413,4 +4413,46 @@ fn round7c_switch_discards_a_staged_unsent_step() {
     assert_eq!(p.session.sends_lost, sent, "the staged sale never went out");
     host.execute("assert(#results == 1 and results[1].state == 'stopped' and results[1].completed == 0)").unwrap();
     window_takeover::reset_all_for_test();
+}
+
+/// Round 7 Part C fix round 2 L2: the switch goes through the settings store the client reads at start. The
+/// fork's `enhanced.opt` already holds the defaults-migration marker and an unrelated line; turning the switch on
+/// and off keeps both, and after every cache is dropped (a restart: the store alone survives) the client's own
+/// start-up read (which runs the defaults migration) leaves the text alone and the switch reads back.
+#[test]
+fn round7c_game_windows_switch_round_trips_through_the_settings_store() {
+    use crate::fork_ext::addons::window_takeover;
+    const FILE: &str = "enhanced.opt";
+    let seed = "first_run_defaults_applied=on\nunrelated=keep this line\n";
+    let restart = || {
+        let kept = crate::settings::testing::kept(FILE);
+        crate::settings::testing::reset(false);
+        crate::fork_ext::bindpage::reset_in_memory();
+        window_takeover::forget_switch_for_test();
+        match kept {
+            Some(bytes) => crate::settings::testing::put(FILE, &bytes),
+            None => crate::settings::testing::forget(FILE),
+        }
+        let _ = crate::settings::client();
+    };
+    let text = || String::from_utf8(crate::settings::read_config(FILE).unwrap_or_default()).unwrap();
+    crate::settings::testing::reset(false);
+    window_takeover::reset_all_for_test();
+    crate::settings::write_config(FILE, seed.as_bytes()).unwrap();
+
+    window_takeover::set_use_game_windows(true);
+    restart();
+    let after_on = text();
+    let read_on = window_takeover::use_game_windows();
+    window_takeover::set_use_game_windows(false);
+    restart();
+    let after_off = text();
+    let read_off = window_takeover::use_game_windows();
+
+    window_takeover::reset_all_for_test();
+    crate::settings::testing::reset(false);
+    assert_eq!(after_on, format!("{seed}use_game_windows=on\n"), "marker and unrelated line kept, switch saved");
+    assert!(read_on, "the switch reads back on after a restart");
+    assert_eq!(after_off, format!("{seed}use_game_windows=off\n"), "one switch line, the others kept");
+    assert!(!read_off, "the switch reads back off after a restart");
 }
