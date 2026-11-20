@@ -1,113 +1,121 @@
 // Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 //! The player's own map waypoint as mods move it (`eqoa.map.set_waypoint` / `clear_waypoint`). The pin itself
 //! is the map's (`Map::set_waypoint`, the path a map click takes); this remembers which mod put the current one
-//! there, so `eqoa.map.get().waypoint` can name its owner and label, a mod clears only its own pin, and a
-//! disabled mod's still-owned pin goes away. Ownership ends when the pin moves, is reached or is taken away.
+//! there, per world (the map keeps one pin per world), so `eqoa.map.get().waypoint` can name its owner and
+//! label, a mod clears only its own pins, and a disabled mod's still-owned pins go away in every world.
+//! Ownership lasts only while that exact pin is continuously present: every game step drops, for good, the
+//! record of a pin that is absent or differs (moved, reached, cleared, or cleared and re-pinned by the player),
+//! and any set by another mod replaces the record. Known limit: a player who clears and re-pins the exact
+//! same point between two 30 Hz game steps is not seen; catching that needs one hook line in the map's own
+//! waypoint setter (upstream), which this round does not take.
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 
-#[derive(Clone, Debug, PartialEq)]
 struct Owned {
     vm: u64,
     addon: String,
     world: i32,
     at: [f32; 2],
     label: Option<String>,
+    released: bool,
 }
 
 thread_local! {
-    static OWNED: RefCell<Option<Owned>> = const { RefCell::new(None) };
-    /// Pins a disabled mod still owned, taken away at the next step that reaches the map.
-    static ORPHANED: RefCell<Vec<(i32, [f32; 2])>> = const { RefCell::new(Vec::new()) };
+    // One entry per world, ordered by placement for clear_waypoint's unaddressed call.
+    static OWNED: RefCell<Vec<Owned>> = const { RefCell::new(Vec::new()) };
 }
 
-/// A mod's `set_waypoint` was applied: `world`'s waypoint is now at `at`.
+/// A mod's `set_waypoint` was applied: `world`'s pin is now `vm`'s, replacing any earlier owner there.
 pub(crate) fn placed(vm: u64, addon: &str, world: i32, at: [f32; 2], label: Option<String>) {
-    OWNED.with(|o| {
-        *o.borrow_mut() = Some(Owned {
+    OWNED.with(|pins| {
+        let mut pins = pins.borrow_mut();
+        pins.retain(|pin| pin.world != world);
+        pins.push(Owned {
             vm,
             addon: addon.to_owned(),
             world,
             at,
             label,
-        })
+            released: false,
+        });
     });
 }
 
-/// The owning mod and label of `world`'s waypoint, now at `current`; none for the player's own pin. A pin that
-/// moved or went away since a mod put it there is the player's from then on.
+/// Ownership ends permanently once a game step observes a missing or changed pin.
+pub(crate) fn reconcile(current: impl Fn(i32) -> Option<[f32; 2]>) {
+    OWNED.with(|pins| {
+        pins.borrow_mut()
+            .retain(|pin| current(pin.world) == Some(pin.at))
+    });
+}
+
+/// The owning mod and label of `world`'s pin, now at `current`; none for the player's own pin.
 pub(crate) fn owner(world: i32, current: Option<[f32; 2]>) -> Option<(String, Option<String>)> {
-    OWNED.with(|o| {
-        let mut o = o.borrow_mut();
-        let owned = o.as_ref()?;
-        if owned.world != world {
+    OWNED.with(|pins| {
+        let mut pins = pins.borrow_mut();
+        let index = pins.iter().position(|pin| pin.world == world)?;
+        if Some(pins[index].at) != current {
+            pins.remove(index);
             return None;
         }
-        if Some(owned.at) != current {
-            *o = None;
-            return None;
-        }
-        Some((owned.addon.clone(), owned.label.clone()))
+        let pin = &pins[index];
+        Some((pin.addon.clone(), pin.label.clone()))
     })
 }
 
-/// `vm`'s pin, when it is still the map's waypoint of its world (`current` reads the map).
+/// The world of the pin `vm` placed most recently and still owns (`current` reads the map).
 pub(crate) fn owned_by(vm: u64, current: impl Fn(i32) -> Option<[f32; 2]>) -> Option<i32> {
-    OWNED.with(|o| {
-        let mut o = o.borrow_mut();
-        let owned = o.as_ref().filter(|owned| owned.vm == vm)?;
-        let world = owned.world;
-        if current(world) != Some(owned.at) {
-            *o = None;
-            return None;
-        }
-        Some(world)
+    reconcile(current);
+    OWNED.with(|pins| {
+        pins.borrow()
+            .iter()
+            .rev()
+            .find(|pin| pin.vm == vm && !pin.released)
+            .map(|pin| pin.world)
     })
 }
 
-/// `vm`'s pin was taken away by its own `clear_waypoint`.
-pub(crate) fn cleared(vm: u64) {
-    OWNED.with(|o| {
-        let mut o = o.borrow_mut();
-        if o.as_ref().is_some_and(|owned| owned.vm == vm) {
-            *o = None;
-        }
-    });
+/// `world`'s pin was taken away by its owner's own `clear_waypoint`.
+pub(crate) fn cleared(world: i32) {
+    OWNED.with(|pins| pins.borrow_mut().retain(|pin| pin.world != world));
 }
 
-/// A mod's VM ended: a pin it still owns goes away at the next step (the player's own pins stay).
+/// A mod's VM ended: the pins it still owns go away after the next step's dispatch (the player's stay).
 pub(crate) fn release_vm(vm: u64) {
-    OWNED.with(|o| {
-        let mut o = o.borrow_mut();
-        if let Some(owned) = o.take_if(|owned| owned.vm == vm) {
-            ORPHANED.with(|r| r.borrow_mut().push((owned.world, owned.at)));
+    OWNED.with(|pins| {
+        for pin in pins.borrow_mut().iter_mut().filter(|pin| pin.vm == vm) {
+            pin.released = true;
         }
     });
 }
 
-/// The pins disabled mods still owned; allocates nothing when there are none.
-pub(crate) fn take_orphaned() -> Vec<(i32, [f32; 2])> {
-    ORPHANED.with(|r| {
-        let mut r = r.borrow_mut();
-        if r.is_empty() {
-            Vec::new()
-        } else {
-            std::mem::take(&mut *r)
-        }
+/// Consumed after dispatch, so a same-step replacement has already retired the old record.
+pub(crate) fn take_released(current: impl Fn(i32) -> Option<[f32; 2]>) -> Vec<i32> {
+    OWNED.with(|pins| {
+        let mut released = Vec::new();
+        pins.borrow_mut().retain(|pin| {
+            if !pin.released {
+                return true;
+            }
+            if current(pin.world) == Some(pin.at) {
+                released.push(pin.world);
+            }
+            false
+        });
+        released
     })
 }
 
-/// Who owns the pin, for the map record's change key.
+/// Who owns which pin, for the map record's change key.
 pub(crate) fn hash_owner(h: &mut impl Hasher) {
-    OWNED.with(|o| {
-        if let Some(owned) = &*o.borrow() {
-            (owned.vm, owned.world, owned.at.map(f32::to_bits), &owned.label).hash(h);
+    OWNED.with(|pins| {
+        for pin in pins.borrow().iter() {
+            (pin.vm, pin.world, pin.at.map(f32::to_bits), &pin.label).hash(h);
         }
     });
 }
 
 #[cfg(test)]
 pub(crate) fn reset_for_test() {
-    OWNED.with(|o| *o.borrow_mut() = None);
-    ORPHANED.with(|r| r.borrow_mut().clear());
+    OWNED.with(|pins| pins.borrow_mut().clear());
 }

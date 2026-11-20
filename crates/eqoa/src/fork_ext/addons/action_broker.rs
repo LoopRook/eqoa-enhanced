@@ -3060,7 +3060,7 @@ pub(crate) fn enqueue_lua(
 }
 
 /// Queues a map alias (`eqoa.map.set_waypoint` / `clear_waypoint`, spec §7): the same request and result
-/// contract as `eqoa.actions.*`. The spec gives these no capability: any mod logic may move the waypoint.
+/// contract as `eqoa.actions.*`. The map binding checks the waypoint grant and world readiness.
 pub(crate) fn enqueue_map_lua(
     lua: &Lua,
     symbol: &str,

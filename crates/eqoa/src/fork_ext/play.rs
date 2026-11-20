@@ -746,6 +746,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         crate::fork_ext::addons::action_broker::update_native_snapshot(snapshot);
         crate::fork_ext::addons::native_core::iteration(_game_step);
         if _game_step {
+            crate::fork_ext::addons::map_waypoint::reconcile(|world| _play.map.waypoint(world));
             if let Some(pending) = PENDING_BANK_TX.with(|b| {
                 if !bank_session_open(_play) {
                     b.borrow_mut().take()
@@ -841,10 +842,8 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                 clear_staged_for_kind(expired_kind);
             }
             let reqs = crate::fork_ext::addons::actions::take_action_requests();
-            for (world, at) in crate::fork_ext::addons::map_waypoint::take_orphaned() {
-                if _play.map.waypoint(world) == Some(at) {
-                    _play.map.api_set_waypoint(world, None);
-                }
+            for world in crate::fork_ext::addons::map_waypoint::take_released(|world| _play.map.waypoint(world)) {
+                _play.map.api_set_waypoint(world, None);
             }
             if ready {
                 if reqs.map && crate::settings::map() && _play.addon_input_available() {
@@ -2004,7 +2003,7 @@ fn dispatch_broker_action(
             match crate::fork_ext::addons::map_waypoint::owned_by(*vm, |world| play.map.waypoint(world)) {
                 Some(world) => {
                     play.map.api_set_waypoint(world, None);
-                    crate::fork_ext::addons::map_waypoint::cleared(*vm);
+                    crate::fork_ext::addons::map_waypoint::cleared(world);
                     DispatchOutcome::Completed {
                         detail: Some(serde_json::json!({"world_id": world})),
                     }
