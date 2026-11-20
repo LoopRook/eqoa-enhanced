@@ -246,8 +246,9 @@ fn round7c_world_events_come_from_play_changes() {
 #[test]
 fn round7c_mod_moves_and_clears_the_players_own_waypoint() {
     crate::fork_ext::addons::big_stack(|| {
-        use crate::fork_ext::addons::action_broker;
+        use crate::fork_ext::addons::{action_broker, map_waypoint};
         action_broker::reset_all_for_test();
+        map_waypoint::reset_for_test();
         let mut p = Play::bundled_ui_fixture();
         let world = p.world_id();
         p.map.round4_waypoint(world, None);
@@ -333,6 +334,7 @@ fn round7c_mod_moves_and_clears_the_players_own_waypoint() {
         crate::settings::set_client(before);
         refused.unwrap();
         p.map.round4_waypoint(world, None);
+        map_waypoint::reset_for_test();
         action_broker::reset_all_for_test();
     });
 }
