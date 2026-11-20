@@ -4,6 +4,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- **Bag Viewer sells single items near a merchant.** Sell 1 and Sell stack work whenever a merchant is in reach: with no merchant window open, Bag Viewer talks to the merchant for you and sells without opening the game's window. After a sale the game's merchant window no longer pops up.
 - Mods need the map waypoint permission to place or clear a personal pin. New pins must be on the loaded map's ground.
 - Disabling a mod removes only the map pins it placed and still owns, in every world. A pin you clear and place again, even at the same spot, stays yours.
 - When a mod's selling or banking run stops (its Stop, or **Use the game's windows** for a mod that replaces the window), a sale already sent still counts once the server answers, and a step that was only queued is never sent. Runs that reached a merchant or bank by talking to them stop too.

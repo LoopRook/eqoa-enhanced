@@ -4665,8 +4665,20 @@ fn round7c_bag_viewer_sells_single_items_near_a_merchant_body() {
     bv.play.bags_set(&bv_world());
     bv.play.bags_player_at([0.0, 0.0, 0.0]);
     bv.enable();
-    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [6.0, 0.0, 0.0]);
     bv.open();
+    bv.frames(2);
+    // no merchant in the zone: both entries greyed with the reason
+    bv.click(bv.slot(7));
+    bv.frames(2);
+    for row in ["Sell 1", "Sell stack"] {
+        let (_, _, enabled, reason, _) = bv.menu_row(row).unwrap_or_else(|| panic!("{row} is listed"));
+        assert!(!enabled, "{row} with no merchant near");
+        assert_eq!(reason.as_deref(), Some("no merchant nearby"), "{row}");
+    }
+    bv.click(bv.slot(7));
+    bv.frames(2);
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [6.0, 0.0, 0.0]);
+    bv.lua().load("require('bags').scan_reset()").exec().unwrap();
     bv.frames(2);
 
     // Sell 1 of the Healing Potions (slot 2, 5 of them), no merchant window open
@@ -4720,15 +4732,13 @@ fn round7c_bag_viewer_sells_single_items_near_a_merchant_body() {
     bv.play.bags_close_merchant();
     bv.frames(2);
 
-    // no merchant near: both entries greyed with the reason
+    // walked away, out of the zone scan's radius: greyed with the reason again
     bv.play.bags_player_at([400.0, 0.0, 400.0]);
+    bv.lua().load("require('bags').scan_reset()").exec().unwrap();
     bv.frames(2);
     bv.click(bv.slot(2));
     bv.frames(2);
     let (_, _, enabled, reason, _) = bv.menu_row("Sell 1").expect("Sell 1 is still listed");
-    assert!(!enabled);
-    assert_eq!(reason.as_deref(), Some("no merchant nearby"));
-    let (_, _, enabled, reason, _) = bv.menu_row("Sell stack").expect("Sell stack is still listed");
     assert!(!enabled);
     assert_eq!(reason.as_deref(), Some("no merchant nearby"));
 
