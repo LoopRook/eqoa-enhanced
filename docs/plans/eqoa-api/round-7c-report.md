@@ -627,7 +627,19 @@ Red on the old code (0446ddd8): `the list sale 1 is answered with stays hidden l
 
 **Gates.** Focused `--filter round7` with the disc: 158 passed, 0 failed, 1 SKIP (the deliberate no-adapter
 test). wasm, footprint and paths PASS. The surface is unchanged (the support-table comparison passes).
-GitHub CI: OWNER1_CI_PLACEHOLDER
+GitHub CI run 44796154401 at e823e942: **success on the third attempt**. addons 658 passed / 0 failed / 25
+ignored / 17 SKIP; full 3297 / 0 / 37 / 378 SKIP; wasm, footprint, paths, player-release 20/0, tools 201/0/1
+SKIP.
+- Attempt 1: `full` failed one test, `round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame`:
+  "the open window asks for the zone's creature list 4.1 times a second" against a cap of 4.0.
+- Attempt 2 (failed jobs rerun): the same test failed in both jobs (4.07 and 4.44).
+- That test measures 0.00 or about 4 list calls a second for the same code. In attempt 1, `addons` measured
+  0.00 and `full` 4.08; locally it is 0.00. The test's own comment records 3.4 on this runner on 2026-11-19,
+  before this change (b8e63048 raised the cap to 4). Bag Viewer times its scan with `os.clock()`
+  (`bags.lua:54-96`), so the count depends on the runner's wall-clock timing. The test does not reach a
+  hidden merchant session.
+- An intermittent existing round 6.5 test, not changed here. It should measure in game time or allow the
+  design cap plus timing noise. `cleanup` run.
 
 **Left as it is (owner decisions pending, or out of scope):**
 - The switch and its scope.
@@ -641,5 +653,5 @@ GitHub CI: OWNER1_CI_PLACEHOLDER
 - A single item sold while the merchant session is up: no window afterwards.
 - Talking to the merchant yourself (Square/Q) a few seconds after the mod's sale: the game's window opens as
   usual.
-- With an open session, single-item Sell is still only offered while a merchant session is open (unchanged;
-  pending decision).
+- Single-item Sell is still offered only while a merchant session is open (unchanged; a decision is
+  pending).
