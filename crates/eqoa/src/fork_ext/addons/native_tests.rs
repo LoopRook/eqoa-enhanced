@@ -909,6 +909,9 @@ fn option_test_host(id: &str) -> Host {
     .unwrap()
 }
 
+#[path = "round7e_key_tests.rs"]
+mod round7e_key_tests;
+
 #[test]
 fn failed_option_saves_leave_lua_and_controls_values_unchanged_and_diagnose() {
     super::options::set_storage_root(None);
