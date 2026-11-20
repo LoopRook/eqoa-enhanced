@@ -109,6 +109,8 @@ mod profile;
 pub(crate) mod quest_log;
 #[cfg(test)]
 mod round_3_picture_tests;
+#[cfg(test)]
+mod round7c_fix_tests;
 mod sandbox;
 mod spike;
 pub(crate) mod storage;

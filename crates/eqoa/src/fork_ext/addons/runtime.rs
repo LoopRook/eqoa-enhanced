@@ -873,6 +873,19 @@ fn replacement_label(replaces: &[String]) -> Option<String> {
     Some(format!("Replaces game windows: {}", names.join(", ")))
 }
 
+/// What Mods & Addons tells the player about a mod before it is enabled: what it can do on its own and
+/// which game windows it replaces. Derived from the manifest only, never from what the mod says.
+pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec<String> {
+    let caps = addon.declared_capabilities().unwrap_or(&[]);
+    let mut lines = Vec::new();
+    lines.extend(autonomous_action_label(caps));
+    lines.extend(replacement_label(&addon.extensions.replaces));
+    if declares_dialog_actions(caps) {
+        lines.push("Can answer NPC dialogs".into());
+    }
+    lines
+}
+
 fn declares_dialog_actions(caps: &[String]) -> bool {
     super::native::capability_grants(caps, "eqoa.actions.dialog_answer")
 }
@@ -903,14 +916,8 @@ fn controls(
             if !caps.is_empty() {
                 ui.text_wrapped(format!("Capabilities: {}", caps.join(", ")));
             }
-            if let Some(label) = autonomous_action_label(caps) {
-                ui.text_wrapped(label);
-            }
-            if let Some(label) = replacement_label(&entry.metadata.extensions.replaces) {
-                ui.text_wrapped(label);
-            }
-            if declares_dialog_actions(caps) {
-                ui.text_wrapped("Can answer NPC dialogs");
+            for line in disclosure_lines(&entry.metadata) {
+                ui.text_wrapped(line);
             }
             let id=&entry.metadata.id;
             let warnings=manager.diagnostics().iter().filter(|d|d.id.as_ref()==Some(id)).count();

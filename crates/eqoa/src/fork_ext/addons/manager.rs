@@ -2738,4 +2738,104 @@ mod tests {
         manager.shutdown();
         super::super::action_broker::reset_all_for_test();
     }
+
+    /// Round 7 Part C fix M4: the eight events the manager's own work emits, each driven through its production
+    /// caller: enabling (a mod's first frame), a frame, the settings page, a texture made from memory that
+    /// succeeds and one that fails, a write to a declared shared file, a declared command sent between mods,
+    /// and disabling.
+    #[test]
+    fn round7c_manager_events_come_from_their_production_callers() {
+        let Some(mut gpu) = Gpu::new() else {
+            eprintln!("SKIP round7c_manager_events_come_from_their_production_callers: no GPU adapter");
+            return;
+        };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package(
+            "probe",
+            true,
+            r#"
+            seen, problems, frames = {}, {}, 0
+            for _, name in ipairs({'enabled', 'disabling', 'settings.render', 'resource.ready',
+                    'resource.failed', 'shared.changed', 'mod.command'}) do
+                assert(eqoa.events.on(name, function(e) seen[name] = e end))
+            end
+            local function try(what, ok, ...)
+                if not ok then problems[#problems + 1] = what .. ': ' .. tostring((...)) end
+            end
+            assert(eqoa.events.on('render', function(e)
+                seen.render = e
+                frames = frames + 1
+                if frames == 2 then
+                    try('texture', pcall(UiForge.CreateTextureFromMemory, string.char(255, 0, 0, 255), 1, 1))
+                    if pcall(UiForge.CreateTextureFromMemory, 'xx', 2, 2) then
+                        problems[#problems + 1] = 'a 2x2 texture from 2 bytes was accepted'
+                    end
+                    try('write', pcall(function() assert(eqoa.files.write('journal.json', '{}')) end))
+                    try('send', pcall(function() assert(eqoa.mods.send('probe', 'refresh', {id = 17})) end))
+                end
+            end))
+        "#,
+        );
+        let manifest = scripts.0.join("probe/mod.json");
+        let mut meta: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        meta["entryMode"] = serde_json::json!("once");
+        meta["shares"] = serde_json::json!(["data/journal.json"]);
+        meta["commands"] = serde_json::json!(["refresh"]);
+        fs::write(&manifest, serde_json::to_vec(&meta).unwrap()).unwrap();
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        for _ in 0..4 {
+            gpu.frame(&mut manager);
+        }
+        let probe = lua(&manager, "probe");
+        manager.queue(Command::Settings("probe".into()));
+        gpu.begin();
+        manager.frame(Snapshot {
+            in_game: false,
+            start_menu: true,
+            ..Snapshot::default()
+        });
+        gpu.render();
+        manager.after_render();
+        gpu.frame(&mut manager);
+        manager.queue(Command::Enable("probe".into(), false));
+        gpu.frame(&mut manager);
+        super::super::native_tests::install_field_check_lua(&probe).unwrap();
+        probe
+            .globals()
+            .set(
+                "manager_events",
+                probe
+                    .create_sequence_from(super::super::native_tests::MANAGER_EVENTS.iter().copied())
+                    .unwrap(),
+            )
+            .unwrap();
+        let diagnostics = manager
+            .diagnostics()
+            .iter()
+            .map(|d| d.message.clone())
+            .collect::<Vec<_>>()
+            .join("; ");
+        probe.globals().set("diagnostics", diagnostics).unwrap();
+        let checked = probe
+            .load(
+                r#"
+                assert(#problems == 0, table.concat(problems, '; ') .. ' | ' .. diagnostics)
+                local missing = {}
+                for _, name in ipairs(manager_events) do
+                    if not seen[name] then missing[#missing + 1] = name end
+                end
+                assert(#missing == 0, 'the manager did not emit: ' .. table.concat(missing, ', ') .. ' | ' .. diagnostics)
+                assert(seen['mod.command'].data.args.id == 17)
+                assert(seen['shared.changed'].data.path == 'data/journal.json', seen['shared.changed'].data.path)
+                assert(seen['resource.ready'].data.kind == 'texture')
+                assert(seen['resource.failed'].data.kind == 'texture')
+                event_fields(seen, manager_events)
+            "#,
+            )
+            .exec();
+        manager.shutdown();
+        checked.unwrap();
+    }
 }

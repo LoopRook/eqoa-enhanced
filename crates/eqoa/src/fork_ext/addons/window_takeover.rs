@@ -228,11 +228,17 @@ pub(crate) fn take_state_borrows_for_test() -> usize {
     STATE_BORROWS.with(|n| n.replace(0))
 }
 
-pub(super) fn use_game_windows() -> bool {
+pub(crate) fn use_game_windows() -> bool {
     USE_GAME_WINDOWS.with(Cell::get)
 }
 
-pub(super) fn set_use_game_windows(on: bool) {
+/// What a restart does to the switch's in-memory value: forgotten, read again on first use.
+#[cfg(test)]
+pub(crate) fn forget_switch_for_test() {
+    USE_GAME_WINDOWS.with(|value| value.set(false));
+}
+
+pub(crate) fn set_use_game_windows(on: bool) {
     USE_GAME_WINDOWS.with(|value| value.set(on));
     if on && has_activity() {
         release_claims("released by the player", true);

@@ -564,12 +564,32 @@ pub(super) fn envelope_readonly(lua: &mlua::Lua, e: &Event) -> Result<mlua::Tabl
 fn deliver(lua: &mlua::Lua, e: &Event, only: Option<&Token>) -> Result<()> {
     deliver_data(lua, e, only, None)
 }
+#[cfg(test)]
+thread_local! {
+    static DATA_KEYS: RefCell<std::collections::BTreeMap<String, std::collections::BTreeSet<String>>> =
+        RefCell::new(Default::default());
+}
+
+/// The non-null top-level keys the native data of every delivered `name` event carried (tests only).
+#[cfg(test)]
+pub(crate) fn data_keys_for_test(name: &str) -> Vec<String> {
+    DATA_KEYS.with(|k| k.borrow().get(name).map(|keys| keys.iter().cloned().collect()).unwrap_or_default())
+}
+
 fn deliver_data(
     lua: &mlua::Lua,
     e: &Event,
     only: Option<&Token>,
     data: Option<mlua::Table>,
 ) -> Result<()> {
+    #[cfg(test)]
+    if let Json::Object(fields) = &*e.data {
+        DATA_KEYS.with(|k| {
+            k.borrow_mut().entry(e.name.clone()).or_default().extend(
+                fields.iter().filter(|(_, v)| !v.is_null()).map(|(key, _)| key.clone()),
+            )
+        });
+    }
     let _timed = super::addon_perf::section("events.deliver");
     let shared = bus(lua);
     {

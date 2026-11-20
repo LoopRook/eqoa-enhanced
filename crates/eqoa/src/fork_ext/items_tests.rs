@@ -237,6 +237,10 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
             fields('items.CanUse', eqoa.items.can_use(sword.ref, 0, 0, 50))
             fields('gems.Gem', eqoa.gems.get('Moonstone'))
             fields('items.SlotInfo', eqoa.items.slot_info(sword.wear_slot), 'name')
+            seen = {}
+            for _, n in ipairs({'loot.changed', 'merchant.changed'}) do
+                eqoa.events.on(n, function(e) seen[n] = e end)
+            end
         "#,
         )
         .unwrap();
@@ -278,6 +282,7 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
             fields('items.MerchantState', shop.merchant)
             fields('items.MerchantOption', shop.merchant.options[1])
             assert(log[#log].name == 'merchant.changed', 'no merchant event from the native open')
+            event_fields(seen, {'loot.changed', 'merchant.changed'})
         "#,
         )
         .unwrap();
@@ -4218,4 +4223,79 @@ fn round65_fix2_merchant_uses_native_flags_and_exact_request() {
         .unwrap();
     window_takeover::reset_all_for_test();
     action_broker::reset_all_for_test();
+}
+
+/// Round 7 Part C fix L1: the "Use the game's windows" switch holds after a restart, and turning it on stops a
+/// running batch whose window claim it released, exactly as the Stop button does.
+#[test]
+fn round7c_game_windows_switch_is_saved_and_stops_a_claimed_batch() {
+    use crate::fork_ext::addons::{action_broker, native_events, window_takeover};
+    let config = std::env::temp_dir().join(format!("eqoa-r7c-switch-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&config);
+    std::fs::create_dir_all(&config).unwrap();
+    let previous = std::env::var_os("EQOA_CONFIG");
+    unsafe { std::env::set_var("EQOA_CONFIG", &config) };
+    window_takeover::reset_all_for_test();
+    window_takeover::set_use_game_windows(true);
+    window_takeover::forget_switch_for_test();
+    let kept = window_takeover::use_game_windows();
+    window_takeover::set_use_game_windows(false);
+    window_takeover::forget_switch_for_test();
+    let cleared = !window_takeover::use_game_windows();
+
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    let mut a = potion();
+    a.key = 101;
+    a.equip_slot = -1;
+    let mut b = gem();
+    b.key = 102;
+    b.equip_slot = -1;
+    p.dump.inventory = list(&[a, b]);
+    p.bags_open_merchant(88);
+    p.forge_snapshot(None);
+    let host = Host::with_test_capabilities(&["eqoa.actions.*", "eqoa.windows.takeover"]).unwrap();
+    host.execute(
+        r#"
+        bres = {}
+        eqoa.events.on('batch.result', function(e) bres[#bres + 1] = e.data end)
+        assert(eqoa.windows.takeover('merchant'))
+        local inv = assert(eqoa.inventory.get())
+        assert(eqoa.actions.batch({ steps = {
+            { kind = 'sell', item = inv.items[1].ref, count = 1 },
+            { kind = 'sell', item = inv.items[2].ref, count = 1 },
+        }, require_window = 'merchant' }))
+        "#,
+    )
+    .unwrap();
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    assert!(p.npcw.shop.pending, "the batch's first sale went out");
+    let sent = p.session.sends_lost;
+    window_takeover::set_use_game_windows(true);
+    for _ in 0..3 {
+        p.bags_broker_tick();
+        native_events::dispatch(&host).unwrap();
+    }
+    let result = host.execute(
+        "assert(#bres == 1, 'batch results: ' .. #bres); local r = bres[1]; \
+         assert(r.state == 'stopped' and r.code == 'cancelled' and r.reason == 'stopped', \
+         tostring(r.state) .. ' ' .. tostring(r.code) .. ' ' .. tostring(r.reason))",
+    );
+    let later_sends = p.session.sends_lost - sent;
+    window_takeover::set_use_game_windows(false);
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+    match previous {
+        Some(value) => unsafe { std::env::set_var("EQOA_CONFIG", value) },
+        None => unsafe { std::env::remove_var("EQOA_CONFIG") },
+    }
+    let _ = std::fs::remove_dir_all(&config);
+    assert!(kept, "the switch must hold after a restart");
+    assert!(cleared, "turning it off must hold after a restart too");
+    result.unwrap();
+    assert_eq!(later_sends, 0, "no sale after the switch stopped the batch");
 }

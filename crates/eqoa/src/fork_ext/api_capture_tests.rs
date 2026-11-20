@@ -136,7 +136,7 @@ fn round7c_play_records_match_declared_fields() {
             fields('map.Waypoint', map.waypoint, 'label owner')
             fields('map.Marker', eqoa.map.markers(map.world_id)[1], 'level_min level_max label step')
             local _, err = eqoa.actions.move()
-            fields('Error', err, 'retry_after')
+            fields('Error', err)
             fields('capabilities.Capability', eqoa.capabilities.get('eqoa.api'), 'reason')
         "#).unwrap();
     });
@@ -220,6 +220,7 @@ fn round7c_world_events_come_from_play_changes() {
                 if not seen[name] then missing[#missing + 1] = name end
             end
             assert(#missing == 0, 'Play did not emit: ' .. table.concat(missing, ', '))
+            event_fields(seen, world_events)
             fields('events.Event', seen['combat.hit'])
             fields('combat.CombatHit', seen['combat.hit'].data)
         "#,
@@ -227,6 +228,102 @@ fn round7c_world_events_come_from_play_changes() {
         .unwrap();
     });
 }
+/// Round 7 Part C fix M5b: `eqoa.map.set_waypoint`/`clear_waypoint` move the player's own waypoint through the
+/// map's own waypoint path, read back through `eqoa.map.get().waypoint`.
+#[test]
+fn round7c_mod_moves_and_clears_the_players_own_waypoint() {
+    crate::fork_ext::addons::big_stack(|| {
+        use crate::fork_ext::addons::action_broker;
+        action_broker::reset_all_for_test();
+        let mut p = Play::bundled_ui_fixture();
+        let world = p.world_id();
+        p.map.round4_waypoint(world, None);
+        p.forge_snapshot(None);
+        let host = Host::new().unwrap();
+        let tick = |p: &mut Play, host: &Host| {
+            p.bags_broker_tick();
+            native_events::dispatch(host).unwrap();
+            p.forge_snapshot(None);
+            native_events::dispatch(host).unwrap();
+        };
+        host.execute(
+            r#"
+            ares = {}
+            eqoa.events.on('action.result', function(e) ares[#ares + 1] = e.data end)
+            world = eqoa.map.get().world_id
+            local req, err = eqoa.map.set_waypoint{world_id = world, x = 1200, z = 3400, label = 'Camp'}
+            assert(req, err and (err.code .. ': ' .. err.message))
+            "#,
+        )
+        .unwrap();
+        tick(&mut p, &host);
+        assert_eq!(p.map.waypoint(world), Some([1200.0, 3400.0]), "the game's own waypoint moved");
+        host.execute(
+            r#"
+            local r = ares[#ares]
+            assert(r and r.kind == 'set_waypoint' and r.state == 'completed', r and (r.kind .. ' ' .. r.state))
+            local w = assert(eqoa.map.get().waypoint, 'waypoint read back')
+            assert(w.world_id == world and w.x == 1200 and w.z == 3400, 'position')
+            assert(w.label == 'Camp' and w.owner == 'test', tostring(w.label) .. ' ' .. tostring(w.owner))
+            assert(eqoa.map.clear_waypoint())
+            "#,
+        )
+        .unwrap();
+        tick(&mut p, &host);
+        assert_eq!(p.map.waypoint(world), None, "the mod's waypoint cleared");
+        host.execute(
+            r#"
+            local r = ares[#ares]
+            assert(r.kind == 'clear_waypoint' and r.state == 'completed', r.kind .. ' ' .. r.state)
+            assert(eqoa.map.get().waypoint == nil)
+            assert(eqoa.map.set_waypoint{world_id = world, x = 50, z = 60})
+            "#,
+        )
+        .unwrap();
+        tick(&mut p, &host);
+        // the player puts their own waypoint elsewhere: it is theirs, and the mod cannot clear it
+        p.map.round4_waypoint(world, Some([10.0, 20.0]));
+        tick(&mut p, &host);
+        host.execute(
+            r#"
+            local w = assert(eqoa.map.get().waypoint)
+            assert(w.x == 10 and w.z == 20 and w.owner == nil and w.label == nil, tostring(w.owner))
+            assert(eqoa.map.clear_waypoint())
+            "#,
+        )
+        .unwrap();
+        tick(&mut p, &host);
+        assert_eq!(p.map.waypoint(world), Some([10.0, 20.0]), "the player's waypoint stays");
+        host.execute(
+            r#"
+            local r = ares[#ares]
+            assert(r.kind == 'clear_waypoint' and r.state == 'refused' and r.code == 'busy', r.state .. ' ' .. tostring(r.code))
+            local ok, err = eqoa.map.set_waypoint{world_id = world, x = 0/0, z = 1}
+            assert(ok == nil and err.code == 'invalid_argument', 'NaN')
+            ok, err = eqoa.map.set_waypoint{world_id = world, x = 1, z = 1, label = string.rep('x', 129)}
+            assert(ok == nil and err.code == 'invalid_argument', 'label length')
+            "#,
+        )
+        .unwrap();
+        let before = crate::settings::client();
+        let mut off = before.clone();
+        off.map = false;
+        crate::settings::set_client(off);
+        let refused = host.execute(
+            r#"
+            local ok, err = eqoa.map.set_waypoint{world_id = world, x = 1, z = 1}
+            assert(ok == nil and err.code == 'unavailable', 'set with the map off')
+            ok, err = eqoa.map.clear_waypoint()
+            assert(ok == nil and err.code == 'unavailable', 'clear with the map off')
+            "#,
+        );
+        crate::settings::set_client(before);
+        refused.unwrap();
+        p.map.round4_waypoint(world, None);
+        action_broker::reset_all_for_test();
+    });
+}
+
 // Shared bundled-UI fixture: populate the native client structures, then use
 // exactly the cached projection that Play supplies to the addon manager.
 impl Play {

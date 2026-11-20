@@ -32,60 +32,121 @@ pub(crate) const PLAY_EVENTS: &[&str] = &[
     "input.pad",
 ];
 
+/// Events the host's own services emit, driven in `round7c_host_service_events_reach_lua_from_their_producers`.
 const SERVICE_EVENTS: &[&str] = &[
-    "enabled",
-    "disabling",
-    "render",
-    "settings.render",
     "timer",
     "pointer.pressed",
     "pointer.wheel",
-    "resource.ready",
-    "resource.failed",
-    "shared.changed",
-    "mod.command",
     "action.result",
     "batch.progress",
     "batch.result",
     "events.dropped",
 ];
 
+/// Events the mod manager's lifecycle, frames, settings page, resource loads and mod exchange emit, driven
+/// through the manager in `manager::tests::round7c_manager_events_come_from_their_production_callers`.
+pub(crate) const MANAGER_EVENTS: &[&str] = &[
+    "enabled",
+    "disabling",
+    "render",
+    "settings.render",
+    "resource.ready",
+    "resource.failed",
+    "shared.changed",
+    "mod.command",
+];
+
 
 const RECORD_FIELD_CHECK: &str = r#"
-function fields(name, record, optional)
+-- Every way a record (or an event's data) differs from its declared fields, as one list. `extra` lists keys
+-- the native value carried that a lazily built record has not made yet.
+function field_issues(name, record, optional, extra)
     local path = 'eqoa.' .. name
-    assert(type(record) == 'table', path .. ' did not produce a record')
     local declared = {}
-    for _, field in ipairs(assert(eqoa.capabilities.get(path)).children) do
+    local described = eqoa.capabilities.get(path)
+    for _, field in ipairs(described and described.children or {}) do
         declared[field:sub(#path + 2)] = eqoa.capabilities.get(field).status
+    end
+    local issues = {}
+    if record == nil and next(declared) == nil then
+        return issues
+    end
+    if type(record) ~= 'table' then
+        return {path .. ' did not produce a record'}
     end
     local may_be_nil = {}
     for field in (optional or ''):gmatch('%S+') do
-        assert(declared[field], path .. '.' .. field .. ' is no longer declared')
+        if not declared[field] then
+            issues[#issues + 1] = path .. '.' .. field .. ' is no longer declared'
+        end
         may_be_nil[field] = true
     end
-    local actual = {}
-    for _, key in ipairs(round7c_record_keys(record)) do
-        assert(declared[key], path .. '.' .. key .. ' is undeclared')
-        assert(declared[key] == 'supported', path .. '.' .. key .. ' is projected but marked unsupported')
-        actual[key] = record[key]
-    end
+    -- a lazily built record makes a field when it is first read
     for key, status in pairs(declared) do
-        if status == 'supported' and not may_be_nil[key] then
-            assert(actual[key] ~= nil, path .. '.' .. key .. ' is missing')
+        if status == 'supported' then local _ = record[key] end
+    end
+    local keys, listed = {}, {}
+    for _, key in ipairs(round7c_record_keys(record)) do keys[#keys + 1] = key; listed[key] = true end
+    for _, key in ipairs(extra or {}) do
+        if not listed[key] then keys[#keys + 1] = key; listed[key] = true end
+    end
+    local actual = {}
+    for _, key in ipairs(keys) do
+        if not declared[key] then
+            issues[#issues + 1] = path .. '.' .. key .. ' is undeclared'
+        elseif declared[key] ~= 'supported' then
+            issues[#issues + 1] = path .. '.' .. key .. ' is projected but marked ' .. declared[key]
+        else
+            actual[key] = record[key]
         end
     end
+    for key, status in pairs(declared) do
+        if status == 'supported' and not may_be_nil[key] and actual[key] == nil then
+            issues[#issues + 1] = path .. '.' .. key .. ' is missing'
+        end
+    end
+    table.sort(issues)
+    return issues
+end
+function fields(name, record, optional)
+    local issues = field_issues(name, record, optional)
+    assert(#issues == 0, table.concat(issues, '\n'))
+end
+-- Fields an event's data may lack, each with the reason it may be nil.
+EVENT_OPTIONAL = {
+}
+-- The data of every event in `names` (each seen in `seen`) against its declared fields.
+function event_fields(seen, names)
+    local issues = {}
+    for _, name in ipairs(names) do
+        local event = seen[name]
+        if event == nil then
+            issues[#issues + 1] = name .. ' was not seen'
+        else
+            local issues_here = field_issues('events.' .. name .. '.data', event.data, EVENT_OPTIONAL[name],
+                round7c_event_keys(name))
+            for _, issue in ipairs(issues_here) do
+                issues[#issues + 1] = issue
+            end
+        end
+    end
+    assert(#issues == 0, #issues .. ' event field issues:\n' .. table.concat(issues, '\n'))
 end
 "#;
 
 /// The Lua-facing proxies expose properties through their backing table.
 /// Inspect its keys without changing the public read-only table behavior.
 pub(crate) fn install_field_check(host: &Host) -> mlua::Result<()> {
+    install_field_check_lua(&host.lua)
+}
+
+/// `install_field_check` for a mod's Lua state the manager runs.
+pub(crate) fn install_field_check_lua(lua: &mlua::Lua) -> mlua::Result<()> {
     use mlua::{Table, Value};
 
-    host.lua.globals().set(
+    lua.globals().set(
         "round7c_record_keys",
-        host.lua.create_function(|lua, record: Table| {
+        lua.create_function(|lua, record: Table| {
             let backing = record
                 .metatable()
                 .and_then(|mt| mt.raw_get::<Table>("__index").ok())
@@ -97,7 +158,13 @@ pub(crate) fn install_field_check(host: &Host) -> mlua::Result<()> {
             lua.create_sequence_from(keys)
         })?,
     )?;
-    host.execute(RECORD_FIELD_CHECK)
+    lua.globals().set(
+        "round7c_event_keys",
+        lua.create_function(|lua, name: String| {
+            lua.create_sequence_from(super::native_events::data_keys_for_test(&name))
+        })?,
+    )?;
+    lua.load(RECORD_FIELD_CHECK).exec()
 }
 
 #[test]
@@ -105,7 +172,7 @@ fn round7c_supported_event_inventory_has_fixture_coverage() {
     use std::collections::BTreeSet;
 
     let host = Host::new().unwrap();
-    let fixtures = PLAY_EVENTS.iter().chain(SERVICE_EVENTS)
+    let fixtures = PLAY_EVENTS.iter().chain(SERVICE_EVENTS).chain(MANAGER_EVENTS)
         .copied().chain(["loot.changed", "merchant.changed"]).collect::<BTreeSet<_>>();
     let rows: mlua::Table = host.lua.load("return eqoa.capabilities.list('eqoa.events')").eval().unwrap();
     let events = rows.sequence_values::<mlua::Table>().map(|row| row.unwrap())
@@ -202,7 +269,6 @@ fn round7c_native_switch_releases_every_holder_and_prevents_reclaims() {
 #[test]
 fn round7c_host_service_events_reach_lua_from_their_producers() {
     use super::{action_broker, native_core, native_events, pointer_api};
-    use serde_json::json;
     use winit::event::{
         DeviceId, ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
     };
@@ -227,10 +293,6 @@ fn round7c_host_service_events_reach_lua_from_their_producers() {
     "#,
     )
     .unwrap();
-    native_events::lifecycle(&host, "enabled").unwrap();
-    native_events::lifecycle(&host, "disabling").unwrap();
-    native_events::render(&host).unwrap();
-    native_events::settings_render(&host).unwrap();
     pointer_api::position([10., 20.], true, (100, 100));
     let device_id = DeviceId::dummy();
     pointer_api::observe(
@@ -249,15 +311,6 @@ fn round7c_host_service_events_reach_lua_from_their_producers() {
         },
         (100, 100),
     );
-    native_events::resource(&host.lua, "font", mlua::Value::Integer(1), None).unwrap();
-    native_events::resource(&host.lua, "font", mlua::Value::Nil, Some("fixture failure")).unwrap();
-    native_events::shared_changed("owner", "data/journal.json");
-    native_events::command(
-        &native_events::bus(&host.lua),
-        json!({"from":"owner","command":"refresh","args":{"id":17}}),
-        || None,
-    )
-    .unwrap();
 
     host.execute(
         r#"
@@ -284,11 +337,11 @@ fn round7c_host_service_events_reach_lua_from_their_producers() {
         end
         assert(#missing == 0, 'Host did not emit: ' .. table.concat(missing, ', '))
         assert(seen['pointer.pressed'].data.x == 10)
-        assert(seen['mod.command'].data.args.id == 17)
         assert(seen['batch.result'].data.completed == 2)
         fields('actions.ActionResult', seen['action.result'].data, 'code reason detail')
         fields('actions.BatchResult', seen['batch.result'].data, 'code reason detail current_step failed_step')
         assert(seen['events.dropped'].data.count > 0)
+        event_fields(seen, service_events)
     "#,
     )
     .unwrap();
