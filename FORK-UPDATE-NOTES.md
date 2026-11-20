@@ -5,6 +5,8 @@ Upstream changes remain in UPDATE-NOTES.md.
 ## Unreleased
 
 - Mods need the map waypoint permission to place or clear a personal pin. New pins must be on the loaded map's ground.
+- Disabling a mod removes only the map pins it placed and still owns, in every world. A pin you clear and place again, even at the same spot, stays yours.
+- When a mod's selling or banking run stops (its Stop, or **Use the game's windows**), a sale already sent still counts once the server answers, and a step that was only queued is never sent. Runs that reached a merchant or bank by talking to them stop too.
 - An enabled addon that changes package type or adds permissions stays disabled until you approve it again in Mods & Addons.
 - Mods with chat permission can send ordinary chat. Lines starting with a slash require the command permission, including chat submitted through the game's editor.
 - Mods & Addons shows **Replaces game windows** and **Can answer NPC dialogs** when a mod declares those abilities. Turn on **Use the game's windows** to release all mod window claims and keep new openings native.
