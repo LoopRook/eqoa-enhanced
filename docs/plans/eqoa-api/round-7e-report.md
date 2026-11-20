@@ -407,3 +407,95 @@ which is why n=1 alone passes; with both broken the table's wrong answers fail f
 - Not verified: the live client; real keyboards on German or UK layouts, a real numpad (the layouts and the numpad
   are tested with synthetic events carrying the logical key and the key's place that those keyboards send); the
   App's `key_input` ordering, as before.
+
+
+# Owner test fix 1 (owner: "I was able to assign Shift+Space, however, jump works just fine")
+
+Branch `feat/eqoa-api-r7e`, develop merged first (fast-forward to a3da75d8: the branch was already inside develop,
+15163407 included my round-3 work). Upstream lines: none new (`options.rs` stays +2/-0, footprint PASS).
+
+## Cause, in two sentences
+
+**What I could prove:** a mod key on a combo the game does NOT have bound (Shift+Space with nothing on it) is refused
+in the live order; I traced and ran that and it holds (below). **What I found that is accepted and wrong:** when a game
+control already holds the combo itself (a bar slot, say, on Shift+Space), `mod_row_capture` treated
+it as an exact owner and swapped or freed that control for the mod, without asking what the game would act on for the
+press *after* the control let go: with the combo free again the game takes Shift+Space as Space, Jump's, so the mod was
+accepted and was dead at once (Jump works fine; the row is marked). That matches the owner's words, but **I cannot
+see the owner's state**: their saved files end without a `shift+space` (the session was cancelled or overwritten), so I
+could not confirm that a control held Shift+Space at that moment. The lead should ask the owner (below).
+
+## The live path, traced (the instructions' step 2)
+
+Order in the client: `window_event` -> `fork_report::event` -> `report_viewer::addon_event` (the mod runtime sees
+`ModifiersChanged` and the key FIRST: `Runtime::event` -> `observe_modifiers`, then `route_key` -> `route_mod_key_based`)
+-> `handle_window_event` -> `key_input` -> `key_name(capture = true)` -> `Play::capture_key` -> `WndOptions` ->
+`ControlsPage::capture_key` -> the mod hook (`bindpage::capture_key`).
+- **Which function receives the key / what name:** the hook gets the page's name, which `App::key_name` makes with the
+  capture flag: `shift+space` (viewer.rs: the combo whenever `capture` is true). Space is `Key::Named(Space)` on Windows
+  in every modifier state (winit 0.30.13 `keyboard_layout.rs`: `vkey_to_non_char_key` runs first and returns it), so it
+  takes the same branch as the keys the tests press.
+- **Is the learned record filled before the capture decision?** Yes: the mod runtime runs before `key_input`, and the
+  learning in `route_mod_key_based` comes BEFORE the "is anyone listening / is this plain play" returns, so
+  `plain_play == false` on the Options page does not skip it. (If no VM is active at that moment `route_key` returns
+  early and nothing is learned; the capture then falls back to the static rule, which gives the same answer for Space.)
+- **Does the Options page's `plain_play` matter at press time?** There is no mod press while Options is up; the
+  press-time names are only made in play.
+- Verified by running the order in tests: `round7e_owner1_*` (below) enter at the mod runtime (`Runtime::scripted_key_based`
+  with the modifiers set through `observe_modifiers`, `plain_play` false), then `GameKeys` for `App::key_name`, then the
+  real `WndOptions` (open, rows, ✕, `capture_key`, draw). **The gap that remains** (and where the earlier tests entered):
+  `Runtime::event`'s own match on the window event (needs a `Window`), `App::key_input` and `key_name` themselves, the
+  real `self.mods` and `typing`, and winit's `KeyEvent`. The earlier tests called the hook with a hand-written name and
+  never had a game control already on the combo, which is the state that was accepted wrongly.
+
+## Why the tests missed it
+
+The Shift+Space tests all started from a clean layout (nothing on `shift+space`), the one state where the exact-owner
+branch is not taken. The branch that was wrong is the one where a control already has the combo.
+
+## The fix
+
+`mod_row_capture`: when a game row is going to give up the combo (swap or free), the layout AFTER that change is checked
+with `game_owner` first; if the game would then act on the plain key and a control has it, the capture is refused naming
+that control (`shadow_text`), and nothing has changed (the layout is only a copy until `set_binds`). Also: every Controls
+capture, refusal and kept key now writes one line to `eqoa.log` (`controls: mod row N given shift+space: the game acts on
+space for that press (it has row jump on it)`, `controls: refused: ...`, `controls: mod X.Y kept ...`), and a saved mod key
+the game has the press of says so once (`controls: mod X.Y on shift+space does nothing: the game acts on space for that
+press`), so an odd result in the next test can be read from the log.
+
+## Tests
+
+`round7e_owner1_*` (all in `round7e_key_tests.rs`):
+- `shift_and_friends_over_a_game_key_are_refused_in_the_live_order`: Shift+Space, Shift+Tab, Shift+Enter, Shift+Up,
+  Shift+F5, Ctrl+Space, Alt+Space, each through the live order, each refused. `a_shifted_character_is_what_it_types`:
+  Shift+1 (types `!`, nothing has it) is accepted.
+- `shift_space_is_refused_after_the_swaps_the_owner_made`: fresh, after a swap then cancel, after Jump taking a mod key
+  then cancel, after Defaults then cancel, after a swap saved and swapped back: always refused with Jump on Space.
+- `a_saved_shift_space_is_marked_says_jump_and_does_not_fire` (step 4): the saved key is kept as it is, the row is marked
+  and says "Jump ... the game's control wins", and a Shift+Space press fires Jump only (the game acts; the mod does not;
+  nothing fires twice).
+- `a_game_control_on_shift_space_cannot_hand_it_to_a_mod_that_jump_then_beats`: **the reproduction.** On the unfixed code
+  it failed (`round7e_key_tests.rs:418`: the capture was accepted); with the fix it passes, including the control that
+  a combo whose plain key nothing has (`shift+u`) is still handed over by the usual swap.
+- Negative control for the live-order tests: `R7E_BREAK=1` (the combo treated as its own name, no plain-key rule)
+  fails three of the four `owner1` tests (:1267, :1345, :1357); with it off all pass.
+
+## What the owner should retest
+
+1. Give a bar slot (or any game control) Shift+Space, then give a MOD Shift+Space: refused, the note names Jump, the
+   slot keeps Shift+Space.
+2. With nothing on Shift+Space, give a mod Shift+Space: refused naming Jump (this was already so in every test).
+3. If it is still accepted somewhere: send `eqoa.log`; the `controls:` lines say which kind of row was given the key, what
+   name the page got, what the game acts on for it and what it has there. Please also say which row (game or mod) took
+   Shift+Space, and whether any control already had it.
+4. A mod already saved on Shift+Space: its row is marked with ! and says Jump's wins; pressing Shift+Space jumps and
+   the mod does nothing.
+
+## Gates
+- Local with the disc (`EQOA_ISO`): `--filter round7e_ fork_ext:: options:: settings:: bindpage:: binds:: play::fork_hooks::`:
+  1120 passed, 0 failed, 26 ignored (unrelated SKIPs); 0 SKIP among the `round7e_` tests. wasm, footprint, paths PASS.
+- CI run https://github.com/LoopRook/eqoa-enhanced/actions/runs/44792534526 on b895c0a5: success. addons 663 / 0 failed;
+  full 3300 / 0 failed (378 SKIP: no disc or GPU in CI); wasm, footprint, paths, player-release (20), tools (201)
+  success. `ci_gates.py cleanup` run.
+- Not verified: the live client itself (Runtime::event, App::key_input and key_name are not run by any test), and
+  that this is the state the owner was in (see "Cause").
