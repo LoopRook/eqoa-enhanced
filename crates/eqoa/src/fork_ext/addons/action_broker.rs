@@ -517,7 +517,7 @@ impl VmBroker {
         };
         self.upsert_batch_retained(rec.clone());
         if emit_event {
-            self.pending_batch_events.push_back((true, rec));
+            self.pending_batch_events.push_back((true, rec.clone()));
         }
         for kind in super::window_takeover::TakeoverKind::ALL {
             if batch.takeover_kinds[kind as usize] {
