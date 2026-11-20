@@ -244,7 +244,7 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
             fields('items.SlotInfo', eqoa.items.slot_info(sword.wear_slot), 'name')
             seen = {}
             for _, n in ipairs({'loot.changed', 'merchant.changed'}) do
-                eqoa.events.on(n, function(e) seen[n] = e end)
+                eqoa.events.on(n, function(e) seen[n] = e; round7c_note(n, e) end)
             end
         "#,
         )

@@ -60,7 +60,7 @@ pub(crate) const MANAGER_EVENTS: &[&str] = &[
 const RECORD_FIELD_CHECK: &str = r#"
 -- Every way a record (or an event's data) differs from its declared fields, as one list. `extra` lists keys
 -- the native value carried that a lazily built record has not made yet.
-function field_issues(name, record, optional, extra)
+function field_issues(name, record, optional, extra, present)
     local path = 'eqoa.' .. name
     local declared = {}
     local described = eqoa.capabilities.get(path)
@@ -101,7 +101,8 @@ function field_issues(name, record, optional, extra)
         end
     end
     for key, status in pairs(declared) do
-        if status == 'supported' and not may_be_nil[key] and actual[key] == nil then
+        if status == 'supported' and not may_be_nil[key] and actual[key] == nil
+                and not (present and present[key]) then
             issues[#issues + 1] = path .. '.' .. key .. ' is missing'
         end
     end
@@ -112,9 +113,36 @@ function fields(name, record, optional)
     local issues = field_issues(name, record, optional)
     assert(#issues == 0, table.concat(issues, '\n'))
 end
--- Fields an event's data may lack, each with the reason it may be nil.
+-- Fields an event's data may lack in every delivery of the fixtures, each with the reason it may be nil.
 EVENT_OPTIONAL = {
+    -- code/reason: only a refusal or failure; detail: only an action that reports what it did
+    ['action.result'] = 'code reason detail',
+    -- a running batch has no outcome yet: no ok, code, reason, completed_tick or failed_step
+    ['batch.progress'] = 'ok code reason completed_tick failed_step',
+    -- code/reason: only a batch that stopped or failed; failed_step: only when a step failed
+    ['batch.result'] = 'code reason failed_step',
+    -- text: only a key that types a character
+    ['input.key'] = 'text',
+    -- handle: a texture, font or sound (or a decoded JSON value); request/value/path: a file or JSON request
+    ['resource.ready'] = 'handle request value path',
+    -- handle: only a font that fell back to the default; request: only a file or JSON request
+    ['resource.failed'] = 'handle request',
 }
+-- The declared fields any delivery of each event filled (`round7c_note` records them as they arrive).
+round7c_present = {}
+function round7c_note(name, event)
+    local path = 'eqoa.events.' .. name .. '.data'
+    local described = eqoa.capabilities.get(path)
+    if not described or event.data == nil then return end
+    local present = round7c_present[name] or {}
+    round7c_present[name] = present
+    for _, field in ipairs(described.children) do
+        local key = field:sub(#path + 2)
+        if eqoa.capabilities.get(field).status == 'supported' and event.data[key] ~= nil then
+            present[key] = true
+        end
+    end
+end
 -- The data of every event in `names` (each seen in `seen`) against its declared fields.
 function event_fields(seen, names)
     local issues = {}
@@ -124,7 +152,7 @@ function event_fields(seen, names)
             issues[#issues + 1] = name .. ' was not seen'
         else
             local issues_here = field_issues('events.' .. name .. '.data', event.data, EVENT_OPTIONAL[name],
-                round7c_event_keys(name))
+                round7c_event_keys(name), round7c_present[name])
             for _, issue in ipairs(issues_here) do
                 issues[#issues + 1] = issue
             end
@@ -281,12 +309,13 @@ fn round7c_host_service_events_reach_lua_from_their_producers() {
         core.view.in_world = true;
     });
     host.lua.globals().set("service_events", host.lua.create_sequence_from(SERVICE_EVENTS.iter().copied()).unwrap()).unwrap();
+    install_field_check(&host).unwrap();
     host.execute(
         r#"
         seen = {}
         for _, name in ipairs(service_events) do
             assert(eqoa.capabilities.has('eqoa.events.' .. name), name)
-            assert(eqoa.events.on(name, function(e) seen[name] = e end))
+            assert(eqoa.events.on(name, function(e) seen[name] = e; round7c_note(name, e) end))
         end
         assert(eqoa.events.after(0, function(e) seen.timer = e end))
         assert(eqoa.events.on('chat.message', function() end))
@@ -324,7 +353,6 @@ fn round7c_host_service_events_reach_lua_from_their_producers() {
         action_broker::dispatch_all_for_test();
         native_events::dispatch(&host).unwrap();
     }
-    install_field_check(&host).unwrap();
     for _ in 0..1050 {
         native_core::observe_text("overflow fixture", [1.; 4]);
     }

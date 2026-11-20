@@ -167,12 +167,13 @@ fn round7c_world_events_come_from_play_changes() {
         native_core::fixture_demand(true);
         let host = Host::new().unwrap();
         host.lua.globals().set("world_events", host.lua.create_sequence_from(PLAY_EVENTS.iter().copied()).unwrap()).unwrap();
+        install_field_check(&host).unwrap();
         host.execute(
             r#"
             seen = {}
             for _, name in ipairs(world_events) do
                 assert(eqoa.capabilities.has('eqoa.events.' .. name), name)
-                assert(eqoa.events.on(name, function(e) seen[name] = e end))
+                assert(eqoa.events.on(name, function(e) seen[name] = e; round7c_note(name, e) end))
             end
             "#,
         )
@@ -225,7 +226,6 @@ fn round7c_world_events_come_from_play_changes() {
         p.forge_snapshot(None);
         native_events::dispatch(&host).unwrap();
 
-        install_field_check(&host).unwrap();
         host.execute(
             r#"
             local missing = {}
