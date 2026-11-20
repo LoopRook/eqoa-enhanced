@@ -939,7 +939,7 @@ impl Manager {
             // A bundled package exactly as a release of this client shipped it carries that release's own
             // grants: re-adopted silently, the player's choice kept (fix round 3 item 5).
             Some(_) if crate::fork_ext::bundled::is_shipped_package(&addon.id, &addon.package_root) => {
-                (requested, Some(new))
+                (true, Some(new))
             }
             // The player's off stays off: its new labels show, with nothing to accept (fix round 3 item 4a).
             _ if !requested => return false,
@@ -950,7 +950,6 @@ impl Manager {
             }
             None => (true, Some(new)),
         };
-        let blocked = requested && !allowed;
         if let Some(record) = update {
             let persisted = self.storage.update_enable_state(None, Some((&addon.id, &record)));
             self.disclosures.insert(addon.id.clone(), record);
@@ -958,7 +957,7 @@ impl Manager {
                 self.diagnostic(Some(&addon.id), "storage", error);
             }
         }
-        if blocked && !self.diagnostics.iter().any(|d| {
+        if !allowed && !self.diagnostics.iter().any(|d| {
             d.phase == "permissions" && d.id.as_deref() == Some(addon.id.as_str())
         }) {
             self.diagnostic(
@@ -966,7 +965,8 @@ impl Manager {
                 "its permissions changed; enable it again to accept".into(),
             );
         }
-        allowed
+        // `allowed` is false only for a blocked enable; a shipped package keeps the player's choice
+        allowed && requested
     }
 
     fn rescan(&mut self, rendering: bool) {
