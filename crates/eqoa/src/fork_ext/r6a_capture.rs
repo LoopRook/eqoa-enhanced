@@ -2,6 +2,7 @@
 //! Round 6 Part A native state capture: quests and class mastery (plus camera and windows in subsequent steps).
 use super::Play;
 use crate::fork_ext::addons::native_core::{self, CORE, Core, MasteryFlags, View, changed_fields};
+use crate::fork_ext::addons::window_kinds;
 use serde_json::{Value as Json, json};
 use std::cell::{Cell, RefCell};
 use std::hash::{Hash, Hasher};
@@ -87,91 +88,13 @@ pub(super) fn forget() {
 }
 
 pub(super) fn mode_name(mode: i32) -> &'static str {
-    match mode {
-        0 => "normal",
-        1 => "loot",
-        2 => "input",
-        4 => "gm_goto",
-        5 => "spellbook",
-        6 => "recipe_book",
-        7 => "response_dialog",
-        9 => "text_dialog",
-        10 => "merchant",
-        11 => "bank",
-        12 => "trainer",
-        13 => "start_menu",
-        14 => "confirm",
-        15 => "trade",
-        16 => "trade_ask",
-        17 => "buddy_request",
-        18 => "buddy_list",
-        19 => "blacksmith",
-        20 => "guild_invite",
-        21 => "guild",
-        22 => "quest_log",
-        23 => "mail_compose",
-        24 => "mail_inbox",
-        26 => "ignore_list",
-        27 => "gm_buff_pc",
-        28 => "mail_tell",
-        29 => "mail_reply",
-        30 => "quick_chat",
-        31 => "support_request",
-        32 => "support_inbox",
-        33 => "chat_history",
-        34 => "options",
-        35 => "who",
-        36 => "fishing",
-        37 => "experiment",
-        38 => "manual_camera",
-        39 => "auction_search",
-        40 => "mastery",
-        41 => "factions",
-        42 => "group_search",
-        43 => "duel_invite",
-        44 => "duel",
-        60 => "combat_record",
-        _ => "other",
-    }
+    window_kinds::mode_name(mode)
 }
 
 fn mode_title(mode: i32, edit_title: &str) -> Option<&str> {
     match mode {
-        1 => Some("Loot"),
-        2 => Some(if edit_title.is_empty() { "Input" } else { edit_title }),
-        4 => Some("Go To"),
-        5 => Some("Abilities"),
-        6 => Some("Recipe Book"),
-        7 | 9 => Some("Dialog"),
-        10 => Some("Merchant"),
-        11 => Some("Bank"),
-        12 => Some("Character Summary"),
-        13 => Some("Start Menu"),
-        14 => Some("Confirm"),
-        15 | 16 => Some("Trade"),
-        17 => Some("Buddy Request"),
-        18 => Some("Buddy List"),
-        19 => Some("Blacksmith"),
-        20 => Some("Guild Invite"),
-        21 => Some("Guild"),
-        22 => Some("Quest Journal"),
-        23 | 24 | 28 | 29 => Some("Mail"),
-        26 => Some("Ignore List"),
-        27 => Some("Buff PC"),
-        30 => Some("Quick Chat"),
-        31 | 32 => Some("Support"),
-        33 => Some("Chat History"),
-        34 => Some("Options"),
-        35 => Some("Who"),
-        36 => Some("Fishing"),
-        37 => Some("Experiment"),
-        39 => Some("Auction Search"),
-        40 => Some("Class Mastery"),
-        41 => Some("Factions"),
-        42 => Some("Group Search"),
-        43 | 44 => Some("Duel"),
-        60 => Some("Combat Record"),
-        _ => None,
+        2 if !edit_title.is_empty() => Some(edit_title),
+        _ => window_kinds::mode_title(mode),
     }
 }
 
@@ -720,8 +643,8 @@ pub(crate) fn windows_json(play: &Play) -> Json {
                 push_wnd(
                     &mut windows,
                     "sub:inventory".into(),
-                    "inventory",
-                    Some("Inventory"),
+                    window_kinds::INVENTORY.0,
+                    Some(window_kinds::INVENTORY.1),
                     Vec::new(),
                     inventory_subwindow_data(play),
                 );
@@ -764,8 +687,8 @@ pub(crate) fn windows_json(play: &Play) -> Json {
         push_wnd(
             &mut windows,
             "overlay:map".into(),
-            "map",
-            Some("Map"),
+            window_kinds::MAP.0,
+            Some(window_kinds::MAP.1),
             Vec::new(),
             WindowData::default(),
         );
@@ -774,8 +697,8 @@ pub(crate) fn windows_json(play: &Play) -> Json {
         push_wnd(
             &mut windows,
             "overlay:search".into(),
-            "search",
-            Some("Player Search"),
+            window_kinds::SEARCH.0,
+            Some(window_kinds::SEARCH.1),
             Vec::new(),
             WindowData::default(),
         );
@@ -784,8 +707,8 @@ pub(crate) fn windows_json(play: &Play) -> Json {
         push_wnd(
             &mut windows,
             "overlay:typing".into(),
-            "typing",
-            Some("Chat"),
+            window_kinds::TYPING.0,
+            Some(window_kinds::TYPING.1),
             Vec::new(),
             WindowData {
                 dialog: json!({

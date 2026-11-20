@@ -853,24 +853,27 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
     }
 }
 
-fn replacement_label(replaces: &[String]) -> Option<String> {
-    if replaces.is_empty() {
-        return None;
+/// The windows a manifest's `replaces` names, by the game's own window titles: first those this build can
+/// replace, then (a mod written for a later build) those it cannot replace yet.
+fn replacement_labels(replaces: &[String]) -> [Option<String>; 2] {
+    let (mut now, mut later) = (Vec::new(), Vec::new());
+    for kind in replaces {
+        let Some(title) = super::window_kinds::title(kind) else {
+            continue;
+        };
+        let list = if super::window_takeover::TakeoverKind::parse(kind).is_ok() {
+            &mut now
+        } else {
+            &mut later
+        };
+        if !list.contains(&title) {
+            list.push(title);
+        }
     }
-    let names = replaces
-        .iter()
-        .map(|kind| match kind.as_str() {
-            "loot" => "Loot",
-            "merchant" => "Merchant",
-            "bank" => "Bank",
-            "inventory" => "Bags",
-            "spellbook" => "Spellbook",
-            "journal" => "Quest journal",
-            "hud.target" => "Target frame",
-            kind => kind,
-        })
-        .collect::<Vec<_>>();
-    Some(format!("Replaces game windows: {}", names.join(", ")))
+    [
+        (!now.is_empty()).then(|| format!("Replaces game windows: {}", now.join(", "))),
+        (!later.is_empty()).then(|| format!("Not replaceable in this version: {}", later.join(", "))),
+    ]
 }
 
 /// What Mods & Addons tells the player about a mod before it is enabled: what it can do on its own and
@@ -879,7 +882,7 @@ pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec
     let caps = addon.declared_capabilities().unwrap_or(&[]);
     let mut lines = Vec::new();
     lines.extend(autonomous_action_label(caps));
-    lines.extend(replacement_label(&addon.extensions.replaces));
+    lines.extend(replacement_labels(&addon.extensions.replaces).into_iter().flatten());
     if declares_dialog_actions(caps) {
         lines.push("Can answer NPC dialogs".into());
     }
@@ -2453,11 +2456,13 @@ mod tests {
 
     #[test]
     fn round7c_manager_labels_come_from_manifest_declarations() {
-        assert_eq!(replacement_label(&[]), None);
+        assert_eq!(replacement_labels(&[]), [None, None]);
         assert_eq!(
-            replacement_label(&["inventory".into(), "spellbook".into(), "hud.target".into()])
-                .as_deref(),
-            Some("Replaces game windows: Bags, Spellbook, Target frame")
+            replacement_labels(&["bank".into(), "spellbook".into(), "loot".into(), "bank".into()]),
+            [
+                Some("Replaces game windows: Bank, Loot".into()),
+                Some("Not replaceable in this version: Abilities".into())
+            ]
         );
         assert!(declares_dialog_actions(&[
             "eqoa.actions.dialog_answer".into()

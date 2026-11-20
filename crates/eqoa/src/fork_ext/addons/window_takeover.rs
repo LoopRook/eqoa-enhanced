@@ -57,6 +57,12 @@ impl TakeoverKind {
             "loot" => Ok(Self::Loot),
             "merchant" => Ok(Self::Merchant),
             "bank" => Ok(Self::Bank),
+            _ if super::window_kinds::is_window(s) => Err((
+                "unsupported",
+                format!(
+                    "the game's '{s}' window cannot be taken over in this version (only 'loot', 'merchant'                      and 'bank'); more windows follow the window-replacement roadmap"
+                ),
+            )),
             _ => Err((
                 "invalid_argument",
                 format!("window takeover kind must be 'loot', 'merchant', or 'bank', got '{s}'"),
