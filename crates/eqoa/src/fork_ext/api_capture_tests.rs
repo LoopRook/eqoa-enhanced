@@ -229,6 +229,39 @@ fn round7c_world_events_come_from_play_changes() {
 // Shared bundled-UI fixture: populate the native client structures, then use
 // exactly the cached projection that Play supplies to the addon manager.
 impl Play {
+    pub(crate) fn replay_ui_fixture() -> Self {
+        let mut p = ready();
+        super::api_capture::updates::inactive();
+        p.session.drdp = drdp::Drdp::create_client(
+            drdp::Addr {
+                ip: [127, 0, 0, 1],
+                port: 5000,
+            },
+            p.session.now(),
+        );
+        p.session.conn = None;
+        p.session.state = net::session::State::World;
+        p.words = std::env::var_os("EQOA_ISO")
+            .and_then(|path| iso::Iso::open(std::path::Path::new(&path)).ok())
+            .and_then(|mut disc| disc.read("WORDS.TXT").ok())
+            .and_then(|bytes| crate::spelling::words(&bytes));
+        p
+    }
+
+    pub(crate) fn enqueue_replay_ui_row(&mut self, row: &crate::fork_ext::session_replay::Row<'_>) {
+        row.enqueue(&mut self.session);
+    }
+
+    pub(crate) fn replay_ui_target(&mut self, id: u32) {
+        if self.target != id {
+            self.target_id(id);
+        }
+    }
+
+    pub(crate) fn prepare_replay_ui_frame(&mut self) {
+        self.loading.wait = None;
+    }
+
     /// Tells the API that entity slot `slot` changed, as the session's packet handling does.
     pub(crate) fn entity_slot_changed(&self, slot: usize) {
         api_capture::updates::capture(self, &api_capture::updates::Kind::Entity(slot), None);

@@ -355,3 +355,10 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
   only the diagnostic shows. Proposed fix: (1) Map Search makes its first journal read at its first `render`, not in
   its entry; (2) the host answers a read whose owner is enabled but not yet primed with a `not_yet` code that is not a
   diagnostic, keeping `permission_denied` for an owner that is disabled or missing.
+
+## Wereoxxs live-fix follow-ups (review 2026-11-19)
+
+- **Status:** Small. `wereoxxs_custom_font_load_budget` returns silently without a GPU (print SKIP); mark the
+  `window_fonts` declaration/Cleanup lines `-- EQOA Enhanced perf:` and update the outdated comment at wereoxxs_ui.lua:438;
+  a font file restored after going missing is retried only on face/size change or re-enable; add 0.5.3's wereoxxs_ui.lua
+  hash (1c8827...) to bundled_shipped_hashes.txt for installs older than the registry.

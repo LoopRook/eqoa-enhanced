@@ -177,6 +177,7 @@ local FONT_WINDOWS = {
 }
 
 font_configs = font_configs or {}
+window_fonts = window_fonts or {}
 for _, entry in ipairs(FONT_WINDOWS) do
     font_configs[entry.key] = font_configs[entry.key]
         or { font = "Default", size = DEFAULT_FONT_SIZE }
@@ -440,7 +441,19 @@ local function PushWindowFont(key)
     local fc = font_configs[key]
     for _, entry in ipairs(FONTS) do
         if entry.name == fc.font and entry.path ~= nil then
-            ImGui.PushFont(UiForge.LoadFont(entry.path, fc.size))
+            -- EQOA Enhanced perf: Reuse the handle while the face and size
+            -- match. LoadFont resolves the resource before checking its cache.
+            local cached = eqoa and window_fonts[key]
+            local font
+            if cached and cached.path == entry.path and cached.size == fc.size then
+                font = cached.font
+            else
+                font = UiForge.LoadFont(entry.path, fc.size)
+                if eqoa and font then
+                    window_fonts[key] = { path = entry.path, size = fc.size, font = font }
+                end
+            end
+            ImGui.PushFont(font)
             return true
         end
     end
@@ -1333,6 +1346,7 @@ local function Load(saved)
 end
 
 local function Cleanup()
+    window_fonts = {}
     Input.ReleaseDpadRotation(HOOK_OWNER)
     dpad_claimed = false
     RestoreGameUi()
