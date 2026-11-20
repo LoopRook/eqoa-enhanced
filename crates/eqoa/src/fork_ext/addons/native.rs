@@ -30,6 +30,8 @@ pub(crate) struct Session {
     pub(crate) addon: String,
     pub(crate) capabilities: Option<Vec<String>>,
     pub(crate) replaces: Vec<String>,
+    /// The mod is a native `eqoa/1` package (a `mod.json`), not a Forge import.
+    pub(crate) native_manifest: bool,
     vm: u64,
     phase: String,
     tokens: f64,
@@ -57,6 +59,7 @@ impl Session {
             addon: String::new(),
             capabilities: None,
             replaces: Vec::new(),
+            native_manifest: false,
             vm: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             phase: "lua".into(),
             tokens: 32.0,
@@ -304,6 +307,32 @@ pub(crate) fn require_capability(
         format!("{symbol} requires capability '{cap}' in mod.json"),
     ))
 }
+/// What a Forge import can make the game do on its own through the helpers it keeps (Forge chat sends, slash
+/// commands and the weapon-set alias). Forge imports declare no capabilities, so these are not gated for them
+/// (compatibility first); Mods & Addons labels every Forge import with them instead.
+pub(crate) const FORGE_IMPORT_ACTIONS: [&str; 3] =
+    ["eqoa.actions.chat", "eqoa.actions.command", "eqoa.actions.weapon_set"];
+
+/// The gate for a legacy alias or Forge helper that acts: a native `eqoa/1` mod (or a test host given
+/// capabilities) passes the same capability gate as the typed action `cap`; a Forge import keeps today's
+/// behaviour and carries the label instead.
+pub(crate) fn require_acting_capability(
+    lua: &Lua,
+    symbol: &str,
+    cap: &str,
+) -> std::result::Result<(), (&'static str, String)> {
+    let gated = {
+        let s = session(lua);
+        let s = s.borrow();
+        s.native_manifest || s.capabilities.is_some()
+    };
+    if gated {
+        require_capability(lua, symbol, cap)
+    } else {
+        Ok(())
+    }
+}
+
 pub(crate) fn annotate_host(host: &Host) -> Result<()> {
     let lua = &host.lua;
     let root: Table = lua.named_registry_value("eqoa_root")?;
@@ -819,6 +848,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     s.addon = host.addon_id();
     s.capabilities = host.requested_capabilities().map(<[String]>::to_vec);
     s.replaces = host.replaced_windows().to_vec();
+    s.native_manifest = host.native_manifest();
     drop(s);
     let root: Table = lua.globals().get("eqoa").unwrap_or(lua.create_table()?);
     lua.set_named_registry_value("eqoa_root", root.clone())?;

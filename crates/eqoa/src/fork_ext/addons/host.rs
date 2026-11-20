@@ -516,6 +516,11 @@ impl Host {
             .and_then(super::discovery::DiscoveredAddon::declared_capabilities)
     }
 
+    /// A native `eqoa/1` package; Forge imports have no `mod.json` and so no `api`.
+    pub(crate) fn native_manifest(&self) -> bool {
+        self.addon.as_ref().is_some_and(|addon| addon.api.is_some())
+    }
+
     pub(crate) fn replaced_windows(&self) -> &[String] {
         self.addon
             .as_ref()

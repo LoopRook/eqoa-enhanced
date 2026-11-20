@@ -879,7 +879,13 @@ fn replacement_labels(replaces: &[String]) -> [Option<String>; 2] {
 /// What Mods & Addons tells the player about a mod before it is enabled: what it can do on its own and
 /// which game windows it replaces. Derived from the manifest only, never from what the mod says.
 pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec<String> {
-    let caps = addon.declared_capabilities().unwrap_or(&[]);
+    let forge_import: Vec<String>;
+    let caps = if addon.api.is_none() {
+        forge_import = super::native::FORGE_IMPORT_ACTIONS.map(str::to_owned).to_vec();
+        &forge_import[..]
+    } else {
+        addon.declared_capabilities().unwrap_or(&[])
+    };
     let mut lines = Vec::new();
     lines.extend(autonomous_action_label(caps));
     lines.extend(replacement_labels(&addon.extensions.replaces).into_iter().flatten());

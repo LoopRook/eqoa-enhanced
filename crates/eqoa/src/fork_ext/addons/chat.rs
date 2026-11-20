@@ -436,6 +436,19 @@ pub fn install_chat_adapter(host: &Host) -> LuaResult<()> {
                         line = format!("{m} {line}");
                     }
                 }
+                let cap = if line.starts_with('/') {
+                    "eqoa.actions.command"
+                } else {
+                    "eqoa.actions.chat"
+                };
+                if let Err((code, message)) = super::native::require_acting_capability(
+                    lua,
+                    "frontiers_forge.chat.SendChatText",
+                    cap,
+                ) {
+                    super::native::diagnose(lua, "frontiers_forge.chat.SendChatText", code, &message);
+                    return Ok((false, Some(format!("{code}: {message}"))));
+                }
                 if report_route(&line) {
                     super::native::diagnose(
                         lua,
@@ -560,9 +573,9 @@ mod tests {
             package_root: root.to_path_buf(),
             module_dirs: vec![root.to_path_buf()],
             resource_dirs: vec![],
-            api: Some("eqoa/1".to_string()),
+            api: None,
             entry_mode: Default::default(),
-            capabilities_declared: true,
+            capabilities_declared: false,
             requested_capabilities: vec![],
             extensions: Default::default(),
             initially_enabled: true,
