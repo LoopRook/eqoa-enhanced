@@ -131,6 +131,9 @@ pub(super) fn mode_name(mode: i32) -> &'static str {
         43 => "duel_invite",
         44 => "duel",
         60 => "combat_record",
+        61 => "mercenary_items",
+        62 => "mercenary_spells",
+        63 => "dye_picker",
         _ => "other",
     }
 }
@@ -171,6 +174,9 @@ fn mode_title(mode: i32, edit_title: &str) -> Option<&str> {
         42 => Some("Group Search"),
         43 | 44 => Some("Duel"),
         60 => Some("Combat Record"),
+        61 => Some("Mercenary Items"),
+        62 => Some("Mercenary Spells"),
+        63 => Some("Dye Picker"),
         _ => None,
     }
 }
@@ -189,6 +195,7 @@ pub(super) fn windows_fingerprint(play: &Play, generation: u64) -> WindowsFinger
     if play.mode == 14 {
         play.mbox.kind.hash(&mut mh);
         play.mbox.text.hash(&mut mh);
+        play.mbox.p1.hash(&mut mh);
         play.mbox.p2.hash(&mut mh);
         play.mbox.sel().hash(&mut mh);
     }
@@ -613,6 +620,14 @@ fn mode_window_data(play: &Play, edit_title: &str) -> WindowData {
                 1 => (sel >= 0).then(|| (sel + 1) as u64),
                 _ => None,
             };
+            let prompt_kind = match (play.mbox.p1, play.mbox.p2) {
+                (0, 0x0702_0000) => "group_invite",
+                (0, 0x050E_0000) => "pet_dismiss",
+                (0, 0x0A01_0000) => "quit",
+                (0, 0x0B05_1007 | 0x0B05_1008) => "guild",
+                (0, 0x0B0B_1002) => "report",
+                _ => "other",
+            };
             WindowData {
                 dialog: json!({
                     "kind": "confirm",
@@ -620,6 +635,7 @@ fn mode_window_data(play: &Play, edit_title: &str) -> WindowData {
                     "style": style,
                     "style_id": play.mbox.kind,
                     "tag": play.mbox.p2,
+                    "prompt_kind": prompt_kind,
                     "selection": selection,
                 }),
                 ..Default::default()
