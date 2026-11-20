@@ -322,6 +322,14 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
   hide the server's refusals; check that chat stays quiet and the server tolerates it) and group kills (only if the client
   can see what group members hit: unverified).
 
+## Scripted input: `EQOA_MOD_KEYS` alone still counts as the player's own presses (review 2026-11-18)
+
+- **Status:** Small, not scheduled; test tooling only. `EQOA_MOD_KEYS` alone leaves `input::from_device()` true (`input.rs`
+  lists the upstream script variables), so S2's press record treats replayed mod keys as device presses. The record's two
+  call sites are upstream lines in `play.rs`; a fix there rewrote both (tried and reverted 2026-11-19). Fix only with a
+  route that changes no upstream line (for example the scene tool also setting one of upstream's own script variables),
+  or leave it.
+
 ## Window takeover and upstream's keyboard-owning windows (sync review 2026-11-18)
 
 - **Status:** For round 6.5 / window replacement. Upstream's mercenary windows and dye picker only open from modes 0, 7, 9

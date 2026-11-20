@@ -7165,12 +7165,7 @@ impl Play {
         use crate::hudmenu::Key as H;
         // S2's record of a pad key (its hook in SetKey, past the dead test)
         if !self.is_dead() {
-            self.presses.key(
-                key,
-                down,
-                self.session.timer() as u32,
-                fork_hooks::presses_from_device(),
-            );
+            self.presses.key(key, down, self.session.timer() as u32, crate::input::from_device());
         }
         self.keyboard = false;
         if self.typing.is_some() || self.window_key(key, down) {
@@ -8866,12 +8861,7 @@ impl Play {
             self.auto_use_held(down);
         }
         if !self.is_dead() {
-            self.presses.key(
-                code,
-                down,
-                self.session.timer() as u32,
-                fork_hooks::presses_from_device(),
-            );
+            self.presses.key(code, down, self.session.timer() as u32, crate::input::from_device());
         }
     }
 

@@ -74,6 +74,8 @@ python tools/run_gates.py [options]
 
 ### Progress Output
 
+The build lock belongs to `run_gates.py`: never make `cargo-build.lock` by hand. An empty lock folder (no `pid-*.token` inside) that is over five minutes old while no `cargo` or `rustc` process is running is treated as left behind by a dead holder and removed, so a hand-made lock held across a quiet stretch would be taken away and two builds could collide.
+
 While waiting for the Cargo build lock, `Waiting for cargo lock` messages include the holder PID from its token file when one is present. While any step runs, a flushed progress line is printed every 60 seconds showing the step name, elapsed minutes, and—for `cargo test` steps—the number of `test ... ok/FAILED/ignored` lines seen so far; full child output continues to be written to each step's log file.
 
 ### Shared target directory: stale-binary guard
