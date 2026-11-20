@@ -234,7 +234,7 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
             local sword = inv.items[1]
             fields('items.Item', sword, 'quick_slot charges damage attack_type attack_name')
             fields('items.ItemStat', sword.stats[1], 'name')
-            fields('items.CanUse', eqoa.items.can_use(sword.ref))
+            fields('items.CanUse', eqoa.items.can_use(sword.ref, 0, 0, 50))
             fields('gems.Gem', eqoa.gems.get('Moonstone'))
             fields('items.SlotInfo', eqoa.items.slot_info(sword.wear_slot), 'name')
         "#,

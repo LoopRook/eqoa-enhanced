@@ -38,3 +38,29 @@ which does not enumerate its backing table. The revised fixture checks
 the underlying keys and reads their values through the public record.
 The host event fixture uses a multi-step batch so it exercises progress
 and completion.
+
+The generated preflight reference from the Windows client has 1,742
+descriptors, including 1,643 supported, nine partial, 50 planned and 40
+unsupported. All planned rows name their plan. The checks name all 46
+supported events and cover the 72 existing record schemas plus icon
+surface info.
+
+### Negative controls
+
+One focused run applied these three temporary mutations. Each failed the
+intended test.
+
+| Mutation | Observed failure |
+|---|---|
+| Mark the refusing `eqoa.actions.move` member supported | Its capability status disagreed with the call's error code. |
+| Remove `class_id` from the Play player projection | `eqoa.player.Player.class_id is missing`. |
+| Suppress the combat hit event's production name | `Play did not emit: combat.hit`. |
+
+Removing `class_id` also removed the default class argument for the
+item check. That fixture now passes the class, race and level explicitly
+to the real `can_use` binding. All three mutations were restored
+byte-for-byte before this change.
+
+The restored focused gate passed **11 tests, 0 failed, 0 ignored**.
+It used the shared Cargo lock and reported the current worktree's
+test executable.
