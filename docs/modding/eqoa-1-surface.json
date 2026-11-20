@@ -11491,6 +11491,7 @@
         "eqoa.windows.Dialog.kind",
         "eqoa.windows.Dialog.options",
         "eqoa.windows.Dialog.password",
+        "eqoa.windows.Dialog.prompt_kind",
         "eqoa.windows.Dialog.selection",
         "eqoa.windows.Dialog.style",
         "eqoa.windows.Dialog.style_id",
@@ -11531,6 +11532,14 @@
     {
       "children": [],
       "path": "eqoa.windows.Dialog.password",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.Dialog.prompt_kind",
       "reason": null,
       "revision": 1,
       "round": 4,
@@ -15275,9 +15284,9 @@
     }
   ],
   "metadata": {
-    "client_version": "0.5.3",
+    "client_version": "0.6.0",
     "commit": "unstamped local build",
-    "generated_utc": "2026-11-19",
+    "generated_utc": "2026-11-20",
     "platform": "windows-x86_64"
   },
   "schema_version": 1
