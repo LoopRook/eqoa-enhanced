@@ -1368,6 +1368,13 @@ fn install_fields(lua: &Lua) {
 
 pub(super) fn unprojected_field(path: &str, field: &str) -> Option<&'static str> {
     match (path, field) {
+        ("eqoa.Error", "retry_after") => {
+            Some("no refusal in this client knows how long to wait: rate_limited and quota carry no wait")
+        }
+        (
+            "eqoa.actions.BatchResult" | "eqoa.events.batch.progress.data" | "eqoa.events.batch.result.data",
+            "detail",
+        ) => Some("a batch reports what each step did in that step's action.result"),
         ("eqoa.chat.ChatMessage" | "eqoa.events.chat.message.data", "channel_code" | "sender" | "outgoing") => {
             Some("the chat observer retains only text, color and the channel name")
         }

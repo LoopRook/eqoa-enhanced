@@ -3601,13 +3601,11 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         "batch progress and completion record",
     );
     for field in BATCH_RESULT_KEYS {
-        describe(
-            lua,
-            &format!("eqoa.actions.BatchResult.{field}"),
-            "supported",
-            Some(6),
-            "BatchResult field",
-        );
+        let path = format!("eqoa.actions.BatchResult.{field}");
+        match super::native::unprojected_field("eqoa.actions.BatchResult", field) {
+            Some(reason) => describe(lua, &path, "unsupported", None, reason),
+            None => describe(lua, &path, "supported", Some(6), "BatchResult field"),
+        }
     }
 
     super::native::refuse_native(
