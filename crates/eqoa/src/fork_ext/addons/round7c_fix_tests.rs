@@ -333,10 +333,14 @@ fn round7c_every_refusing_member_reports_its_status_through_its_call() {
                         local ok, t = pcall(require, module)
                         return ok and type(t) == 'table' and rawget(t, name) or nil
                     end
+                    -- eqoa's modules are reached through its own lookup; ImGui and the rest are plain tables
+                    local get = path:find('^eqoa%.') and function(t, k) return t[k] end or rawget
                     local v = _G
                     for part in path:gmatch('[^.]+') do
                         if type(v) ~= 'table' then return nil end
-                        v = rawget(v, part)
+                        local ok, next_v = pcall(get, v, part)
+                        if not ok then return nil end
+                        v = next_v
                     end
                     return v
                 end
