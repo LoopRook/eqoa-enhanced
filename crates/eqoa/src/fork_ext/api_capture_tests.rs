@@ -2915,10 +2915,13 @@ fn round7w_mail_opens_inbox_and_compose_opens_compose() {
 #[test]
 fn round7w_tell_and_reply_open_their_own_forms() {
     let mut p = ready();
+    begin_iteration(&mut p, false);
     let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
     for (kind, mode) in [("tell", 28), ("reply", 29)] {
         p.mode = 0;
-        let code = format!("local id, err = eqoa.actions.open_window('{kind}'); assert(id ~= nil, tostring(err and err.reason))");
+        let code = format!(
+            "local id, err = eqoa.actions.open_window('{kind}'); assert(id ~= nil, tostring(err and (err.code .. ': ' .. err.message)))"
+        );
         host.execute(&code).unwrap();
         begin_iteration(&mut p, true);
         assert_eq!(p.mode, mode, "{kind}");
