@@ -157,7 +157,7 @@ fn service(lua: &Lua) -> Result<Shared> {
     lua.set_app_data(s.clone());
     Ok(s)
 }
-fn resource_path(m: &Mounts, path: &str) -> std::result::Result<PathBuf, String> {
+fn resource_path(m: &Mounts, path: &str) -> std::result::Result<Option<PathBuf>, String> {
     if path.starts_with('@') {
         return super::exchange::read(path);
     }
@@ -166,10 +166,10 @@ fn resource_path(m: &Mounts, path: &str) -> std::result::Result<PathBuf, String>
     }
     let key = m.key(path)?;
     if key.starts_with("data") {
-        return m.read_path(&key);
+        return m.read_path(&key).map(Some);
     }
     // Packaged mounts bypass overlays; private names use only this mod's storage.
-    Ok(m.addon.script_root.join(key))
+    Ok(Some(m.addon.script_root.join(key)))
 }
 enum Key {
     Index(usize),
@@ -333,7 +333,15 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 );
             };
             let path = match resource_path(&m, &path) {
-                Ok(p) => p,
+                Ok(Some(path)) => path,
+                Ok(None) => {
+                    return super::native::quiet_error(
+                        lua,
+                        "eqoa.files.load_json",
+                        "not_yet",
+                        "shared file owner is still loading",
+                    );
+                }
                 Err(e) => {
                     return error(
                         lua,

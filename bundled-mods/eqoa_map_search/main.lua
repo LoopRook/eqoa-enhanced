@@ -3,15 +3,17 @@
 local s=require("search")
 local hits={}
 local requests={}
-local reload=false
+-- The Journal may still be starting when Map Search first renders.
+local reload=true
+local owner_pending=true
 local retry_at=0
 local function load_journal()
-    if requests.journal then reload=true;return end
-    requests.journal=eqoa.files.load_json("@eqoa_creature_journal/data/journal.json")
-    if not requests.journal then reload=true;retry_at=(s.now or 0)+1 end
+    local request,err=eqoa.files.load_json("@eqoa_creature_journal/data/journal.json")
+    requests.journal=request
+    owner_pending=err and err.code=="not_yet"
+    if not request then reload=true;retry_at=(s.now or 0)+1 end
 end
 requests.catalog=eqoa.files.load_json("package_resources/map-entities.json")
-load_journal()
 local font_info=eqoa.fonts.load("package_resources/SpaceMono-Regular.ttf",13)
 local font=font_info and font_info.font
 local function command(name)
@@ -41,13 +43,12 @@ for _,name in ipairs({"group.changed","map.changed","state.reset","events.droppe
     eqoa.events.on(name,function() s.refresh=true end)
 end
 eqoa.events.on("shared.changed",function(e)
-    if e.data.mod=="eqoa_creature_journal" and e.data.path=="data/journal.json" then if s.open then load_journal() else reload=true end end
+    if e.data.mod=="eqoa_creature_journal" and e.data.path=="data/journal.json" then reload=true end
 end)
 eqoa.events.on("resource.ready",function(e)
     local d=e.data
     if d.kind=="json" then
         for _,kind in ipairs({"catalog","journal"}) do if d.request==requests[kind] then requests[kind]=nil;s.load(d.value,kind) end end
-        if reload and s.open and not requests.journal then reload=false;load_journal() end
     end
 end)
 eqoa.events.on("resource.failed",function(e)
@@ -176,7 +177,7 @@ end
 eqoa.events.on("render",function(e)
     s.now=e.time
     if s.message_until and e.time>=s.message_until then s.message=nil;s.message_until=nil end
-    if s.open and reload and e.time>=retry_at and not requests.journal then reload=false;load_journal() end
+    if (s.open or owner_pending) and reload and e.time>=retry_at and not requests.journal then reload=false;load_journal() end
     s.step()
     draw()
 end)
