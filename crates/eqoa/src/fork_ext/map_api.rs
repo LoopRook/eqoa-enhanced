@@ -2,6 +2,40 @@
 use super::*;
 use serde_json::{Value as Json, json};
 impl Map {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn api_validate_waypoint(
+        &self,
+        world: i32,
+        current_world: i32,
+        [x, z]: [f32; 2],
+    ) -> Result<(), (&'static str, &'static str)> {
+        if !x.is_finite() || !z.is_finite() {
+            return Err(("invalid_argument", "waypoint coordinates must be finite"));
+        }
+        let cached = [&self.world, &self.home]
+            .into_iter()
+            .flatten()
+            .find(|map| map.index == world);
+        let Some(map) = cached else {
+            if world == current_world
+                || usize::try_from(world).is_ok_and(|index| index < self.names.names.len())
+            {
+                return Err(("not_ready", "the addressed world map is not loaded"));
+            }
+            return Err(("invalid_argument", "unknown waypoint world"));
+        };
+        let cells = &map.builder.cells;
+        if cells.len() == 0 {
+            return Err(("not_ready", "the addressed world map has no ground extent"));
+        }
+        let [xmin, zmin, xmax, zmax] = cells.extent();
+        if ee::le(xmin, x) && ee::le(x, xmax) && ee::le(zmin, z) && ee::le(z, zmax) {
+            Ok(())
+        } else {
+            Err(("invalid_argument", "waypoint is outside the world's ground extent"))
+        }
+    }
+
     /// Small allocation-free source key; dynamic records are rebuilt only on change.
     pub(crate) fn api_key(&self, world: i32) -> u64 {
         use std::hash::{Hash, Hasher};

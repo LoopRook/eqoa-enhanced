@@ -1985,6 +1985,9 @@ fn dispatch_broker_action(
                     reason: "Map is turned off".into(),
                 };
             }
+            if let Err((code, reason)) = play.map.api_validate_waypoint(*world, play.world_id(), [*x, *z]) {
+                return DispatchOutcome::Refused { code, reason: reason.into() };
+            }
             play.map.api_set_waypoint(*world, Some([*x, *z]));
             crate::fork_ext::addons::map_waypoint::placed(*vm, addon, *world, [*x, *z], label.clone());
             DispatchOutcome::Completed {

@@ -835,7 +835,11 @@ struct FrameState {
 pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
     let mut kinds: Vec<&str> = Vec::new();
     for cap in caps {
-        if cap == "eqoa.actions.*" {
+        if cap == "eqoa.map.waypoint" {
+            if !kinds.contains(&"map waypoint") {
+                kinds.push("map waypoint");
+            }
+        } else if cap == "eqoa.actions.*" {
             if !kinds.contains(&"all actions") {
                 kinds.push("all actions");
             }

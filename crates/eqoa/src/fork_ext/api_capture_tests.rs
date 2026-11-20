@@ -266,9 +266,10 @@ fn round7c_mod_moves_and_clears_the_players_own_waypoint() {
         map_waypoint::reset_for_test();
         let mut p = Play::bundled_ui_fixture();
         let world = p.world_id();
+        p.map = crate::map::testing::up((640, 448));
         p.map.round4_waypoint(world, None);
         p.forge_snapshot(None);
-        let host = Host::new().unwrap();
+        let host = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
         let tick = |p: &mut Play, host: &Host| {
             p.bags_broker_tick();
             native_events::dispatch(host).unwrap();
@@ -280,19 +281,19 @@ fn round7c_mod_moves_and_clears_the_players_own_waypoint() {
             ares = {}
             eqoa.events.on('action.result', function(e) ares[#ares + 1] = e.data end)
             world = eqoa.map.get().world_id
-            local req, err = eqoa.map.set_waypoint{world_id = world, x = 1200, z = 3400, label = 'Camp'}
+            local req, err = eqoa.map.set_waypoint{world_id = world, x = 12000, z = 3400, label = 'Camp'}
             assert(req, err and (err.code .. ': ' .. err.message))
             "#,
         )
         .unwrap();
         tick(&mut p, &host);
-        assert_eq!(p.map.waypoint(world), Some([1200.0, 3400.0]), "the game's own waypoint moved");
+        assert_eq!(p.map.waypoint(world), Some([12000.0, 3400.0]), "the game's own waypoint moved");
         host.execute(
             r#"
             local r = ares[#ares]
             assert(r and r.kind == 'set_waypoint' and r.state == 'completed', r and (r.kind .. ' ' .. r.state))
             local w = assert(eqoa.map.get().waypoint, 'waypoint read back')
-            assert(w.world_id == world and w.x == 1200 and w.z == 3400, 'position')
+            assert(w.world_id == world and w.x == 12000 and w.z == 3400, 'position')
             assert(w.label == 'Camp' and w.owner == 'test', tostring(w.label) .. ' ' .. tostring(w.owner))
             assert(eqoa.map.clear_waypoint())
             "#,
@@ -305,24 +306,24 @@ fn round7c_mod_moves_and_clears_the_players_own_waypoint() {
             local r = ares[#ares]
             assert(r.kind == 'clear_waypoint' and r.state == 'completed', r.kind .. ' ' .. r.state)
             assert(eqoa.map.get().waypoint == nil)
-            assert(eqoa.map.set_waypoint{world_id = world, x = 50, z = 60})
+            assert(eqoa.map.set_waypoint{world_id = world, x = 5000, z = 6000})
             "#,
         )
         .unwrap();
         tick(&mut p, &host);
         // the player puts their own waypoint elsewhere: it is theirs, and the mod cannot clear it
-        p.map.round4_waypoint(world, Some([10.0, 20.0]));
+        p.map.round4_waypoint(world, Some([10000.0, 20000.0]));
         tick(&mut p, &host);
         host.execute(
             r#"
             local w = assert(eqoa.map.get().waypoint)
-            assert(w.x == 10 and w.z == 20 and w.owner == nil and w.label == nil, tostring(w.owner))
+            assert(w.x == 10000 and w.z == 20000 and w.owner == nil and w.label == nil, tostring(w.owner))
             assert(eqoa.map.clear_waypoint())
             "#,
         )
         .unwrap();
         tick(&mut p, &host);
-        assert_eq!(p.map.waypoint(world), Some([10.0, 20.0]), "the player's waypoint stays");
+        assert_eq!(p.map.waypoint(world), Some([10000.0, 20000.0]), "the player's waypoint stays");
         host.execute(
             r#"
             local r = ares[#ares]

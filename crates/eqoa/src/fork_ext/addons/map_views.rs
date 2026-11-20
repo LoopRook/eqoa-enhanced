@@ -179,18 +179,19 @@ fn info(lua: &Lua, lease: &Lease) -> Result<Value> {
     Ok(Value::Table(t))
 }
 /// The player's waypoint can be moved: in a world, with the Map on.
-fn waypoint_ready() -> std::result::Result<(), (&'static str, String)> {
+fn waypoint_ready(lua: &mlua::Lua, symbol: &str) -> std::result::Result<(), (&'static str, String)> {
     if !CORE.with(|c| c.borrow().view.in_world) {
         return Err(("not_in_world", "enter a loaded world first".into()));
     }
     if !crate::settings::map() {
         return Err(("unavailable", "Map is turned off".into()));
     }
-    Ok(())
+    super::native::require_capability(lua, symbol, "eqoa.map.waypoint")
 }
 
 pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
+    super::native::describe(lua, "eqoa.map.waypoint", "supported", Some(7), "capability to set or clear a personal waypoint");
     for (name, status, reason) in [
         ("images", "unsupported", "replaced by eqoa.map.view"),
         ("load_image", "unsupported", "replaced by eqoa.map.view"),
@@ -211,7 +212,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         "set_waypoint",
         lua.create_function(|lua, point: Value| {
             super::action_broker::enqueue_map_lua(lua, "eqoa.map.set_waypoint", |vm, addon| {
-                waypoint_ready()?;
+                waypoint_ready(lua, "eqoa.map.set_waypoint")?;
                 let Value::Table(point) = point else {
                     return Err(("invalid_argument", "point must be {world_id, x, z, label?}".into()));
                 };
@@ -259,7 +260,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         "clear_waypoint",
         lua.create_function(|lua, ()| {
             super::action_broker::enqueue_map_lua(lua, "eqoa.map.clear_waypoint", |vm, _| {
-                waypoint_ready()?;
+                waypoint_ready(lua, "eqoa.map.clear_waypoint")?;
                 Ok(super::action_broker::ActionKind::ClearWaypoint { vm })
             })
         })?,
