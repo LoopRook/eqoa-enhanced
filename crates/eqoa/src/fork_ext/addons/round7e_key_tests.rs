@@ -1201,3 +1201,165 @@ fn round7e_fix3_the_marks_use_what_presses_showed_and_nothing_is_written() {
     assert!(controls_text(ROWS.len()).contains(&"!".into()), "marked once a press showed it");
     assert_eq!(testing::kept(MOD_KEYS), before, "what was learned is not written anywhere");
 }
+
+// ---- owner test fix 1: the capture as the live client orders it -------------------------------
+//
+// The order in the client: the window's ModifiersChanged and the key reach the mod runtime
+// (`report_viewer::addon_event` -> `Runtime::event` -> `route_key`, with the Options page up so
+// `plain_play` is false), then `App::key_input` names the key with the capture waiting
+// (`key_name(capture = true)`, `GameKeys` here) and hands the name to the Options window, whose
+// Controls page asks the mod hook. The test enters at the Options window (`WndOptions`) and the
+// mod runtime (`Runtime::scripted_key_based`); only `Runtime::event`'s own match on the window
+// event and `App::key_input` are not run (they need a `Window` and the App).
+
+fn live_capture(
+    row: usize,
+    mods: (bool, bool, bool),
+    logical: &Key,
+    base: Option<&'static str>,
+) -> (String, String) {
+    use winit::event::{Modifiers, WindowEvent};
+    use winit::keyboard::ModifiersState;
+    let mut s = Session::open();
+    let mut rt = runtime();
+    for _ in 0..row {
+        s.press(key::DOWN);
+    }
+    s.press(key::CROSS);
+    let mut state = ModifiersState::empty();
+    state.set(ModifiersState::CONTROL, mods.0);
+    state.set(ModifiersState::ALT, mods.1);
+    state.set(ModifiersState::SHIFT, mods.2);
+    input::observe_modifiers(&WindowEvent::ModifiersChanged(Modifiers::from(state)));
+    // the mod runtime sees the key first; the Options page is up, so it is not plain play
+    rt.scripted_key_based(7001, logical, base, None, ElementState::Pressed, false);
+    // then the game's naming with the capture waiting, and the page
+    let name = GameKeys::new().name(mods, logical, base, true, false, true, false).unwrap();
+    s.w.capture_key(&s.vui, &name, &mut Vec::new());
+    s.draw();
+    rt.scripted_key_based(7001, logical, base, None, ElementState::Released, false);
+    input::observe_modifiers(&WindowEvent::ModifiersChanged(Modifiers::from(ModifiersState::empty())));
+    let waiting = if s.w.capturing().is_some() { "waiting" } else { "done" };
+    (name, format!("{}/{}", mod_key_of("alpha"), waiting))
+}
+
+#[test]
+fn round7e_owner1_shift_and_friends_over_a_game_key_are_refused_in_the_live_order() {
+    let cases: [(&str, (bool, bool, bool), Key, Option<&'static str>, &str); 7] = [
+        ("shift+space", SHIFT, Key::Named(NamedKey::Space), None, "Jump"),
+        ("shift+tab", SHIFT, Key::Named(NamedKey::Tab), None, "Target"),
+        ("shift+enter", SHIFT, Key::Named(NamedKey::Enter), None, ""),
+        ("shift+up", SHIFT, Key::Named(NamedKey::ArrowUp), None, "Quick menu"),
+        ("shift+f5", SHIFT, Key::Named(NamedKey::F5), None, "Group"),
+        ("ctrl+space", CTRL, Key::Named(NamedKey::Space), None, "Jump"),
+        ("alt+space", ALT, Key::Named(NamedKey::Space), None, "Jump"),
+    ];
+    let mut wrong = Vec::new();
+    for (name, mods, logical, base, who) in cases {
+        reset();
+        let _alpha = bind("alpha", "");
+        let _beta = bind("beta", "b");
+        let (got, result) = live_capture(ROWS.len(), mods, &logical, base);
+        if got != name || result != "/done" {
+            wrong.push(format!("{name}: named {got:?}, mod key/capture {result:?} (wanted refused, naming {who})"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+#[test]
+fn round7e_owner1_a_shifted_character_is_what_it_types() {
+    // Shift+1 types ! on a US keyboard: nothing of the game's is on !, so it is accepted
+    reset();
+    let _alpha = bind("alpha", "");
+    let (name, result) = live_capture(ROWS.len(), SHIFT, &Key::Character("!".into()), Some("1"));
+    assert_eq!((name.as_str(), result.as_str()), ("shift+1", "shift+1/done"));
+}
+
+/// Shift+Space given to the mod on `row` in `s`, in the live order (see `live_capture`):
+/// what the mod's key is after, and whether the page is still waiting.
+fn shift_space_in(s: &mut Session, rt: &mut Runtime, row: usize, who: &str) -> String {
+    use winit::event::{Modifiers, WindowEvent};
+    use winit::keyboard::ModifiersState;
+    for _ in 0..row {
+        s.press(key::DOWN);
+    }
+    s.press(key::CROSS);
+    let space = Key::Named(NamedKey::Space);
+    input::observe_modifiers(&WindowEvent::ModifiersChanged(Modifiers::from(ModifiersState::SHIFT)));
+    rt.scripted_key_based(7101, &space, None, None, ElementState::Pressed, false);
+    let name = GameKeys::new().name(SHIFT, &space, None, true, false, true, false).unwrap();
+    s.w.capture_key(&s.vui, &name, &mut Vec::new());
+    s.draw();
+    rt.scripted_key_based(7101, &space, None, None, ElementState::Released, false);
+    input::observe_modifiers(&WindowEvent::ModifiersChanged(Modifiers::from(ModifiersState::empty())));
+    for _ in 0..row {
+        s.press(key::UP);
+    }
+    format!("{}/{}", mod_key_of(who), if s.w.capturing().is_some() { "waiting" } else { "done" })
+}
+
+#[test]
+fn round7e_owner1_shift_space_is_refused_after_the_swaps_the_owner_made() {
+    let jump = row_named("jump").unwrap();
+    let mut wrong = Vec::new();
+    // each: the steps before, then Shift+Space on the first mod row
+    for scenario in ["fresh", "swap then cancel", "jump takes then cancel", "defaults then cancel", "swap saved then swapped back"] {
+        reset();
+        let _alpha = bind("alpha", "b");
+        let _beta = bind("beta", "");
+        let mut rt = runtime();
+        let mut s = Session::open();
+        match scenario {
+            "swap then cancel" => {
+                s.give(ROWS.len(), "space");
+                s.cancel();
+                s = Session::open();
+            }
+            "jump takes then cancel" => {
+                s.give(jump, "b");
+                s.cancel();
+                s = Session::open();
+            }
+            "defaults then cancel" => {
+                s.give(crate::bindpage::defaults() as usize, "unused");
+                s.cancel();
+                s = Session::open();
+            }
+            "swap saved then swapped back" => {
+                s.give(ROWS.len(), "space");
+                s.save();
+                s = Session::open();
+                s.give(jump, "space");
+                s.save();
+                s = Session::open();
+            }
+            _ => {}
+        }
+        assert_eq!(settings::binds().key(jump), Some("space"), "{scenario}: Jump is on Space");
+        let result = shift_space_in(&mut s, &mut rt, ROWS.len() + 1, "beta");
+        if result != "/done" {
+            wrong.push(format!("{scenario}: {result}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+#[test]
+fn round7e_owner1_a_saved_shift_space_is_marked_says_jump_and_does_not_fire() {
+    reset();
+    testing::put(MOD_KEYS, b"mod.alpha.act=shift+space\n");
+    let host = bind("alpha", "");
+    let mut rt = runtime();
+    assert_eq!(mod_key_of("alpha"), "shift+space", "an old saved key is kept as it is");
+    // the row is marked and says who has the press
+    let text = controls_text(ROWS.len());
+    assert!(text.contains(&"!".into()), "marked: {text:?}");
+    let said = text.join(" ");
+    assert!(said.contains("Jump") && said.contains("wins"), "{said}");
+    // pressing it: the game acts (Jump), the mod does not
+    let space = Key::Named(NamedKey::Space);
+    assert!(game_acts(SHIFT, &space, None));
+    press_based(&mut rt, SHIFT, &space, None, &[&host]);
+    hits(&host, 0);
+}

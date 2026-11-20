@@ -284,6 +284,7 @@ pub fn capture_key(
     cues: &mut Vec<i32>,
 ) -> bool {
     let key_name = normalize_key(&name.to_ascii_lowercase());
+    trace_capture(row, &key_name);
     if row < ROWS.len() {
         return game_row_capture(capture, note, row, name, &key_name, cues);
     }
@@ -466,6 +467,33 @@ fn game_owner(game: &Binds, key: &str) -> Option<(Owner, bool)> {
     owner_of(game, &name).map(|owner| (owner, name != key))
 }
 
+/// One line in the log for every key a Controls row is given: which kind of row, the name the
+/// page was handed, the name the game acts on for that press, and what the game has on it.
+/// A key that was taken when the player expected a refusal (or the reverse) can then be read
+/// from the log instead of guessed at.
+fn trace_capture(row: usize, key: &str) {
+    let game = crate::settings::with_binds(Clone::clone);
+    let acts = game_press(&game, key);
+    let has = match owner_of(&game, &acts) {
+        Some(Owner::Row(r)) => format!("row {}", ROWS[r].id),
+        Some(Owner::Macros(ms)) => format!("{}", crate::bindpage::macro_names(&ms)),
+        None => "nothing".to_string(),
+    };
+    let exact = if acts == key {
+        String::new()
+    } else {
+        match owner_of(&game, key) {
+            Some(_) => ", and the combo itself is bound".to_string(),
+            None => String::new(),
+        }
+    };
+    crate::say(&format!(
+        "controls: {} row {row} given {key}: the game acts on {acts} for that press (it has {has} on it{exact}){}",
+        if row < ROWS.len() { "game" } else { "mod" },
+        if never_mod_key(key) { "; the client's own key" } else { "" },
+    ));
+}
+
 fn enabled_index(binds: &[ModBind], nth: usize) -> Option<usize> {
     binds
         .iter()
@@ -565,8 +593,18 @@ pub(crate) fn fires(addon: &str, id: &str, combo: &str, game_key: &str) -> bool 
     let game_key = game_key.to_ascii_lowercase();
     let game = crate::settings::with_binds(Clone::clone);
     let binds = MOD_BINDS.lock().unwrap();
-    firing_press(&game, &binds, &combo, &game_key)
-        .is_some_and(|i| binds[i].addon_id == addon && binds[i].id == id)
+    let winner = firing_press(&game, &binds, &combo, &game_key);
+    if winner.is_none() && !never_mod_key(&combo) && owner_of(&game, &game_key).is_some() {
+        // said once per key and binding: a mod key the game has the press of
+        static SAID: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let line = format!("{addon}.{id} {combo}");
+        let mut said = SAID.lock().unwrap();
+        if binds.iter().any(|b| b.addon_id == addon && b.id == id && b.current_key == combo) && !said.contains(&line) {
+            said.push(line);
+            crate::say(&format!("controls: mod {addon}.{id} on {combo} does nothing: the game acts on {game_key} for that press"));
+        }
+    }
+    winner.is_some_and(|i| binds[i].addon_id == addon && binds[i].id == id)
 }
 
 enum Other {
@@ -852,6 +890,7 @@ fn game_row_capture(
 
 /// A refusal said at once: the page's help shows its prompt while it waits.
 fn refuse(capture: &mut Option<Column>, note: &mut Option<String>, cues: &mut Vec<i32>, text: String) -> bool {
+    crate::say(&format!("controls: refused: {text}"));
     *note = Some(text);
     *capture = None;
     cues.push(9);
@@ -951,6 +990,7 @@ fn mod_row_capture(
     }
     resolve(&game, &mut binds);
     *capture = None;
+    crate::say(&format!("controls: mod {}.{} kept {key}", binds[i].addon_id, binds[i].id));
     let mut text = format!("{}: {}.", binds[i].description, binds::display(key));
     if let Some(g) = game_on {
         text.push(' ');
