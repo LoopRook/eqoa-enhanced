@@ -361,3 +361,13 @@ A font restored after going missing is retried after a face or size change or af
 - Marks for keys read from saved settings use a US-layout table until that key has been pressed once this session.
 - One enabled mod with no key and no key listener still records the key in the runtime's held-key map (a hash insert
   and remove per press; no allocation).
+
+## Permission records and the bundled pass: accepted leftovers (round 7 Part C, final review 2026-11-20)
+
+- **Status:** Low, not scheduled. Both fail safe.
+- The exact-shipped-package check runs on the resolved folder: a link at the bundled location that points at another
+  folder holding exactly the shipped bytes still passes (no other code can be exempted by it).
+- A package enabled and recorded in this build, then switched off and on again in 0.6.0 with wider grants installed
+  in between, is blocked until re-enabled here instead of being adopted once.
+- Waypoints: a player who clears and re-pins the identical point within one game step is not seen as the new owner;
+  the one hook line it would take in the native waypoint setter is in the round 7C report (for the upstream-seam round).
