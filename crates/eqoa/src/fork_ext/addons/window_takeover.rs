@@ -260,14 +260,12 @@ fn save_switch(on: bool) {
     for line in String::from_utf8_lossy(&old).lines() {
         if !line.starts_with(SWITCH_KEY) {
             text.push_str(line);
-            text.push('
-');
+            text.push('\n');
         }
     }
     text.push_str(SWITCH_KEY);
     text.push_str(if on { "on" } else { "off" });
-    text.push('
-');
+    text.push('\n');
     if let Err(error) = crate::settings::write_config(SETTINGS_FILE, text.as_bytes()) {
         log(format!("takeover: the game's windows switch was not saved: {error}"));
     }
