@@ -70,7 +70,8 @@ fn extension_list(raw: &serde_json::Value, field: &str) -> Result<Vec<String>, S
             "replaces" => {
                 if !super::window_kinds::is_window(value) {
                     return Err(format!(
-                        "Invalid manifest 'replaces': {value:?} is not a game window kind                          (the kinds eqoa.windows.get() reports)"
+                        "Invalid manifest 'replaces': {value:?} is not a game window kind \
+                         (the kinds eqoa.windows.get() reports)"
                     ));
                 }
                 true

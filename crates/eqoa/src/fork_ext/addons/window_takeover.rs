@@ -60,7 +60,8 @@ impl TakeoverKind {
             _ if super::window_kinds::is_window(s) => Err((
                 "unsupported",
                 format!(
-                    "the game's '{s}' window cannot be taken over in this version (only 'loot', 'merchant'                      and 'bank'); more windows follow the window-replacement roadmap"
+                    "the game's '{s}' window cannot be taken over in this version (only 'loot', 'merchant' \
+                     and 'bank'); more windows follow the window-replacement roadmap"
                 ),
             )),
             _ => Err((
