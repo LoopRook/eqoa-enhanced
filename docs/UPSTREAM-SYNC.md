@@ -26,6 +26,21 @@ footprint passing) merges without one (the owner, 2026-11-08). Always run the te
 through the script (`--continue --tests-only`): it uses one thread and a scratch
 EQOA_CONFIG, and a parallel run's GPU/addon tests collide and hang.
 
+### Keeping stable current (owner, 2026-11-20; starts after round 7 ships)
+
+Once the round 7 release has brought stable level with develop, sync stable directly
+each week instead of waiting for the next feature release:
+
+1. `python tools/sync_upstream.py --develop enhanced` (the sync branch starts from stable).
+2. Merge it into `enhanced` and cut a patch release (`0.x.y+1`) with the owner's go-ahead.
+3. Merge `enhanced` back into `develop`, as for a hotfix.
+
+The cost of a sync is its conflicts in shared files, not upstream's commit count: 192
+commits gave 8 hand conflicts (11-15), 133 gave 6 (11-18). Each hook upstream accepts and
+each feature moved into a mod (docs/plans/EQOA-MOD-API-PLAN.md) removes a place where that
+can happen. When a sync finishes with no hand conflicts, it can run on a schedule. A single
+urgent upstream fix can go to stable before then as a cherry-picked hotfix.
+
 Owner disk-space rule (2026-11-09): all local cargo builds/tests use
 `CARGO_TARGET_DIR=%USERPROFILE%/Paseo/targets/shared` under the shared mkdir lock
 `%USERPROFILE%/Paseo/cargo-build.lock`, with a timeout. The sync script honors an
