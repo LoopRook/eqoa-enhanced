@@ -4,6 +4,7 @@
 use net::session::{Event, Session};
 
 pub(crate) struct Row<'a> {
+    pub micros: u64,
     pub sent: bool,
     pub ty: u8,
     pub bytes: &'a [u8],
@@ -27,6 +28,7 @@ pub(crate) fn rows(mut data: &[u8]) -> Result<Vec<Row<'_>>, &'static str> {
             .split_at_checked(len)
             .ok_or("short recording payload")?;
         rows.push(Row {
+            micros: u64::from_le_bytes(header[..8].try_into().unwrap()),
             sent,
             ty: header[9],
             bytes,
@@ -37,15 +39,24 @@ pub(crate) fn rows(mut data: &[u8]) -> Result<Vec<Row<'_>>, &'static str> {
 }
 
 impl Row<'_> {
-    /// Deliver server data through DRDP's local endpoint and the real Session
-    /// dispatcher. The test drives client actions and consumes the events.
-    pub(crate) fn deliver(&self, session: &mut Session) -> Vec<Event> {
+    /// Queue one server message for the next Play frame.
+    pub(crate) fn enqueue(&self, session: &mut Session) -> bool {
         if self.sent || matches!(self.ty, drdp::TYPE_CONNECT | drdp::TYPE_DISCONNECT) {
-            return Vec::new();
+            return false;
         }
         let ep = session.drdp.system_endpoint;
         let dst = session.drdp.eps[ep].id;
         session.drdp.endpoint_send(ep, dst, self.bytes, self.ty);
-        session.pump()
+        true
+    }
+
+    /// Deliver server data through DRDP's local endpoint and the real Session
+    /// dispatcher. The test drives client actions and consumes the events.
+    pub(crate) fn deliver(&self, session: &mut Session) -> Vec<Event> {
+        if self.enqueue(session) {
+            session.pump()
+        } else {
+            Vec::new()
+        }
     }
 }

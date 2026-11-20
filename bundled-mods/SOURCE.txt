@@ -4,6 +4,7 @@ License: MIT (see FrontiersForge-MIT.txt in the release archive)
 Fonts: SIL Open Font License 1.1 (see OFL.txt beside each font family)
 Files are unmodified vendor assets from the FrontiersForge reference repository, except:
 - wereoxxs_ui/wereoxxs_ui.lua and modules/ability_bars.lua add an optional native weapon-set bar using eqoa.WeaponSets; PCSX2 behavior is unchanged without eqoa. MIT permits modification.
+- wereoxxs_ui/wereoxxs_ui.lua reuses each window's custom font handle in EQOA Enhanced while the face and size match. MIT permits modification.
 - wereoxxs_ui/modules/chat_window.lua scrolls with the game's chat-history keys (R2 held) through eqoa.ChatHistory when it is there, and snaps back to the newest line on release; without eqoa it keeps the stock stick-to-bottom log. MIT permits modification.
 - wereoxxs_ui/modules/chat_window.lua builds each chat line with one concatenation. Where the host supports scoped wrapping and colored text, it sets the wrap position once per message list and draws each line with one TextColored call. The original widget sequence is the fallback on older Forge hosts. MIT permits modification.
 - avoids_modern_ui/modules/avoids_exp_bars.lua the XP bars hide at max level and line 269 gets a nil guard, since Util.GetExpRequiredForLevel returns nil at level 60. MIT permits modification.
@@ -106,4 +107,4 @@ c7bbf4fd6063f585cad6aa06e6f2ff5947b05a35b56514ab1d0c3673e93fcea1  wereoxxs_ui/mo
 281d989cc2d90100c0e2bdb3d83a463934edf775f3b3db1cad9b1b3a6a1789f3  wereoxxs_ui/modules/party_frames.lua
 ec4121d96d223715b78fbcc4d6d6b375a9fdb7a2690db94ec441a82eadbaa8eb  wereoxxs_ui/modules/solo_meter.lua
 be073280aa2f0f1f3def16af58268de4645af2083bbc0d5014daa3f654ce5776  wereoxxs_ui/modules/tape_compass.lua
-1c882793c00b94e004ba5fc8816e208cf97f526705c27fccea24edecd3c5a817  wereoxxs_ui/wereoxxs_ui.lua
+e792d80ef51e0ec0def1779f9dac377b4e08e0c1b522e144c955a2ecde824f73  wereoxxs_ui/wereoxxs_ui.lua
