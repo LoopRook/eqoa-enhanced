@@ -456,7 +456,7 @@ creating it (b9da8f0e; 4,379 such folders are in this PC's temp directory from e
   first, so on a slow runner the code is `quota`. The same test passed in that run's `full` job, alone
   locally, and in the local `addons` step. Not changed here (an existing round 4 test); worth fixing by
   waiting for the first save before the cycle check.
-- CI_RERUN_PLACEHOLDER
+- GitHub CI run **44728527305 at 313c2484 (this report's commit; code as 5236a687): success**. addons 604 passed / 0 failed / 25 ignored / 17 SKIP; full 3236 / 0 / 37 / 378 SKIP; wasm, footprint, paths, player-release 20/0, tools 201/0/1 SKIP. CI has no disc or GPU: its SKIPs are those tests, including the GPU manager tests of this round, which print a SKIP line there. `cleanup` run.
 
 ### Not verified
 
