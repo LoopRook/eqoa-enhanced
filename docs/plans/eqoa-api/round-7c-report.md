@@ -562,7 +562,7 @@ None.
   (`round7b_without_adapter_is_an_explicit_skip`, deliberate); wasm, footprint (no budget change, no upstream
   line), paths PASS. The support-table comparison passes: the surface did not change, so the reference files
   were not regenerated.
-- GitHub CI: CI4_PLACEHOLDER
+- GitHub CI run **44737561963 at b2e241ea (this report's commit; code as 383d53b6): success**. addons 607 passed / 0 failed / 25 ignored / 17 SKIP; full 3243 / 0 / 37 / 378 SKIP; wasm, footprint, paths, player-release 20/0, tools 201/0/1 SKIP. CI has no disc or GPU: its SKIPs are those tests, including this round's GPU manager tests, which print a SKIP line there. `cleanup` run.
 
 ### Not verified
 
