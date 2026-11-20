@@ -2697,6 +2697,120 @@ mod tests {
         }
     }
 
+    /// One bundled-exemption case: the bundled set installed in a fresh mods folder (`install`), `setup`
+    /// changes it, an earlier release's narrower enable is bound for `id`, and a manager starts on it.
+    /// Returns whether `id` came back enabled and whether it got the permissions line.
+    fn round7c_bundle_case(gpu: &Gpu, id: &str, install: bool, setup: impl FnOnce(&Path)) -> (bool, bool) {
+        let config = Scratch::new();
+        let mods = Scratch::new();
+        if install {
+            crate::fork_ext::bundled::install_bundled_mods(&mods.0, Some(&config.0)).unwrap();
+        }
+        setup(&mods.0);
+        round7c_bind_older_release(&config.0, &mods.0, &[(id, true)]);
+        let manager = gpu.manager(&mods.0, Some(config.0.clone()));
+        let entry = manager.entries().into_iter().find(|e| e.metadata.id == id).expect("package found");
+        (entry.enabled_intent, round7c_permissions_line(&manager, id))
+    }
+
+    /// A manifest that takes over a bundled package's id with its own entry and wide grants.
+    fn round7c_hijack(folder: &Path, id: &str) {
+        fs::write(
+            folder.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schemaVersion": 1, "runtime": "lua", "api": "eqoa/1", "id": id, "name": id,
+                "entry": "evil.lua", "capabilities": ["eqoa.actions.*"]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(folder.join("evil.lua"), "-- not shipped\n").unwrap();
+    }
+
+    /// Fix round 4 item 1: the exemption holds only for the exact shipped package, at the bundled install
+    /// location, with exactly the shipped files, and with discovery's manifest and entry among them.
+    #[test]
+    fn round7c_bundled_exemption_only_for_the_exact_shipped_package() {
+        let Some(gpu) = Gpu::new() else {
+            eprintln!("SKIP round7c exact shipped package: no GPU adapter");
+            return;
+        };
+        let asked = (false, true);
+        assert_eq!(round7c_bundle_case(&gpu, "eqoa_bag_viewer", true, |_| {}), (true, false), "the shipped package");
+        assert_eq!(
+            round7c_bundle_case(&gpu, "eqoa_bag_viewer", true, |m| round7c_hijack(&m.join("eqoa_bag_viewer"), "eqoa_bag_viewer")),
+            asked,
+            "scenario A, native: shipped files untouched, a manifest.json and entry added"
+        );
+        assert_eq!(
+            round7c_bundle_case(&gpu, "arpg_ui", true, |m| round7c_hijack(&m.join("arpg_ui"), "arpg_ui")),
+            asked,
+            "scenario A, Forge import: its shipped set has no manifest"
+        );
+        assert_eq!(
+            round7c_bundle_case(&gpu, "eqoa_bag_viewer", false, |m| {
+                let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods/eqoa_bag_viewer");
+                copy_tree(&from, &m.join("other/scripts/eqoa_bag_viewer"));
+            }),
+            asked,
+            "scenario B: the shipped files in a pack's scripts folder, not the bundled install location"
+        );
+        assert_eq!(
+            round7c_bundle_case(&gpu, "eqoa_bag_viewer", true, |m| {
+                fs::write(m.join("eqoa_bag_viewer/modules/extra.lua"), "-- added\n").unwrap()
+            }),
+            asked,
+            "an extra file in a subfolder"
+        );
+        assert_eq!(
+            round7c_bundle_case(&gpu, "eqoa_bag_viewer", true, |m| {
+                fs::remove_file(m.join("eqoa_bag_viewer/README.md")).unwrap()
+            }),
+            asked,
+            "a shipped file missing"
+        );
+    }
+
+    /// Fix round 4 item 2: an older build that toggles one package (Q) leaves every other package's record
+    /// standing, so another package (P) that widens its grants in an update is still asked again.
+    #[test]
+    fn round7c_older_build_toggle_keeps_other_packages_records() {
+        let Some(mut gpu) = Gpu::new() else {
+            eprintln!("SKIP round7c per-package staleness: no GPU adapter");
+            return;
+        };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("p_mod", false, "loaded = true");
+        scripts.package("q_mod", false, "loaded = true");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        manager.queue(Command::Enable("p_mod".into(), true));
+        manager.queue(Command::Enable("q_mod".into(), true));
+        gpu.frame(&mut manager);
+        drop(manager);
+
+        // 0.6.0 turns Q off: its writer rewrites state.json whole, two keys
+        let found = super::super::discovery::discover(&scripts.0);
+        let q_key = Storage::key(found.addons.iter().find(|a| a.id == "q_mod").unwrap()).unwrap();
+        let state = config.0.join("addons/state.json");
+        let mut enabled = serde_json::from_slice::<serde_json::Value>(&fs::read(&state).unwrap()).unwrap()["enabled"].clone();
+        enabled[&q_key] = serde_json::json!(false);
+        fs::write(&state, serde_json::to_vec(&serde_json::json!({"schemaVersion": 1, "enabled": enabled})).unwrap()).unwrap();
+        // P's update widens its grants
+        let manifest = scripts.0.join("p_mod/mod.json");
+        let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        raw["capabilities"] = serde_json::json!(["eqoa.actions.command"]);
+        fs::write(&manifest, serde_json::to_vec(&raw).unwrap()).unwrap();
+
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        let entry = |id: &str| manager.entries().into_iter().find(|e| e.metadata.id == id).unwrap();
+        assert!(!entry("p_mod").enabled_intent, "P's wider grants are not adopted silently");
+        assert!(round7c_permissions_line(&manager, "p_mod"), "{:?}", manager.diagnostics());
+        assert!(!entry("q_mod").enabled_intent, "Q is as the older build left it");
+        assert!(!round7c_permissions_line(&manager, "q_mod"), "{:?}", manager.diagnostics());
+    }
+
     #[test]
     fn round7c_bundled_packages_keep_their_enabled_disclosures() {
         let Some(gpu) = Gpu::new() else { return };
