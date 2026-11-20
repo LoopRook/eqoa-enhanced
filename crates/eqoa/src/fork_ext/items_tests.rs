@@ -228,14 +228,19 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
         host.execute(
             r#"
             local inv = eqoa.inventory.get()
+            -- merchant: only at a merchant; source: only a corpse's loot
             fields('items.Container', inv, 'merchant source')
+            -- selected/selected_row: only while a row is selected
             fields('items.ContainerView', inv.view, 'selected selected_row')
             fields('items.Tab', inv.view.tabs[1])
             local sword = inv.items[1]
+            -- quick_slot/charges: only an item that has one; damage/attack_*: only a weapon
             fields('items.Item', sword, 'quick_slot charges damage attack_type attack_name')
+            -- name: the stat's name comes from the disc's word table
             fields('items.ItemStat', sword.stats[1], 'name')
             fields('items.CanUse', eqoa.items.can_use(sword.ref, 0, 0, 50))
             fields('gems.Gem', eqoa.gems.get('Moonstone'))
+            -- name: the slot's name comes from the disc's word table
             fields('items.SlotInfo', eqoa.items.slot_info(sword.wear_slot), 'name')
             seen = {}
             for _, n in ipairs({'loot.changed', 'merchant.changed'}) do
@@ -263,6 +268,7 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
         host.execute(
             r#"
             local loot = eqoa.loot.get()
+            -- money: only the pack and bank; view: only while its window shows; merchant: only at a merchant
             fields('items.Container', loot, 'money view merchant')
             fields('items.LootSource', loot.source)
             assert(log[#log].name == 'loot.changed', 'no loot event from the native open')

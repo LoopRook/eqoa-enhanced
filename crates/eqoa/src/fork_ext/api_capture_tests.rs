@@ -76,6 +76,7 @@ fn round7c_play_records_match_declared_fields() {
             r#"
             local p = eqoa.player.get()
             fields('player.Player', p)
+            -- name: the place's name comes from the disc's word table (nil without the disc)
             fields('player.Location', p.location, 'name')
             fields('player.Vital', p.hp)
             fields('player.Vital', p.power)
@@ -85,10 +86,12 @@ fn round7c_play_records_match_declared_fields() {
             fields('player.Resists', p.resists)
             local stats = eqoa.player.stats()
             fields('player.Stats', stats)
+            -- min/max/without_*: only a stat with a native range carries them
             fields('player.StatItem', stats.strength, 'min max without_min without_max')
             fields('Vec3', p.position)
             fields('Vec3', p.velocity)
-            fields('mastery.Mastery', p.mastery, 'stats bonuses')
+            fields('mastery.Mastery', p.mastery)
+            -- disposition*: only a creature the server sent a con colour for
             fields('entities.Entity', eqoa.entities.list()[1], 'disposition disposition_name')
         "#,
         )
@@ -96,16 +99,21 @@ fn round7c_play_records_match_declared_fields() {
         host.execute(r#"
             local g = eqoa.group.get()
             fields('group.Group', g)
+            -- entity: only a member in view; power: only after the server sent that member's power
             fields('group.Member', g.members[1], 'entity power')
             fields('group.RaidMember', g.raid[1])
             fields('group.Invite', g.invites[1])
             local ability = eqoa.abilities.list()[1]
+            -- spellbook_slot: only an ability placed in the spellbook
             fields('abilities.Ability', ability, 'spellbook_slot')
             fields('abilities.RangeResult', eqoa.abilities.in_range(ability.ref,
                 {x=0,y=0,z=0}, {x=1,y=2,z=3}))
+            -- started_at/estimated_remaining: only while a cooldown runs
             fields('cooldowns.Cooldown', eqoa.cooldowns.get(ability.ref), 'started_at estimated_remaining')
             local bar = eqoa.hotbar.list()[1]
+            -- selected_slot: only when the bar's cursor is on a slot
             fields('hotbar.Hotbar', bar, 'selected_slot')
+            -- item/weapon_set: only a slot of that kind; ui_icon: only a slot the game gives a UI icon
             fields('hotbar.HotbarSlot', bar.slots[1], 'item weapon_set ui_icon')
             fields('effects.Effect', eqoa.effects.list()[1])
             local chat = eqoa.chat.history()
@@ -120,6 +128,7 @@ fn round7c_play_records_match_declared_fields() {
             fields('client.Client', eqoa.client.get())
             fields('camera.Camera', eqoa.camera.get())
             fields('quests.Quest', eqoa.quests.list()[1])
+            -- active: only while a window is focused
             fields('windows.Windows', eqoa.windows.get(), 'active')
             fields('combat.Counters', eqoa.combat.get_counters())
             fields('hud.Frame', eqoa.hud.frame())
@@ -131,12 +140,16 @@ fn round7c_play_records_match_declared_fields() {
             fields('hud.SinglePanelLayout', layout.pet)
             fields('hud.Rect', layout.player.panel)
             local map = eqoa.map.get()
+            -- world_name: needs the disc's word table or a cached world; search_anchor: only while the map's search shows
             fields('map.MapState', map, 'world_name search_anchor')
             fields('map.Bounds', map.bounds)
+            -- label/owner: only a waypoint a mod placed; nil for the player's own
             fields('map.Waypoint', map.waypoint, 'label owner')
+            -- level_min/level_max: only a camp; label: only a community or waypoint mark; step: only a quest mark
             fields('map.Marker', eqoa.map.markers(map.world_id)[1], 'level_min level_max label step')
             local _, err = eqoa.actions.move()
             fields('Error', err)
+            -- reason: only a capability described with one
             fields('capabilities.Capability', eqoa.capabilities.get('eqoa.api'), 'reason')
         "#).unwrap();
     });

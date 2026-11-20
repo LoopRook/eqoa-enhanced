@@ -357,6 +357,7 @@ mod tests {
             host.execute(
                 r#"
                 fields('client.DisplayMetrics', eqoa.client.display())
+                -- reason: only a font that fell back to the default
                 fields('fonts.FontInfo', eqoa.fonts.default(), 'reason')
             "#,
             )

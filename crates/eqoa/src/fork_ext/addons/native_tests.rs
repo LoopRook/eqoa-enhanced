@@ -338,8 +338,10 @@ fn round7c_host_service_events_reach_lua_from_their_producers() {
         assert(#missing == 0, 'Host did not emit: ' .. table.concat(missing, ', '))
         assert(seen['pointer.pressed'].data.x == 10)
         assert(seen['batch.result'].data.completed == 2)
+        -- code/reason: only a refusal or failure; detail: only an action that reports what it did
         fields('actions.ActionResult', seen['action.result'].data, 'code reason detail')
-        fields('actions.BatchResult', seen['batch.result'].data, 'code reason detail current_step failed_step')
+        -- code/reason: only a batch that stopped or failed; failed_step: only when a step failed
+        fields('actions.BatchResult', seen['batch.result'].data, 'code reason failed_step')
         assert(seen['events.dropped'].data.count > 0)
         event_fields(seen, service_events)
     "#,

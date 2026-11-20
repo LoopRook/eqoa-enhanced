@@ -634,6 +634,7 @@ fn round6a_windows_modes_dialogs_hints_and_outside_world() {
         assert(g.mode == 'start_menu' and g.native_mode == 13 and g.busy == true and g.start_menu_open == true and g.any_window_open == true)
         local sm = eqoa.windows.find('start_menu')
         assert(sm ~= nil and sm.focused == true and #sm.hints == 2)
+        -- rows/selected_row/scroll_top: only a window with a native list; tabs/tab: only a tabbed one; dialog: only a dialog
         fields('windows.Window', sm, 'rows selected_row scroll_top tabs tab dialog')
         fields('windows.ButtonHint', sm.hints[1])
         saved_wref = sm.ref
@@ -676,6 +677,7 @@ fn round6a_windows_modes_dialogs_hints_and_outside_world() {
         r#"
         local c = eqoa.windows.find('confirm')
         assert(c.dialog.kind == 'confirm' and c.dialog.text == 'Delete item?' and c.dialog.style == 'yes_no' and c.dialog.style_id == 1 and c.dialog.selection == 2)
+        -- a confirm box has no options, and title/chat/password belong to an input box
         fields('windows.Dialog', c.dialog, 'options title chat password')
         "#,
     )
@@ -692,6 +694,7 @@ fn round6a_windows_modes_dialogs_hints_and_outside_world() {
         r#"
         local inp = eqoa.windows.find('input')
         assert(inp.dialog.kind == 'input' and inp.dialog.text == 'Hello world' and inp.dialog.chat == true and inp.dialog.password == false)
+        -- an input box has no options, selection or confirm style
         fields('windows.Dialog', inp.dialog, 'options selection style style_id')
         "#,
     )
@@ -938,7 +941,9 @@ fn round6a_seam_dialogs_privchat_response_pages_and_confirm_yes_no() {
         eqoa.events.on('windows.changed', function(e) wlog[#wlog + 1] = e.data end)
         local rw = eqoa.windows.find('response_dialog')
         assert(rw.dialog.kind == 'text' and rw.dialog.text == 'Choose your path:')
+        -- item: only an item row; command: only a row that runs a command
         fields('windows.MenuRow', rw.rows[1], 'item command')
+        -- a response dialog has options, not a selection, tag, title, input fields or confirm style
         fields('windows.Dialog', rw.dialog, 'selection tag title chat password style style_id')
         -- Page 1: Option 1..12, More, Close
         assert(#rw.dialog.options == 14 and rw.dialog.options[13] == 'More' and rw.dialog.options[14] == 'Close',
