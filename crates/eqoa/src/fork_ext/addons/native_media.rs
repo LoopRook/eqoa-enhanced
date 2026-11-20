@@ -25,38 +25,42 @@ pub(crate) fn imgui(lua: &Lua, imgui: &Table) -> Result<()> {
     for module in ["eqoa.imgui", "ImGui"] {
         describe_module(lua, module, Some(2), "bounded native bridge");
     }
-    for name in [
-        "BeginTooltip",
-        "EndTooltip",
-        "BeginItemTooltip",
-        "GetMousePos",
-        "GetMousePosOnOpeningCurrentPopup",
-        "GetMouseWheel",
-        "GetMouseDragDelta",
-        "ResetMouseDragDelta",
-        "IsMouseDown",
-        "IsMouseClicked",
-        "IsMouseReleased",
-        "IsMouseDoubleClicked",
-        "IsMousePosValid",
-        "SetMousePos",
-        "SetMouseCursor",
-        "PushStyleVar",
-        "PopStyleVar",
-        "PushItemWidth",
-        "PopItemWidth",
-        "SetNextWindowFocus",
-        "SetWindowFocus",
-        "GetForegroundDrawList",
+    // Not in the bounded ImGui bridge of `eqoa/1`, and not scheduled: each answers `unsupported` with what
+    // to use instead.
+    const MOUSE: &str = "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events";
+    const NOT_BRIDGED: &str = "not part of the ImGui bridge in eqoa/1";
+    for (name, reason) in [
+        ("BeginTooltip", NOT_BRIDGED),
+        ("EndTooltip", NOT_BRIDGED),
+        ("BeginItemTooltip", NOT_BRIDGED),
+        ("GetMousePos", MOUSE),
+        ("GetMousePosOnOpeningCurrentPopup", MOUSE),
+        ("GetMouseWheel", MOUSE),
+        ("GetMouseDragDelta", MOUSE),
+        ("ResetMouseDragDelta", MOUSE),
+        ("IsMouseDown", MOUSE),
+        ("IsMouseClicked", MOUSE),
+        ("IsMouseReleased", MOUSE),
+        ("IsMouseDoubleClicked", MOUSE),
+        ("IsMousePosValid", MOUSE),
+        ("SetMousePos", MOUSE),
+        ("SetMouseCursor", MOUSE),
+        ("PushStyleVar", NOT_BRIDGED),
+        ("PopStyleVar", NOT_BRIDGED),
+        ("PushItemWidth", NOT_BRIDGED),
+        ("PopItemWidth", NOT_BRIDGED),
+        ("SetNextWindowFocus", NOT_BRIDGED),
+        ("SetWindowFocus", NOT_BRIDGED),
+        ("GetForegroundDrawList", NOT_BRIDGED),
     ] {
         if imgui.raw_get::<Value>(name)?.is_nil() {
             refuse_member(
                 lua,
                 imgui,
                 &format!("ImGui.{name}"),
-                "not_yet",
-                Some(4),
-                "planned for the mod API plan's round 4 map and ImGui additions",
+                "unsupported",
+                None,
+                reason,
                 RefusalShape::Native,
             )?;
         }

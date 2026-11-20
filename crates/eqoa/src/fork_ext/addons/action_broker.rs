@@ -3623,7 +3623,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             name,
             "not_yet",
             Some(6),
-            "continuous controls come after the upstream PR (mod API plan, round 6)",
+            "continuous controls come after the upstream PR (mod API plan, round 8)",
         )?;
     }
     bind(

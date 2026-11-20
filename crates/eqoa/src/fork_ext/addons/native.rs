@@ -960,9 +960,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     describe(
         lua,
         "eqoa.textures.formats.jpeg",
-        "not_yet",
-        Some(4),
-        "JPEG decoding is planned in the mod API plan (map and media API); use PNG or RGBA meanwhile",
+        "unsupported",
+        None,
+        "the client decodes PNG only; convert JPEG to PNG or pass RGBA pixels",
     );
     bind(
         lua,
