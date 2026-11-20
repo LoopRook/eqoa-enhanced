@@ -11590,6 +11590,7 @@
         "eqoa.windows.Dialog.kind",
         "eqoa.windows.Dialog.options",
         "eqoa.windows.Dialog.password",
+        "eqoa.windows.Dialog.prompt_kind",
         "eqoa.windows.Dialog.selection",
         "eqoa.windows.Dialog.style",
         "eqoa.windows.Dialog.style_id",
@@ -11633,6 +11634,14 @@
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.Dialog.prompt_kind",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
       "status": "supported"
     },
     {

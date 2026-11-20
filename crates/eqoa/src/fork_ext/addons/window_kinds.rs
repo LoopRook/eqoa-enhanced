@@ -49,6 +49,9 @@ const MODES: &[(i32, &str, Option<&str>)] = &[
     (43, "duel_invite", Some("Duel")),
     (44, "duel", Some("Duel")),
     (60, "combat_record", Some("Combat Record")),
+    (61, "mercenary_items", Some("Mercenary Items")),
+    (62, "mercenary_spells", Some("Mercenary Spells")),
+    (63, "dye_picker", Some("Dye Picker")),
 ];
 
 /// Windows the game shows beside or over a mode (kind, title).

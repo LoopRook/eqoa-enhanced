@@ -442,3 +442,14 @@ docs/modding/AGENT-GUIDE.md (one page for agents building mods from an owner bri
   icons, window size, a hidden Take all. Hydrogen fixed all in 3 rounds (free DeepSeek review: 0H/4M/2L, fixed),
   0 upstream lines. **Owner retest PASSED** (51bd3bf3); merged into develop 0d664fd4; gates `--release` ALL PASS.
   Owner then dropped the one-gesture rule and approved round 6.5 as a general window takeover (above).
+- **Round 6.5 (window takeover) and release 0.6.0, 2026-11-17/19.** Owner dropped the one-gesture rule (enabling a mod is
+  permission; actions/takeover need mod.json declarations) and approved window takeover with scopes `own` (helpers) and
+  `all` (full replacements; contract rules land in round 7 Part C). Bag Viewer: Look at corpse, Take all / Take all but
+  junk, Sell junk near merchants, Deposit/Withdraw near bankers without the game's windows; greyed when beyond the reach the
+  server last allowed; Auto-loot Off / Everything / Everything but junk per character, with a log line per decision. 4
+  inserted upstream hook lines (npcw.rs, bankplay.rs), lead-approved under delegation. Route: Gemini Hydrogen built, then
+  Sonnet and Opus fix rounds (6 owner retests); reviews by free DeepSeek, Sonnet and Opus. Owner tests passed 2026-11-19.
+  Also shipped: round 7 Parts A and B, upstream sync 2026-11-18 (133 commits), session recorder, scripted local-server
+  scenes, CI on GitHub for work branches, run_gates stale-binary guard, Wereoxxs speed-ups (11.8 -> 1.9 ms/frame on the
+  owner's recorded session). **Released as v0.6.0** (enhanced b8e63048; official release published 2026-11-19); `eqoa/1`
+  not frozen yet (owner: the API is not ready for third-party modders). Next: round 7 Parts C, D2, E, freeze.

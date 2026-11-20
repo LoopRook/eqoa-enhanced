@@ -2,6 +2,7 @@
 # Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 """Run workspace gates in order and generate a short summary report."""
 import argparse
+import csv
 import datetime
 import json
 import os
@@ -344,7 +345,32 @@ def process_alive(pid):
     return True
 
 
+def cargo_process_running():
+    """Treat a failed process listing as busy."""
+    try:
+        if sys.platform == "win32":
+            result = subprocess.run(
+                ["tasklist", "/fo", "csv", "/nh"],
+                capture_output=True, text=True, check=True, timeout=10,
+            )
+            rows = list(csv.reader(result.stdout.splitlines(), strict=True))
+            if any(len(row) != 5 or not row[1].isdecimal() for row in rows):
+                return True
+            names = [row[0].lower() for row in rows]
+        else:
+            result = subprocess.run(
+                ["ps", "-A", "-o", "comm="],
+                capture_output=True, text=True, check=True, timeout=10,
+            )
+            names = [Path(line.strip()).name for line in result.stdout.splitlines()]
+    except (OSError, subprocess.SubprocessError, UnicodeError, csv.Error):
+        return True
+    return not names or any(name in {"cargo", "rustc", "cargo.exe", "rustc.exe"} for name in names)
+
+
 class CargoLock:
+    EMPTY_STALE_SECONDS = 5 * 60
+
     def __init__(self, lock_dir=None, wait_minutes=60, poll_interval=30):
         if lock_dir is None:
             lock_dir = Path.home() / "Paseo" / "cargo-build.lock"
@@ -387,11 +413,13 @@ class CargoLock:
                 time.sleep(min(self.poll_interval, 1.0))
                 continue
 
-            self.acquired = True
             try:
                 (self.lock_dir / self.owner_token).touch()
             except OSError:
-                pass
+                # Running without a token would look stale to a later waiter.
+                self.lock_dir.rmdir()
+                raise
+            self.acquired = True
             return
 
     def _holder_pid(self):
@@ -409,11 +437,22 @@ class CargoLock:
     def _clear_if_holder_dead(self):
         """Remove a lock left by a process that no longer runs (a killed gate run).
 
-        Only a lock holding exactly one `pid-<n>-*.token` whose process is gone counts as stale; a lock
-        without a token (a plain `mkdir` lock, or a holder between mkdir and touch) is never removed.
+        An empty lock gets a grace period for its holder to write the token.
         """
         try:
-            tokens = [p for p in self.lock_dir.iterdir() if p.name.startswith("pid-") and p.name.endswith(".token")]
+            stamp = self.lock_dir.stat()
+            entries = list(self.lock_dir.iterdir())
+            if not entries:
+                if time.time() - stamp.st_mtime < self.EMPTY_STALE_SECONDS or cargo_process_running():
+                    return False
+                current = self.lock_dir.stat()
+                if not os.path.samestat(stamp, current) or stamp.st_mtime_ns != current.st_mtime_ns:
+                    return False
+                # rmdir also refuses a directory that gained a token during the check.
+                self.lock_dir.rmdir()
+                print(f"Removed stale empty cargo lock at {self.lock_dir}")
+                return True
+            tokens = [p for p in entries if p.name.startswith("pid-") and p.name.endswith(".token")]
         except OSError:
             return False
         if len(tokens) != 1:

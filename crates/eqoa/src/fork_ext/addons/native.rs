@@ -410,6 +410,15 @@ pub(crate) fn error(lua: &Lua, symbol: &str, code: &str, message: &str) -> Resul
     ) {
         diagnose(lua, symbol, code, message);
     }
+    quiet_error(lua, symbol, code, message)
+}
+
+pub(super) fn quiet_error(
+    lua: &Lua,
+    symbol: &str,
+    code: &str,
+    message: &str,
+) -> Result<MultiValue> {
     let e = record(
         lua,
         "eqoa.Error",

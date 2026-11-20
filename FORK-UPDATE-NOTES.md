@@ -2,10 +2,11 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
-
 ## Unreleased
 
 - Mods & Addons shows **Replaces game windows** and **Can answer NPC dialogs** when a mod declares those abilities. Turn on **Use the game's windows** to release all mod window claims and keep new openings native.
+- Map Search waits for the Creature Journal to start before reading its shared data.
+- Mods opening Mail, Auction, or Who now open the right window.
 
 ## 2026-11-19 · Enhanced 0.6.0
 

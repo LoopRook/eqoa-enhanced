@@ -125,6 +125,19 @@ class TestRunGates(unittest.TestCase):
             self.assertEqual([p.name for p in lock_dir.iterdir()], [lock.owner_token])
         self.assertFalse(lock_dir.exists())
 
+    def test_lock_reclaims_old_empty_directory_only_when_build_is_idle(self):
+        lock_dir = Path(self.temp_dir.name) / "empty.lock"
+        lock_dir.mkdir()
+        lock = run_gates.CargoLock(lock_dir=lock_dir)
+        old = time.time() - 600
+        os.utime(lock_dir, (old, old))
+        with mock.patch.object(run_gates, "cargo_process_running", return_value=True, create=True):
+            self.assertFalse(lock._clear_if_holder_dead())
+        self.assertTrue(lock_dir.is_dir())
+        with mock.patch.object(run_gates, "cargo_process_running", return_value=False, create=True):
+            self.assertTrue(lock._clear_if_holder_dead())
+        self.assertFalse(lock_dir.exists())
+
     def test_lock_keeps_a_live_holder_and_a_tokenless_lock(self):
         for name, token in (("live.lock", True), ("plain.lock", False)):
             lock_dir = Path(self.temp_dir.name) / name

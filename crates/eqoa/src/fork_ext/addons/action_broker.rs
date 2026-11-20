@@ -4520,6 +4520,8 @@ fn install_non_item_actions(lua: &Lua) -> Result<()> {
                         | "guild"
                         | "mail"
                         | "mail_compose"
+                        | "tell"
+                        | "reply"
                         | "auction"
                         | "auction_browse"
                         | "auction_search"

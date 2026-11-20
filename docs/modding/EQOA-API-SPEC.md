@@ -545,6 +545,9 @@ The scout's first uncertainty is resolved by the window's literal “Points Avai
 | 43 | `duel_invite` | `duelplay.rs:133`, owns :31 |
 | 44 | `duel` | `duelplay.rs:152`, owns :31 |
 | 60 | `combat_record` | `recordplay.rs:10` MODE constant, assignment :56 |
+| 61 | `mercenary_items` | `mercplay.rs:30` `ITEMS_MODE` |
+| 62 | `mercenary_spells` | `mercplay.rs:31` `SPELLS_MODE` |
+| 63 | `dye_picker` | `dyeplay.rs:17` `MODE` |
 | every other int (including 3, 8, 25) | `other` | no implemented owner found at this revision; preserve native_mode unchanged |
 
 `native_mode` keeps the actual number; it is an ID, not a position. Map/search/typing overlays do not invent IDs or replace the underlying mode name; they appear as Window records and affect busy/active. `start_menu_open` means actual pause menu visible; `any_window_open` means native window/map/search/typing present, includes overlays; busy is input ownership blocking plain-play hotkeys, not network pending. `F:680..699` is the existing baseline; do not equate busy with health unknown. Outside W the explicit none state above applies.
@@ -558,7 +561,7 @@ MenuRow.index and Window.selected_row are 1..#rows, `WndList.sel+1` only for dir
 | kind | Fields / availability |
 |---|---|
 | `text` | `{kind="text",text:string,options:string[]}`; PrivChat (mode 9) / response (mode 7) when native page active. Response options are visible 1-based labels including page/Close actions. Empty options for Done-only PrivChat; dialog_answer option=1 means its single Done action. `dialog.rs:9,45,97`, `P:2342,2348,797,861`. |
-| `confirm` | `{kind="confirm",text:string,style:"ok"\|"yes_no"\|"cancel"\|"other",style_id:int,selection:uint?}`; MBox.kind/text/sel; kinds 0=OK,1=Yes/No,2=single Cancel (`dialog.rs:237`, `R/window.lua:594`). Yes/No selection is native sel+1, single-button selection=1. |
+| `confirm` | `{kind="confirm",text:string,style:"ok"\|"yes_no"\|"cancel"\|"other",style_id:int,tag:int,prompt_kind:"group_invite"\|"pet_dismiss"\|"quit"\|"guild"\|"report"\|"other",selection:uint?}`; MBox.kind/text/sel/p1/p2; kinds 0=OK,1=Yes/No,2=single Cancel (`dialog.rs:237`, `R/window.lua:594`). Yes/No selection is native sel+1, single-button selection=1. `prompt_kind` classifies prompts upstream distinguishes by `(p1, p2)` (`0x07020000` group_invite, `0x050E0000` pet_dismiss, `0x0A010000` quit, `0x0B051007`/`0x0B051008` guild, `0x0B0B1002` report; summons and resurrection share `p1=2, p2=0` in upstream and report `"other"`). The list of `prompt_kind` values may grow: a prompt that reads `other` today (summons and resurrection among them) may get its own value in a later revision, so treat any value you do not know as `other`. |
 | `input` | `{kind="input",text:string?,tag:uint,title:string,chat:bool,password:bool}`; EditBox purpose/title, keyboard typing. Password text always nil. Tag is native purpose ID, never arbitrary memory. `P:6385,6400`, `editbox.rs:156`. |
 
 `eqoa.windows.find(kind:string)` → Window? first visible matching kind, nil,nil none. `eqoa.windows.get_window(ref:WindowRef)` → Window or stale_handle. `eqoa.windows.format_hint(button:string,label:string)` → string in game's `|glyph label` syntax; `parse_hint(text:string)` → ButtonHint[] preserving order and unknown literal text as button="text". Both A pure helpers from native glyph table `binds.rs:189`; no raw window tree. Selection methods are actions (§8). Small neutral read-only accessors are unavoidable for private dialog fields; see §10.
@@ -643,7 +646,7 @@ Every row is under `eqoa.actions` except map aliases in §7. All use the request
 | `follow(member:EntityRef?)` | nil stops; otherwise observed different current group member, target_id then native toggle_follow (`P:4975`) if needed; preserves native follow steering and distance (6 walk /3 stop in `controls.rs:19`). No follow of arbitrary NPC bypass. |
 | `stop()` | applied locally: release this VM's leases/held buttons and, if this VM started them, end autorun/follow using native controls_changed (`P:4988`). Does not force velocity to zero or clear physical input/another mod's leases. |
 | `camera(options:{heading:number?,pitch:number?,distance:number?,mode:int?})` | at least one field; finite radians/game units/native mode; WalkCamera setters `V/camera.rs:243,256,397` and preset path `camstyle.rs:270`, same clamping/native collisions. Busy if native camera locked. |
-| `open_window(kind:string)` | ordinary start-menu/window activation `P:6476`/native start menu messages. Kinds `start_menu,inventory,spellbook,quests,mastery,map,options,group,buddy_list,ignore_list,guild,who,mail_inbox,mail_compose,factions,auction_search,combat_record,recipes,experiment,controls`; server/role features may reject unsupported/unavailable. Bank/loot/merchant require interact(), not force-open. |
+| `open_window(kind:string,arg:int=0)` | ordinary start-menu/window activation `P:7724,8516`/native start menu messages (allowed in modes 0 and 38 when alive). Kinds `summary`/`trainer`/`skills`, `map`, `start`/`menu`, `inventory`/`bags`, `abilities`/`spellbook`, `quests`, `mastery`, `factions`, `options` (refuses `not_ready` until start/HUD assets load), `friends`/`buddies`, `ignore`, `guild` (refuses `not_ready` outside a guild), `mail` (inbox, mode 24), `mail_compose` (mode 23), `tell` (mode 28), `reply` (mode 29), `auction`/`auction_browse`/`auction_search` (mode 39 via `0xA801_0000`, refuses `not_ready` unless the game offers auction via `live::features().auction(bank.p78cc)`), `support`, `support_inbox`, `recipes` (takes `arg` skill id), `experiment`, `who` (mode 35 via `0x0B03_0004`, sending `who.open()`), `search` (via `0xFF00_0001`, refuses `unsupported` when server lacks `player_search`). Bank/loot/merchant require interact()/open_loot()/talk(), not force-open. |
 | `close_window(ref:WindowRef)` | native cancel/back path `P:5085,5220`, `bankplay.rs:208`, `npcw.rs:429,441`; close only exact current instance, respect pending native locks. |
 | `select_row(ref:WindowRef,row:uint)` | current active menu; route native list selection helper + its ordinary change notification; does not activate row. Read actual rows and index bounds; `wndlist.rs:53`, per-window key/pointer paths `P:4436,5085`. |
 | `activate_row(ref:WindowRef,row:uint)` | select then native confirm key/action for that menu; enabled row only; executes normal response/quantity/confirmation flow. |
@@ -904,7 +907,10 @@ paths, commands use nonempty ASCII identifiers, and permissions are limited to
 
 `eqoa.files.load_json("@mod_id/data/journal.json")` uses the existing 16 MiB
 worker and sliced materialisation limits. Only a running owner's explicitly
-shared file is readable. `shared.changed{mod,path}` follows a successful save.
+shared file is readable. Before an enabled owner starts, the load returns
+`nil, Error` with code `not_yet` and produces no diagnostic. Retry after the
+owner starts. A missing or disabled owner returns `permission_denied`.
+`shared.changed{mod,path}` follows a successful save.
 
 `eqoa.mods.send(mod_id, command, args?)` queues `mod.command{from,command,args}`
 for the next event boundary. Missing/disabled targets and undeclared commands

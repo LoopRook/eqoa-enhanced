@@ -322,11 +322,13 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
   hide the server's refusals; check that chat stays quiet and the server tolerates it) and group kills (only if the client
   can see what group members hit: unverified).
 
-## Scripted-input follow-ups (review 2026-11-18)
+## Scripted input: `EQOA_MOD_KEYS` alone still counts as the player's own presses (review 2026-11-18)
 
-- **Status:** Small, not scheduled. `EQOA_MOD_KEYS` alone leaves `input::from_device()` true (`input.rs:518` lists the upstream
-  script variables); count it as scripted fork-side without editing input.rs. The bag-viewer scene clicks fixed pixels
-  (fails closed if the layout moves); add a negative control for a missing loot receipt in tools/test_local_scene.py.
+- **Status:** Small, not scheduled; test tooling only. `EQOA_MOD_KEYS` alone leaves `input::from_device()` true (`input.rs`
+  lists the upstream script variables), so S2's press record treats replayed mod keys as device presses. The record's two
+  call sites are upstream lines in `play.rs`; a fix there rewrote both (tried and reverted 2026-11-19). Fix only with a
+  route that changes no upstream line (for example the scene tool also setting one of upstream's own script variables),
+  or leave it.
 
 ## Window takeover and upstream's keyboard-owning windows (sync review 2026-11-18)
 
@@ -336,29 +338,10 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
   refused by upstream with 0x0016 and the pending open must be cleared). `report_viewer.rs:61` keeps keys from addons only for
   `merc_win_owns() || dyepick_owns()`: a "not plain play" rule (mode not 0/38) would survive future upstream windows.
 
-## Small tooling and Wereoxxs follow-ups (2026-11-19)
+## Old Forge chat fallback (2026-11-19)
 
-- **Status:** Small, not scheduled. run_gates: an empty `cargo-build.lock` directory (no token) with no cargo/rustc running
-  blocked every build for ~1.5 h on 11-19; treat it as stale after a few minutes. Wereoxxs perf test: SKIP line when no GPU
-  is counted only through the manager's prerequisite line; the 110k instruction budget is ~6 steps above the measured peak
-  (tight); the old-Forge-host fallback path in chat_window.lua is untested.
+The fallback drawing path in Wereoxxs `chat_window.lua` still needs a check on an older Forge host.
 
-## Map Search reads the Creature Journal before it is running (owner screenshot, 2026-11-19)
+## Wereoxxs custom font recovery (2026-11-19)
 
-- **Status:** Not scheduled; not caused by round 6.5 (`exchange.rs` and Map Search are the same as on develop). At
-  startup Mods & Addons showed "eqoa_map_search: eqoa.files.load_json [permission_denied]: shared file owner is missing
-  or disabled (1 occurrence) Phase: entry". Map Search asks for `@eqoa_creature_journal/data/journal.json` in its entry
-  (`bundled-mods/eqoa_map_search/main.lua:10`); `exchange::read` serves a shared file only from a VM whose event bus is
-  primed (`native_events::prime`, the owner's first frame entry). Entries run in id order in one frame, so the Journal
-  normally comes first; the error means the Journal's VM was not running yet when Map Search started (a load-order race:
-  enabled later, or its package still loading). Map Search already retries (`resource.failed` / `reload`), so it heals;
-  only the diagnostic shows. Proposed fix: (1) Map Search makes its first journal read at its first `render`, not in
-  its entry; (2) the host answers a read whose owner is enabled but not yet primed with a `not_yet` code that is not a
-  diagnostic, keeping `permission_denied` for an owner that is disabled or missing.
-
-## Wereoxxs live-fix follow-ups (review 2026-11-19)
-
-- **Status:** Small. `wereoxxs_custom_font_load_budget` returns silently without a GPU (print SKIP); mark the
-  `window_fonts` declaration/Cleanup lines `-- EQOA Enhanced perf:` and update the outdated comment at wereoxxs_ui.lua:438;
-  a font file restored after going missing is retried only on face/size change or re-enable; add 0.5.3's wereoxxs_ui.lua
-  hash (1c8827...) to bundled_shipped_hashes.txt for installs older than the registry.
+A font restored after going missing is retried after a face or size change or after the addon is re-enabled.

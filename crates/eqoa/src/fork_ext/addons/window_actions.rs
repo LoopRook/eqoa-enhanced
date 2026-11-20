@@ -36,7 +36,15 @@ pub(crate) fn signature(w: &Json) -> u64 {
     };
     // what an edit box or confirm is for: a replaced box is another window
     let d = &w["dialog"];
-    let purpose = json!([d["tag"], d["title"], d["chat"], d["password"], d["style"], d["style_id"]]);
+    let purpose = json!([
+        d["tag"],
+        d["title"],
+        d["chat"],
+        d["password"],
+        d["style"],
+        d["style_id"],
+        d["prompt_kind"]
+    ]);
     let s = json!([
         w["kind"],
         rows,
