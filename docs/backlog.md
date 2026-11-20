@@ -345,3 +345,19 @@ The fallback drawing path in Wereoxxs `chat_window.lua` still needs a check on a
 ## Wereoxxs custom font recovery (2026-11-19)
 
 A font restored after going missing is retried after a face or size change or after the addon is re-enabled.
+
+## Mod keys against game keys: accepted leftovers (round 7 Part E, final review 2026-11-20)
+
+- **Status:** Low, not scheduled. None can make a normal press fire both a game control and a mod key.
+- The update banner takes Enter, the arrows, PgUp/PgDn, Home and End while it is shown in the world, ignoring
+  modifiers: a mod on one of those keys (after the player moved the game control off it) fires as well.
+- Chat copy/paste matches the typed letter while the never-a-mod-key list matches the key's place: on a layout such as
+  Dvorak a mod on the physical key that types `c` can fire together with Ctrl+C in chat.
+- The Macros page (upstream's) accepts a trigger on a mod's key with no note; the macro wins and Controls marks the mod.
+- Capturing on a mod row shows "Press the key for ." without the mod's name (upstream draws that line).
+- With Auto Save Options off, leaving Options by a route that neither saves nor cancels and then restarting leaves a
+  mod's new key saved beside the game's old key; the who-wins order settles it and the row is marked. Closing it fully
+  needs two more upstream lines (`settings::save`, `keep`), refused 2026-11-20.
+- Marks for keys read from saved settings use a US-layout table until that key has been pressed once this session.
+- One enabled mod with no key and no key listener still records the key in the runtime's held-key map (a hash insert
+  and remove per press; no allocation).
