@@ -454,6 +454,9 @@ struct VmBroker {
     active_batch: Option<ActiveBatch>,
     retained_batches: VecDeque<BatchResultRecord>,
     pending_batch_events: VecDeque<(bool, BatchResultRecord)>,
+    /// A stopped batch whose step was already on the wire: its terminal result waits for that step's
+    /// server reply (request id, record), so the count it reports includes a late success (M2).
+    stopped_awaiting: Option<(u64, BatchResultRecord)>,
     tokens: u32,
     last_refill_tick: u64,
 }
@@ -469,6 +472,7 @@ impl VmBroker {
             active_batch: None,
             retained_batches: VecDeque::new(),
             pending_batch_events: VecDeque::new(),
+            stopped_awaiting: None,
             tokens: TOKEN_BUCKET_BURST,
             last_refill_tick: now_tick,
         }
@@ -494,10 +498,8 @@ impl VmBroker {
         now_tick: u64,
         failed_step: Option<usize>,
         emit_event: bool,
-    ) {
-        let Some(batch) = self.active_batch.take() else {
-            return;
-        };
+    ) -> Option<BatchResultRecord> {
+        let batch = self.active_batch.take()?;
         let rec = BatchResultRecord {
             id: batch.id,
             vm: batch.vm,
@@ -522,6 +524,7 @@ impl VmBroker {
                 super::window_takeover::end_session_for_vm(batch.vm, kind);
             }
         }
+        Some(rec)
     }
 
     fn emit_batch_progress(&mut self) {
@@ -556,6 +559,16 @@ impl VmBroker {
         code: Option<&str>,
         reason: Option<String>,
     ) {
+        if self.stopped_awaiting.as_ref().is_some_and(|(waiting, _)| *waiting == req_id) {
+            let (_, mut rec) = self.stopped_awaiting.take().expect("checked above");
+            if ok == Some(true) {
+                rec.completed += 1;
+            }
+            rec.completed_tick = Some(now_tick);
+            self.upsert_batch_retained(rec.clone());
+            self.pending_batch_events.push_back((true, rec));
+            return;
+        }
         let Some(batch) = self.active_batch.as_mut() else {
             return;
         };
@@ -873,15 +886,47 @@ impl BrokerState {
         if target_id.is_some_and(|want| want != active.id) {
             return Ok(false);
         }
-        vm_state.finish_batch(
+        // A step already sent keeps its in-flight record: its server reply still counts (M2). A step only
+        // staged for the native send is discarded here, so nothing later consumes it.
+        let mut sent_step = None;
+        if let Some(req_id) = active.waiting_req_id {
+            match vm_state.in_flight.get(&req_id).map(|f| f.native_sent) {
+                Some(true) => sent_step = Some(req_id),
+                Some(false) => {
+                    let staged = vm_state.in_flight.remove(&req_id).expect("checked above");
+                    self.expired_staged_kinds.push(staged.kind);
+                    let rec = ActionResultRecord {
+                        id: staged.id,
+                        vm: staged.vm,
+                        kind: staged.kind,
+                        state: "cancelled",
+                        phase: "dispatch",
+                        ok: Some(false),
+                        code: Some("cancelled".into()),
+                        reason: Some("the batch stopped before this step was sent".into()),
+                        queued_tick: staged.queued_tick,
+                        dispatched_tick: None,
+                        completed_tick: Some(now_tick),
+                        detail: staged.detail,
+                    };
+                    vm_state.upsert_retained(rec.clone());
+                    vm_state.pending_events.push_back(rec);
+                }
+                None => {}
+            }
+        }
+        let rec = vm_state.finish_batch(
             "stopped",
             Some(false),
             Some("cancelled"),
             Some("stopped".into()),
             now_tick,
             None,
-            true,
+            sent_step.is_none(),
         );
+        if let (Some(req_id), Some(rec)) = (sent_step, rec) {
+            vm_state.stopped_awaiting = Some((req_id, rec));
+        }
         Ok(true)
     }
 

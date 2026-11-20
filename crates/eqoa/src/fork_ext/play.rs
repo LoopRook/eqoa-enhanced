@@ -838,9 +838,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
             crate::fork_ext::addons::action_broker::step_tick(snapshot, |kind| {
                 dispatch_broker_action(_play, kind)
             });
-            for expired_kind in crate::fork_ext::addons::action_broker::take_expired_staged_kinds() {
-                clear_staged_for_kind(expired_kind);
-            }
+            discard_expired_staged();
             let reqs = crate::fork_ext::addons::actions::take_action_requests();
             for world in crate::fork_ext::addons::map_waypoint::take_released(|world| _play.map.waypoint(world)) {
                 _play.map.api_set_waypoint(world, None);
@@ -889,6 +887,16 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
 pub(super) fn dropped(_play: &mut Play) {
     #[cfg(not(target_arch = "wasm32"))]
     net::fork_record::drain(&mut _play.session);
+}
+
+/// Drops staged native sends whose broker request already ended (cancelled, timed out, its batch stopped).
+/// Runs each step and again right before the merchant, loot and bank send hooks, so a stop that lands
+/// between the step and the native window's frame is not sent anyway.
+#[cfg(not(target_arch = "wasm32"))]
+fn discard_expired_staged() {
+    for expired_kind in crate::fork_ext::addons::action_broker::take_expired_staged_kinds() {
+        clear_staged_for_kind(expired_kind);
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -959,6 +967,7 @@ pub(crate) fn npcw_requests(
         if !_merch_out.is_empty() {
             mark_player_activity(Subsystem::Merchant);
         }
+        discard_expired_staged();
         let Some(req) = PENDING_NPCW_TX.with(|p| *p.borrow()) else {
             return;
         };
@@ -1101,6 +1110,7 @@ pub(crate) fn bank_requests(_play: &Play, _out: &mut Vec<crate::bank::BankOut>) 
         if !_out.is_empty() {
             mark_player_activity(Subsystem::Bank);
         }
+        discard_expired_staged();
         let Some(req) = PENDING_BANK_TX.with(|b| *b.borrow()) else {
             return;
         };
