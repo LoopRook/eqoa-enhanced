@@ -2,6 +2,10 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## Unreleased
+
+- **A key does one thing.** A mod's key and a game control can no longer share a key. Giving a mod a key the game uses frees or swaps the game control (the same line you get between two game controls says which), and giving a game control a key a mod uses does the same to the mod. A mod's default key never takes a key already in use: its row starts empty and says which control has it. If your saved keys from an earlier version already share a key, the game control wins, the mod's row on Controls is marked with ! and says why, and nothing you saved is changed until you pick a key.
+
 ## 2026-11-19 · Enhanced 0.6.0
 
 The mod API (`eqoa/1`) is not frozen yet. Bundled mods and client updates ship in this release; third-party mod authors should wait for the freeze before building on it.

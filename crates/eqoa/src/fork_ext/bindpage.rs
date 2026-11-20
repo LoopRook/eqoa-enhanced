@@ -903,30 +903,30 @@ mod tests {
 
     #[test]
     fn mod_bind_register_rebind_and_negative_control() {
-        let _ = register("test_addon", "toggle_window", "k", "Test Window");
-        assert_eq!(get_key("test_addon", "toggle_window"), Some("k".into()));
+        let _ = register("test_addon", "toggle_window", "u", "Test Window");
+        assert_eq!(get_key("test_addon", "toggle_window"), Some("u".into()));
 
-        // Initial key 'k' fires
-        let fired = dispatch_keypress("k");
+        // Initial key 'u' fires
+        let fired = dispatch_keypress("u");
         assert_eq!(fired, Some(("test_addon".into(), "toggle_window".into())));
 
-        // Negative control: 'm' does not fire initially
-        assert_eq!(dispatch_keypress("m"), None);
+        // Negative control: 'y' does not fire initially
+        assert_eq!(dispatch_keypress("y"), None);
 
-        // Rebind to 'm'
-        assert!(set_key("test_addon", "toggle_window", "m"));
-        assert_eq!(get_key("test_addon", "toggle_window"), Some("m".into()));
+        // Rebind to 'y'
+        assert!(set_key("test_addon", "toggle_window", "y"));
+        assert_eq!(get_key("test_addon", "toggle_window"), Some("y".into()));
 
-        // Negative control: old key 'k' does NOTHING now!
+        // Negative control: old key 'u' does NOTHING now!
         assert_eq!(
-            dispatch_keypress("k"),
+            dispatch_keypress("u"),
             None,
             "old key does nothing after rebind"
         );
 
-        // New key 'm' fires!
+        // New key 'y' fires!
         assert_eq!(
-            dispatch_keypress("m"),
+            dispatch_keypress("y"),
             Some(("test_addon".into(), "toggle_window".into()))
         );
     }
@@ -936,19 +936,19 @@ mod tests {
         reset_in_memory();
         crate::settings::testing::put("keys.opt", b"key.attack=q\nkey.hide_ui=z\n");
         register("eqoa_stats_box", "toggle", "b", "Stats");
-        assert!(set_key("eqoa_stats_box", "toggle", "f8"));
+        assert!(set_key("eqoa_stats_box", "toggle", "f10"));
         reset_in_memory();
         register("eqoa_stats_box", "toggle", "b", "Stats");
-        assert_eq!(get_key("eqoa_stats_box", "toggle"), Some("f8".into()));
+        assert_eq!(get_key("eqoa_stats_box", "toggle"), Some("f10".into()));
         let text = String::from_utf8(crate::settings::testing::kept("keys.opt").unwrap()).unwrap();
         assert!(text.contains("key.attack=q") && text.contains("key.hide_ui=z"));
         assert!(!text.contains("mod."));
         let mod_text =
             String::from_utf8(crate::settings::testing::kept(KEYS_FILE).unwrap()).unwrap();
-        assert!(mod_text.contains("mod.eqoa_stats_box.toggle=f8"));
+        assert!(mod_text.contains("mod.eqoa_stats_box.toggle=f10"));
         assert_eq!(dispatch_keypress("b"), None);
         assert_eq!(
-            dispatch_keypress("f8"),
+            dispatch_keypress("f10"),
             Some(("eqoa_stats_box".into(), "toggle".into()))
         );
         crate::settings::testing::reset(false);

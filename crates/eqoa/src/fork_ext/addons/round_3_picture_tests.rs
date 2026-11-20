@@ -1028,14 +1028,14 @@ fn fresh_hud_mod_load_defaults_and_live_stats_key_and_menu_wiring() {
     assert!(crate::fork_ext::bindpage::set_key(
         "eqoa_stats_box",
         "toggle",
-        "f8"
+        "f10"
     ));
     input::route_mod_key(&b, true, false, false, true, false);
     native_events::dispatch(&stats).unwrap();
     stats
         .execute("assert(eqoa.options.get('stats_box') == true)")
         .unwrap();
-    let f8 = Key::Named(NamedKey::F8);
+    let f8 = Key::Named(NamedKey::F10);
     input::route_mod_key(&f8, true, false, false, true, false);
     native_events::dispatch(&stats).unwrap();
     stats
@@ -1049,7 +1049,7 @@ fn fresh_hud_mod_load_defaults_and_live_stats_key_and_menu_wiring() {
     stats.execute("assert(eqoa.options.get('stats_box')==false);require('frontiers_forge.input').SetTextCaptureActive('chat',false)").unwrap();
     // Search's native editor still receives its own F2/F4-style controls; the
     // same key must not trigger a different VM's ordinary bound action.
-    tot.execute("other_hits=0;assert(eqoa.input.bind({id='editor_probe',default_key='f8'},function() other_hits=other_hits+1 end))").unwrap();
+    tot.execute("other_hits=0;assert(eqoa.input.bind({id='editor_probe',default_key='f10'},function() other_hits=other_hits+1 end))").unwrap();
     stats
         .execute("assert(eqoa.input.capture_text(true))")
         .unwrap();
