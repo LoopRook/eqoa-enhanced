@@ -204,23 +204,142 @@ eqoa's modules, so it reached only the ImGui and Forge refusals. Fixed in `4d675
 
 ## Fix round 2
 
-Merged develop in 4399bcac. The post-merge focused run reported 65 passes,
-one failure in the checked-in support-table comparison, and one explicit
-no-adapter SKIP. The support reference will be regenerated after the fixes.
-The post-merge footprint and tracked-path checks passed.
+From the cross-family review of 0e35c35e (`round-7c-fix1-review.md`, REJECT: 4 HIGH, 5 MEDIUM, 2 LOW). Two
+builders: the first (a GPT model) merged develop, wrote the reproducing tests and fixed H1, M5, M3, M4, H2 and H3
+before a usage limit stopped it; the second (Claude) kept its uncommitted H4 work after review, fixed M1, M2, L1,
+L2 and the record-helper exception, ran every negative control below (including for the first builder's fixes),
+regenerated the reference and ran the gates. Zero upstream lines (`git diff --stat 4399bcac..HEAD` outside
+`fork_ext/`, `docs/` and the notes is empty).
 
-Red run A used the focused gate with the tests in 1ec6a293. It ran 11 tests
-with 10 failures and no SKIP lines. The bundled-package compatibility fixture
-passed. The first B attempt stopped at a compile error in the H2 decoder, fixed
-in e9ac471e. That attempt produced no test evidence.
+Step 0: develop merged in 4399bcac. The post-merge focused run had 65 passes, one failure (the checked-in support
+table, missing develop's `Dialog.prompt_kind`; fixed by the regeneration) and the one deliberate no-adapter SKIP.
 
-| Finding | First failure | Fix |
+### Per finding
+
+"Red" is the reproducing test failing on the code before its fix (red run A at 1ec6a293 for the grant and window
+findings; red run B at e9ac471e for the rest). "Negative control" is the second builder's own run: the fix broken
+by the named mutation with every test present, `python tools/run_gates.py --only round --filter round7c_`, then
+`git checkout -- crates` (status clean afterwards). Batch A held the first builder's fixes, batch B and C the
+second builder's; each test failed only for its own mutation.
+
+| Finding | Red (reproduced) | Commit | Test | Negative control: mutation → failing line |
+|---|---|---|---|---|
+| H1 chat vs command | yes: typed chat and the native editor completed a slash line under the chat grant; `batch slash line requires command` | 06e60ef3 | `round7c_typed_chat_checks_the_grant_for_the_final_line`, `round7c_batch_chat_checks_the_grant_for_the_final_line`, `round7c_native_chat_editor_checks_the_submitted_lines_grant`, `round7c_native_chat_send_passes_the_chat_and_command_gates` | `chat.rs line_capability`: `if false && line.starts_with('/')` → `r6d_tests.rs:88 nil req=RequestId(1) n=1 msg=nil` (typed, editor), `batch slash line requires command`, `round7c_fix_tests.rs:260 ["eqoa.actions.chat"] /sit left: true right: false` |
+| H2 grants across rescan | yes: `native enable must not authorize a Forge import`, `the legacy enable was already adopted` | efb5d62a, e9ac471e | `round7c_enabled_native_package_cannot_gain_forge_grants`, `round7c_legacy_enable_adopts_once_then_refuses_new_grants_on_restart`, `round7c_bundled_packages_keep_their_enabled_disclosures` | `manager.rs`: `Some(old) if true \|\| old.allows(&new)` → `manager.rs:2529 native enable must not authorize a Forge import`, `manager.rs:2567 the legacy enable was already adopted` |
+| H3 waypoint checks + grant | yes: `{world_id=99,...} left: "completed" right: "invalid_argument"`; `set requires eqoa.map.waypoint` | 71a394dd | `round7c_waypoint_checks_the_addressed_native_ground_at_dispatch`, `round7c_waypoint_writes_require_a_grant` | dispatch skips `api_validate_waypoint` → `api_capture_tests.rs:3526 {world_id=99,x=25300,z=15200} left: "completed" right: "invalid_argument"`; `waypoint_ready` returns `Ok(())` → `api_capture_tests.rs:3494 set requires eqoa.map.waypoint` |
+| H4 waypoint ownership | yes: `the earlier world's owned pin was cleared` (left `Some([22000, 15000])`), `the second VM put this pin` (left `None`), `the replacement belongs to the player` (left `None`) | 63e625b7 | `round7c_disable_clears_every_world_the_mod_still_owns`, `round7c_player_owns_a_pin_replaced_at_the_same_position`, `round7c_other_mods_identical_pin_survives_disable_in_the_same_step` | per-step `reconcile` call removed → `api_capture_tests.rs:3579 the replacement belongs to the player`; `release_vm` marks only the last pin → `:3553 the earlier world's owned pin was cleared`; `placed` keeps a released record → `:3600 the second VM put this pin` |
+| M1 claim used by talking | yes: `merchant: completed` | 5d59601b | `round7c_switch_stops_batch_that_reaches_a_claim_by_talking` (merchant and bank) | stop filter ignores `used_claims` → `items_tests.rs:4343 merchant: completed` |
+| M2 late reply, staged work | yes: `late success count: 0`; `the native merchant did not consume the discarded sale` | 458956be, 3d4e5a39 | `round7c_switch_counts_an_already_sent_step_after_its_late_reply`, `round7c_switch_discards_a_staged_unsent_step`, `round7c_game_windows_switch_is_saved_and_stops_a_claimed_batch` | sent step not awaited → `items_tests.rs:4398 late success count: 0` and `:4310 stopped cancelled stopped 0`; staged step kept → `:4412 the native merchant did not consume the discarded sale` |
+| M3 takeover precedence, HUD tokens | yes: `own inventory: unsupported`; `hud.target` rejected | 863f3221 | `round7c_takeover_checks_view_scope_before_build_support`, `round7c_window_design_manifest_loads_and_discloses_hud_target`, `round7c_manifest_declares_full_takeover_for_the_named_window_only` | view-scope check off → `round7c_fix_tests.rs:130 own inventory: unsupported`; discovery rejects HUD tokens → `round7c_fix_tests.rs:43 "hud.target" is not a game window kind or an eqoa.hud piece token`, `discovery.rs:986 discovered.diagnostics.is_empty()` |
+| M4 label needs the grant | yes: `Replaces game windows: Bank` without the grant | 0f11d3c1 | `round7c_replacement_disclosure_requires_the_takeover_grant` | `can_takeover = true \|\| ...` → `round7c_fix_tests.rs:158 ["Replaces game windows: Bank"]` |
+| M5 chat length, channel | yes: a 128-unit ASCII line and a non-nil channel both completed | b1deb2b4 | `round7c_typed_chat_rejects_the_native_utf16_cutoff`, `round7c_typed_chat_refuses_explicit_channels` | limit `>= 256` and channel check off → `r6d_tests.rs:88 nil req=RequestId(1) n=1 msg=nil` (both tests) |
+| L1 refusal shapes, all 88 | yes (old checker): `expected three malformed returns to be caught; found 0` | ef2c2005 | `round7c_every_refusing_member_reports_its_status_through_its_call`, `round7c_refusal_checker_detects_wrong_codes_and_missing_values` | native refusals answer `unsupported` for a declared `unavailable` → `eqoa.hud.hidden_by: code unsupported but declared unavailable`; `ReadForeignCave` refusal not installed → `round7c_fix_tests.rs:501 refusing callables by name`; checker without the code and value-count checks (batch C) → `expected three malformed returns to be caught; found 0` |
+| L2 switch through the store | test-only finding | c9d783dd | `round7c_game_windows_switch_round_trips_through_the_settings_store` | `save_switch` drops other lines → `items_tests.rs:4454 marker and unrelated line kept, switch saved left: "use_game_windows=on\nfirst_run_defaults_applied=on\n"` |
+| Helper nil-record exception | yes: `an ordinary record must be a table even without declared fields` | eace9fa3 | `round7c_only_payload_free_events_can_have_a_nil_record` | `payload_free` condition removed → `native_tests.rs:1860 an ordinary record must be a table even without declared fields` |
+
+How each fix works, briefly:
+
+- **H4.** One ownership record per world, naming the mod. Every game step (before dispatch) drops, for good, the
+  record of a pin that is absent or differs; another mod's `set_waypoint` replaces the record during dispatch;
+  a disabled mod's records are marked released and cleared after dispatch, in every world, only where the pin
+  is still exactly theirs. `clear_waypoint()` (no world argument) clears the most recently placed pin the mod
+  still owns (spec row says so).
+- **M1.** A `talk` step whose dispatch arms a merchant or bank open under the mod's claim records that claim on
+  its batch (`used_claims`); the switch stops batches that hold or used a released claim. The record does not
+  end sessions at batch end (unchanged behaviour there).
+- **M2.** Stopping a batch whose step is on the wire keeps that step in flight; the batch's single
+  `batch.result` waits for the reply (at most the 10 s server timeout, or a zone reset) and counts a confirmed
+  step. `eqoa.actions.status(batch)` reads `stopped` at once and its `completed` is updated when the reply lands.
+  A staged, unsent step is cancelled (its action result says "the batch stopped before this step was sent") and
+  its staged transaction is cleared at the next step and again right before the merchant/loot and bank send
+  hooks, so a stop that lands mid-frame is not sent by the native window either.
+- **L1.** In test builds each refusal records its declared code and return shape; the check requires, per
+  callable, nil plus an Error with exactly that code and the described message (`native`), or the pinned Forge
+  shape value by value (`nil`; `nil, reason`; `nil, reason, nil`), and compares the sorted callables with a
+  pinned list of all 88 names.
+- **Helper.** `field_issues` takes `payload_free`; only `event_fields` passes it.
+
+### Existing tests whose assertion changed
+
+| Test | Before → after | Why |
 |---|---|---|
-| H1 | Typed chat and the native editor both returned and completed a request under the chat grant for a slash line. Batch assertion: `batch slash line requires command`. | 06e60ef3 |
-| H2 | `native enable must not authorize a Forge import` and `the legacy enable was already adopted`. | efb5d62a, e9ac471e |
-| M3 | `own inventory: unsupported` and `hud.target` rejected as a declaration. | 863f3221 |
-| M4 | The ungranted manifest displayed `Replaces game windows: Bank`. | 0f11d3c1 |
-| M5 | ASCII chat at the 128-unit cutoff and a call with a non-nil channel both completed. | b1deb2b4 |
+| `round7c_game_windows_switch_is_saved_and_stops_a_claimed_batch` | one `stopped` result after three steps, no count → the test delivers the sent sale's reply, then one `stopped` result with `completed == 1` | M2: a stopped batch's result now waits for the step already sent. Without the reply it would arrive only at the 10 s timeout. |
+| `round7c_every_refusing_member_reports_its_status_through_its_call` | `checked >= 30`, code compared only as "is `not_yet`" → every callable's exact declared shape and code, 88 by count and name | L1 |
+| `round7c_mod_moves_and_clears_the_players_own_waypoint` | points (1200,3400), (50,60), player (10,20), no grant → (12000,3400), (5000,6000), player (10000,20000) on a fixture map with ground, `eqoa.map.waypoint` granted | H3: the old points are outside any map's ground and the call now needs the grant. Ownership and clear assertions unchanged. |
+| `round7c_manifest_declares_full_takeover_for_the_named_window_only` (discovery) | replaces `["bank","bank","inventory"]` → `["bank","bank","hud.target"]`, dedup to `["bank","hud.target"]` | M3: restores round 1's HUD-token example, which loads again. |
+| `round7c_manager_labels_come_from_manifest_declarations` (runtime) | `replacement_labels(list)` with 2 lines → `replacement_labels(list, can_takeover)` with 3 lines; adds `["hud.target"] → "Replaces game windows: Target frame"` | M3 restores the target-frame label expectation; M4 adds the grant argument and the HUD line. |
+| `round7c_forge_imports_are_labelled_and_keep_their_acting_calls` | `Actions: can act on its own (chat, command, weapon_set)` → `(chat (ordinary lines), command (slash lines), weapon_set)` | H1 label wording. |
+| `round7c_replaces_accepts_game_windows_and_reports_any_other_name` | `hud.target` listed as unknown → `hud.bogus`; its `views_only` fixture `replaces: ["inventory"]` alone → with `capabilities: ["eqoa.windows.takeover"]` | M3: `hud.target` is a valid declaration again. M4: without the grant the fixture would now get a diagnostic and no affirmative label. |
+| `round6a_windows_modes_dialogs_hints_and_outside_world` (input box), `round6a_seam_dialogs_privchat_response_pages_and_confirm_yes_no` (response dialog) | optional fields `options selection style style_id` / `selection tag title chat password style style_id` → each plus `prompt_kind` | Found by the first full CI run (44704221098, the only 2 failures of 2748). develop's `Dialog.prompt_kind` (open_window fix) exists only on confirm dialogs, and this branch's record check requires every supported field not listed optional. The confirm check (`round6a_windows_modes...` confirm box) still requires it. 99408179. |
 
-The remaining findings, negative controls, final verification and support
-reference generation are pending.
+`round7c_window_design_manifest_loads_and_discloses_hud_target` is new this round (1ec6a293); M3/M4 tightened
+its own first expectation (`any line contains "Target frame"`) to the exact two lines. No other existing
+assertion changed. The shared record helper is stricter (an ordinary record may no longer be
+nil); every existing record test still passes.
+
+### Label strings (Mods & Addons)
+
+- `Actions: can act on its own (chat (ordinary lines), command (slash lines), weapon_set, ...)`
+- `Replaces game windows: <windows>` only with `eqoa.windows.takeover` granted; a manifest naming a window in
+  `replaces` without it gets the diagnostic `Manifest 'replaces' lists game windows without the
+  eqoa.windows.takeover capability` and no affirmative label.
+- HUD tokens (`hud.target` and the rest of the `eqoa.hud` piece list): `Replaces game windows: Target frame`
+  with the takeover grant (as before fix round 1); `Replaces HUD: Target frame` without it. For the lead: the
+  brief's "labelled as they were before fix round 1" and M4's "the affirmative label needs the grant" meet here;
+  the first builder chose this split. A HUD-only mod has no reason to hold the takeover grant, so it sees the
+  `Replaces HUD:` line.
+- `Not replaceable in this version: <views>`
+- H2 manager line: `its permissions changed; enable it again to accept`
+- `eqoa.map.waypoint` is listed with the other capabilities: "capability to set or clear a personal waypoint".
+
+### What a player would notice
+
+- A mod whose package type changed or that gained permissions since the player enabled it comes back
+  **disabled** with "its permissions changed; enable it again to accept". Existing installs adopt their current
+  permissions once, silently; the bundled mods stay enabled (`round7c_bundled_packages_keep_their_enabled_disclosures`).
+- A mod with chat permission only can no longer run slash commands (`/sit` is refused `permission_denied` with a
+  diagnostic), whether typed, in a batch, through the Forge chat helper or by submitting the game's chat editor.
+- Mods need the new map waypoint permission to place or clear a pin; pins land only on a loaded map's ground.
+  Disabling a mod removes only the pins it still owns, in every world; a pin the player cleared and placed
+  again, even at the same spot, stays the player's.
+- Stopping a mod's selling or banking run (its Stop, or **Use the game's windows**) reports a sale already sent
+  once the server answers (Bag Viewer shows the true count), never sends a step that was only queued, and also
+  stops runs that reached the merchant or bank by talking to them.
+- Typed chat of 128 or more UTF-16 units is refused instead of silently vanishing.
+
+### Gates
+
+- Focused, with the disc (`EQOA_ISO` → `run/eqoa.iso`): `python tools/run_gates.py --only round --filter round7`
+  → **88 passed, 0 failed, 1 SKIP** (`round7b_without_adapter_is_an_explicit_skip`, which forces the
+  no-adapter path on purpose; same SKIP as the baseline). `--filter round7c_` alone: 47 passed, 0 SKIP.
+- `--only wasm,release --release`: wasm check PASS, release build PASS.
+- Footprint (`--base 35e2a43b`): PASS, no budget change. `check_no_local_paths.py`: PASS.
+- Reference regenerated from that release build in 45de7f86 (adds `eqoa.map.waypoint` and develop's
+  `eqoa.windows.Dialog.prompt_kind`); `round7b_support_table_matches_the_running_client` passes against it.
+- Full set on GitHub (`ci_gates.py`): first run 44704221098 at 45de7f86 failed 2 of 2748 in `full` (the two
+  `round6a_` dialog record checks above; `addons` 600 passed). Fixed in 99408179 (test-only, after the
+  regeneration commit; the generated files are unchanged by it). Second run **44710027543 at 99408179: success**
+  (addons 600 passed / 0 failed / 25 ignored / 17 SKIP; full 3227 passed / 0 failed / 37 ignored / 378 SKIP;
+  wasm, footprint, paths, player-release 20/0, tools 201/0/1 SKIP). CI has no disc and no GPU: its SKIPs are
+  those tests. `cleanup` run.
+- Zero-addon gate: the new per-step calls (`reconcile`, `take_released`, `discard_expired_staged`) work on
+  empty collections and allocate nothing; the zero-addon allocation test runs in the full set.
+
+### Known limits and not verified
+
+- **H4 residual (accepted by the lead):** a player who clears and re-pins the exact same point between two 30 Hz
+  game steps (under 34 ms) is not seen, so a disable in the next step could clear that pin. Closing it takes
+  one upstream line: at the top of `Map::set_waypoint` (`crates/eqoa/src/map/mod.rs:1191`), a call that drops
+  the world's ownership record; the mod path (`api_set_waypoint`, then `map_waypoint::placed`) records again
+  after it. Not taken (zero upstream lines this round).
+- **L2 and the real file:** unit tests never touch disk. Upstream's `settings.rs` compiles an in-memory
+  per-thread store under `cfg(test)` (`settings.rs:3016`) and leaves the file store (`:3071`, write to
+  `.new` then rename) out of test builds. The new test goes through the same `read_config`/`write_config`
+  calls and the client's start-up read (with the defaults migration) with the marker and an unrelated line,
+  dropping every cache, but cannot open a file after a real process restart without an upstream test seam.
+  The file store is upstream's, unchanged. A live check: toggle **Use the game's windows**, quit, restart.
+- **M2 timing:** between the stop and the reply, `status(batch)` already reads `stopped` with the count so far;
+  the one `batch.result` comes with the reply (or after 10 s as before, without the count).
+- No live client or server session. The decomp/eqoa-port oracle is not on this machine; oracle tests skip.
+- The bundled Wereoxxs, ARPG UI, Modern UI and `eqoa_*` mods are covered by the bundled-package test above and
+  their own tests in the full CI set; not played.
