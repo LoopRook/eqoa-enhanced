@@ -4284,6 +4284,8 @@ fn round7c_game_windows_switch_is_saved_and_stops_a_claimed_batch() {
     assert!(p.npcw.shop.pending, "the batch's first sale went out");
     let sent = p.session.sends_lost;
     window_takeover::set_use_game_windows(true);
+    // Fix round 2 M2: the sale already on the wire still counts once its reply arrives.
+    p.bags_sell_confirm(0, 1);
     for _ in 0..3 {
         p.bags_broker_tick();
         native_events::dispatch(&host).unwrap();
