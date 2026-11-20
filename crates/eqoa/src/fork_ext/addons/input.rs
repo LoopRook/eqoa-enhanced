@@ -181,6 +181,20 @@ pub(crate) fn route_mod_key(
     plain_play: bool,
     keyboard: bool,
 ) {
+    route_mod_key_based(key, None, down, repeat, synthetic, plain_play, keyboard);
+}
+
+/// `route_mod_key` with the key's own name by its place on the keyboard (`base`,
+/// `binds::base_name`), which the game's own naming of a modified press uses.
+pub(crate) fn route_mod_key_based(
+    key: &Key,
+    base: Option<&'static str>,
+    down: bool,
+    repeat: bool,
+    synthetic: bool,
+    plain_play: bool,
+    keyboard: bool,
+) {
     let editor = is_text_capture_active();
     if !synthetic && plain_play && (editor || (!repeat && !keyboard)) {
         if let Some(name) = crate::binds::name_of(key) {
@@ -193,10 +207,27 @@ pub(crate) fn route_mod_key(
             } else {
                 None
             };
+            // The name a binding is matched by: the key as the game names a press
+            // (`App::key_name`), the modifiers held written before it. Never while
+            // an edit box types.
+            let (ctrl, alt, shift) = modifiers();
+            let combo = if (ctrl || alt || shift) && !editor {
+                crate::binds::combo_name(ctrl, alt, shift, base.unwrap_or(&name))
+            } else {
+                name.clone()
+            };
             super::native_core::defer(256 + text.as_ref().map_or(0, String::len), move |c| {
-                c.emit("input.key", serde_json::json!({"key":name,"down":down,"repeat":repeat,"synthetic":false,"text":text}));
+                c.emit("input.key", serde_json::json!({"key":name,"combo":combo,"down":down,"repeat":repeat,"synthetic":false,"text":text}));
             });
         }
+    }
+}
+
+/// Keeps the modifiers the window last said (`ModifiersChanged`).
+pub(crate) fn observe_modifiers(event: &winit::event::WindowEvent) {
+    if let winit::event::WindowEvent::ModifiersChanged(m) = event {
+        let s = m.state();
+        set_modifiers((s.control_key(), s.alt_key(), s.shift_key()));
     }
 }
 

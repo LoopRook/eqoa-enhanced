@@ -19,13 +19,16 @@ pub struct ModBind {
     pub addon_id: String,
     pub id: String,
     pub default_key: String,
+    /// The key it has now, worked out by `resolve` from `stored` and the default.
     pub current_key: String,
     pub description: String,
     pub enabled: bool,
-    /// A key was saved for it (the player's own choice) rather than its default.
-    pub saved: bool,
-    /// The default key it was refused because something else had it (round 7):
-    /// its row starts empty and says why.
+    /// What `mod-keys.opt` holds for it (the player's own choice; Some("") is
+    /// "no key"), or None when it has only its default.
+    pub stored: Option<String>,
+    /// The key it was refused (a default or an old saved key that something
+    /// else has, or that is the client's): its row is empty and says why. It
+    /// is worked out again each time, so it survives a restart.
     pub refused: String,
 }
 
@@ -35,51 +38,40 @@ pub fn register(addon: &str, id: &str, default_key: &str, description: &str) -> 
     // The game's keys first: the lock below must not be held while they load.
     let game = crate::settings::with_binds(Clone::clone);
     let mut binds = MOD_BINDS.lock().unwrap();
+    let stored = load_saved_key(addon, id);
     if let Some(existing) = binds.iter_mut().find(|b| b.addon_id == addon && b.id == id) {
         existing.default_key = default_key.to_ascii_lowercase();
         existing.description = description.to_string();
         existing.enabled = true;
-        if let Some(saved) = load_saved_key(addon, id) {
-            existing.current_key = saved;
-            existing.saved = true;
+        if stored.is_some() {
+            existing.stored = stored;
         }
-        return true;
+    } else {
+        binds.push(ModBind {
+            addon_id: addon.to_string(),
+            id: id.to_string(),
+            default_key: default_key.to_ascii_lowercase(),
+            current_key: String::new(),
+            description: description.to_string(),
+            enabled: true,
+            stored,
+            refused: String::new(),
+        });
     }
-
-    let saved_key = load_saved_key(addon, id);
-    let default_key = default_key.to_ascii_lowercase();
-    let saved = saved_key.is_some();
-    let mut refused = String::new();
-    let current_key = saved_key.unwrap_or_else(|| {
-        // A default never takes a key in use (round 7): it starts empty.
-        if default_in_use(&game, &binds, &default_key) {
-            refused = default_key.clone();
-            String::new()
-        } else {
-            default_key.clone()
-        }
-    });
-
-    binds.push(ModBind {
-        addon_id: addon.to_string(),
-        id: id.to_string(),
-        default_key,
-        current_key,
-        description: description.to_string(),
-        enabled: true,
-        saved,
-        refused,
-    });
+    resolve(&game, &mut binds);
     true
 }
 
 pub fn set_addon_enabled(addon_id: &str, enabled: bool) {
+    let game = crate::settings::with_binds(Clone::clone);
     let mut binds = MOD_BINDS.lock().unwrap();
     for b in binds.iter_mut() {
         if b.addon_id == addon_id {
             b.enabled = enabled;
         }
     }
+    // A mod coming back is checked again against what has the keys now.
+    resolve(&game, &mut binds);
 }
 
 pub fn reset_in_memory() {
@@ -96,19 +88,18 @@ pub fn get_key(addon: &str, id: &str) -> Option<String> {
 }
 
 pub fn set_key(addon: &str, id: &str, key: &str) -> bool {
+    let game = crate::settings::with_binds(Clone::clone);
     let mut binds = MOD_BINDS.lock().unwrap();
-    if let Some(b) = binds.iter_mut().find(|b| b.addon_id == addon && b.id == id) {
-        let key = key.to_ascii_lowercase();
-        if save_mod_bind(addon, id, &key).is_err() {
-            return false;
-        }
-        b.current_key = key;
-        b.saved = true;
-        b.refused.clear();
-        true
-    } else {
-        false
+    let Some(i) = binds.iter().position(|b| b.addon_id == addon && b.id == id) else {
+        return false;
+    };
+    let key = key.to_ascii_lowercase();
+    if save_mod_bind(addon, id, &key).is_err() {
+        return false;
     }
+    binds[i].stored = Some(key);
+    resolve(&game, &mut binds);
+    true
 }
 
 pub fn extra_rows() -> i32 {
@@ -129,12 +120,8 @@ pub fn help_or_defaults(row: i32) -> String {
                 help.push(' ');
                 help.push_str(&why);
             } else if !b.refused.is_empty() && b.current_key.is_empty() {
-                help.push_str(&format!(
-                    " Its default key {} was in use, so it starts with no key{}.",
-                    binds::display(&b.refused),
-                    owner_text(&game, &binds, i, &b.refused)
-                        .map_or(String::new(), |who| format!(": {who}'s")),
-                ));
+                help.push(' ');
+                help.push_str(&refused_text(&game, &binds, i));
             }
             return help;
         }
@@ -221,18 +208,17 @@ pub fn draw(
 
 pub fn reset_defaults() {
     // The game's defaults come back with these, so a default is judged against
-    // them (the macros keep their triggers, `controls_defaults`).
+    // them (the macros keep their triggers, `controls_defaults`). Every mod,
+    // those that are off too, goes back to having only its default: nothing
+    // is kept for it, so a refused default is refused again after a restart
+    // and says why.
     let game = crate::settings::with_binds(Binds::controls_defaults);
     let mut binds = MOD_BINDS.lock().unwrap();
-    for i in 0..binds.len() {
-        let default = binds[i].default_key.clone();
-        let blocked = binds[i].enabled && default_in_use(&game, &binds[..i], &default);
-        let b = &mut binds[i];
-        b.refused = if blocked { default.clone() } else { String::new() };
-        b.current_key = if blocked { String::new() } else { default };
-        b.saved = true;
-        let _ = save_mod_bind(&b.addon_id, &b.id, &b.current_key);
+    for b in binds.iter_mut() {
+        let _ = forget_mod_bind(&b.addon_id, &b.id);
+        b.stored = None;
     }
+    resolve(&game, &mut binds);
 }
 
 pub fn capture_key(
@@ -251,12 +237,34 @@ pub fn capture_key(
 
 // ---- keys in common between mods and the game (round 7) --------------------------------
 //
-// One press does one thing. A control the game has wins over a mod's key, a
-// key in a macro's trigger wins over a mod's, and between mods the player's
-// own saved key wins over a default, then the name decides (`priority`), so
-// the winner does not depend on the order the mods loaded in. Giving a row a
-// key another has swaps or frees as the Controls page does between two game
-// rows. Nothing here rewrites a saved key on its own.
+// One press does one thing. PRECEDENCE, all of it decided here and nowhere else:
+//   1. a control the game has on the key (`game_owner`: a row, a macro's trigger, or the
+//      row the game takes a modified key as when nothing is bound to the combo) wins;
+//   2. else, among mods, a key the player saved beats a default (`priority`), then the
+//      addon id, then the binding id (so it does not depend on the order mods loaded);
+//   3. a key the client keeps for itself (`never_mod_key`) is no mod's at all.
+// A mod's key is the name the game gives the press: the modifiers held written before
+// it (`binds::combo_name`), so Ctrl+U is not U. Giving a row a key another has swaps or
+// frees as the Controls page does between two game rows. Nothing here rewrites a saved
+// key on its own: an old shared key is marked and settled at press time.
+
+/// Keys the client takes for itself, beside or before the game's key handling
+/// (`App::key_input`, `clipboard_key`): full screen, the report keys, Escape's
+/// clean-ups, Windows' Alt+Enter, and the clipboard's Ctrl+C, V and X. A mod never
+/// has them, whatever modifier is on them.
+fn never_mod_key(key: &str) -> bool {
+    let ((ctrl, alt, _), base) = binds::split_combo(key);
+    binds::reserved(base)
+        || base == "escape"
+        || (alt && base == "enter")
+        || (ctrl && matches!(base, "c" | "v" | "x"))
+}
+
+/// What the game takes a key as.
+enum Owner {
+    Row(usize),
+    Macros(Vec<usize>),
+}
 
 /// The game row a key is on, as its dispatch sees it: moved there, or a
 /// default key (the first or an alternate) its row was not moved off.
@@ -271,6 +279,34 @@ fn game_row(game: &Binds, key: &str) -> Option<usize> {
     })
 }
 
+/// The key a modified press is taken as where nothing is bound to the combo
+/// (`App::key_name`): the key itself, for Ctrl and Alt and for a letter with
+/// Shift; a Shift digit becomes a symbol the layout decides, which is not known here.
+fn plain_of(key: &str) -> Option<&str> {
+    let ((ctrl, alt, shift), base) = binds::split_combo(key);
+    let letter = base.len() == 1 && base.bytes().all(|c| c.is_ascii_alphabetic());
+    ((ctrl || alt || shift) && (ctrl || alt || letter)).then_some(base)
+}
+
+fn owner_of(game: &Binds, key: &str) -> Option<Owner> {
+    if let Some(r) = game_row(game, key) {
+        return Some(Owner::Row(r));
+    }
+    let ms = game.macros_with(&Input::Key(key.to_string()));
+    (!ms.is_empty()).then_some(Owner::Macros(ms))
+}
+
+/// What the game does with a press named `key`, and whether it does it as the
+/// plain key (the combo has no row or macro of its own, so the game takes the
+/// press as the key without its modifiers).
+fn game_owner(game: &Binds, key: &str) -> Option<(Owner, bool)> {
+    if let Some(owner) = owner_of(game, key) {
+        return Some((owner, false));
+    }
+    let plain = plain_of(key).filter(|_| !game.combo_bound(key))?;
+    owner_of(game, plain).map(|owner| (owner, true))
+}
+
 fn enabled_index(binds: &[ModBind], nth: usize) -> Option<usize> {
     binds
         .iter()
@@ -280,10 +316,10 @@ fn enabled_index(binds: &[ModBind], nth: usize) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
-/// Whose key wins when several mods have it: a saved choice before a default,
-/// then by addon and id.
+/// Whose key wins when several mods have it (rule 2): a saved choice before a
+/// default, then by addon and id.
 fn priority(b: &ModBind) -> (bool, &str, &str) {
-    (!b.saved, &b.addon_id, &b.id)
+    (b.stored.is_none(), &b.addon_id, &b.id)
 }
 
 /// The enabled mod bindings with `key`, the winner first.
@@ -297,27 +333,62 @@ fn holders(binds: &[ModBind], key: &str, skip: Option<usize>) -> Vec<usize> {
     found
 }
 
-/// Whether a default key is taken: by a game row, a macro's trigger, or a mod
-/// that has it already.
+/// Whether a default key is taken: the client's, the game's or a macro's, or a
+/// mod that has it already.
 fn default_in_use(game: &Binds, binds: &[ModBind], key: &str) -> bool {
     !key.is_empty()
-        && (game_row(game, key).is_some()
-            || game.key_in_macros(key)
+        && (never_mod_key(key)
+            || game_owner(game, key).is_some()
             || !holders(binds, key, None).is_empty())
 }
 
-/// The binding that does something on `key`, if any: none when the game or a
-/// macro has the key.
+/// Every mod's key worked out again from what is kept and what each default
+/// may have: a kept key is its own (a client key is refused, and said); the
+/// defaults then take their keys one by one in name order, each only if nothing
+/// has the key. Run whenever a mod arrives, goes, comes back, is given a key
+/// or has them put back, so the result never depends on the order any of
+/// that happened in.
+fn resolve(game: &Binds, binds: &mut [ModBind]) {
+    for b in binds.iter_mut() {
+        b.refused.clear();
+        match &b.stored {
+            Some(k) if never_mod_key(k) => {
+                b.refused = k.clone();
+                b.current_key.clear();
+            }
+            Some(k) => b.current_key = k.clone(),
+            None => b.current_key.clear(),
+        }
+    }
+    let mut order: Vec<usize> = (0..binds.len()).filter(|&i| binds[i].stored.is_none()).collect();
+    order.sort_by(|&a, &b| {
+        (binds[a].addon_id.as_str(), binds[a].id.as_str())
+            .cmp(&(binds[b].addon_id.as_str(), binds[b].id.as_str()))
+    });
+    for i in order {
+        let default = binds[i].default_key.clone();
+        if default.is_empty() {
+            continue;
+        }
+        if default_in_use(game, binds, &default) {
+            binds[i].refused = default;
+        } else {
+            binds[i].current_key = default;
+        }
+    }
+}
+
+/// The binding that does something on a press named `key`, if any (rules 1 to 3).
 fn firing(game: &Binds, binds: &[ModBind], key: &str) -> Option<usize> {
-    if key.is_empty() || game_row(game, key).is_some() || game.key_in_macros(key) {
+    if key.is_empty() || never_mod_key(key) || game_owner(game, key).is_some() {
         return None;
     }
     holders(binds, key, None).first().copied()
 }
 
-/// Whether the mod binding `addon`/`id` acts on a press of `key` now. The
-/// bind callback asks this at press time, so a key two controls share still
-/// does one thing.
+/// Whether the mod binding `addon`/`id` acts on a press named `key` (the modifiers
+/// held written before it) now. The bind callback asks this at press time, so
+/// a key two controls share still does one thing.
 pub(crate) fn fires(addon: &str, id: &str, key: &str) -> bool {
     let key = key.to_ascii_lowercase();
     let game = crate::settings::with_binds(Clone::clone);
@@ -326,8 +397,8 @@ pub(crate) fn fires(addon: &str, id: &str, key: &str) -> bool {
 }
 
 enum Other {
-    Game(usize),
-    Macros(Vec<usize>),
+    Game(usize, bool),
+    Macros(Vec<usize>, bool),
     Mod(usize),
 }
 
@@ -337,12 +408,10 @@ fn other_on(game: &Binds, binds: &[ModBind], i: usize) -> Option<Other> {
     if key.is_empty() {
         return None;
     }
-    if let Some(r) = game_row(game, key) {
-        return Some(Other::Game(r));
-    }
-    let ms = game.macros_with(&Input::Key(key.clone()));
-    if !ms.is_empty() {
-        return Some(Other::Macros(ms));
+    match game_owner(game, key) {
+        Some((Owner::Row(r), plain)) => return Some(Other::Game(r, plain)),
+        Some((Owner::Macros(ms), plain)) => return Some(Other::Macros(ms, plain)),
+        None => {}
     }
     holders(binds, key, Some(i)).first().map(|&j| Other::Mod(j))
 }
@@ -359,35 +428,57 @@ fn game_row_shared(row: usize) -> bool {
     }
     crate::settings::with_binds(|game| {
         binds.iter().any(|b| {
-            b.enabled && !b.current_key.is_empty() && game_row(game, &b.current_key) == Some(row)
+            b.enabled
+                && matches!(game_owner(game, &b.current_key), Some((Owner::Row(r), _)) if r == row)
         })
     })
 }
 
 /// Who has `key`, as a note names it: a game row's label, a macro, a mod's words.
 fn owner_text(game: &Binds, binds: &[ModBind], skip: usize, key: &str) -> Option<String> {
-    if let Some(r) = game_row(game, key) {
-        return Some(row_label(r));
-    }
-    let ms = game.macros_with(&Input::Key(key.to_string()));
-    if !ms.is_empty() {
-        return Some(crate::bindpage::macro_names(&ms));
+    match game_owner(game, key) {
+        Some((Owner::Row(r), _)) => return Some(row_label(r)),
+        Some((Owner::Macros(ms), _)) => return Some(crate::bindpage::macro_names(&ms)),
+        None => {}
     }
     holders(binds, key, Some(skip))
         .first()
         .map(|&j| binds[j].description.clone())
 }
 
+/// Why a mod row is empty: its default or old saved key was refused.
+fn refused_text(game: &Binds, binds: &[ModBind], i: usize) -> String {
+    let key = &binds[i].refused;
+    let shown = binds::display(key);
+    if never_mod_key(key) {
+        return format!("{shown} is a key the client keeps for itself, so this has no key: choose another.");
+    }
+    match owner_text(game, binds, i, key) {
+        Some(who) => format!("{shown} is {who}'s, so this has no key: choose another."),
+        None => format!("{shown} was in use when this loaded, so it has no key: choose another."),
+    }
+}
+
 /// The Controls page's words on a mod row whose key is shared, and who wins.
 fn conflict_text(game: &Binds, binds: &[ModBind], i: usize) -> Option<String> {
     let key = binds::display(&binds[i].current_key);
+    let also = |plain: bool| {
+        if plain {
+            let base = plain_of(&binds[i].current_key).unwrap_or_default();
+            format!("{key} is pressed as {} too, and that is", binds::display(base))
+        } else {
+            format!("{key} is also")
+        }
+    };
     Some(match other_on(game, binds, i)? {
-        Other::Game(r) => format!(
-            "{key} is also {}'s, and the game's control wins: this does nothing until it has another key.",
+        Other::Game(r, plain) => format!(
+            "{} {}'s, and the game's control wins: this does nothing until it has another key.",
+            also(plain),
             row_label(r)
         ),
-        Other::Macros(ms) => format!(
-            "{key} is in a trigger of {}, which wins: this does nothing until it has another key.",
+        Other::Macros(ms, plain) => format!(
+            "{} in a trigger of {}, which wins: this does nothing until it has another key.",
+            also(plain),
             crate::bindpage::macro_names(&ms)
         ),
         Other::Mod(j) => {
@@ -445,26 +536,21 @@ fn mark(vui: &Vui, r: &mut dyn Raster, w: &mut Window, at: i32, on: bool) {
 
 /// Keys applied one by one; any failure puts back the ones already kept.
 fn apply_mod_keys(binds: &mut [ModBind], changes: &[(usize, String)]) -> Result<(), String> {
-    let mut done: Vec<(usize, String, bool, String)> = Vec::new();
+    let mut done: Vec<(usize, Option<String>)> = Vec::new();
     for (i, key) in changes {
-        let was = (
-            binds[*i].current_key.clone(),
-            binds[*i].saved,
-            binds[*i].refused.clone(),
-        );
+        let was = binds[*i].stored.clone();
         if let Err(error) = save_mod_bind(&binds[*i].addon_id, &binds[*i].id, key) {
-            for (j, old, saved, refused) in done.into_iter().rev() {
-                let _ = save_mod_bind(&binds[j].addon_id, &binds[j].id, &old);
-                binds[j].current_key = old;
-                binds[j].saved = saved;
-                binds[j].refused = refused;
+            for (j, old) in done.into_iter().rev() {
+                let _ = match &old {
+                    Some(k) => save_mod_bind(&binds[j].addon_id, &binds[j].id, k),
+                    None => forget_mod_bind(&binds[j].addon_id, &binds[j].id),
+                };
+                binds[j].stored = old;
             }
             return Err(error);
         }
-        done.push((*i, was.0, was.1, was.2));
-        binds[*i].current_key = key.clone();
-        binds[*i].saved = true;
-        binds[*i].refused.clear();
+        done.push((*i, was));
+        binds[*i].stored = Some(key.clone());
     }
     Ok(())
 }
@@ -478,23 +564,22 @@ fn without_key(game: &Binds, row: usize) -> Binds {
         .to_text()
         .lines()
         .filter(|l| !l.starts_with(&line))
-        .map(|l| format!("{l}
-"))
+        .map(|l| format!("{l}\n"))
         .collect();
     if !ROWS[row].keys.is_empty() {
-        text.push_str(&format!("{line}
-"));
+        text.push_str(&format!("{line}\n"));
     }
     Binds::from_text(&text)
 }
 
-/// Whether the key a control leaves can go to the one that gave up its own:
-/// free of the game, the macros and every mod but the ones giving theirs up.
+/// Whether the key a control leaves can go to the one that gave up its
+/// own: not the client's, free of the game, the macros and every mod but the
+/// ones giving theirs up.
 fn can_take(game: &Binds, binds: &[ModBind], key: &str, leaving: &[usize]) -> bool {
     !key.is_empty()
+        && !never_mod_key(key)
         && !binds::reserved(key)
-        && game_row(game, key).is_none()
-        && !game.key_in_macros(key)
+        && game_owner(game, key).is_none()
         && holders(binds, key, None).iter().all(|i| leaving.contains(i))
 }
 
@@ -526,16 +611,28 @@ fn game_row_capture(
 ) -> bool {
     let mut game = crate::settings::binds();
     let mut binds = MOD_BINDS.lock().unwrap();
-    let held = holders(&binds, key, None);
-    if held.is_empty() {
+    // the mods on the key, and those on a modified press of it that would now be
+    // pressed as the key too (the game takes Ctrl+U as U where Ctrl+U has no row)
+    let exact = holders(&binds, key, None);
+    let shadowed: Vec<usize> = (0..binds.len())
+        .filter(|&i| {
+            binds[i].enabled
+                && !exact.contains(&i)
+                && plain_of(&binds[i].current_key) == Some(key)
+                && !game.combo_bound(&binds[i].current_key)
+        })
+        .collect();
+    if exact.is_empty() && shadowed.is_empty() {
         return false;
     }
+    let held: Vec<usize> = exact.iter().chain(&shadowed).copied().collect();
     let had = game.macros_with(&Input::Key(name.to_string()));
     let old = game.key(row).map(str::to_string).filter(|k| !k.is_empty());
     let moved = game.bind_key(row, name);
     let mut changes: Vec<(usize, String)> = held.iter().map(|&i| (i, String::new())).collect();
-    // the first mod takes the key the row left, if it is free and no game row took it
-    if let (Moved::Freed(_) | Moved::Already, Some(old)) = (&moved, &old)
+    // the first mod on the key takes the key the row left, if it is free and no game row took it
+    if let (Some(_), Moved::Freed(_) | Moved::Already, Some(old)) =
+        (exact.first(), &moved, &old)
         && old != key
         && can_take(&game, &binds, old, &held)
     {
@@ -543,10 +640,12 @@ fn game_row_capture(
     }
     if let Err(error) = apply_mod_keys(&mut binds, &changes) {
         *note = Some(format!("Key not kept: {error}"));
+        *capture = None;
         cues.push(9);
         return true;
     }
     crate::settings::set_binds(game.clone());
+    resolve(&game, &mut binds);
     *capture = None;
     let me = format!("{}: {}.", row_label(row), binds::display(name));
     let mut text = match &moved {
@@ -575,6 +674,14 @@ fn game_row_capture(
     true
 }
 
+/// A refusal said at once: the page's help shows its prompt while it waits.
+fn refuse(capture: &mut Option<Column>, note: &mut Option<String>, cues: &mut Vec<i32>, text: String) -> bool {
+    *note = Some(text);
+    *capture = None;
+    cues.push(9);
+    true
+}
+
 fn mod_row_capture(
     capture: &mut Option<Column>,
     note: &mut Option<String>,
@@ -587,19 +694,48 @@ fn mod_row_capture(
     let Some(i) = enabled_index(&binds, row - ROWS.len()) else {
         return false;
     };
-    let in_macros = game.macros_with(&Input::Key(key.to_string()));
-    if !in_macros.is_empty() {
-        *note = Some(format!(
-            "{} is in a trigger of {}: choose another key, or change that trigger on the Macros page.",
-            binds::display(key),
-            crate::bindpage::macro_names(&in_macros)
-        ));
-        // said at once: the page's help shows the prompt while it waits
-        *capture = None;
-        cues.push(9);
-        return true;
+    let shown = binds::display(key);
+    if never_mod_key(key) {
+        return refuse(
+            capture,
+            note,
+            cues,
+            format!("{shown} is a key the client keeps for itself: choose another key."),
+        );
     }
-    let game_on = game_row(&game, key);
+    let owner = game_owner(&game, key);
+    match &owner {
+        Some((Owner::Macros(ms), false)) => {
+            return refuse(
+                capture,
+                note,
+                cues,
+                format!(
+                    "{shown} is in a trigger of {}: choose another key, or change that trigger on the Macros page.",
+                    crate::bindpage::macro_names(ms)
+                ),
+            );
+        }
+        // the game would take the press as the plain key too: both would act
+        Some((taken, true)) => {
+            let plain = binds::display(plain_of(key).unwrap_or_default());
+            let who = match taken {
+                Owner::Row(r) => row_label(*r),
+                Owner::Macros(ms) => crate::bindpage::macro_names(ms),
+            };
+            return refuse(
+                capture,
+                note,
+                cues,
+                format!("{shown} is pressed as {plain} too, which is {who}'s: choose another key."),
+            );
+        }
+        _ => {}
+    }
+    let game_on = match owner {
+        Some((Owner::Row(r), false)) => Some(r),
+        _ => None,
+    };
     let others = holders(&binds, key, Some(i));
     let old = binds[i].current_key.clone();
     let mut changes = vec![(i, key.to_string())];
@@ -631,11 +767,13 @@ fn mod_row_capture(
     }
     if let Err(error) = apply_mod_keys(&mut binds, &changes) {
         *note = Some(format!("Key not kept: {error}"));
+        *capture = None;
         return true;
     }
     if moved_game {
         crate::settings::set_binds(game.clone());
     }
+    resolve(&game, &mut binds);
     *capture = None;
     let mut text = format!("{}: {}.", binds[i].description, binds::display(key));
     if let Some(g) = game_on {
@@ -758,6 +896,22 @@ pub fn save_mod_bind(addon: &str, id: &str, key: &str) -> Result<(), String> {
     }
     out.push_str(&key_line);
     out.push('\n');
+    write_config(KEYS_FILE, out.as_bytes())
+}
+
+/// Takes a mod's entry out of `mod-keys.opt`: it has only its default again.
+fn forget_mod_bind(addon: &str, id: &str) -> Result<(), String> {
+    let existing = read_config(KEYS_FILE).unwrap_or_default();
+    let text = String::from_utf8_lossy(&existing);
+    let prefix = format!("mod.{addon}.{id}=");
+    if !text.lines().any(|line| line.starts_with(&prefix)) {
+        return Ok(());
+    }
+    let mut out = String::new();
+    for line in text.lines().filter(|line| !line.starts_with(&prefix)) {
+        out.push_str(line);
+        out.push('\n');
+    }
     write_config(KEYS_FILE, out.as_bytes())
 }
 
@@ -903,6 +1057,8 @@ mod tests {
 
     #[test]
     fn mod_bind_register_rebind_and_negative_control() {
+        crate::settings::testing::reset(false);
+        reset_in_memory();
         let _ = register("test_addon", "toggle_window", "u", "Test Window");
         assert_eq!(get_key("test_addon", "toggle_window"), Some("u".into()));
 

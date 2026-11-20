@@ -215,6 +215,8 @@ struct KeyRoute<'a> {
     down: bool,
     repeat: bool,
     synthetic: bool,
+    /// the key's own name by its place on the keyboard, where known
+    base: Option<&'static str>,
 }
 
 impl Runtime {
@@ -297,6 +299,7 @@ impl Runtime {
         self.error = None;
     }
     pub fn event(&mut self, window: &Window, event: &WindowEvent, plain_play: bool) -> bool {
+        super::input::observe_modifiers(event);
         let pointer_capture = super::pointer_api::observe(
             event,
             (window.inner_size().width, window.inner_size().height),
@@ -359,6 +362,10 @@ impl Runtime {
                     down: event.state.is_pressed(),
                     repeat: event.repeat,
                     synthetic: *is_synthetic,
+                    base: match event.physical_key {
+                        winit::keyboard::PhysicalKey::Code(code) => crate::binds::base_name(code),
+                        _ => None,
+                    },
                 },
                 plain_play,
                 keyboard,
@@ -418,6 +425,7 @@ impl Runtime {
                 down,
                 repeat: false,
                 synthetic: false,
+                base: None,
             },
             plain_play,
             keyboard,
@@ -432,8 +440,9 @@ impl Runtime {
         {
             super::input::record_key_event_only(code, event.down);
         }
-        super::input::route_mod_key(
+        super::input::route_mod_key_based(
             event.logical,
+            event.base,
             event.down,
             event.repeat,
             event.synthetic,

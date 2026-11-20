@@ -1353,7 +1353,12 @@ fn install_math(lua: &Lua) -> Result<()> {
                         let down = data.get::<Option<bool>>("down")?.unwrap_or(false);
                         let rep = data.get::<Option<bool>>("repeat")?.unwrap_or(false);
                         let synthetic = data.get::<Option<bool>>("synthetic")?.unwrap_or(false);
-                        let key = data.get::<Option<String>>("key")?.unwrap_or_default();
+                        // The press as the game names it: the modifiers held written
+                        // before the key (`combo`); a bare event is just its key.
+                        let key = match data.get::<Option<String>>("combo")? {
+                            Some(combo) => combo,
+                            None => data.get::<Option<String>>("key")?.unwrap_or_default(),
+                        };
                         if down
                             && !rep
                             && !synthetic
