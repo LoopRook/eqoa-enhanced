@@ -818,7 +818,7 @@ pub(crate) fn expire_hidden_session_for_test(kind: TakeoverKind) {
 }
 
 pub(crate) fn reset_all_for_test() {
-    USE_GAME_WINDOWS.with(|value| value.set(false));
+    USE_GAME_WINDOWS.with(|value| value.set(Some(false)));
     STATE.with(|s| *s.borrow_mut() = TakeoverState::default());
     HAS_ACTIVITY.with(|a| a.set(false));
     #[cfg(test)]
