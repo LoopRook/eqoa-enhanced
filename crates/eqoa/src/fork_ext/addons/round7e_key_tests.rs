@@ -1003,3 +1003,186 @@ fn round7e_fix2_l3_window_modifier_events_carry_super() {
     press_based(&mut rt, NONE, &Key::Character("u".into()), None, &[&host]);
     hits(&host, 1);
 }
+
+// ---- fix round 3: the press is exact, a table only fills in where no press exists -------------
+
+const CTRL_SHIFT: (bool, bool, bool) = (true, false, true);
+
+/// Whether the game acts on this press (a row or a macro on the name `App::key_name` gives it).
+fn game_acts(mods: (bool, bool, bool), logical: &Key, base: Option<&'static str>) -> bool {
+    let name = GameKeys::new().name(mods, logical, base, true, false, false, false).unwrap();
+    let game = settings::binds();
+    game.row_on(&name).is_some() || game.key_in_macros(&name)
+}
+
+#[test]
+fn round7e_fix3_a_german_shift_7_types_slash_and_the_game_acts() {
+    reset();
+    let host = bind("alpha", "");
+    let mut rt = runtime();
+    assert!(bindpage::set_key("alpha", "act", "shift+7"));
+    let slash = Key::Character("/".into());
+    assert!(game_acts(SHIFT, &slash, Some("7")), "Shift+7 types /, the command key");
+    press_based(&mut rt, SHIFT, &slash, Some("7"), &[&host]);
+    hits(&host, 0);
+    // control: where Shift+7 types & (US), nothing of the game's is on it and the mod fires
+    let amp = Key::Character("&".into());
+    assert!(!game_acts(SHIFT, &amp, Some("7")));
+    press_based(&mut rt, SHIFT, &amp, Some("7"), &[&host]);
+    hits(&host, 1);
+}
+
+#[test]
+fn round7e_fix3_a_uk_shift_quote_types_at_and_the_game_acts() {
+    reset();
+    let host = bind("alpha", "");
+    let mut rt = runtime();
+    let slot = row_named("bar1_slot1").unwrap();
+    let mut game = settings::binds();
+    game.bind_key(slot, "@");
+    settings::set_binds(game);
+    assert!(bindpage::set_key("alpha", "act", "shift+'"));
+    let at = Key::Character("@".into());
+    assert!(game_acts(SHIFT, &at, Some("'")));
+    press_based(&mut rt, SHIFT, &at, Some("'"), &[&host]);
+    hits(&host, 0);
+    let quote = Key::Character("\"".into());
+    assert!(!game_acts(SHIFT, &quote, Some("'")));
+    press_based(&mut rt, SHIFT, &quote, Some("'"), &[&host]);
+    hits(&host, 1);
+}
+
+#[test]
+fn round7e_fix3_the_numpad_with_numlock_off_arrives_as_end() {
+    reset();
+    let host = bind("alpha", "");
+    let mut rt = runtime();
+    // Target: self is on 1 by default; move it, so a wrong guess of "1" finds nothing
+    let mut game = settings::binds();
+    game.bind_key(row_named("target_self").unwrap(), "y");
+    settings::set_binds(game);
+    let end = Key::Named(NamedKey::End);
+    for (mods, combo) in [(CTRL, "ctrl+1"), (SHIFT, "shift+1")] {
+        assert!(bindpage::set_key("alpha", "act", combo));
+        assert!(game_acts(mods, &end, Some("1")), "{combo}: the game takes it as End (Orbit right)");
+        press_based(&mut rt, mods, &end, Some("1"), &[&host]);
+        hits(&host, 0);
+    }
+    // control: the digit row's 1 with Ctrl is no game control now, and the mod fires
+    assert!(bindpage::set_key("alpha", "act", "ctrl+1"));
+    let one = Key::Character("1".into());
+    assert!(!game_acts(CTRL, &one, Some("1")));
+    press_based(&mut rt, CTRL, &one, Some("1"), &[&host]);
+    hits(&host, 1);
+}
+
+#[test]
+fn round7e_fix3_a_capture_uses_what_the_real_press_typed() {
+    reset();
+    let _host = bind("alpha", "");
+    let mut rt = runtime();
+    // a German Shift+7 pressed: the client learns it types /
+    press_based(&mut rt, SHIFT, &Key::Character("/".into()), Some("7"), &[]);
+    refused(ROWS.len(), "shift+7", "/");
+    assert_eq!(mod_key_of("alpha"), "");
+    // control: with no press seen, the US table says & (nothing's) and the key is accepted
+    reset();
+    let _host = bind("alpha", "");
+    capture(&mut ControlsPage::default(), ROWS.len(), "shift+7");
+    assert_eq!(mod_key_of("alpha"), "shift+7");
+}
+
+#[test]
+fn round7e_fix3_a_release_is_named_as_its_press_even_when_unmodified() {
+    reset();
+    let host = bind("alpha", "");
+    host.execute("log = {}; eqoa.events.on('input.key', function(e) log[#log + 1] = e.data.key .. '/' .. e.data.combo .. (e.data.down and '+' or '-') end)")
+        .unwrap();
+    let mut rt = runtime();
+    // a plain 1 goes down, Shift is taken, 1 is let go (it types ! now): still 1
+    rt_key(&mut rt, 9101, true, &Key::Character("1".into()), Some("1"));
+    input::set_modifiers(SHIFT);
+    rt_key(&mut rt, 9101, false, &Key::Character("!".into()), Some("1"));
+    input::set_modifiers(NONE);
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(table.concat(log, ',') == '1/1+,1/1-', table.concat(log, ','))").unwrap();
+}
+
+#[test]
+fn round7e_fix3_a_let_go_key_is_forgotten_wherever_it_went() {
+    reset();
+    let host = bind("alpha", "");
+    host.execute("log = {}; eqoa.events.on('input.key', function(e) log[#log + 1] = e.data.combo .. (e.data.down and '+' or '-') end)")
+        .unwrap();
+    let mut rt = runtime();
+    let u = Key::Character("u".into());
+    input::set_modifiers(CTRL);
+    rt.scripted_key_based(9201, &u, None, None, ElementState::Pressed, true);
+    input::set_modifiers(NONE);
+    // a menu has the keyboard when it is let go: nothing is sent, and it is forgotten
+    rt.scripted_key_based(9201, &u, None, None, ElementState::Released, false);
+    // later a plain U goes down in a menu and comes up in play: a plain U
+    rt.scripted_key_based(9202, &u, None, None, ElementState::Pressed, false);
+    rt.scripted_key_based(9202, &u, None, None, ElementState::Released, true);
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(table.concat(log, ',') == 'ctrl+u+,u-', table.concat(log, ','))").unwrap();
+}
+
+#[test]
+fn round7e_fix3_modifier_order_in_a_saved_name_does_not_matter() {
+    reset();
+    testing::put(MOD_KEYS, b"mod.alpha.act=shift+ctrl+u\nmod.beta.act=ctrl+super+c\nmod.gamma.act=alt+super+enter\n");
+    let alpha = bind("alpha", "");
+    let _beta = bind("beta", "");
+    let _gamma = bind("gamma", "");
+    assert_eq!(mod_key_of("alpha"), "ctrl+shift+u", "read in the order the client names a press");
+    assert_eq!(mod_key_of("beta"), "", "ctrl+super+c is the client's however it is written");
+    assert_eq!(mod_key_of("gamma"), "", "alt+super+enter too");
+    let mut rt = runtime();
+    press_based(&mut rt, CTRL_SHIFT, &Key::Character("U".into()), Some("u"), &[&alpha]);
+    hits(&alpha, 1);
+}
+
+#[test]
+fn round7e_fix3_nothing_listening_means_no_key_work() {
+    use super::super::perf_alloc::measure;
+    reset();
+    bindpage::reset_in_memory();
+    let mut rt = runtime();
+    let u = Key::Character("u".into());
+    // no mod at all: the runtime keeps nothing of the key
+    input::set_modifiers(CTRL);
+    rt_key(&mut rt, 9301, true, &u, Some("u"));
+    rt_key(&mut rt, 9301, false, &u, Some("u"));
+    let (_, _, allocs, _) = measure(|| {
+        for _ in 0..300 {
+            rt_key(&mut rt, 9301, true, &u, Some("u"));
+            rt_key(&mut rt, 9301, false, &u, Some("u"));
+        }
+    });
+    input::set_modifiers(NONE);
+    assert_eq!(allocs, 0, "no mod: no allocation on the key path");
+    assert_eq!(input::testing_key_ring_len(), 0, "no mod: no key ring kept");
+    // one mod that is on, with no key bound and no input.key listener
+    let _quiet = option_test_host("quiet");
+    input::set_modifiers(CTRL);
+    input::route_mod_key_based(&u, Some("u"), true, false, false, true, false);
+    input::route_mod_key_based(&u, Some("u"), false, false, false, true, false);
+    let (_, _, allocs, _) = measure(|| {
+        for _ in 0..300 {
+            input::route_mod_key_based(&u, Some("u"), true, false, false, true, false);
+            input::route_mod_key_based(&u, Some("u"), false, false, false, true, false);
+        }
+    });
+    input::set_modifiers(NONE);
+    assert_eq!(allocs, 0, "a mod with nothing bound or listening: no allocation");
+    // control: a mod that has a key bound does the work
+    let _loud = bind("loud", "");
+    input::set_modifiers(CTRL);
+    let (_, _, allocs, _) = measure(|| {
+        input::route_mod_key_based(&u, Some("u"), true, false, false, true, false);
+        input::route_mod_key_based(&u, Some("u"), false, false, false, true, false);
+    });
+    input::set_modifiers(NONE);
+    assert!(allocs > 0, "the meter sees a listening mod's key work");
+}

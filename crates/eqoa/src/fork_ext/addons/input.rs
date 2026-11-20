@@ -1380,3 +1380,8 @@ pub(crate) fn testing_text_capture(active: bool) {
         }
     });
 }
+
+#[cfg(test)]
+pub(crate) fn testing_key_ring_len() -> usize {
+    INPUT_STATE.with(|s| s.borrow().key_events.len())
+}
