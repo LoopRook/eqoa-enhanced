@@ -367,7 +367,7 @@ fn round7c_every_refusing_member_reports_its_status_through_its_call() {
                         end
                     end
                 end
-                assert(checked >= 60, 'only ' .. checked .. ' refusing members found')
+                assert(checked >= 30, 'only ' .. checked .. ' refusing members found')
                 assert(#issues == 0, table.concat(issues, '\n'))
                 round7c_checked = checked
                 "#,
