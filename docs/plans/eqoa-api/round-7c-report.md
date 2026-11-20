@@ -202,3 +202,25 @@ eqoa's modules, so it reached only the ImGui and Forge refusals. Fixed in `4d675
 - A mod that owned the waypoint and is disabled: its pin is cleared on the next step; covered by code reading
   and the ownership helpers, not by its own test.
 
+## Fix round 2
+
+Merged develop in 4399bcac. The post-merge focused run reported 65 passes,
+one failure in the checked-in support-table comparison, and one explicit
+no-adapter SKIP. The support reference will be regenerated after the fixes.
+The post-merge footprint and tracked-path checks passed.
+
+Red run A used the focused gate with the tests in 1ec6a293. It ran 11 tests
+with 10 failures and no SKIP lines. The bundled-package compatibility fixture
+passed. The first B attempt stopped at a compile error in the H2 decoder, fixed
+in e9ac471e. That attempt produced no test evidence.
+
+| Finding | First failure | Fix |
+|---|---|---|
+| H1 | Typed chat and the native editor both returned and completed a request under the chat grant for a slash line. Batch assertion: `batch slash line requires command`. | 06e60ef3 |
+| H2 | `native enable must not authorize a Forge import` and `the legacy enable was already adopted`. | efb5d62a, e9ac471e |
+| M3 | `own inventory: unsupported` and `hud.target` rejected as a declaration. | 863f3221 |
+| M4 | The ungranted manifest displayed `Replaces game windows: Bank`. | 0f11d3c1 |
+| M5 | ASCII chat at the 128-unit cutoff and a call with a non-nil channel both completed. | b1deb2b4 |
+
+The remaining findings, negative controls, final verification and support
+reference generation are pending.
