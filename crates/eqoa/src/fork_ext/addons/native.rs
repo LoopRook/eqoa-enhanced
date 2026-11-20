@@ -223,6 +223,31 @@ pub(crate) enum RefusalShape {
     ForgeReasonAndNil,
 }
 
+impl RefusalShape {
+    #[cfg(test)]
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Native => "native",
+            Self::ForgeNil => "forge_nil",
+            Self::ForgeReason => "forge_reason",
+            Self::ForgeReasonAndNil => "forge_reason_and_nil",
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Each refusal's declared code and return shape by member path, for the refusal-contract test.
+    static DECLARED_REFUSALS: RefCell<std::collections::HashMap<String, (&'static str, RefusalShape)>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+
+/// The code and return shape `path`'s refusal was declared with on this thread.
+#[cfg(test)]
+pub(crate) fn declared_refusal(path: &str) -> Option<(&'static str, &'static str)> {
+    DECLARED_REFUSALS.with(|d| d.borrow().get(path).map(|(code, shape)| (*code, shape.name())))
+}
+
 /// Installs a refusal and its capability from the same declaration. A service
 /// installer can later replace the member and mark that real binding supported.
 pub(crate) fn refuse_member(
@@ -257,8 +282,12 @@ pub(crate) fn refuse_member(
         "unsupported"
     };
     describe(lua, path, status, round, reason);
+    #[cfg(test)]
+    DECLARED_REFUSALS.with(|d| d.borrow_mut().insert(path.to_owned(), (code, shape)));
     if module == "ImGui" {
         describe(lua, &format!("eqoa.imgui.{name}"), status, round, reason);
+        #[cfg(test)]
+        DECLARED_REFUSALS.with(|d| d.borrow_mut().insert(format!("eqoa.imgui.{name}"), (code, shape)));
     }
     Ok(())
 }

@@ -393,6 +393,10 @@ const INSPECT_REFUSALS: &str = r#"
                     end
                     return v
                 end
+                local function pack(...) return {n = select('#', ...), ...} end
+                -- Every refusing callable's return against the exact shape it was declared with: `native` is
+                -- nil plus an Error whose code is the declared code and whose message is the described reason;
+                -- the Forge shapes are pinned value by value (nil; nil, reason; nil, reason, nil).
                 function inspect_refusals(invoke)
                 local issues, checked, names = {}, 0, {}
                 for _, row in ipairs(eqoa.capabilities.list('')) do
@@ -401,24 +405,36 @@ const INSPECT_REFUSALS: &str = r#"
                     if type(fn) == 'function' then
                         checked = checked + 1
                         names[#names + 1] = row.path
-                        local r = {invoke(row.path, fn)}
-                        local value, second = r[2], r[3]
+                        local code, shape = round7c_declared_refusal(row.path)
+                        local r = pack(invoke(row.path, fn))
+                        local n, value, second, third = r.n - 1, r[2], r[3], r[4]
+                        local function bad(what) issues[#issues + 1] = row.path .. ': ' .. what end
                         if not r[1] then
-                            issues[#issues + 1] = row.path .. ' raised ' .. tostring(value)
-                        elseif value ~= nil and value ~= false then
-                            issues[#issues + 1] = row.path .. ' returned a value while ' .. row.status
-                        elseif type(second) == 'table' then
-                            if second.message ~= row.reason then
-                                issues[#issues + 1] = row.path .. ': message ' .. tostring(second.message)
-                                    .. ' but reason ' .. tostring(row.reason)
+                            bad('raised ' .. tostring(value))
+                        elseif not code then
+                            bad('has no declared refusal')
+                        elseif (row.status == 'not_yet') ~= (code == 'not_yet') then
+                            bad('declared code ' .. code .. ' but status ' .. row.status)
+                        elseif shape == 'native' then
+                            if n ~= 2 or value ~= nil or type(second) ~= 'table' then
+                                bad(n .. ' values, ' .. type(value) .. ', ' .. type(second) .. '; want nil and an Error')
+                            elseif second.code ~= code then
+                                bad('code ' .. tostring(second.code) .. ' but declared ' .. code)
+                            elseif second.message ~= row.reason then
+                                bad('message ' .. tostring(second.message) .. ' but reason ' .. tostring(row.reason))
                             end
-                            if (row.status == 'not_yet') ~= (second.code == 'not_yet') then
-                                issues[#issues + 1] = row.path .. ': code ' .. tostring(second.code)
-                                    .. ' but status ' .. row.status
+                        elseif shape == 'forge_nil' then
+                            if n ~= 1 or value ~= nil then bad(n .. ' values; want one nil') end
+                        elseif shape == 'forge_reason' then
+                            if n ~= 2 or value ~= nil or second ~= row.reason then
+                                bad(n .. ' values, reason ' .. tostring(second) .. '; want nil, ' .. tostring(row.reason))
                             end
-                        elseif second ~= nil and second ~= row.reason then
-                            issues[#issues + 1] = row.path .. ': reason ' .. tostring(second)
-                                .. ' but described ' .. tostring(row.reason)
+                        elseif shape == 'forge_reason_and_nil' then
+                            if n ~= 3 or value ~= nil or second ~= row.reason or third ~= nil then
+                                bad(n .. ' values, reason ' .. tostring(second) .. '; want nil, reason, nil')
+                            end
+                        else
+                            bad('unknown shape ' .. tostring(shape))
                         end
                     end
                 end
@@ -426,23 +442,64 @@ const INSPECT_REFUSALS: &str = r#"
                 end
 "#;
 
+/// Every callable that refuses on the reference host, by name: a refusal added, removed or turned into a real
+/// binding changes this list on purpose.
+const EXPECTED_REFUSING_CALLABLES: &str = "ImGui.BeginItemTooltip ImGui.BeginTooltip ImGui.EndTooltip \
+ImGui.GetForegroundDrawList ImGui.GetMouseDragDelta ImGui.GetMousePos ImGui.GetMousePosOnOpeningCurrentPopup \
+ImGui.GetMouseWheel ImGui.IsMouseClicked ImGui.IsMouseDoubleClicked ImGui.IsMouseDown ImGui.IsMousePosValid \
+ImGui.IsMouseReleased ImGui.PopItemWidth ImGui.PopStyleVar ImGui.PushItemWidth ImGui.PushStyleVar \
+ImGui.ResetMouseDragDelta ImGui.SetMouseCursor ImGui.SetMousePos ImGui.SetNextWindowFocus ImGui.SetWindowFocus \
+eqoa.actions.buttons eqoa.actions.destroy eqoa.actions.look eqoa.actions.move eqoa.fonts.default eqoa.fonts.game \
+eqoa.fonts.load eqoa.fonts.release eqoa.hud.hidden_by eqoa.hud.hide eqoa.hud.show eqoa.icons.class \
+eqoa.icons.disposition eqoa.icons.info eqoa.icons.resource eqoa.icons.ui eqoa.imgui.BeginItemTooltip \
+eqoa.imgui.BeginTooltip eqoa.imgui.EndTooltip eqoa.imgui.GetForegroundDrawList eqoa.imgui.GetMouseDragDelta \
+eqoa.imgui.GetMousePos eqoa.imgui.GetMousePosOnOpeningCurrentPopup eqoa.imgui.GetMouseWheel \
+eqoa.imgui.IsMouseClicked eqoa.imgui.IsMouseDoubleClicked eqoa.imgui.IsMouseDown eqoa.imgui.IsMousePosValid \
+eqoa.imgui.IsMouseReleased eqoa.imgui.PopItemWidth eqoa.imgui.PopStyleVar eqoa.imgui.PushItemWidth \
+eqoa.imgui.PushStyleVar eqoa.imgui.ResetMouseDragDelta eqoa.imgui.SetMouseCursor eqoa.imgui.SetMousePos \
+eqoa.imgui.SetNextWindowFocus eqoa.imgui.SetWindowFocus eqoa.map.images eqoa.map.load_image \
+eqoa.sound.is_playing eqoa.sound.load eqoa.sound.play eqoa.sound.release eqoa.sound.set_volume eqoa.sound.stop \
+eqoa.textures.load eqoa.textures.release eqoa.textures.rgba frontiers_forge.cave.Alloc frontiers_forge.cave.Free \
+frontiers_forge.cave.Get frontiers_forge.cave.Info frontiers_forge.cave.IsRegionZero frontiers_forge.cave.Release \
+frontiers_forge.cave.Reserve frontiers_forge.chat.CaptureChannelTypeFromGameWindow \
+frontiers_forge.chat.DebugDumpFocusChain frontiers_forge.chat.GetChannelTableInfo \
+frontiers_forge.combat.ReadForeignCave frontiers_forge.icon.GetTexture frontiers_forge.icon.GetUITexture \
+frontiers_forge.quest.GetName frontiers_forge.quest.new frontiers_forge.util.utf16_to_utf8 \
+frontiers_forge.util.utf8_to_utf16";
+
+fn install_refusal_inspector(host: &Host) {
+    let declared = host
+        .lua
+        .create_function(|_, path: String| {
+            let declared = super::native::declared_refusal(&path);
+            Ok((declared.map(|d| d.0), declared.map(|d| d.1)))
+        })
+        .unwrap();
+    host.lua.globals().set("round7c_declared_refusal", declared).unwrap();
+    host.execute(INSPECT_REFUSALS).unwrap();
+}
+
 #[test]
 fn round7c_every_refusing_member_reports_its_status_through_its_call() {
     super::big_stack(|| {
         reference_host(|host| {
-            host.execute(INSPECT_REFUSALS).unwrap();
+            install_refusal_inspector(host);
             host.execute(
                 r#"
                 local issues, checked, names = inspect_refusals(function(_, fn) return pcall(fn) end)
+                table.sort(names)
                 round7c_refusing_paths = table.concat(names, ' ')
-                assert(checked >= 30, 'only ' .. checked .. ' refusing members found')
-                assert(#issues == 0, table.concat(issues, '\n'))
+                assert(#issues == 0, #issues .. ' refusal shape issues:\n' .. table.concat(issues, '\n'))
                 round7c_checked = checked
                 "#,
             ).unwrap();
             let checked: u32 = host.lua.globals().get("round7c_checked").unwrap();
             let paths: String = host.lua.globals().get("round7c_refusing_paths").unwrap();
-            eprintln!("round7c refusing members checked through their call: {checked} {paths}");
+            eprintln!("round7c refusing members checked through their call: {checked}");
+            let expected: Vec<&str> = EXPECTED_REFUSING_CALLABLES.split_whitespace().collect();
+            assert_eq!(expected.len(), 88, "the pinned list holds every refusing callable");
+            assert_eq!(paths.split_whitespace().collect::<Vec<_>>(), expected, "refusing callables by name");
+            assert_eq!(checked as usize, expected.len(), "refusing callables by count");
         });
     });
 }
@@ -451,7 +508,7 @@ fn round7c_every_refusing_member_reports_its_status_through_its_call() {
 fn round7c_refusal_checker_detects_wrong_codes_and_missing_values() {
     super::big_stack(|| {
         reference_host(|host| {
-            host.execute(INSPECT_REFUSALS).unwrap();
+            install_refusal_inspector(host);
             host.execute(
                 r#"
                 local issues = inspect_refusals(function(path, fn)
