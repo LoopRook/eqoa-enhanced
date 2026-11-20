@@ -155,6 +155,20 @@ pub fn reset_input_state() {
     INPUT_STATE.with(|s| {
         *s.borrow_mut() = InputState::default();
     });
+    set_modifiers((false, false, false));
+}
+
+thread_local! {
+    /// Ctrl, Alt and Shift as the window last said them (`ModifiersChanged`).
+    static MODIFIERS: std::cell::Cell<(bool, bool, bool)> = const { std::cell::Cell::new((false, false, false)) };
+}
+
+pub(crate) fn set_modifiers(held: (bool, bool, bool)) {
+    MODIFIERS.with(|m| m.set(held));
+}
+
+pub(crate) fn modifiers() -> (bool, bool, bool) {
+    MODIFIERS.with(|m| m.get())
 }
 
 /// Routes a live logical key after native chat/menu and ImGui focus gating.

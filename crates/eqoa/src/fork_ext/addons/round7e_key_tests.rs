@@ -361,3 +361,277 @@ fn round7e_typing_in_chat_suppresses_the_binding() {
     press("b", true, false, &[&host]);
     hits(&host, 1);
 }
+
+// ---- fix round 1 (review of aa4fe9ba) ---------------------------------------------------
+//
+// These go through `Runtime::scripted_key`, the same `route_key` -> `route_mod_key` path a
+// window key takes in `Runtime::event`, with the modifiers the window last said. The App's
+// own `key_name`/`key_input` cannot be built in a test (it owns the window and the
+// renderer), so the game's side is `game_sends`: `App::key_name`'s rule (viewer.rs, "the
+// modifiers held where that is bound") written out and fed to the real `KeyEdge`.
+
+use super::super::runtime::{Paths, Runtime};
+use winit::event::ElementState;
+use winit::keyboard::{Key, NamedKey};
+
+const NONE: (bool, bool, bool) = (false, false, false);
+const CTRL: (bool, bool, bool) = (true, false, false);
+const ALT: (bool, bool, bool) = (false, true, false);
+
+fn runtime() -> Runtime {
+    Runtime::new(Paths::select(std::path::PathBuf::new(), None, None, None))
+}
+
+fn press_key(rt: &mut Runtime, mods: (bool, bool, bool), key: &Key, hosts: &[&Host]) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(1000);
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    input::set_modifiers(mods);
+    rt.scripted_key(id, key, None, ElementState::Pressed, true);
+    rt.scripted_key(id, key, None, ElementState::Released, true);
+    for host in hosts {
+        native_events::dispatch(host).unwrap();
+    }
+    input::set_modifiers(NONE);
+}
+
+/// What the game does with a key pressed with `mods` held: the name `App::key_name`
+/// gives it (a combo where a row or a macro is on that, else the key's own), through
+/// the real key dispatch.
+fn game_sends(mods: (bool, bool, bool), key: &Key) -> Option<Sent> {
+    let plain = binds::name_of(key).unwrap();
+    let game = settings::binds();
+    let (c, a, s) = mods;
+    let name = if c || a || s {
+        let combo = binds::combo_name(c, a, s, &plain);
+        if game.combo_bound(&combo) { combo } else { plain }
+    } else {
+        plain
+    };
+    KeyEdge::default().key(&name, true, false, false, &game)
+}
+
+fn mod_key_of(addon: &str) -> String {
+    bindpage::get_key(addon, "act").unwrap_or_default()
+}
+
+/// A capture on `row` of `name` the page refuses: the key stays as it was, the page
+/// is not left waiting, and what it says names `why`.
+fn refused(row: usize, name: &str, why: &str) {
+    let mut page = ControlsPage::default();
+    page.row = row as i32;
+    page_text(&mut page);
+    let mut cues = Vec::new();
+    page.key(key::CROSS, true, 0, &mut cues);
+    page.capture_key(&vui(), name, &mut cues);
+    assert_eq!(page.capture, None, "{name}: a refusal is said, not hidden behind the prompt");
+    let text = said(&mut page);
+    assert!(text.contains(why), "{name}: {text}");
+}
+
+#[test]
+fn round7e_fix_h1_ctrl_u_on_a_game_row_does_not_also_fire_a_bare_u_mod() {
+    reset();
+    let host = bind("alpha", "u");
+    let mut rt = runtime();
+    let slot = row_named("bar1_slot1").unwrap();
+    let mut game = settings::binds();
+    game.bind_key(slot, "ctrl+u");
+    settings::set_binds(game);
+    let u = Key::Character("u".into());
+    assert_eq!(game_sends(CTRL, &u), Some(Sent::Slot(0, 0)), "the game acts on Ctrl+U");
+    press_key(&mut rt, CTRL, &u, &[&host]);
+    hits(&host, 0);
+    // control: a plain U is the mod's
+    press_key(&mut rt, NONE, &u, &[&host]);
+    hits(&host, 1);
+}
+
+#[test]
+fn round7e_fix_h1_a_mod_bound_to_a_combo_fires_on_that_combo_only() {
+    reset();
+    let host = bind("alpha", "");
+    let mut rt = runtime();
+    capture(&mut ControlsPage::default(), ROWS.len(), "ctrl+u");
+    assert_eq!(mod_key_of("alpha"), "ctrl+u");
+    let u = Key::Character("u".into());
+    press_key(&mut rt, NONE, &u, &[&host]);
+    press_key(&mut rt, ALT, &u, &[&host]);
+    hits(&host, 0);
+    press_key(&mut rt, CTRL, &u, &[&host]);
+    hits(&host, 1);
+}
+
+#[test]
+fn round7e_fix_h1_a_ctrl_combo_over_a_plain_game_key_is_refused_and_never_fires() {
+    reset();
+    let host = bind("alpha", "");
+    let mut rt = runtime();
+    // Ctrl+W is pressed by the game as W (Walk forward): the mod may not have it
+    refused(ROWS.len(), "ctrl+w", "Walk forward");
+    assert_eq!(mod_key_of("alpha"), "");
+    // an old saved key of the kind: the game acts, the mod does not
+    assert!(bindpage::set_key("alpha", "act", "ctrl+w"));
+    let w = Key::Character("w".into());
+    assert_eq!(game_sends(CTRL, &w), Some(Sent::Key("w".into())));
+    press_key(&mut rt, CTRL, &w, &[&host]);
+    hits(&host, 0);
+}
+
+#[test]
+fn round7e_fix_h1_alt_enter_is_the_windows_not_a_mods_enter() {
+    reset();
+    let chat = row_named("chat").unwrap();
+    let mut game = settings::binds();
+    game.bind_key(chat, "y");
+    settings::set_binds(game);
+    let host = bind("alpha", "enter");
+    let mut rt = runtime();
+    assert_eq!(mod_key_of("alpha"), "enter", "Enter is free once chat has moved");
+    let enter = Key::Named(NamedKey::Enter);
+    press_key(&mut rt, ALT, &enter, &[&host]);
+    hits(&host, 0);
+    press_key(&mut rt, NONE, &enter, &[&host]);
+    hits(&host, 1);
+}
+
+#[test]
+fn round7e_fix_h2_m7_client_keys_are_never_mod_keys() {
+    reset();
+    testing::put(MOD_KEYS, b"mod.beta.act=f3\n");
+    let alpha = bind("alpha", "f11");
+    let beta = bind("beta", "");
+    let gamma = bind("gamma", "escape");
+    for who in ["alpha", "beta", "gamma"] {
+        assert_eq!(mod_key_of(who), "", "{who}: a key the client keeps is not a mod's");
+    }
+    let mut rt = runtime();
+    for key in [
+        Key::Named(NamedKey::F11),
+        Key::Named(NamedKey::F3),
+        Key::Named(NamedKey::Escape),
+    ] {
+        press_key(&mut rt, NONE, &key, &[&alpha, &beta, &gamma]);
+    }
+    for host in [&alpha, &beta, &gamma] {
+        hits(host, 0);
+    }
+    assert_eq!(
+        testing::kept(MOD_KEYS).as_deref(),
+        Some(b"mod.beta.act=f3\n".as_slice()),
+        "the saved file is not rewritten"
+    );
+    assert!(controls_text(ROWS.len()).join(" ").contains("client"), "the row says why");
+}
+
+#[test]
+fn round7e_fix_h2_the_clients_own_combos_are_refused_for_a_mod() {
+    reset();
+    let _host = bind("alpha", "");
+    // Escape is the page's own (it gives a capture up), the rest are refused
+    for key in ["alt+enter", "ctrl+c", "ctrl+v", "ctrl+x", "ctrl+f11"] {
+        refused(ROWS.len(), key, "client");
+        assert_eq!(mod_key_of("alpha"), "", "{key}");
+    }
+}
+
+#[test]
+fn round7e_fix_m7_a_bare_mod_key_does_not_fire_on_the_clipboard_combo() {
+    reset();
+    let host = bind("alpha", "u");
+    let mut rt = runtime();
+    press_key(&mut rt, CTRL, &Key::Character("u".into()), &[&host]);
+    hits(&host, 0);
+    press_key(&mut rt, NONE, &Key::Character("u".into()), &[&host]);
+    hits(&host, 1);
+}
+
+#[test]
+fn round7e_fix_m6_the_winner_of_a_shared_default_does_not_depend_on_load_order() {
+    for order in [["alpha", "beta"], ["beta", "alpha"]] {
+        reset();
+        for who in order {
+            let _ = bind(who, "u");
+        }
+        assert_eq!(mod_key_of("alpha"), "u", "{order:?}");
+        assert_eq!(mod_key_of("beta"), "", "{order:?}");
+    }
+}
+
+#[test]
+fn round7e_fix_m6_a_saved_key_beats_a_default_in_either_load_order() {
+    for order in [["alpha", "beta"], ["beta", "alpha"]] {
+        reset();
+        testing::put(MOD_KEYS, b"mod.beta.act=u\n");
+        let mut hosts = Vec::new();
+        for who in order {
+            hosts.push((who, bind(who, if who == "alpha" { "u" } else { "" })));
+        }
+        assert_eq!(mod_key_of("beta"), "u", "{order:?}");
+        assert_eq!(mod_key_of("alpha"), "", "{order:?}");
+        let (alpha, beta) = (
+            &hosts.iter().find(|h| h.0 == "alpha").unwrap().1,
+            &hosts.iter().find(|h| h.0 == "beta").unwrap().1,
+        );
+        press("u", true, false, &[alpha, beta]);
+        hits(alpha, 0);
+        hits(beta, 1);
+    }
+}
+
+#[test]
+fn round7e_fix_m5_a_mod_returning_from_disabled_is_checked_again() {
+    reset();
+    let _alpha = bind("alpha", "u");
+    bindpage::set_addon_enabled("alpha", false);
+    let _beta = bind("beta", "");
+    capture(&mut ControlsPage::default(), ROWS.len(), "u");
+    assert_eq!(mod_key_of("beta"), "u");
+    bindpage::set_addon_enabled("alpha", true);
+    assert_eq!(mod_key_of("alpha"), "", "u was taken while it was off");
+    assert_eq!(mod_key_of("beta"), "u");
+}
+
+#[test]
+fn round7e_fix_m5_the_defaults_button_obeys_the_rule_for_every_mod_and_keeps_its_reason() {
+    reset();
+    let _alpha = bind("alpha", "space");
+    let _gamma = bind("gamma", "space");
+    bindpage::set_addon_enabled("gamma", false);
+    assert!(bindpage::set_key("alpha", "act", "u"));
+    let mut page = ControlsPage::default();
+    page.row = crate::bindpage::defaults();
+    let mut cues = Vec::new();
+    page.key(key::CROSS, true, 0, &mut cues);
+    assert_eq!(mod_key_of("alpha"), "", "Space is Jump's");
+    bindpage::set_addon_enabled("gamma", true);
+    assert_eq!(mod_key_of("gamma"), "", "a mod that was off gets no key in use either");
+    // a restart: the saved file says nothing for it, so the row still says why
+    let saved = testing::kept(MOD_KEYS).unwrap_or_default();
+    assert!(
+        !String::from_utf8_lossy(&saved).contains("mod.alpha.act="),
+        "an empty entry would lose the reason: {}",
+        String::from_utf8_lossy(&saved)
+    );
+    let keep = (testing::kept(KEYS), testing::kept(MOD_KEYS));
+    reset();
+    if let Some(k) = keep.0 {
+        testing::put(KEYS, &k);
+    }
+    if let Some(k) = keep.1 {
+        testing::put(MOD_KEYS, &k);
+    }
+    let _alpha = bind("alpha", "space");
+    assert!(controls_text(ROWS.len()).join(" ").contains("Jump"));
+}
+
+#[test]
+fn round7e_fix_l9_a_key_that_cannot_be_kept_is_said_not_hidden() {
+    reset();
+    testing::reset(true);
+    let _host = bind("alpha", "");
+    let mut page = ControlsPage::default();
+    capture(&mut page, ROWS.len(), "u");
+    assert!(said(&mut page).contains("Key not kept"), "{}", said(&mut page));
+    assert_eq!(mod_key_of("alpha"), "", "the old key stays");
+}
