@@ -285,7 +285,7 @@ fn markdown(doc: &Json) -> String {
         writeln!(out, "## {name}\n").unwrap();
         table(&mut out, &rows);
     }
-    out.push_str("## Forge compatibility\n\nEach module lists its member count and every entry whose status is not `supported`.\n\n");
+    out.push_str("## Forge compatibility\n\nForge compatibility is listed by presence, not verified per function; it is not part of the `eqoa/1` promise. Each module lists its member count and every entry whose status is not `supported`.\n\n");
     for (name, rows) in forge {
         let members: Vec<_> = rows
             .iter()
@@ -391,9 +391,7 @@ mod tests {
             "round": 2, "reason": null, "children": []
         }]});
         let text = markdown(&doc);
-        let forge = text.split("## Forge compatibility
-
-").nth(1).unwrap();
+        let forge = text.split("## Forge compatibility\n\n").nth(1).unwrap();
         assert!(
             forge.starts_with(
                 "Forge compatibility is listed by presence, not verified per function; it is not part of the `eqoa/1` promise."
