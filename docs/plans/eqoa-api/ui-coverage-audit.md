@@ -595,3 +595,15 @@ contract rules and the four defects are settled.
 - The eight "probable" lines are counted from which functions are private; a round may find a zero-line route
   (as round 6.5 did for its review fixes) or need one more.
 - The ImGui bridge and the Forge layer were not re-audited here; `round-7-audit.md` covers them.
+
+## Owner answers (2026-11-19)
+
+1. Servers that ask for the game as it was: mods are **not** restricted there (a player who wants pure vanilla
+   does not enable mods; others may want vanilla rules with mod quality-of-life). No code change. Obeying the
+   switch can be added later, additively, if a server operator asks.
+2. Order agreed: A0, A1, A2, A3, then HUD completion.
+3. Irreversible steps: lead's recommendation is that a confirmation always happens but a replacement mod may
+   draw it (the prompt is readable and answerable); a mod cannot skip it. Explained to the owner; awaiting a
+   final yes. Destroy stays unsupported.
+4. Before the world (login, character select, creation): left to the game. Mods only act once in the world.
+5. Name plates and damage numbers (A12): wanted.
