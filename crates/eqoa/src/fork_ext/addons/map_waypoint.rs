@@ -5,7 +5,9 @@
 //! label, a mod clears only its own pins, and a disabled mod's still-owned pins go away in every world.
 //! Ownership lasts only while that exact pin is continuously present: every game step drops, for good, the
 //! record of a pin that is absent or differs (moved, reached, cleared, or cleared and re-pinned by the player),
-//! and any set by another mod replaces the record. Known limit: a player who clears and re-pins the exact
+//! and any set by another mod replaces the record. Only pins the map has read count: a fresh map after a
+//! login reads the window's pin file at its first frame, and ownership waits for that. The pin file belongs
+//! to the client window, not the character, so ownership carries across a logout for the client session. Known limit: a player who clears and re-pins the exact
 //! same point between two 30 Hz game steps is not seen; catching that needs one hook line in the map's own
 //! waypoint setter (upstream), which this round does not take.
 use std::cell::RefCell;

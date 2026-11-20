@@ -746,7 +746,10 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         crate::fork_ext::addons::action_broker::update_native_snapshot(snapshot);
         crate::fork_ext::addons::native_core::iteration(_game_step);
         if _game_step {
-            crate::fork_ext::addons::map_waypoint::reconcile(|world| _play.map.waypoint(world));
+            // only against pins the map has read: a fresh map after a login holds none yet
+            if _play.map.api_waypoints_loaded() {
+                crate::fork_ext::addons::map_waypoint::reconcile(|world| _play.map.waypoint(world));
+            }
             if let Some(pending) = PENDING_BANK_TX.with(|b| {
                 if !bank_session_open(_play) {
                     b.borrow_mut().take()
@@ -840,9 +843,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
             });
             discard_expired_staged();
             let reqs = crate::fork_ext::addons::actions::take_action_requests();
-            for world in crate::fork_ext::addons::map_waypoint::take_released(|world| _play.map.waypoint(world)) {
-                _play.map.api_set_waypoint(world, None);
-            }
+            drain_released_waypoints(_play);
             if ready {
                 if reqs.map && crate::settings::map() && _play.addon_input_available() {
                     _play.map.show();
@@ -887,6 +888,21 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
 pub(super) fn dropped(_play: &mut Play) {
     #[cfg(not(target_arch = "wasm32"))]
     net::fork_record::drain(&mut _play.session);
+    // a mod disabled since the last game step: its pins go before the world does (a logout)
+    #[cfg(not(target_arch = "wasm32"))]
+    drain_released_waypoints(_play);
+}
+
+/// Clears the pins disabled mods still own, once the map has read the window's pins; until then the
+/// released records wait (for this map's first frame, or the next login's).
+#[cfg(not(target_arch = "wasm32"))]
+fn drain_released_waypoints(play: &mut Play) {
+    if !play.map.api_waypoints_loaded() {
+        return;
+    }
+    for world in crate::fork_ext::addons::map_waypoint::take_released(|world| play.map.waypoint(world)) {
+        play.map.api_set_waypoint(world, None);
+    }
 }
 
 /// Drops staged native sends whose broker request already ended (cancelled, timed out, its batch stopped).
@@ -2012,6 +2028,7 @@ fn dispatch_broker_action(
                     reason: "Map is turned off".into(),
                 };
             }
+            play.map.api_load_waypoints();
             match crate::fork_ext::addons::map_waypoint::owned_by(*vm, |world| play.map.waypoint(world)) {
                 Some(world) => {
                     play.map.api_set_waypoint(world, None);

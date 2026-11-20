@@ -2,6 +2,17 @@
 use super::*;
 use serde_json::{Value as Json, json};
 impl Map {
+    /// Whether this map has read the window's pins from the settings yet (a fresh map after a login has not,
+    /// until its first frame in a world): before that, an absent pin says nothing.
+    pub(crate) fn api_waypoints_loaded(&self) -> bool {
+        self.waypoints_read
+    }
+
+    /// The window's pins read from the settings now, as the map's own first use does.
+    pub(crate) fn api_load_waypoints(&mut self) {
+        self.read_waypoints();
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn api_validate_waypoint(
         &self,
@@ -298,7 +309,7 @@ impl Map {
     pub(crate) fn round4_waypoint(&mut self,world:i32,at:Option<[f32;2]>){self.set_waypoint(world,at);}
 
     /// The pins read from the settings, as the map's first frame in a world does.
-    pub(crate) fn round7c_read_waypoints(&mut self){self.read_waypoints();}
+    pub(crate) fn round7c_read_waypoints(&mut self){self.api_load_waypoints();}
 
     /// A minimap frame as `Play::map_frame` makes it each frame (a moved or toggled minimap
     /// is laid out again), centred on `at` with `view`'s dots and marks, over a terrain
