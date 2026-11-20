@@ -439,6 +439,9 @@ struct ActiveBatch {
     corpse_target_id: Option<u32>,
     corpse_reopen: Option<CorpseReopen>,
     takeover_kinds: [bool; 3],
+    /// Claims a step actually used once dispatched (a `talk` that armed a merchant or bank open): the
+    /// game-windows switch stops this batch when it releases one of them (M1).
+    used_claims: [bool; 3],
 }
 
 #[derive(Default)]
@@ -819,6 +822,7 @@ impl BrokerState {
                 .flatten(),
             corpse_reopen: None,
             takeover_kinds,
+            used_claims: [false; 3],
         };
         vm_state.active_batch = Some(batch);
         vm_state.upsert_batch_retained(BatchResultRecord {
@@ -888,9 +892,10 @@ impl BrokerState {
             .iter()
             .filter(|(vm, state)| {
                 state.active_batch.as_ref().is_some_and(|batch| {
-                    released
-                        .iter()
-                        .any(|(holder, kind)| holder == *vm && batch.takeover_kinds[*kind as usize])
+                    released.iter().any(|(holder, kind)| {
+                        holder == *vm
+                            && (batch.takeover_kinds[*kind as usize] || batch.used_claims[*kind as usize])
+                    })
                 })
             })
             .map(|(vm, _)| *vm)
@@ -1655,14 +1660,19 @@ impl BrokerState {
                         }
                         let step_req_id = self.next_id;
                         self.next_id = self.next_id.wrapping_add(1).max(1);
+                        DISPATCH_CLAIMS.with(|c| c.set([false; 3]));
                         let outcome = {
                             let _vm_guard = DispatchVmGuard::enter(vm_id);
                             dispatch(&step_kind)
                         };
+                        let used = DISPATCH_CLAIMS.with(|c| c.replace([false; 3]));
                         let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
                         if let Some(batch) = vm_state.active_batch.as_mut() {
                             let _ = batch.steps.pop_front();
                             batch.rate_wait_start_tick = None;
+                            for (seen, now) in batch.used_claims.iter_mut().zip(used) {
+                                *seen |= now;
+                            }
                         }
                         match outcome {
                             DispatchOutcome::Completed { detail } => {
@@ -1996,6 +2006,8 @@ thread_local! {
     static CURRENT_CORPSE_TARGET: Cell<Option<u32>> = const { Cell::new(None) };
     static EXPIRED_LOOT_TIMEOUT: Cell<bool> = const { Cell::new(false) };
     static DISPATCHING_VM: Cell<Option<u64>> = const { Cell::new(None) };
+    /// Claims the action being dispatched armed (indexed by `TakeoverKind`), read back by a batch step.
+    static DISPATCH_CLAIMS: Cell<[bool; 3]> = const { Cell::new([false; 3]) };
 }
 
 struct DispatchVmGuard(Option<u64>);
@@ -2009,6 +2021,15 @@ impl Drop for DispatchVmGuard {
     fn drop(&mut self) {
         DISPATCHING_VM.with(|d| d.set(self.0));
     }
+}
+
+/// The action being dispatched armed `kind`'s claim (a `talk` reaching a merchant or bank, an `open_loot`).
+pub(crate) fn note_dispatch_claim(kind: super::window_takeover::TakeoverKind) {
+    DISPATCH_CLAIMS.with(|c| {
+        let mut used = c.get();
+        used[kind as usize] = true;
+        c.set(used);
+    });
 }
 
 pub(crate) fn current_dispatch_vm() -> Option<u64> {

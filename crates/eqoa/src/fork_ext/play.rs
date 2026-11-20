@@ -1704,15 +1704,17 @@ fn dispatch_broker_action(
                 .map_or(0, |c| c.npc_flags);
             if let Some(vm) = crate::fork_ext::addons::action_broker::current_dispatch_vm() {
                 use crate::fork_ext::addons::window_takeover::{self, TakeoverKind};
-                if *kind == TalkKind::Merchant
-                    || (*kind == TalkKind::AnyFriendly && target_flags & 1 != 0)
+                if (*kind == TalkKind::Merchant
+                    || (*kind == TalkKind::AnyFriendly && target_flags & 1 != 0))
+                    && window_takeover::arm_pending_open(TakeoverKind::Merchant, vm, npc_id)
                 {
-                    let _ = window_takeover::arm_pending_open(TakeoverKind::Merchant, vm, npc_id);
+                    crate::fork_ext::addons::action_broker::note_dispatch_claim(TakeoverKind::Merchant);
                 }
-                if *kind == TalkKind::Bank
-                    || (*kind == TalkKind::AnyFriendly && target_flags & 2 != 0)
+                if (*kind == TalkKind::Bank
+                    || (*kind == TalkKind::AnyFriendly && target_flags & 2 != 0))
+                    && window_takeover::arm_pending_open(TakeoverKind::Bank, vm, npc_id)
                 {
-                    let _ = window_takeover::arm_pending_open(TakeoverKind::Bank, vm, npc_id);
+                    crate::fork_ext::addons::action_broker::note_dispatch_claim(TakeoverKind::Bank);
                 }
             }
             {
