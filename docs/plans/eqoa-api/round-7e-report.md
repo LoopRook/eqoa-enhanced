@@ -125,8 +125,9 @@ no `brk` left). `hits = N` is the Lua assert in `round7e_key_tests.rs:34`.
 
 Commits, in order: `42f07789` tests first, `c321a564` the fix, `91712e54` + `a6c1c7d0` fixture and
 modifier tests, `bcd5c12b` priority simplification and one more test, `bf41426d` the `combo` field and spec
-text, `270be2fb` generated docs (hand-edited, see below), then the player note. Zero upstream-file changes
-(footprint below). **The tests were written and run against the unfixed code first: all 12 failed, each for
+text, `270be2fb` generated docs (hand-edited, see below), then the player note. Then the H3 round (lead-approved):
+tests with the two hook lines and stubs, then the implementation. Upstream-file changes in the whole part: exactly
+two added lines in `options.rs` (H3 below), budget raised by 2, footprint PASS. **The tests were written and run against the unfixed code first: all 12 failed, each for
 the intended reason** (`hits = 1` where a mod fired twice or on the wrong press, `f11` kept as a mod key, a
 capture left waiting, a default taken in one load order).
 
@@ -156,7 +157,7 @@ capture left waiting, a default taken in one load order).
 |---|---|---|---|
 | H1 | yes: Ctrl+U on a game row also fired a bare-U mod; a mod saved on `ctrl+u` never fired | combo naming above; a mod key with modifiers that the game would take as the plain key is refused on Controls and never fires | `round7e_fix_h1_*` (4 tests through `Runtime::scripted_key`) and `round7e_fix_h1_the_windows_modifier_events...`. n=1 (modifiers ignored): 4 fail (`hits` assert, :34); n=2 (no shadow rule): `a_ctrl_combo_over_a_plain_game_key...` :429; n=12 (modifier events ignored): :648 |
 | H2 | yes: default/saved `f11`, `f3`, `escape` all became mod keys | `never_mod_key`: reserved keys, Escape, Alt+Enter, Ctrl+C/V/X, with any other modifiers; a default or saved one leaves the row empty with the reason, file untouched | `round7e_fix_h2_m7_client_keys_are_never_mod_keys`, `..._the_clients_own_combos_are_refused_for_a_mod`. n=3: both fail (:506, :429); n=4 (Escape, Alt+Enter, clipboard only): the combos test fails :429 |
-| H3 | yes (read: Options cancel restores `saved_binds` only) | **NOT DONE: needs an upstream hook, see below** | none |
+| H3 | yes (read: Options cancel restores `saved_binds` only) | **done, the lead-approved 2-line version** (section below) | `round7e_h3_*` (4 tests through the real `WndOptions` open, cancel and Save Changes keys). Control: the cancel hook call removed from `options.rs`: 3 fail (`a_cancel_puts_back_what_a_game_row_took_from_a_mod` :745, `..._a_mod_took_from_a_game_row` :759, `a_cancel_after_defaults...` :774), the save test passes |
 | H4 | yes: with the probe's default refused the `other_hits==0` check passed whatever capture did | `fresh_hud_mod_load_...` restored: stats on `f10`, probe really bound on `y` (asserted), the editor owner has the keyboard (`other_hits==0`), then the probe fires once the editor is off (`other_hits==1`) | n=11 (the gate that keeps another VM's binding quiet while one VM owns the text editor is broken, chat suppression kept): the restored test fails at `round_3_picture_tests.rs:1064` (`the editor owner has the keyboard`); **the old test body from aa4fe9ba, run in the same binary on the final code, passes under n=11**, so it was vacuous |
 | M5 | yes: returning mod not re-checked; Defaults wrote defaults for disabled mods and an empty entry that lost the reason | `resolve` on enable/disable/register/capture/Defaults; Defaults forgets entries | `round7e_fix_m5_*` (3). n=7 (no re-check on enable): `a_mod_returning_is_checked_against_the_game_too` :605; n=8 (Defaults writes defaults): :606 |
 | M6 | yes: registration order decided | name order in `resolve`, saved before default | `round7e_fix_m6_*` (2). n=6 (no name order): :556; n=5 (saved not before default): 4 tests fail (:184, :350, :570, :591) |
@@ -174,30 +175,35 @@ n=7: one fails).
 
 On the H4 control: n=10 (the whole text-capture gate bypassed) fails both versions at the earlier chat step, so it shows nothing about the probe; n=11 is the control that matters (command: build with the switch, then `<exe> fresh_hud_mod_load zz_h4 --test-threads=1` with `R7E_BREAK=0` (both pass) and `R7E_BREAK=11` (restored fails, old passes)).
 
-## H3 (STOP): mod keys following Save Changes / cancel
+## H3: a cancelled Options session puts mod keys back (done, lead-approved 2-line version)
 
-Not doable without an upstream line. What exists: `Options` keeps `saved_binds`, restores it on cancel
-(`options.rs`, the `27 | 132 =>` arm, `crate::settings::set_binds(self.saved_binds.clone())`), and writes keys in
-`settings::save` through `save_binds()` only when the game's own `Binds` changed. Mod keys are not in `Binds`
-or `ClientOptions`, so no existing hook (`fork_options::change/activate`, `fork_settings::write/parse`,
-`bindpage::draw/capture_key/help_or_defaults`) sees a cancel, a save, or even that Options is open; a change
-to a mod key alone does not make Options think anything changed. Two lines would give restore-on-cancel
-(keys stay written at once, which a cancel then rewrites):
+Two plain hook calls in `crates/eqoa/src/options.rs` (diff of that file against the base is exactly +2/-0),
+nothing else upstream:
 
-1. `crates/eqoa/src/options.rs`, in `open()`, after `self.saved_binds = crate::settings::binds();`:
-   `crate::fork_ext::bindpage::session_begin();` (remembers every mod key as it is)
-2. same file, in the cancel arm, after `crate::settings::set_binds(self.saved_binds.clone());`:
-   `crate::fork_ext::bindpage::session_cancel();` (puts the remembered keys back and rewrites `mod-keys.opt`)
+1. in `open()`, right after `self.saved_binds = crate::settings::binds();`:
+   `crate::fork_ext::bindpage::session_begin();`
+2. in the cancel arm (`27 | 132 =>`), right after `crate::settings::set_binds(self.saved_binds.clone());`:
+   `crate::fork_ext::bindpage::session_cancel();`
 
-For the full "pending until Save Changes, written at once with Auto Save Options" lifecycle also:
+`session_begin` snapshots what `mod-keys.opt` holds for every mod (including "nothing", which is what Defaults
+forgets). `session_cancel` puts every changed entry back, in memory and in the file, then `resolve`s against
+the game's keys that `options.rs` has just restored. Mod keys are still written as they are changed; only a
+cancel rewrites them. NOT built, as decided: `session_commit()` in `settings::save()` and the `session_pending()`
+term in `keep()`.
 
-3. `crates/eqoa/src/settings.rs`, in `save()` after `let keys = save_binds();`:
-   `crate::fork_ext::bindpage::session_commit();`, and in `options.rs` `keep()`'s unchanged check,
-   `&& !crate::fork_ext::bindpage::session_pending()`.
+The `options.rs` budget in `docs/fork-footprint.json` is raised by the measured 2 lines (20 to 22 added) with
+the reason recorded in `review_state` and in the file's own reason. Footprint PASS.
 
-The lead decides. Until then: a cross change (a mod and a game row swapping keys) that is cancelled leaves the
-saved mod key and the old game key; the press-time rule settles it (game wins, mod row marked). Nothing is lost
-except the mod's previous key choice.
+Tests (through the real `WndOptions`: `open_controls`, keys, `capture_key`, Triangle twice, Save Changes):
+(a) Jump takes a mod's key, cancel: both back, nothing of the swap left in the file; (b) the mod takes Jump's
+key, cancel: both back; (c) Defaults then cancel: the saved mod key and its file entry are back; (d) Save
+Changes: a swap stays swapped in memory, in `keys.opt` (`key.jump=b`) and in `mod-keys.opt`, and a later window
+cancelled changes nothing of it.
+
+Known residual (also in the player note): with Auto Save Options off, leaving Options by a route that neither
+saves nor cancels, then restarting, leaves the mod's new key saved beside the game's old key. The who-wins
+order (the owner confirmed it 2026-11-20: game control, then macro, then mod; a chosen key beats a default;
+then addon id and binding id) settles it and the mod's row is marked.
 
 ## Existing tests changed (H4 re-audit)
 
@@ -239,7 +245,7 @@ do something (a gesture, a count, `dispatch_keypress` Some), so a refused bindin
 - A mod on a key means the key as pressed: a mod on U does not fire on Ctrl+U (or Shift+U, Alt+U); a mod can be
   put on Ctrl+U on Controls; a modifier combination over a key the game uses as its plain key is refused.
 - A mod's refused default keeps saying why after a restart; Defaults no longer writes empty entries.
-- Mod key changes still write at once (H3 not done).
+- Leaving Options with Triangle now puts mod keys back with the game's; mod keys still write as they are changed, so a route that neither saves nor cancels leaves a mod's new key beside the game's old one (marked, settled by the who-wins order).
 
 ## Gates (fix round)
 
@@ -254,4 +260,18 @@ do something (a gesture, a count, `dispatch_keypress` Some), so a refused bindin
   GPU in CI); wasm, footprint, paths, player-release (20), tools (199) success. `ci_gates.py cleanup` run.
 - Not verified: the live client (the `!` mark, the notes, Ctrl and Alt presses on a real keyboard);
   `Runtime::event` and the App's key path (see Corrections); the generated docs (hand-edited, see above);
-  H3 (not built).
+  that a *real* Save Changes with Auto Save Options on is unchanged (only the manual Save Changes path is tested).
+
+### H3 round gates
+
+- `--only round --filter round7e_ options::`: 69 passed, 0 failed (upstream's own Options tests included).
+- Negative control: the cancel hook call removed from `options.rs` (restored by `git checkout`; the file's diff
+  against the base is again exactly +2/-0): the three cancel tests fail, the save test passes.
+- Wide local run `--only round,wasm,footprint,paths --filter round7e_ fork_ext:: options:: settings:: bindpage::
+  binds:: play::fork_hooks::`: 1014 passed, 1 failed, 26 ignored. The one failure is
+  `round_3_all_four_mods_per_frame_performance_benchmark` (5.081 ms against a 5 ms limit in a debug build while
+  other agents were building); it is a timing benchmark that `run_gates.py`'s full step skips, and it passed
+  alone straight after (1 passed). wasm PASS, footprint PASS with the new budget, paths PASS.
+- CI run https://github.com/LoopRook/eqoa-enhanced/actions/runs/44706426719 on e16e8895: success. addons 604
+  passed / 0 failed / 25 ignored (17 SKIP); full 3195 passed / 0 failed / 37 ignored (378 SKIP, no disc or GPU
+  in CI); wasm, footprint, paths, player-release (20), tools (199) success. `ci_gates.py cleanup` run.
