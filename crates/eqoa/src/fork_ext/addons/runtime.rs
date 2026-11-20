@@ -224,6 +224,7 @@ impl Runtime {
         let _ = super::native_core::time();
         crate::fork_ext::mods::auto_create_mods_dir();
         crate::fork_ext::bundled::install_bundled_mods_if_needed();
+        crate::fork_ext::bindpage::register_manager_row();
         let mut runtime = Self::new(Paths::select(
             crate::fork_ext::mods::mods_dir(),
             std::env::var_os("EQOA_FORGE_MODS").map(PathBuf::from),
@@ -297,6 +298,27 @@ impl Runtime {
     pub fn request_open(&mut self) {
         self.open = true;
         self.error = None;
+    }
+    /// The manager key: open the window, or close it when it is open.
+    pub(super) fn toggle_manager(&mut self) {
+        if self.open {
+            self.open = false;
+        } else {
+            self.request_open();
+        }
+    }
+    pub(super) fn manager_open(&self) -> bool {
+        self.open
+    }
+    /// What the frame does with the requests made since the last: the Options row's open, the
+    /// manager key's toggle.
+    pub(super) fn apply_requests(&mut self) {
+        if super::take_open_request() {
+            self.request_open();
+        }
+        if super::take_toggle_request() {
+            self.toggle_manager();
+        }
     }
     pub fn event(&mut self, window: &Window, event: &WindowEvent, plain_play: bool) -> bool {
         super::input::observe_modifiers(event);
@@ -447,6 +469,18 @@ impl Runtime {
     }
 
     fn route_key(&mut self, event: KeyRoute<'_>, plain_play: bool, keyboard: bool) -> bool {
+        // The manager key opens and closes the Mods & Addons window, with or without a mod.
+        if super::input::manager_key_pressed(
+            event.logical,
+            event.base,
+            event.down,
+            event.repeat,
+            event.synthetic,
+            plain_play,
+            keyboard,
+        ) {
+            super::request_toggle();
+        }
         // No mod runs, nothing is held by one and no editor has the keyboard: the key is the
         // game's alone, and nothing here has any work for it.
         if self.capture.is_empty()
@@ -542,9 +576,7 @@ impl Runtime {
                 }
             }
         }
-        if super::take_open_request() {
-            self.request_open();
-        }
+        self.apply_requests();
         if self.graphics.is_none() && self.error.is_none() {
             match self.launch(self.open) {
                 Launch::Dormant => {

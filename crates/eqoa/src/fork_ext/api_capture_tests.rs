@@ -1050,15 +1050,19 @@ fn performance_busy_world_zero_addons_frame_and_packet_allocation_bound() {
         chat_allocs as f64 / 600.,
         chat_bytes as f64 / 600.
     );
-    // a key with modifiers held, press and release, with nothing listening
+    // a key with modifiers held, press and release, with nothing listening; the Mods & Addons
+    // row is there (default F10) as it is with no mod enabled, and its key test costs nothing
+    crate::fork_ext::bindpage::register_manager_row();
     let key = winit::keyboard::Key::Character("u".into());
     input::set_modifiers((true, false, true));
     let (_, key_time, key_allocs, key_bytes) = measure(|| {
         for _ in 0..600 {
             input::route_mod_key_based(&key, Some("u"), true, false, false, true, false);
             input::route_mod_key_based(&key, Some("u"), false, false, false, true, false);
+            input::manager_key_pressed(&key, Some("u"), true, false, false, true, false);
         }
     });
+    crate::fork_ext::bindpage::reset_in_memory();
     input::set_modifiers((false, false, false));
     eprintln!(
         "PERF zero-addons key_us={:.3} allocs/key={:.1} bytes/key={:.1}",

@@ -230,6 +230,37 @@ fn press_names(plain: &str, own: &str, editor: bool) -> Press {
     Press { key: plain.to_string(), combo }
 }
 
+/// Whether this key going down is the manager row's key and the client should open or close the
+/// Mods & Addons window for it. The same conditions as a mod key (plain play, no menu or editor
+/// has the keyboard, not a repeat), and the one rule for who has the key (`manager_wins`). With
+/// no key set, or any other key, it costs a lock and a compare and allocates nothing.
+pub(crate) fn manager_key_pressed(
+    key: &Key,
+    base: Option<&'static str>,
+    down: bool,
+    repeat: bool,
+    synthetic: bool,
+    plain_play: bool,
+    keyboard: bool,
+) -> bool {
+    if !down || repeat || synthetic || !plain_play || keyboard {
+        return false;
+    }
+    let (ctrl, alt, shift) = modifiers();
+    let sup = SUPER.with(|m| m.get());
+    if !crate::fork_ext::bindpage::manager_key_matches(key, base, (sup, ctrl, alt, shift)) || is_text_capture_active() {
+        return false;
+    }
+    let Some(plain) = crate::binds::name_of(key) else {
+        return false;
+    };
+    let own: &str = match base {
+        Some(base) => base,
+        None => &plain,
+    };
+    crate::fork_ext::bindpage::manager_wins(&press_names(&plain, own, false).combo)
+}
+
 /// Whether this key going down is a mod's alone: it has a modifier on it, a mod holds that
 /// combination and would fire (`bindpage::owns_press`), and nothing keeps it from firing (a
 /// menu or an editor has the keyboard, it is a repeat or synthetic). The mod runtime then

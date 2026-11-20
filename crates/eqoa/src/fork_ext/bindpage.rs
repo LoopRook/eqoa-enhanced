@@ -34,6 +34,78 @@ pub struct ModBind {
 
 static MOD_BINDS: Mutex<Vec<ModBind>> = Mutex::new(Vec::new());
 
+/// The Controls row that opens and closes the Mods & Addons window (the addon manager),
+/// beside the mod rows (owner, 2026-11-20). It is a mod binding like any other (the same
+/// rule, notes, saved file, cancel) that no mod owns: it is there with no mod enabled and
+/// the client acts on it itself (`manager_wins`, `Runtime::route_key`). Its default key is
+/// this one constant: change it here. An old build reads `mod.enhanced.mods_addons=` as
+/// the entry of a mod it does not have, and ignores it.
+pub(crate) const MANAGER_ADDON: &str = "enhanced";
+pub(crate) const MANAGER_ID: &str = "mods_addons";
+pub(crate) const MANAGER_LABEL: &str = "Mods & Addons";
+pub(crate) const MANAGER_DEFAULT_KEY: &str = "f10";
+
+/// Puts the row among the mod rows (the runtime does this as it starts).
+pub(crate) fn register_manager_row() {
+    register(MANAGER_ADDON, MANAGER_ID, MANAGER_DEFAULT_KEY, MANAGER_LABEL);
+}
+
+fn is_manager(b: &ModBind) -> bool {
+    b.addon_id == MANAGER_ADDON && b.id == MANAGER_ID
+}
+
+/// The key the manager row has now, ready to compare with a key event without making a name
+/// (so a key press with no mod key set costs no allocation).
+struct ManagerKey {
+    mods: (bool, bool, bool, bool),
+    key: winit::keyboard::Key,
+    base: String,
+}
+
+static MANAGER_KEY: Mutex<Option<ManagerKey>> = Mutex::new(None);
+
+fn set_manager_key(key: Option<&str>) {
+    let spec = key.filter(|k| !k.is_empty()).map(|k| {
+        let ((sup, ctrl, alt, shift), base) = parse_key(k);
+        ManagerKey { mods: (sup, ctrl, alt, shift), key: binds::key_of(base), base: base.to_string() }
+    });
+    *MANAGER_KEY.lock().unwrap() = spec;
+}
+
+/// Whether a key event is the manager row's key (its modifiers held, its key): a cheap test that
+/// makes no name and allocates nothing.
+pub(crate) fn manager_key_matches(
+    key: &winit::keyboard::Key,
+    base: Option<&str>,
+    mods: (bool, bool, bool, bool),
+) -> bool {
+    use winit::keyboard::Key;
+    let guard = MANAGER_KEY.lock().unwrap();
+    let Some(spec) = guard.as_ref() else {
+        return false;
+    };
+    if spec.mods != mods {
+        return false;
+    }
+    match (&spec.key, key) {
+        (Key::Named(a), Key::Named(b)) => a == b,
+        (Key::Character(_), _) => match base {
+            Some(base) => base == spec.base,
+            None => matches!(key, Key::Character(c) if c.eq_ignore_ascii_case(&spec.base)),
+        },
+        _ => false,
+    }
+}
+
+/// Whether the manager row is what acts on this press (`combo`): it has the key and no game
+/// control, macro, client key or winning mod does (the one rule, `firing_press`).
+pub(crate) fn manager_wins(combo: &str) -> bool {
+    let combo = normalize_key(&combo.to_ascii_lowercase());
+    let game = crate::settings::with_binds(Clone::clone);
+    let binds = MOD_BINDS.lock().unwrap();
+    firing_press(&game, &binds, &combo).is_some_and(|i| is_manager(&binds[i]))
+}
+
 pub fn register(addon: &str, id: &str, default_key: &str, description: &str) -> bool {
     // The game's keys first: the lock below must not be held while they load.
     let game = crate::settings::with_binds(Clone::clone);
@@ -77,6 +149,7 @@ pub fn set_addon_enabled(addon_id: &str, enabled: bool) {
 pub fn reset_in_memory() {
     let mut binds = MOD_BINDS.lock().unwrap();
     binds.clear();
+    set_manager_key(None);
     *SESSION.lock().unwrap() = None;
 }
 
@@ -116,7 +189,11 @@ pub fn help_or_defaults(row: i32) -> String {
         let binds = MOD_BINDS.lock().unwrap();
         if let Some(i) = enabled_index(&binds, idx) {
             let b = &binds[i];
-            let mut help = format!("{} (from mod: {}).", b.description, b.addon_id);
+            let mut help = if is_manager(b) {
+                "Opens the Mods & Addons window, and closes it again. It has no mod; it is the client's own.".to_string()
+            } else {
+                format!("{} (from mod: {}).", b.description, b.addon_id)
+            };
             if let Some(why) = conflict_text(&game, &binds, i) {
                 help.push(' ');
                 help.push_str(&why);
@@ -480,6 +557,7 @@ fn resolve(game: &Binds, binds: &mut [ModBind]) {
             binds[i].current_key = default;
         }
     }
+    set_manager_key(binds.iter().find(|b| is_manager(b) && b.enabled).map(|b| b.current_key.as_str()));
 }
 
 /// The binding that does something on a key, if any (rules 1 to 3), from what is known
