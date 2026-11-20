@@ -26,8 +26,12 @@ fn ready() -> Play {
 }
 
 fn rig() -> (Play, Host) {
+    rig_with_capabilities(&["eqoa.actions.*"])
+}
+
+fn rig_with_capabilities(caps: &[&str]) -> (Play, Host) {
     let p = ready();
-    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
+    let host = Host::with_test_capabilities(caps).unwrap();
     host.execute(
         r#"
         results = {}
@@ -453,4 +457,81 @@ fn round6d_capabilities_are_supported_for_what_is_wired() {
         "#,
     )
     .unwrap();
+}
+
+#[test]
+fn round7c_typed_chat_checks_the_grant_for_the_final_line() {
+    let (mut p, chat) = rig_with_capabilities(&["eqoa.actions.chat"]);
+    gesture(&mut p, &chat, "return eqoa.actions.chat('/sit')");
+    expect_code(&chat, "permission_denied");
+    let sent = p.session.sends_lost;
+    gesture(&mut p, &chat, "return eqoa.actions.chat('hello')");
+    assert!(last_ok(&chat));
+    assert!(p.session.sends_lost > sent);
+
+    let (mut p, command) = rig_with_capabilities(&["eqoa.actions.command"]);
+    gesture(&mut p, &command, "return eqoa.actions.chat('hello')");
+    expect_code(&command, "permission_denied");
+    gesture(&mut p, &command, "return eqoa.actions.chat('/say hello')");
+    assert!(last_ok(&command));
+}
+
+#[test]
+fn round7c_batch_chat_checks_the_grant_for_the_final_line() {
+    let p = ready();
+    let host = Host::with_test_capabilities(&["eqoa.actions.chat", "eqoa.actions.batch"]).unwrap();
+    host.execute(
+        r#"
+        local id, err = eqoa.actions.batch({{kind='chat', text='/sit'}})
+        assert(id == nil and err.code == 'permission_denied', 'batch slash line requires command')
+        assert(err.message:find('eqoa.actions.command', 1, true), err.message)
+        assert(eqoa.actions.batch({{kind='chat', text='hello'}}))
+        "#,
+    )
+    .unwrap();
+    drop(p);
+}
+
+#[test]
+fn round7c_native_chat_editor_checks_the_submitted_lines_grant() {
+    let (mut p, host) = rig_with_capabilities(&["eqoa.actions.input_text", "eqoa.actions.chat"]);
+    p.open_edit(0x0B0F_0000, 128, -1, false);
+    let sent = p.session.sends_lost;
+    gesture(&mut p, &host, "local w = eqoa.windows.find('input'); return eqoa.actions.input_text(w.ref, '/say hidden', true)");
+    expect_code(&host, "permission_denied");
+    assert_eq!(p.session.sends_lost, sent);
+    assert!(p.edit.text.is_empty());
+    assert_eq!(p.mode, 2);
+    gesture(&mut p, &host, "local w = eqoa.windows.find('input'); return eqoa.actions.input_text(w.ref, 'hello', true)");
+    assert!(last_ok(&host));
+    assert!(p.session.sends_lost > sent);
+}
+
+#[test]
+fn round7c_typed_chat_rejects_the_native_utf16_cutoff() {
+    let (mut p, host) = rig();
+    let sent = p.session.sends_lost;
+    for line in ["a".repeat(128), "😀".repeat(64)] {
+        host.lua.globals().set("chat_line", line).unwrap();
+        gesture(&mut p, &host, "return eqoa.actions.chat(chat_line)");
+        expect_code(&host, "invalid_argument");
+        assert_eq!(p.session.sends_lost, sent);
+    }
+    host.lua.globals().set("chat_line", format!("{}a", "😀".repeat(63))).unwrap();
+    gesture(&mut p, &host, "return eqoa.actions.chat(chat_line)");
+    assert!(last_ok(&host));
+    assert!(p.session.sends_lost > sent);
+}
+
+#[test]
+fn round7c_typed_chat_refuses_explicit_channels() {
+    let (mut p, host) = rig();
+    let sent = p.session.sends_lost;
+    gesture(&mut p, &host, "return eqoa.actions.chat('hello', 'guild')");
+    expect_code(&host, "unsupported");
+    host.execute("assert(last_err.message:find('eqoa.actions.command', 1, true))").unwrap();
+    assert_eq!(p.session.sends_lost, sent);
+    gesture(&mut p, &host, "return eqoa.actions.chat('hello', nil)");
+    assert!(last_ok(&host));
+    assert!(p.session.sends_lost > sent);
 }

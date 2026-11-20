@@ -108,6 +108,55 @@ fn round7c_takeover_answers_unsupported_for_a_game_window_it_cannot_take_yet() {
 }
 
 #[test]
+fn round7c_takeover_checks_view_scope_before_build_support() {
+    super::window_takeover::reset_all_for_test();
+    let host = Host::with_test_capabilities(&["eqoa.windows.takeover"]).unwrap();
+    host.execute(
+        r#"
+        for _, opts in ipairs({{}, {scope='own'}}) do
+            local ok, err = eqoa.windows.takeover('inventory', opts)
+            assert(ok == nil and err.code == 'invalid_argument', 'own inventory: ' .. tostring(err and err.code))
+        end
+        local ok, err = eqoa.windows.takeover('inventory')
+        assert(ok == nil and err.code == 'invalid_argument', 'default scope: ' .. tostring(err and err.code))
+        ok, err = eqoa.windows.takeover('inventory', {scope='all'})
+        assert(ok == nil and err.code == 'unsupported')
+        ok, err = eqoa.windows.takeover('bogus', {scope='all'})
+        assert(ok == nil and err.code == 'invalid_argument')
+        ok, err = eqoa.windows.takeover('response_dialog')
+        assert(ok == nil and err.code == 'unsupported', 'future server session')
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn round7c_window_design_manifest_loads_and_discloses_hud_target() {
+    let temp = TempDir::new("design-replaces");
+    package(
+        &temp.0,
+        "design_example",
+        json!({
+            "capabilities": ["eqoa.windows.takeover"],
+            "replaces": ["inventory", "spellbook", "hud.target"]
+        }),
+    );
+    let disclosure = lines(&one(&temp.0));
+    assert!(disclosure.iter().any(|line| line.contains("Target frame")), "{disclosure:?}");
+}
+
+#[test]
+fn round7c_replacement_disclosure_requires_the_takeover_grant() {
+    let temp = TempDir::new("missing-takeover-grant");
+    package(&temp.0, "ungated_bank", json!({"replaces": ["bank"]}));
+    let found = discover(&temp.0);
+    assert_eq!(found.addons.len(), 1);
+    let disclosure = lines(&found.addons[0]);
+    assert!(!disclosure.iter().any(|line| line.starts_with("Replaces game windows")), "{disclosure:?}");
+    assert!(found.diagnostics.iter().any(|row| row.message.contains("eqoa.windows.takeover")));
+}
+
+#[test]
 fn round7c_replaces_accepts_game_windows_and_reports_any_other_name() {
     let temp = TempDir::new("replaces");
     package(

@@ -2459,6 +2459,91 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn round7c_enabled_native_package_cannot_gain_forge_grants() {
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("changing", false, "loaded = true");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        manager.queue(Command::Enable("changing".into(), true));
+        gpu.frame(&mut manager);
+        assert_eq!(manager.entries()[0].status, Status::Enabled);
+
+        fs::remove_file(scripts.0.join("changing/mod.json")).unwrap();
+        manager.queue(Command::Rescan);
+        gpu.frame(&mut manager);
+        let entry = &manager.entries()[0];
+        assert!(entry.metadata.api.is_none());
+        assert!(!entry.enabled_intent, "native enable must not authorize a Forge import");
+        assert!(!entry.initialized);
+        assert!(manager.diagnostics().iter().any(|d| {
+            d.id.as_deref() == Some("changing")
+                && d.message.contains("its permissions changed; enable it again to accept")
+        }));
+
+        drop(manager);
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        assert!(!manager.entries()[0].enabled_intent, "the refusal survives restart");
+        manager.queue(Command::Enable("changing".into(), true));
+        gpu.frame(&mut manager);
+        assert_eq!(manager.entries()[0].status, Status::Enabled);
+    }
+
+    #[test]
+    fn round7c_legacy_enable_adopts_once_then_refuses_new_grants_on_restart() {
+        let Some(mut gpu) = Gpu::new() else { return };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("expanding", false, "loaded = true");
+        let found = super::super::discovery::discover(&scripts.0);
+        let key = Storage::key(&found.addons[0]).unwrap();
+        let storage = Storage::new(Some(config.0.clone()));
+        storage.set_enabled(&key, true).unwrap();
+
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        assert_eq!(manager.entries()[0].status, Status::Enabled);
+        assert!(manager.diagnostics().is_empty(), "{:?}", manager.diagnostics());
+        drop(manager);
+        let manifest = scripts.0.join("expanding/mod.json");
+        let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        raw["capabilities"] = serde_json::json!(["eqoa.actions.command"]);
+        fs::write(&manifest, serde_json::to_vec(&raw).unwrap()).unwrap();
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        assert!(!manager.entries()[0].enabled_intent, "the legacy enable was already adopted");
+        assert!(manager.diagnostics().iter().any(|d| {
+            d.id.as_deref() == Some("expanding")
+                && d.message.contains("its permissions changed; enable it again to accept")
+        }));
+    }
+
+    #[test]
+    fn round7c_bundled_packages_keep_their_enabled_disclosures() {
+        let Some(gpu) = Gpu::new() else { return };
+        let config = Scratch::new();
+        let bundled = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods");
+        let storage = Storage::new(Some(config.0.clone()));
+        let found = super::super::discovery::discover(&bundled);
+        assert!(found.diagnostics.is_empty(), "{:?}", found.diagnostics);
+        for addon in &found.addons {
+            storage.set_enabled(&Storage::key(addon).unwrap(), true).unwrap();
+        }
+        let mut manager = gpu.manager(&bundled, Some(config.0.clone()));
+        assert!(manager.entries().iter().all(|entry| entry.enabled_intent));
+        assert!(manager.diagnostics().is_empty(), "{:?}", manager.diagnostics());
+        manager.rescan(false);
+        assert!(manager.entries().iter().all(|entry| entry.enabled_intent));
+        drop(manager);
+        let manager = gpu.manager(&bundled, Some(config.0.clone()));
+        assert_eq!(manager.entries().len(), found.addons.len());
+        assert!(manager.entries().iter().all(|entry| entry.enabled_intent));
+        assert!(manager.diagnostics().is_empty(), "{:?}", manager.diagnostics());
+    }
+
     #[test]
     fn forge_manager_successful_migration_is_silent_and_failed_migration_surfaces_diagnostic() {
         let Some(mut gpu) = Gpu::new() else {
