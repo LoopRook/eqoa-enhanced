@@ -1186,3 +1186,18 @@ fn round7e_fix3_nothing_listening_means_no_key_work() {
     input::set_modifiers(NONE);
     assert!(allocs > 0, "the meter sees a listening mod's key work");
 }
+
+#[test]
+fn round7e_fix3_the_marks_use_what_presses_showed_and_nothing_is_written() {
+    reset();
+    let _host = bind("alpha", "");
+    let mut rt = runtime();
+    assert!(bindpage::set_key("alpha", "act", "shift+7"));
+    let before = testing::kept(MOD_KEYS);
+    // no press seen: the US table says Shift+7 types &, which nothing has: no mark
+    assert!(!controls_text(ROWS.len()).contains(&"!".into()));
+    // a German Shift+7 is pressed: it types /, the command key, and the row is marked
+    press_based(&mut rt, SHIFT, &Key::Character("/".into()), Some("7"), &[]);
+    assert!(controls_text(ROWS.len()).contains(&"!".into()), "marked once a press showed it");
+    assert_eq!(testing::kept(MOD_KEYS), before, "what was learned is not written anywhere");
+}

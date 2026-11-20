@@ -40,7 +40,7 @@ pub fn register(addon: &str, id: &str, default_key: &str, description: &str) -> 
     let mut binds = MOD_BINDS.lock().unwrap();
     let stored = load_saved_key(addon, id);
     if let Some(existing) = binds.iter_mut().find(|b| b.addon_id == addon && b.id == id) {
-        existing.default_key = default_key.to_ascii_lowercase();
+        existing.default_key = normalize_key(&default_key.to_ascii_lowercase());
         existing.description = description.to_string();
         existing.enabled = true;
         if stored.is_some() {
@@ -50,7 +50,7 @@ pub fn register(addon: &str, id: &str, default_key: &str, description: &str) -> 
         binds.push(ModBind {
             addon_id: addon.to_string(),
             id: id.to_string(),
-            default_key: default_key.to_ascii_lowercase(),
+            default_key: normalize_key(&default_key.to_ascii_lowercase()),
             current_key: String::new(),
             description: description.to_string(),
             enabled: true,
@@ -78,6 +78,7 @@ pub fn reset_in_memory() {
     let mut binds = MOD_BINDS.lock().unwrap();
     binds.clear();
     *SESSION.lock().unwrap() = None;
+    LEARNED.lock().unwrap().clear();
 }
 
 pub fn get_key(addon: &str, id: &str) -> Option<String> {
@@ -94,7 +95,7 @@ pub fn set_key(addon: &str, id: &str, key: &str) -> bool {
     let Some(i) = binds.iter().position(|b| b.addon_id == addon && b.id == id) else {
         return false;
     };
-    let key = key.to_ascii_lowercase();
+    let key = normalize_key(&key.to_ascii_lowercase());
     if save_mod_bind(addon, id, &key).is_err() {
         return false;
     }
@@ -282,7 +283,7 @@ pub fn capture_key(
     name: &str,
     cues: &mut Vec<i32>,
 ) -> bool {
-    let key_name = name.to_ascii_lowercase();
+    let key_name = normalize_key(&name.to_ascii_lowercase());
     if row < ROWS.len() {
         return game_row_capture(capture, note, row, name, &key_name, cues);
     }
@@ -307,14 +308,71 @@ pub fn capture_key(
 /// clean-ups, Windows' Alt+Enter, the clipboard's Ctrl+C, V and X and a Mac's Cmd (Super)
 /// forms of them and Cmd+, . A mod never has them, whatever other modifier is on them.
 fn never_mod_key(key: &str) -> bool {
-    let bare = key.strip_prefix("super+").unwrap_or(key);
-    let sup = bare.len() != key.len();
-    let ((ctrl, alt, _), base) = binds::split_combo(bare);
+    let ((sup, ctrl, alt, _), base) = parse_key(key);
     binds::reserved(base)
         || base == "escape"
         || (alt && base == "enter")
         || (ctrl && matches!(base, "c" | "v" | "x"))
         || (sup && matches!(base, "c" | "v" | "x" | ","))
+}
+
+/// A key name taken apart: its modifiers (Ctrl, Alt, Shift and Super, in any order and
+/// whatever the order they were written in) and the key. (`binds::split_combo` does not
+/// know Super.)
+fn parse_key(name: &str) -> ((bool, bool, bool, bool), &str) {
+    let (mut sup, mut ctrl, mut alt, mut shift) = (false, false, false, false);
+    let mut rest = name;
+    while let Some((m, tail)) = rest.split_once('+') {
+        if tail.is_empty() {
+            break;
+        }
+        match m {
+            "super" => sup = true,
+            "ctrl" => ctrl = true,
+            "alt" => alt = true,
+            "shift" => shift = true,
+            _ => break,
+        }
+        rest = tail;
+    }
+    ((sup, ctrl, alt, shift), rest)
+}
+
+/// A key name written the way the client names a press: Super, Ctrl, Alt, Shift, then the
+/// key (`ctrl+shift+u`). Done when a name is read (a file, a default, a capture), so
+/// `shift+ctrl+u` by hand is the key a press of it is named.
+pub(crate) fn normalize_key(name: &str) -> String {
+    let ((sup, ctrl, alt, shift), base) = parse_key(name);
+    let named = binds::combo_name(ctrl, alt, shift, base);
+    if sup { format!("super+{named}") } else { named }
+}
+
+/// What real presses on this machine have shown: a combo (`shift+7`) and the key it typed
+/// there (`/` on a German layout). Only in memory; a static rule (`shifted`) fills in
+/// where no press has been seen. Learned from `input.rs` as keys arrive.
+static LEARNED: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+
+pub(crate) fn learn(combo: &str, typed: &str) {
+    let mut learned = LEARNED.lock().unwrap();
+    match learned.iter_mut().find(|(c, _)| c == combo) {
+        Some((_, t)) if t == typed => {}
+        Some((_, t)) => *t = typed.to_string(),
+        None => learned.push((combo.to_string(), typed.to_string())),
+    }
+}
+
+fn learned(combo: &str) -> Option<String> {
+    LEARNED
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(c, _)| c == combo)
+        .map(|(_, t)| t.clone())
+}
+
+/// Whether any mod has a row on Controls (so a capture there can use what presses showed).
+pub(crate) fn has_rows() -> bool {
+    !MOD_BINDS.lock().unwrap().is_empty()
 }
 
 /// What the game takes a key as.
@@ -370,19 +428,25 @@ fn shifted(base: &str) -> String {
     over.to_string()
 }
 
-/// The name the game acts on for a press named `key` (the modifiers held written before
-/// the key, `binds::combo_name`). This is `App::key_name`'s rule (viewer.rs, "its own name
-/// with theirs before it where a row or a macro is on that ... else the name it types"),
-/// for every key and every modifier: the combo where the game has that combo bound
-/// (`Binds::combo_bound`), else the plain name, which is the key's own, or with Shift the
-/// character it types (`shifted`). Super is no modifier the game names, so it is dropped. A
-/// key with no modifier is itself. Everything about a mod key meeting a game control (marks,
-/// swaps, refusals, defaults, press time) goes through this one function.
+/// The name the game acts on for a press named `key`, WHERE NO REAL PRESS IS AT HAND (a
+/// default key, a key read from a file, the marks on Controls, a capture): `App::key_name`'s
+/// rule (viewer.rs): the combo where the game has that combo bound (`Binds::combo_bound`),
+/// else the plain name, which is the key typed. What a press typed is what a real press
+/// showed (`learn`), else the key's own name, or with Shift the US layout's character
+/// (`shifted`): a guess, so at worst a wrong or missing mark on another layout. At press time
+/// nothing here is used: the press has its own facts (`input.rs`, `firing_press`). Super is
+/// no modifier the game names, so it is dropped. A key with no modifier is itself.
 fn game_press(game: &Binds, key: &str) -> String {
-    let bare = key.strip_prefix("super+").unwrap_or(key);
-    let ((ctrl, alt, shift), base) = binds::split_combo(bare);
-    if !(ctrl || alt || shift) || game.combo_bound(bare) {
-        return bare.to_string();
+    let ((_, ctrl, alt, shift), base) = parse_key(key);
+    if !(ctrl || alt || shift) {
+        return base.to_string();
+    }
+    let bare = binds::combo_name(ctrl, alt, shift, base);
+    if game.combo_bound(&bare) {
+        return bare;
+    }
+    if let Some(typed) = learned(&bare) {
+        return typed;
     }
     if shift { shifted(base) } else { base.to_string() }
 }
@@ -474,7 +538,8 @@ fn resolve(game: &Binds, binds: &mut [ModBind]) {
     }
 }
 
-/// The binding that does something on a press named `key`, if any (rules 1 to 3).
+/// The binding that does something on a key, if any (rules 1 to 3), from what is known
+/// without a press (`game_owner`). Marks and tests; a real press uses `firing_press`.
 fn firing(game: &Binds, binds: &[ModBind], key: &str) -> Option<usize> {
     if key.is_empty() || never_mod_key(key) || game_owner(game, key).is_some() {
         return None;
@@ -482,14 +547,26 @@ fn firing(game: &Binds, binds: &[ModBind], key: &str) -> Option<usize> {
     holders(binds, key, None).first().copied()
 }
 
-/// Whether the mod binding `addon`/`id` acts on a press named `key` (the modifiers
-/// held written before it) now. The bind callback asks this at press time, so
-/// a key two controls share still does one thing.
-pub(crate) fn fires(addon: &str, id: &str, key: &str) -> bool {
-    let key = key.to_ascii_lowercase();
+/// The binding that does something on THIS press (rules 1 to 3): `combo` is how mods name
+/// it (the modifiers held written before the key), `game_key` the name the game acts on for
+/// the same press, worked out from the event itself as `App::key_name` does (the combo
+/// where the game has it bound, else the key the press typed, on whatever layout). No table.
+fn firing_press(game: &Binds, binds: &[ModBind], combo: &str, game_key: &str) -> Option<usize> {
+    if combo.is_empty() || never_mod_key(combo) || owner_of(game, game_key).is_some() {
+        return None;
+    }
+    holders(binds, combo, None).first().copied()
+}
+
+/// Whether the mod binding `addon`/`id` acts on this press now (see `firing_press`). The bind
+/// callback asks this at press time, so a key two controls share still does one thing.
+pub(crate) fn fires(addon: &str, id: &str, combo: &str, game_key: &str) -> bool {
+    let combo = normalize_key(&combo.to_ascii_lowercase());
+    let game_key = game_key.to_ascii_lowercase();
     let game = crate::settings::with_binds(Clone::clone);
     let binds = MOD_BINDS.lock().unwrap();
-    firing(&game, &binds, &key).is_some_and(|i| binds[i].addon_id == addon && binds[i].id == id)
+    firing_press(&game, &binds, &combo, &game_key)
+        .is_some_and(|i| binds[i].addon_id == addon && binds[i].id == id)
 }
 
 enum Other {
@@ -968,14 +1045,14 @@ fn load_saved_key(addon: &str, id: &str) -> Option<String> {
         let bytes = read_config(file).unwrap_or_default();
         let text = String::from_utf8_lossy(&bytes);
         if let Some(value) = text.lines().find_map(|line| line.strip_prefix(&prefix)) {
-            return Some(value.trim().to_ascii_lowercase());
+            return Some(normalize_key(&value.trim().to_ascii_lowercase()));
         }
         if file == LEGACY_KEYS_FILE && addon == "eqoa_stats_box" && id == "toggle" {
             if let Some(value) = text
                 .lines()
                 .find_map(|line| line.strip_prefix("key.stats_box="))
             {
-                return Some(value.trim().to_ascii_lowercase());
+                return Some(normalize_key(&value.trim().to_ascii_lowercase()));
             }
         }
     }
@@ -1015,7 +1092,7 @@ fn forget_mod_bind(addon: &str, id: &str) -> Result<(), String> {
 }
 
 pub fn dispatch_keypress(key_name: &str) -> Option<(String, String)> {
-    let key = key_name.to_ascii_lowercase();
+    let key = normalize_key(&key_name.to_ascii_lowercase());
     let game = crate::settings::with_binds(Clone::clone);
     let binds = MOD_BINDS.lock().unwrap();
     firing(&game, &binds, &key).map(|i| (binds[i].addon_id.clone(), binds[i].id.clone()))

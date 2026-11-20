@@ -447,6 +447,14 @@ impl Runtime {
     }
 
     fn route_key(&mut self, event: KeyRoute<'_>, plain_play: bool, keyboard: bool) -> bool {
+        // No mod runs, nothing is held by one and no editor has the keyboard: the key is the
+        // game's alone, and nothing here has any work for it.
+        if self.capture.is_empty()
+            && !super::native_events::has_consumers()
+            && !super::input::is_text_capture_active()
+        {
+            return false;
+        }
         let code = super::input::logical_key_to_code(event.logical);
         if !event.synthetic
             && !event.repeat
