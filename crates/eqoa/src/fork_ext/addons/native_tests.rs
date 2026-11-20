@@ -536,7 +536,7 @@ fn round_3_stage_a_actions_assist_and_summary_api() {
         assert(ok2 == nil and err2.code == 'not_in_world', "summary not in world")
         local ok3, err3 = eqoa.windows.open("unsupported_window")
         assert(ok3 == nil and err3.code == 'invalid_argument', "unsupported window")
-        eqoa.input.bind({ id = "assist_go", label = "Assist Go", default_key = "k" }, function()
+        eqoa.input.bind({ id = "assist_go", label = "Assist Go", default_key = "u" }, function()
             last_req, last_err = eqoa.actions.assist()
         end)
     "#,
@@ -546,7 +546,7 @@ fn round_3_stage_a_actions_assist_and_summary_api() {
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
             )
         });
         super::native_events::dispatch(&h).unwrap();
@@ -687,11 +687,16 @@ fn round_3_stage_a_options_toggle_and_get() {
     );
 
     // Disabling a mod hides its option rows and key rows
-    crate::fork_ext::bindpage::register("my_custom_mod", "act", "k", "Custom Act");
+    crate::fork_ext::bindpage::register("my_custom_mod", "act", "7", "Custom Act");
     assert!(
         super::options::active_mod_items()
             .iter()
             .any(|(_, label)| label == "Test Option")
+    );
+    assert_eq!(
+        crate::fork_ext::bindpage::dispatch_keypress("7"),
+        Some(("my_custom_mod".into(), "act".into())),
+        "the key fires while the mod is on"
     );
     let rows_before = crate::fork_ext::bindpage::extra_rows();
     super::options::set_addon_enabled("my_custom_mod", false);
@@ -708,7 +713,7 @@ fn round_3_stage_a_options_toggle_and_get() {
         "disabled mod bind row disappears"
     );
     assert_eq!(
-        crate::fork_ext::bindpage::dispatch_keypress("k"),
+        crate::fork_ext::bindpage::dispatch_keypress("7"),
         None,
         "disabled mod keybind does not fire"
     );
@@ -754,7 +759,7 @@ fn round_3_stage_a_input_bind_and_fonts_game() {
 #[test]
 fn round_3_stage_a_controls_page_rebind_and_negative_control() {
     let entries_before = crate::bindpage::defaults();
-    let _ = crate::fork_ext::bindpage::register("mod_test", "custom_key", "p", "Custom Action");
+    let _ = crate::fork_ext::bindpage::register("mod_test", "custom_key", "y", "Custom Action");
     let entries_after = crate::bindpage::defaults();
     assert_eq!(
         entries_after,
@@ -766,19 +771,19 @@ fn round_3_stage_a_controls_page_rebind_and_negative_control() {
     assert!(crate::fork_ext::bindpage::set_key(
         "mod_test",
         "custom_key",
-        "z"
+        "u"
     ));
     assert_eq!(
         crate::fork_ext::bindpage::get_key("mod_test", "custom_key"),
-        Some("z".into())
+        Some("u".into())
     );
     assert_eq!(
-        crate::fork_ext::bindpage::dispatch_keypress("p"),
+        crate::fork_ext::bindpage::dispatch_keypress("y"),
         None,
         "old key does not fire"
     );
     assert_eq!(
-        crate::fork_ext::bindpage::dispatch_keypress("z"),
+        crate::fork_ext::bindpage::dispatch_keypress("u"),
         Some(("mod_test".into(), "custom_key".into())),
         "new key fires"
     );
@@ -909,6 +914,9 @@ fn option_test_host(id: &str) -> Host {
     .unwrap()
 }
 
+#[path = "round7e_key_tests.rs"]
+mod round7e_key_tests;
+
 #[test]
 fn failed_option_saves_leave_lua_and_controls_values_unchanged_and_diagnose() {
     super::options::set_storage_root(None);
@@ -1020,28 +1028,30 @@ fn option_and_bind_names_never_redirect_caller_identity() {
     super::options::set_storage_root(None);
     super::options::reset_in_memory();
     crate::fork_ext::bindpage::reset_in_memory();
-    for id in ["test", "mod", "third_party"] {
+    // each has its own key: a default never takes a key another mod has (round 7)
+    for (id, key) in [("test", "b"), ("mod", "u"), ("third_party", "y")] {
         let host = option_test_host(id);
         host.execute(
-            r#"
+            &r#"
             assert(eqoa.options.get('stats_box') == nil)
             local toggle = eqoa.options.toggle({id='stats_box',default=true})
             assert(toggle.value == true)
             assert(eqoa.options.get('stats_box') == true)
             assert(eqoa.options.set('stats_box',false))
             assert(eqoa.options.get('stats_box') == false)
-            assert(eqoa.input.bind({id='toggle',label='Toggle Stats Box',default_key='b'}, function()
+            assert(eqoa.input.bind({id='toggle',label='Toggle Stats Box',default_key='@K@'}, function()
                 other_state, other_err = eqoa.actions.toggle_stats_box()
             end))
-            assert(eqoa.binds.get('toggle') == 'b')
-            assert(eqoa.binds.register('toggle','b','Toggle Stats Box'))
-        "#,
+            assert(eqoa.binds.get('toggle') == '@K@')
+            assert(eqoa.binds.register('toggle','@K@','Toggle Stats Box'))
+        "#
+            .replace("@K@", key),
         )
         .unwrap();
         super::native_core::CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                serde_json::json!({"key":"b","down":true,"repeat":false,"synthetic":false,"text":""}),
+                serde_json::json!({"key":key,"down":true,"repeat":false,"synthetic":false,"text":""}),
             )
         });
         super::native_events::dispatch(&host).unwrap();

@@ -1028,14 +1028,14 @@ fn fresh_hud_mod_load_defaults_and_live_stats_key_and_menu_wiring() {
     assert!(crate::fork_ext::bindpage::set_key(
         "eqoa_stats_box",
         "toggle",
-        "f8"
+        "f10"
     ));
     input::route_mod_key(&b, true, false, false, true, false);
     native_events::dispatch(&stats).unwrap();
     stats
         .execute("assert(eqoa.options.get('stats_box') == true)")
         .unwrap();
-    let f8 = Key::Named(NamedKey::F8);
+    let f8 = Key::Named(NamedKey::F10);
     input::route_mod_key(&f8, true, false, false, true, false);
     native_events::dispatch(&stats).unwrap();
     stats
@@ -1047,17 +1047,24 @@ fn fresh_hud_mod_load_defaults_and_live_stats_key_and_menu_wiring() {
     input::route_mod_key(&f8, true, false, false, true, false);
     native_events::dispatch(&stats).unwrap();
     stats.execute("assert(eqoa.options.get('stats_box')==false);require('frontiers_forge.input').SetTextCaptureActive('chat',false)").unwrap();
-    // Search's native editor still receives its own F2/F4-style controls; the
-    // same key must not trigger a different VM's ordinary bound action.
-    tot.execute("other_hits=0;assert(eqoa.input.bind({id='editor_probe',default_key='f8'},function() other_hits=other_hits+1 end))").unwrap();
+    // Search's native editor still receives its own F2/F4-style controls; a key
+    // another VM has bound must not trigger that VM's ordinary bound action. The two
+    // VMs have different keys (a key two mods share does one thing, round 7), and
+    // the probe is really bound (its row has the key; it fires with no editor up).
+    tot.execute("other_hits=0;assert(eqoa.input.bind({id='editor_probe',default_key='y'},function() other_hits=other_hits+1 end));assert(eqoa.binds.get('editor_probe')=='y')").unwrap();
+    let y = Key::Character("y".into());
     stats
         .execute("assert(eqoa.input.capture_text(true))")
         .unwrap();
     input::route_mod_key(&f8, true, false, false, true, true);
+    input::route_mod_key(&y, true, false, false, true, true);
     native_events::dispatch(&stats).unwrap();
     native_events::dispatch(&tot).unwrap();
     stats.execute("assert(eqoa.options.get('stats_box')==true);assert(eqoa.input.capture_text(false));eqoa.options.set('stats_box',false)").unwrap();
-    tot.execute("assert(other_hits==0)").unwrap();
+    tot.execute("assert(other_hits==0, 'the editor owner has the keyboard')").unwrap();
+    input::route_mod_key(&y, true, false, false, true, false);
+    native_events::dispatch(&tot).unwrap();
+    tot.execute("assert(other_hits==1, 'the probe fires once no editor has the keyboard')").unwrap();
     for (repeat, synthetic, plain, keyboard) in [
         (false, false, false, false),
         (false, false, true, true),
@@ -1070,6 +1077,7 @@ fn fresh_hud_mod_load_defaults_and_live_stats_key_and_menu_wiring() {
             .execute("assert(eqoa.options.get('stats_box') == false)")
             .unwrap();
     }
+    crate::fork_ext::bindpage::reset_in_memory();
 }
 
 fn queued(id: &str) -> Vec<hud_layer::HudCommand> {

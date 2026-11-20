@@ -25,6 +25,11 @@ pub(super) struct Capture {
 }
 
 impl Capture {
+    /// Whether no key or button is held by anyone.
+    pub fn is_empty(&self) -> bool {
+        self.held.is_empty()
+    }
+
     pub fn press(&mut self, button: Button, wants_capture: bool) -> Owner {
         *self.held.entry(button).or_insert(if wants_capture {
             Owner::Addon

@@ -4756,7 +4756,7 @@ mod tests {
             r#"
             local r, err = eqoa.actions.assist()
             assert(r ~= nil and err == nil)
-            eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+            eqoa.input.bind({ id = "go", label = "Go", default_key = "u" }, function()
                 key_req, key_err = eqoa.actions.assist()
                 second_req, second_err = eqoa.actions.assist()
             end)
@@ -4766,7 +4766,7 @@ mod tests {
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
             )
         });
         native_events::dispatch(&host).unwrap();
@@ -4934,11 +4934,11 @@ mod tests {
                 local req, err = eqoa.actions.assist()
                 p_res[#p_res + 1] = { ok = req ~= nil, code = err and err.code }
             end)
-            eqoa.input.bind({ id = "b1", label = "Bind 1", default_key = "h" }, function()
+            eqoa.input.bind({ id = "b1", label = "Bind 1", default_key = "y" }, function()
                 local req, err = eqoa.actions.assist()
                 k_res[#k_res + 1] = { ok = req ~= nil, code = err and err.code }
             end)
-            eqoa.input.bind({ id = "b2", label = "Bind 2", default_key = "h" }, function()
+            eqoa.input.bind({ id = "b2", label = "Bind 2", default_key = "u" }, function()
                 local req, err = eqoa.actions.assist()
                 k_res[#k_res + 1] = { ok = req ~= nil, code = err and err.code }
             end)
@@ -4959,7 +4959,11 @@ mod tests {
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                json!({"key":"h","down":true,"repeat":false,"synthetic":false,"text":""}),
+                json!({"key":"y","down":true,"repeat":false,"synthetic":false,"text":""}),
+            );
+            c.borrow_mut().emit(
+                "input.key",
+                json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
             );
         });
         native_events::dispatch(&host).unwrap();
@@ -5333,7 +5337,7 @@ mod tests {
             bprog, bres = {}, {}
             eqoa.events.on("batch.progress", function(e) bprog[#bprog + 1] = e.data end)
             eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
-            eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+            eqoa.input.bind({ id = "go", label = "Go", default_key = "u" }, function()
                 if mode == "first" then
                     b1, err1 = eqoa.actions.batch({
                         { kind = "assist" },
@@ -5353,7 +5357,7 @@ mod tests {
             CORE.with(|c| {
                 c.borrow_mut().emit(
                     "input.key",
-                    json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                    json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
                 )
             });
             native_events::dispatch(&host).unwrap();
@@ -5451,7 +5455,7 @@ mod tests {
             r#"
             bres = {}
             eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
-            eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+            eqoa.input.bind({ id = "go", label = "Go", default_key = "u" }, function()
                 last_b, last_err = eqoa.actions.batch({
                     steps = {
                         { kind = "assist" },
@@ -5470,7 +5474,7 @@ mod tests {
             CORE.with(|c| {
                 c.borrow_mut().emit(
                     "input.key",
-                    json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                    json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
                 )
             });
             native_events::dispatch(&host).unwrap();

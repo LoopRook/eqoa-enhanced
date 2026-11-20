@@ -215,6 +215,8 @@ struct KeyRoute<'a> {
     down: bool,
     repeat: bool,
     synthetic: bool,
+    /// the key's own name by its place on the keyboard, where known
+    base: Option<&'static str>,
 }
 
 impl Runtime {
@@ -297,6 +299,7 @@ impl Runtime {
         self.error = None;
     }
     pub fn event(&mut self, window: &Window, event: &WindowEvent, plain_play: bool) -> bool {
+        super::input::observe_modifiers(event);
         let pointer_capture = super::pointer_api::observe(
             event,
             (window.inner_size().width, window.inner_size().height),
@@ -359,6 +362,10 @@ impl Runtime {
                     down: event.state.is_pressed(),
                     repeat: event.repeat,
                     synthetic: *is_synthetic,
+                    base: match event.physical_key {
+                        winit::keyboard::PhysicalKey::Code(code) => crate::binds::base_name(code),
+                        _ => None,
+                    },
                 },
                 plain_play,
                 keyboard,
@@ -399,6 +406,20 @@ impl Runtime {
         state: ElementState,
         plain_play: bool,
     ) -> bool {
+        self.scripted_key_based(id, logical, None, text, state, plain_play)
+    }
+
+    /// `scripted_key` with the key's own name by its place on the keyboard (`base`), as a
+    /// window key carries it.
+    pub(crate) fn scripted_key_based(
+        &mut self,
+        id: usize,
+        logical: &Key,
+        base: Option<&'static str>,
+        text: Option<&str>,
+        state: ElementState,
+        plain_play: bool,
+    ) -> bool {
         let down = state.is_pressed();
         let keyboard = match self.graphics.as_mut() {
             Some(Graphics::Managed(active)) => {
@@ -418,6 +439,7 @@ impl Runtime {
                 down,
                 repeat: false,
                 synthetic: false,
+                base,
             },
             plain_play,
             keyboard,
@@ -425,6 +447,14 @@ impl Runtime {
     }
 
     fn route_key(&mut self, event: KeyRoute<'_>, plain_play: bool, keyboard: bool) -> bool {
+        // No mod runs, nothing is held by one and no editor has the keyboard: the key is the
+        // game's alone, and nothing here has any work for it.
+        if self.capture.is_empty()
+            && !super::native_events::has_consumers()
+            && !super::input::is_text_capture_active()
+        {
+            return false;
+        }
         let code = super::input::logical_key_to_code(event.logical);
         if !event.synthetic
             && !event.repeat
@@ -432,8 +462,9 @@ impl Runtime {
         {
             super::input::record_key_event_only(code, event.down);
         }
-        super::input::route_mod_key(
+        super::input::route_mod_key_based(
             event.logical,
+            event.base,
             event.down,
             event.repeat,
             event.synthetic,

@@ -122,6 +122,7 @@ pub(crate) fn live_snapshot() -> InputSnapshot {
 pub(crate) fn focus(focused: bool) {
     FOCUSED.with(|f| f.set(focused));
     if !focused {
+        PRESSES.with(|c| c.borrow_mut().clear());
         INPUT_STATE.with(|s| {
             let mut state = s.borrow_mut();
             // Claims describe live VM intent, not a held physical key. The
@@ -155,6 +156,35 @@ pub fn reset_input_state() {
     INPUT_STATE.with(|s| {
         *s.borrow_mut() = InputState::default();
     });
+    set_modifiers((false, false, false));
+    set_super(false);
+    PRESSES.with(|c| c.borrow_mut().clear());
+}
+
+thread_local! {
+    /// Ctrl, Alt and Shift as the window last said them (`ModifiersChanged`).
+    static MODIFIERS: std::cell::Cell<(bool, bool, bool)> = const { std::cell::Cell::new((false, false, false)) };
+}
+
+pub(crate) fn set_modifiers(held: (bool, bool, bool)) {
+    MODIFIERS.with(|m| m.set(held));
+}
+
+thread_local! {
+    /// Super (Cmd) as the window last said it. The game names no combo with it
+    /// (`App::key_name`), so it is kept apart.
+    static SUPER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The names each key (by its own name) went down with, kept until it is let go,
+    /// as `App::key_name` keeps `key_names`: a release is named as its press was.
+    static PRESSES: RefCell<HashMap<String, Press>> = RefCell::new(HashMap::new());
+}
+
+pub(crate) fn set_super(held: bool) {
+    SUPER.with(|m| m.set(held));
+}
+
+pub(crate) fn modifiers() -> (bool, bool, bool) {
+    MODIFIERS.with(|m| m.get())
 }
 
 /// Routes a live logical key after native chat/menu and ImGui focus gating.
@@ -167,22 +197,144 @@ pub(crate) fn route_mod_key(
     plain_play: bool,
     keyboard: bool,
 ) {
-    let editor = is_text_capture_active();
-    if !synthetic && plain_play && (editor || (!repeat && !keyboard)) {
-        if let Some(name) = crate::binds::name_of(key) {
-            let text = if editor && down {
-                match key {
-                    Key::Character(s) => Some(s.to_string()),
-                    Key::Named(NamedKey::Space) => Some(" ".into()),
-                    _ => None,
-                }
-            } else {
-                None
-            };
-            super::native_core::defer(256 + text.as_ref().map_or(0, String::len), move |c| {
-                c.emit("input.key", serde_json::json!({"key":name,"down":down,"repeat":repeat,"synthetic":false,"text":text}));
-            });
+    route_mod_key_based(key, None, down, repeat, synthetic, plain_play, keyboard);
+}
+
+/// What a key press was named, at the press: the key as it typed (`key`), how mods name it
+/// (`combo`, the modifiers held written before the key) and the name the game acts on for
+/// the same press (`game`, as `App::key_name` works it out).
+#[derive(Clone)]
+struct Press {
+    key: String,
+    combo: String,
+    game: String,
+}
+
+impl Press {
+    /// A key with nothing known of its press: just the key.
+    fn plain(plain: &str) -> Press {
+        Press { key: plain.to_string(), combo: plain.to_string(), game: plain.to_string() }
+    }
+}
+
+/// The names of the press of a key that typed `plain` and is `own` by its place on the
+/// keyboard, from the modifiers held now. The game's name is `App::key_name`'s rule (viewer.rs)
+/// worked out from this press's own facts: the combo when the game has that combo bound, else
+/// `plain`, which the event's logical key gave, so it is right on any layout and for the
+/// numpad with NumLock off. Super is no modifier the game names.
+fn press_names(plain: &str, own: &str, editor: bool) -> Press {
+    let (ctrl, alt, shift) = modifiers();
+    let sup = SUPER.with(|m| m.get());
+    let held = ctrl || alt || shift;
+    let combo = if (held || sup) && !editor {
+        let named = crate::binds::combo_name(ctrl, alt, shift, own);
+        if sup { format!("super+{named}") } else { named }
+    } else {
+        plain.to_string()
+    };
+    let game = if held {
+        let named = crate::binds::combo_name(ctrl, alt, shift, own);
+        if crate::settings::with_binds(|b| b.combo_bound(&named)) { named } else { plain.to_string() }
+    } else {
+        plain.to_string()
+    };
+    Press { key: plain.to_string(), combo, game }
+}
+
+/// A key let go is forgotten, whoever had the keyboard when it went (a menu, an ImGui window):
+/// its press's names, if any were kept.
+fn take_press(key: &Key, base: Option<&'static str>) -> Option<Press> {
+    PRESSES.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.is_empty() {
+            return None;
         }
+        let own = match base {
+            Some(base) => base.to_string(),
+            None => crate::binds::name_of(key)?,
+        };
+        m.remove(&own)
+    })
+}
+
+/// `route_mod_key` with the key's own name by its place on the keyboard (`base`,
+/// `binds::base_name`), which the game's own naming of a modified press uses.
+pub(crate) fn route_mod_key_based(
+    key: &Key,
+    base: Option<&'static str>,
+    down: bool,
+    repeat: bool,
+    synthetic: bool,
+    plain_play: bool,
+    keyboard: bool,
+) {
+    let remembered = if down { None } else { take_press(key, base) };
+    // What a modified press typed, kept for the Controls page, where a capture has only the
+    // combo's name (`bindpage::learn`): only while a mod has a row there.
+    let (ctrl, alt, shift) = modifiers();
+    if down && !repeat && (ctrl || alt || shift) && crate::fork_ext::bindpage::has_rows() {
+        if let Some(typed) = crate::binds::name_of(key) {
+            let own: &str = match base {
+                Some(base) => base,
+                None => &typed,
+            };
+            crate::fork_ext::bindpage::learn(&crate::binds::combo_name(ctrl, alt, shift, own), &typed);
+        }
+    }
+    // Nothing is listening: no name made, no event built.
+    let editor = is_text_capture_active();
+    if !(editor || super::native_events::interested("input.key")) {
+        return;
+    }
+    if synthetic || !plain_play || !(editor || (!repeat && !keyboard)) {
+        return;
+    }
+    let Some(plain) = crate::binds::name_of(key) else {
+        return;
+    };
+    let text = if editor && down {
+        match key {
+            Key::Character(s) => Some(s.to_string()),
+            Key::Named(NamedKey::Space) => Some(" ".into()),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    // The names a press has, and a release or a repeat has its press's, as `App::key_name`
+    // keeps `key_names`.
+    let own: &str = match base {
+        Some(base) => base,
+        None => &plain,
+    };
+    let press = if !down {
+        remembered.unwrap_or_else(|| Press::plain(&plain))
+    } else if repeat {
+        PRESSES
+            .with(|m| m.borrow().get(own).cloned())
+            .unwrap_or_else(|| press_names(&plain, own, editor))
+    } else {
+        let press = press_names(&plain, own, editor);
+        PRESSES.with(|m| {
+            let mut m = m.borrow_mut();
+            if m.len() >= 64 {
+                m.clear();
+            }
+            m.insert(own.to_string(), press.clone());
+        });
+        press
+    };
+    super::native_core::defer(256 + text.as_ref().map_or(0, String::len), move |c| {
+        c.emit("input.key", serde_json::json!({"key":press.key,"combo":press.combo,"game_key":press.game,"down":down,"repeat":repeat,"synthetic":false,"text":text}));
+    });
+}
+
+/// Keeps the modifiers the window last said (`ModifiersChanged`).
+pub(crate) fn observe_modifiers(event: &winit::event::WindowEvent) {
+    if let winit::event::WindowEvent::ModifiersChanged(m) = event {
+        let s = m.state();
+        set_modifiers((s.control_key(), s.alt_key(), s.shift_key()));
+        set_super(s.super_key());
     }
 }
 
@@ -1283,4 +1435,9 @@ pub(crate) fn testing_text_capture(active: bool) {
             s.text_capture_owners.remove("test");
         }
     });
+}
+
+#[cfg(test)]
+pub(crate) fn testing_key_ring_len() -> usize {
+    INPUT_STATE.with(|s| s.borrow().key_events.len())
 }

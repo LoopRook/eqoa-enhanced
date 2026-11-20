@@ -1353,7 +1353,14 @@ fn install_math(lua: &Lua) -> Result<()> {
                         let down = data.get::<Option<bool>>("down")?.unwrap_or(false);
                         let rep = data.get::<Option<bool>>("repeat")?.unwrap_or(false);
                         let synthetic = data.get::<Option<bool>>("synthetic")?.unwrap_or(false);
-                        let key = data.get::<Option<String>>("key")?.unwrap_or_default();
+                        // The press as the game names it: the modifiers held written
+                        // before the key (`combo`); a bare event is just its key.
+                        let key = match data.get::<Option<String>>("combo")? {
+                            Some(combo) => combo,
+                            None => data.get::<Option<String>>("key")?.unwrap_or_default(),
+                        };
+                        // and the name the game acts on for the same press (`game_key`)
+                        let game_key = data.get::<Option<String>>("game_key")?.unwrap_or_else(|| key.clone());
                         if down
                             && !rep
                             && !synthetic
@@ -1361,9 +1368,12 @@ fn install_math(lua: &Lua) -> Result<()> {
                         {
                             let bound =
                                 crate::fork_ext::bindpage::get_key(&addon_for_cb, &id_for_cb);
+                            // One press does one thing: a key the game, a macro or
+                            // a winning mod has is not this binding's (round 7).
                             if bound.is_some_and(|bound| {
                                 !bound.is_empty() && key.eq_ignore_ascii_case(&bound)
-                            }) {
+                            }) && crate::fork_ext::bindpage::fires(&addon_for_cb, &id_for_cb, &key, &game_key)
+                            {
                                 super::gesture::arm_mod_key(vm_for_cb);
                                 cb.call::<()>(ev)?;
                             }

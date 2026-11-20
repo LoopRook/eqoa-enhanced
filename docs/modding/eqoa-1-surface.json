@@ -4506,10 +4506,26 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.input.key.data.combo",
+      "reason": null,
+      "revision": 1,
+      "round": 7,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.input.key.data.down",
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.input.key.data.game_key",
+      "reason": null,
+      "revision": 1,
+      "round": 7,
       "status": "supported"
     },
     {
