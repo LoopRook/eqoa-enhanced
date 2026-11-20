@@ -42,7 +42,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.bank_move` | supported | 6 |  |
 | `eqoa.actions.batch` | supported | 6 |  |
 | `eqoa.actions.batch_status` | supported | 6 |  |
-| `eqoa.actions.buttons` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 6) |
+| `eqoa.actions.buttons` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 8) |
 | `eqoa.actions.buy` | supported | 6 |  |
 | `eqoa.actions.camera` | supported | 6 |  |
 | `eqoa.actions.cancel` | supported | 6 |  |
@@ -58,7 +58,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.follow` | supported | 6 |  |
 | `eqoa.actions.input_text` | supported | 6 |  |
 | `eqoa.actions.interact` | supported | 6 |  |
-| `eqoa.actions.look` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 6) |
+| `eqoa.actions.look` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 8) |
 | `eqoa.actions.loot` | supported | 6 |  |
 | `eqoa.actions.loot_all` | supported | 6 |  |
 | `eqoa.actions.mastery_browse` | supported | 6 |  |
@@ -66,7 +66,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.mastery_refund` | supported | 6 |  |
 | `eqoa.actions.mastery_share` | supported | 6 |  |
 | `eqoa.actions.menu_command` | supported | 6 |  |
-| `eqoa.actions.move` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 6) |
+| `eqoa.actions.move` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 8) |
 | `eqoa.actions.open_loot` | supported | 6 |  |
 | `eqoa.actions.open_window` | supported | 6 |  |
 | `eqoa.actions.prepare_weapon_set` | supported | 6 |  |
@@ -379,14 +379,14 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 |---|---|---|---|
 | `eqoa.map` | partial | 4 |  |
 | `eqoa.map.clear_guide` | supported | 4 |  |
-| `eqoa.map.clear_waypoint` | not_yet | 7 | approved in the round 7 plan (Part A); use eqoa.map.set_guide meanwhile |
+| `eqoa.map.clear_waypoint` | supported | 7 |  |
 | `eqoa.map.get` | supported | 4 |  |
 | `eqoa.map.images` | unsupported |  | replaced by eqoa.map.view |
 | `eqoa.map.load_image` | unsupported |  | replaced by eqoa.map.view |
 | `eqoa.map.markers` | supported | 4 |  |
 | `eqoa.map.open` | supported | 4 |  |
 | `eqoa.map.set_guide` | supported | 4 |  |
-| `eqoa.map.set_waypoint` | not_yet | 7 | approved in the round 7 plan (Part A); use eqoa.map.set_guide meanwhile |
+| `eqoa.map.set_waypoint` | supported | 7 |  |
 | `eqoa.map.view` | supported | 4 |  |
 
 ## eqoa.mastery
@@ -500,7 +500,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | Path | Status | Since round | Reason |
 |---|---|---|---|
 | `eqoa.textures` | supported | 2 |  |
-| `eqoa.textures.formats.jpeg` | not_yet | 4 | JPEG decoding is planned in the mod API plan (map and media API); use PNG or RGBA meanwhile |
+| `eqoa.textures.formats.jpeg` | unsupported |  | the client decodes PNG only; convert JPEG to PNG or pass RGBA pixels |
 | `eqoa.textures.formats.png` | supported | 2 |  |
 | `eqoa.textures.formats.rgba` | supported | 2 |  |
 | `eqoa.textures.load` | supported | 2 |  |
@@ -586,7 +586,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.Error.capability` | supported | 2 |  |
 | `eqoa.Error.code` | supported | 2 |  |
 | `eqoa.Error.message` | supported | 2 |  |
-| `eqoa.Error.retry_after` | supported | 2 |  |
+| `eqoa.Error.retry_after` | unsupported |  | no refusal in this client knows how long to wait: rate_limited and quota carry no wait |
 | `eqoa.Vec2` | supported | 2 |  |
 | `eqoa.Vec2.x` | supported | 2 |  |
 | `eqoa.Vec2.y` | supported | 2 |  |
@@ -634,7 +634,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.BatchResult.completed` | supported | 6 | BatchResult field |
 | `eqoa.actions.BatchResult.completed_tick` | supported | 6 | BatchResult field |
 | `eqoa.actions.BatchResult.current_step` | supported | 6 | BatchResult field |
-| `eqoa.actions.BatchResult.detail` | supported | 6 | BatchResult field |
+| `eqoa.actions.BatchResult.detail` | unsupported |  | a batch reports what each step did in that step's action.result |
 | `eqoa.actions.BatchResult.failed_step` | supported | 6 | BatchResult field |
 | `eqoa.actions.BatchResult.ok` | supported | 6 | BatchResult field |
 | `eqoa.actions.BatchResult.queued_tick` | supported | 6 | BatchResult field |
@@ -752,7 +752,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.batch.progress.data.completed` | supported | 6 |  |
 | `eqoa.events.batch.progress.data.completed_tick` | supported | 6 |  |
 | `eqoa.events.batch.progress.data.current_step` | supported | 6 |  |
-| `eqoa.events.batch.progress.data.detail` | supported | 6 |  |
+| `eqoa.events.batch.progress.data.detail` | unsupported |  | a batch reports what each step did in that step's action.result |
 | `eqoa.events.batch.progress.data.failed_step` | supported | 6 |  |
 | `eqoa.events.batch.progress.data.ok` | supported | 6 |  |
 | `eqoa.events.batch.progress.data.queued_tick` | supported | 6 |  |
@@ -764,7 +764,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.batch.result.data.completed` | supported | 6 |  |
 | `eqoa.events.batch.result.data.completed_tick` | supported | 6 |  |
 | `eqoa.events.batch.result.data.current_step` | supported | 6 |  |
-| `eqoa.events.batch.result.data.detail` | supported | 6 |  |
+| `eqoa.events.batch.result.data.detail` | unsupported |  | a batch reports what each step did in that step's action.result |
 | `eqoa.events.batch.result.data.failed_step` | supported | 6 |  |
 | `eqoa.events.batch.result.data.ok` | supported | 6 |  |
 | `eqoa.events.batch.result.data.queued_tick` | supported | 6 |  |
@@ -809,14 +809,12 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.effects.changed.data.before` | supported | 2 |  |
 | `eqoa.events.effects.changed.data.changed` | supported | 2 |  |
 | `eqoa.events.entity.added.data.after` | supported | 2 |  |
-| `eqoa.events.entity.added.data.before` | supported | 2 |  |
 | `eqoa.events.entity.added.data.changed` | supported | 2 |  |
 | `eqoa.events.entity.added.data.ref` | supported | 2 |  |
 | `eqoa.events.entity.changed.data.after` | supported | 2 |  |
 | `eqoa.events.entity.changed.data.before` | supported | 2 |  |
 | `eqoa.events.entity.changed.data.changed` | supported | 2 |  |
 | `eqoa.events.entity.changed.data.ref` | supported | 2 |  |
-| `eqoa.events.entity.removed.data.after` | supported | 2 |  |
 | `eqoa.events.entity.removed.data.before` | supported | 2 |  |
 | `eqoa.events.entity.removed.data.changed` | supported | 2 |  |
 | `eqoa.events.entity.removed.data.ref` | supported | 2 |  |
@@ -868,10 +866,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.player.changed.data.changed` | supported | 2 |  |
 | `eqoa.events.pointer.pressed.data.button` | supported | 4 |  |
 | `eqoa.events.pointer.pressed.data.inside_window` | supported | 4 |  |
-| `eqoa.events.pointer.pressed.data.steps` | supported | 4 |  |
 | `eqoa.events.pointer.pressed.data.x` | supported | 4 |  |
 | `eqoa.events.pointer.pressed.data.y` | supported | 4 |  |
-| `eqoa.events.pointer.wheel.data.button` | supported | 4 |  |
 | `eqoa.events.pointer.wheel.data.inside_window` | supported | 4 |  |
 | `eqoa.events.pointer.wheel.data.steps` | supported | 4 |  |
 | `eqoa.events.pointer.wheel.data.x` | supported | 4 |  |
@@ -883,10 +879,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.resource.failed.data.error` | supported | 2 |  |
 | `eqoa.events.resource.failed.data.handle` | supported | 2 |  |
 | `eqoa.events.resource.failed.data.kind` | supported | 2 |  |
-| `eqoa.events.resource.failed.data.path` | supported | 2 |  |
 | `eqoa.events.resource.failed.data.request` | supported | 2 |  |
-| `eqoa.events.resource.failed.data.value` | supported | 2 |  |
-| `eqoa.events.resource.ready.data.error` | supported | 2 |  |
 | `eqoa.events.resource.ready.data.handle` | supported | 2 |  |
 | `eqoa.events.resource.ready.data.kind` | supported | 2 |  |
 | `eqoa.events.resource.ready.data.path` | supported | 2 |  |
@@ -1332,14 +1325,14 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `ImGui.BeginChild` | supported | 2 |  |
 | `ImGui.BeginCombo` | supported | 2 |  |
 | `ImGui.BeginGroup` | supported | 2 |  |
-| `ImGui.BeginItemTooltip` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.BeginItemTooltip` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.BeginMainMenuBar` | supported | 2 |  |
 | `ImGui.BeginMenu` | supported | 2 |  |
 | `ImGui.BeginMenuBar` | supported | 2 |  |
 | `ImGui.BeginPopup` | supported | 2 |  |
 | `ImGui.BeginTabBar` | supported | 2 |  |
 | `ImGui.BeginTabItem` | supported | 2 |  |
-| `ImGui.BeginTooltip` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.BeginTooltip` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.BulletText` | supported | 2 |  |
 | `ImGui.Button` | supported | 2 |  |
 | `ImGui.CalcTextSize` | supported | 2 |  |
@@ -1359,19 +1352,19 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `ImGui.EndPopup` | supported | 2 |  |
 | `ImGui.EndTabBar` | supported | 2 |  |
 | `ImGui.EndTabItem` | supported | 2 |  |
-| `ImGui.EndTooltip` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.EndTooltip` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.GetBackgroundDrawList` | supported | 2 |  |
 | `ImGui.GetColorU32` | supported | 2 |  |
 | `ImGui.GetContentRegionAvail` | supported | 2 |  |
 | `ImGui.GetCursorPos` | supported | 2 |  |
 | `ImGui.GetCursorScreenPos` | supported | 2 |  |
 | `ImGui.GetDisplaySize` | supported | 2 |  |
-| `ImGui.GetForegroundDrawList` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.GetForegroundDrawList` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.GetFrameHeight` | supported | 2 |  |
-| `ImGui.GetMouseDragDelta` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
-| `ImGui.GetMousePos` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
-| `ImGui.GetMousePosOnOpeningCurrentPopup` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
-| `ImGui.GetMouseWheel` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.GetMouseDragDelta` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.GetMousePos` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.GetMousePosOnOpeningCurrentPopup` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.GetMouseWheel` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `ImGui.GetScrollMaxY` | supported | 2 |  |
 | `ImGui.GetScrollY` | supported | 2 |  |
 | `ImGui.GetTextLineHeight` | supported | 2 |  |
@@ -1387,13 +1380,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `ImGui.InvisibleButton` | supported | 2 |  |
 | `ImGui.IsItemActive` | supported | 2 |  |
 | `ImGui.IsItemHovered` | supported | 2 |  |
-| `ImGui.IsMouseClicked` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
-| `ImGui.IsMouseDoubleClicked` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
-| `ImGui.IsMouseDown` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.IsMouseClicked` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.IsMouseDoubleClicked` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.IsMouseDown` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `ImGui.IsMouseDragging` | supported | 2 |  |
 | `ImGui.IsMouseHoveringRect` | supported | 2 |  |
-| `ImGui.IsMousePosValid` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
-| `ImGui.IsMouseReleased` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.IsMousePosValid` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.IsMouseReleased` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `ImGui.IsWindowFocused` | supported | 2 |  |
 | `ImGui.IsWindowHovered` | supported | 2 |  |
 | `ImGui.MenuItem` | supported | 2 |  |
@@ -1401,36 +1394,36 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `ImGui.PopClipRect` | supported | 2 |  |
 | `ImGui.PopFont` | supported | 2 |  |
 | `ImGui.PopID` | supported | 2 |  |
-| `ImGui.PopItemWidth` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.PopItemWidth` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.PopStyleColor` | supported | 2 |  |
-| `ImGui.PopStyleVar` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.PopStyleVar` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.PopTextWrapPos` | supported | 2 |  |
 | `ImGui.ProgressBar` | supported | 2 |  |
 | `ImGui.PushClipRect` | supported | 2 |  |
 | `ImGui.PushFont` | supported | 2 |  |
 | `ImGui.PushID` | supported | 2 |  |
-| `ImGui.PushItemWidth` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.PushItemWidth` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.PushStyleColor` | supported | 2 |  |
-| `ImGui.PushStyleVar` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.PushStyleVar` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.PushTextWrapPos` | supported | 2 |  |
 | `ImGui.RadioButton` | supported | 2 |  |
-| `ImGui.ResetMouseDragDelta` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.ResetMouseDragDelta` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `ImGui.SameLine` | supported | 2 |  |
 | `ImGui.Selectable` | supported | 2 |  |
 | `ImGui.Separator` | supported | 2 |  |
 | `ImGui.SetCursorPos` | supported | 2 |  |
 | `ImGui.SetCursorScreenPos` | supported | 2 |  |
 | `ImGui.SetKeyboardFocusHere` | supported | 2 |  |
-| `ImGui.SetMouseCursor` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
-| `ImGui.SetMousePos` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.SetMouseCursor` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.SetMousePos` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `ImGui.SetNextItemWidth` | supported | 2 |  |
-| `ImGui.SetNextWindowFocus` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.SetNextWindowFocus` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.SetNextWindowPos` | supported | 2 |  |
 | `ImGui.SetNextWindowSize` | supported | 2 |  |
 | `ImGui.SetScrollHereY` | supported | 2 |  |
 | `ImGui.SetScrollY` | supported | 2 |  |
 | `ImGui.SetTooltip` | supported | 2 |  |
-| `ImGui.SetWindowFocus` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `ImGui.SetWindowFocus` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.SetWindowFontScale` | supported | 2 |  |
 | `ImGui.SetWindowPos` | supported | 2 |  |
 | `ImGui.SliderFloat` | supported | 2 |  |
@@ -1450,14 +1443,14 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.imgui.BeginChild` | supported | 2 |  |
 | `eqoa.imgui.BeginCombo` | supported | 2 |  |
 | `eqoa.imgui.BeginGroup` | supported | 2 |  |
-| `eqoa.imgui.BeginItemTooltip` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.BeginItemTooltip` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.BeginMainMenuBar` | supported | 2 |  |
 | `eqoa.imgui.BeginMenu` | supported | 2 |  |
 | `eqoa.imgui.BeginMenuBar` | supported | 2 |  |
 | `eqoa.imgui.BeginPopup` | supported | 2 |  |
 | `eqoa.imgui.BeginTabBar` | supported | 2 |  |
 | `eqoa.imgui.BeginTabItem` | supported | 2 |  |
-| `eqoa.imgui.BeginTooltip` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.BeginTooltip` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.BulletText` | supported | 2 |  |
 | `eqoa.imgui.Button` | supported | 2 |  |
 | `eqoa.imgui.CalcTextSize` | supported | 2 |  |
@@ -1477,19 +1470,19 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.imgui.EndPopup` | supported | 2 |  |
 | `eqoa.imgui.EndTabBar` | supported | 2 |  |
 | `eqoa.imgui.EndTabItem` | supported | 2 |  |
-| `eqoa.imgui.EndTooltip` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.EndTooltip` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.GetBackgroundDrawList` | supported | 2 |  |
 | `eqoa.imgui.GetColorU32` | supported | 2 |  |
 | `eqoa.imgui.GetContentRegionAvail` | supported | 2 |  |
 | `eqoa.imgui.GetCursorPos` | supported | 2 |  |
 | `eqoa.imgui.GetCursorScreenPos` | supported | 2 |  |
 | `eqoa.imgui.GetDisplaySize` | supported | 2 |  |
-| `eqoa.imgui.GetForegroundDrawList` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.GetForegroundDrawList` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.GetFrameHeight` | supported | 2 |  |
-| `eqoa.imgui.GetMouseDragDelta` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
-| `eqoa.imgui.GetMousePos` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
-| `eqoa.imgui.GetMousePosOnOpeningCurrentPopup` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
-| `eqoa.imgui.GetMouseWheel` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.GetMouseDragDelta` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.GetMousePos` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.GetMousePosOnOpeningCurrentPopup` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.GetMouseWheel` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `eqoa.imgui.GetScrollMaxY` | supported | 2 |  |
 | `eqoa.imgui.GetScrollY` | supported | 2 |  |
 | `eqoa.imgui.GetTextLineHeight` | supported | 2 |  |
@@ -1505,13 +1498,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.imgui.InvisibleButton` | supported | 2 |  |
 | `eqoa.imgui.IsItemActive` | supported | 2 |  |
 | `eqoa.imgui.IsItemHovered` | supported | 2 |  |
-| `eqoa.imgui.IsMouseClicked` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
-| `eqoa.imgui.IsMouseDoubleClicked` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
-| `eqoa.imgui.IsMouseDown` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.IsMouseClicked` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.IsMouseDoubleClicked` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.IsMouseDown` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `eqoa.imgui.IsMouseDragging` | supported | 2 |  |
 | `eqoa.imgui.IsMouseHoveringRect` | supported | 2 |  |
-| `eqoa.imgui.IsMousePosValid` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
-| `eqoa.imgui.IsMouseReleased` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.IsMousePosValid` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.IsMouseReleased` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `eqoa.imgui.IsWindowFocused` | supported | 2 |  |
 | `eqoa.imgui.IsWindowHovered` | supported | 2 |  |
 | `eqoa.imgui.MenuItem` | supported | 2 |  |
@@ -1519,36 +1512,36 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.imgui.PopClipRect` | supported | 2 |  |
 | `eqoa.imgui.PopFont` | supported | 2 |  |
 | `eqoa.imgui.PopID` | supported | 2 |  |
-| `eqoa.imgui.PopItemWidth` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.PopItemWidth` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.PopStyleColor` | supported | 2 |  |
-| `eqoa.imgui.PopStyleVar` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.PopStyleVar` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.PopTextWrapPos` | supported | 2 |  |
 | `eqoa.imgui.ProgressBar` | supported | 2 |  |
 | `eqoa.imgui.PushClipRect` | supported | 2 |  |
 | `eqoa.imgui.PushFont` | supported | 2 |  |
 | `eqoa.imgui.PushID` | supported | 2 |  |
-| `eqoa.imgui.PushItemWidth` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.PushItemWidth` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.PushStyleColor` | supported | 2 |  |
-| `eqoa.imgui.PushStyleVar` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.PushStyleVar` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.PushTextWrapPos` | supported | 2 |  |
 | `eqoa.imgui.RadioButton` | supported | 2 |  |
-| `eqoa.imgui.ResetMouseDragDelta` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.ResetMouseDragDelta` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `eqoa.imgui.SameLine` | supported | 2 |  |
 | `eqoa.imgui.Selectable` | supported | 2 |  |
 | `eqoa.imgui.Separator` | supported | 2 |  |
 | `eqoa.imgui.SetCursorPos` | supported | 2 |  |
 | `eqoa.imgui.SetCursorScreenPos` | supported | 2 |  |
 | `eqoa.imgui.SetKeyboardFocusHere` | supported | 2 |  |
-| `eqoa.imgui.SetMouseCursor` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
-| `eqoa.imgui.SetMousePos` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.SetMouseCursor` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.SetMousePos` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
 | `eqoa.imgui.SetNextItemWidth` | supported | 2 |  |
-| `eqoa.imgui.SetNextWindowFocus` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.SetNextWindowFocus` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.SetNextWindowPos` | supported | 2 |  |
 | `eqoa.imgui.SetNextWindowSize` | supported | 2 |  |
 | `eqoa.imgui.SetScrollHereY` | supported | 2 |  |
 | `eqoa.imgui.SetScrollY` | supported | 2 |  |
 | `eqoa.imgui.SetTooltip` | supported | 2 |  |
-| `eqoa.imgui.SetWindowFocus` | not_yet | 4 | planned for the mod API plan's round 4 map and ImGui additions |
+| `eqoa.imgui.SetWindowFocus` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.SetWindowFontScale` | supported | 2 |  |
 | `eqoa.imgui.SetWindowPos` | supported | 2 |  |
 | `eqoa.imgui.SliderFloat` | supported | 2 |  |
@@ -1597,7 +1590,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 
 ## Forge compatibility
 
-Each module lists its member count and every entry whose status is not `supported`.
+Forge compatibility is listed by presence, not verified per function; it is not part of the `eqoa/1` promise. Each module lists its member count and every entry whose status is not `supported`.
 
 ### frontiers_forge.ability
 

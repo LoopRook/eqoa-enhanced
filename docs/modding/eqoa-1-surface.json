@@ -162,10 +162,10 @@
     {
       "children": [],
       "path": "ImGui.BeginItemTooltip",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -218,10 +218,10 @@
     {
       "children": [],
       "path": "ImGui.BeginTooltip",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -378,10 +378,10 @@
     {
       "children": [],
       "path": "ImGui.EndTooltip",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -434,10 +434,10 @@
     {
       "children": [],
       "path": "ImGui.GetForegroundDrawList",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -450,34 +450,34 @@
     {
       "children": [],
       "path": "ImGui.GetMouseDragDelta",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "ImGui.GetMousePos",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "ImGui.GetMousePosOnOpeningCurrentPopup",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "ImGui.GetMouseWheel",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -602,26 +602,26 @@
     {
       "children": [],
       "path": "ImGui.IsMouseClicked",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "ImGui.IsMouseDoubleClicked",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "ImGui.IsMouseDown",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -642,18 +642,18 @@
     {
       "children": [],
       "path": "ImGui.IsMousePosValid",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "ImGui.IsMouseReleased",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -714,10 +714,10 @@
     {
       "children": [],
       "path": "ImGui.PopItemWidth",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -730,10 +730,10 @@
     {
       "children": [],
       "path": "ImGui.PopStyleVar",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -778,10 +778,10 @@
     {
       "children": [],
       "path": "ImGui.PushItemWidth",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -794,10 +794,10 @@
     {
       "children": [],
       "path": "ImGui.PushStyleVar",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -818,10 +818,10 @@
     {
       "children": [],
       "path": "ImGui.ResetMouseDragDelta",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -874,18 +874,18 @@
     {
       "children": [],
       "path": "ImGui.SetMouseCursor",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "ImGui.SetMousePos",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -898,10 +898,10 @@
     {
       "children": [],
       "path": "ImGui.SetNextWindowFocus",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -946,10 +946,10 @@
     {
       "children": [],
       "path": "ImGui.SetWindowFocus",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -1277,10 +1277,10 @@
     {
       "children": [],
       "path": "eqoa.Error.retry_after",
-      "reason": null,
-      "revision": 1,
-      "round": 2,
-      "status": "supported"
+      "reason": "no refusal in this client knows how long to wait: rate_limited and quota carry no wait",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [
@@ -1957,10 +1957,10 @@
     {
       "children": [],
       "path": "eqoa.actions.BatchResult.detail",
-      "reason": "BatchResult field",
-      "revision": 1,
-      "round": 6,
-      "status": "supported"
+      "reason": "a batch reports what each step did in that step's action.result",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -2101,7 +2101,7 @@
     {
       "children": [],
       "path": "eqoa.actions.buttons",
-      "reason": "continuous controls come after the upstream PR (mod API plan, round 6)",
+      "reason": "continuous controls come after the upstream PR (mod API plan, round 8)",
       "revision": 0,
       "round": 6,
       "status": "not_yet"
@@ -2229,7 +2229,7 @@
     {
       "children": [],
       "path": "eqoa.actions.look",
-      "reason": "continuous controls come after the upstream PR (mod API plan, round 6)",
+      "reason": "continuous controls come after the upstream PR (mod API plan, round 8)",
       "revision": 0,
       "round": 6,
       "status": "not_yet"
@@ -2293,7 +2293,7 @@
     {
       "children": [],
       "path": "eqoa.actions.move",
-      "reason": "continuous controls come after the upstream PR (mod API plan, round 6)",
+      "reason": "continuous controls come after the upstream PR (mod API plan, round 8)",
       "revision": 0,
       "round": 6,
       "status": "not_yet"
@@ -3817,10 +3817,10 @@
     {
       "children": [],
       "path": "eqoa.events.batch.progress.data.detail",
-      "reason": null,
-      "revision": 1,
-      "round": 6,
-      "status": "supported"
+      "reason": "a batch reports what each step did in that step's action.result",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -3921,10 +3921,10 @@
     {
       "children": [],
       "path": "eqoa.events.batch.result.data.detail",
-      "reason": null,
-      "revision": 1,
-      "round": 6,
-      "status": "supported"
+      "reason": "a batch reports what each step did in that step's action.result",
+      "revision": 0,
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -4368,14 +4368,6 @@
     },
     {
       "children": [],
-      "path": "eqoa.events.entity.added.data.before",
-      "reason": null,
-      "revision": 1,
-      "round": 2,
-      "status": "supported"
-    },
-    {
-      "children": [],
       "path": "eqoa.events.entity.added.data.changed",
       "reason": null,
       "revision": 1,
@@ -4433,14 +4425,6 @@
     {
       "children": [],
       "path": "eqoa.events.entity.removed",
-      "reason": null,
-      "revision": 1,
-      "round": 2,
-      "status": "supported"
-    },
-    {
-      "children": [],
-      "path": "eqoa.events.entity.removed.data.after",
       "reason": null,
       "revision": 1,
       "round": 2,
@@ -5000,14 +4984,6 @@
     },
     {
       "children": [],
-      "path": "eqoa.events.pointer.pressed.data.steps",
-      "reason": null,
-      "revision": 1,
-      "round": 4,
-      "status": "supported"
-    },
-    {
-      "children": [],
       "path": "eqoa.events.pointer.pressed.data.x",
       "reason": null,
       "revision": 1,
@@ -5025,14 +5001,6 @@
     {
       "children": [],
       "path": "eqoa.events.pointer.wheel",
-      "reason": null,
-      "revision": 1,
-      "round": 4,
-      "status": "supported"
-    },
-    {
-      "children": [],
-      "path": "eqoa.events.pointer.wheel.data.button",
       "reason": null,
       "revision": 1,
       "round": 4,
@@ -5152,14 +5120,6 @@
     },
     {
       "children": [],
-      "path": "eqoa.events.resource.failed.data.path",
-      "reason": null,
-      "revision": 1,
-      "round": 2,
-      "status": "supported"
-    },
-    {
-      "children": [],
       "path": "eqoa.events.resource.failed.data.request",
       "reason": null,
       "revision": 1,
@@ -5168,23 +5128,7 @@
     },
     {
       "children": [],
-      "path": "eqoa.events.resource.failed.data.value",
-      "reason": null,
-      "revision": 1,
-      "round": 2,
-      "status": "supported"
-    },
-    {
-      "children": [],
       "path": "eqoa.events.resource.ready",
-      "reason": null,
-      "revision": 1,
-      "round": 2,
-      "status": "supported"
-    },
-    {
-      "children": [],
-      "path": "eqoa.events.resource.ready.data.error",
       "reason": null,
       "revision": 1,
       "round": 2,
@@ -6824,10 +6768,10 @@
     {
       "children": [],
       "path": "eqoa.imgui.BeginItemTooltip",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -6880,10 +6824,10 @@
     {
       "children": [],
       "path": "eqoa.imgui.BeginTooltip",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -7040,10 +6984,10 @@
     {
       "children": [],
       "path": "eqoa.imgui.EndTooltip",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -7096,10 +7040,10 @@
     {
       "children": [],
       "path": "eqoa.imgui.GetForegroundDrawList",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -7112,34 +7056,34 @@
     {
       "children": [],
       "path": "eqoa.imgui.GetMouseDragDelta",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "eqoa.imgui.GetMousePos",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "eqoa.imgui.GetMousePosOnOpeningCurrentPopup",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "eqoa.imgui.GetMouseWheel",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -7264,26 +7208,26 @@
     {
       "children": [],
       "path": "eqoa.imgui.IsMouseClicked",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "eqoa.imgui.IsMouseDoubleClicked",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "eqoa.imgui.IsMouseDown",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -7304,18 +7248,18 @@
     {
       "children": [],
       "path": "eqoa.imgui.IsMousePosValid",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "eqoa.imgui.IsMouseReleased",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -7376,10 +7320,10 @@
     {
       "children": [],
       "path": "eqoa.imgui.PopItemWidth",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -7392,10 +7336,10 @@
     {
       "children": [],
       "path": "eqoa.imgui.PopStyleVar",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -7440,10 +7384,10 @@
     {
       "children": [],
       "path": "eqoa.imgui.PushItemWidth",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -7456,10 +7400,10 @@
     {
       "children": [],
       "path": "eqoa.imgui.PushStyleVar",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -7480,10 +7424,10 @@
     {
       "children": [],
       "path": "eqoa.imgui.ResetMouseDragDelta",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -7536,18 +7480,18 @@
     {
       "children": [],
       "path": "eqoa.imgui.SetMouseCursor",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
       "path": "eqoa.imgui.SetMousePos",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -7560,10 +7504,10 @@
     {
       "children": [],
       "path": "eqoa.imgui.SetNextWindowFocus",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -7608,10 +7552,10 @@
     {
       "children": [],
       "path": "eqoa.imgui.SetWindowFocus",
-      "reason": "planned for the mod API plan's round 4 map and ImGui additions",
+      "reason": "not part of the ImGui bridge in eqoa/1",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
@@ -9756,10 +9700,10 @@
     {
       "children": [],
       "path": "eqoa.map.clear_waypoint",
-      "reason": "approved in the round 7 plan (Part A); use eqoa.map.set_guide meanwhile",
-      "revision": 0,
+      "reason": null,
+      "revision": 1,
       "round": 7,
-      "status": "not_yet"
+      "status": "supported"
     },
     {
       "children": [],
@@ -9812,10 +9756,10 @@
     {
       "children": [],
       "path": "eqoa.map.set_waypoint",
-      "reason": "approved in the round 7 plan (Part A); use eqoa.map.set_guide meanwhile",
-      "revision": 0,
+      "reason": null,
+      "revision": 1,
       "round": 7,
-      "status": "not_yet"
+      "status": "supported"
     },
     {
       "children": [],
@@ -11545,10 +11489,10 @@
     {
       "children": [],
       "path": "eqoa.textures.formats.jpeg",
-      "reason": "JPEG decoding is planned in the mod API plan (map and media API); use PNG or RGBA meanwhile",
+      "reason": "the client decodes PNG only; convert JPEG to PNG or pass RGBA pixels",
       "revision": 0,
-      "round": 4,
-      "status": "not_yet"
+      "round": null,
+      "status": "unsupported"
     },
     {
       "children": [],
