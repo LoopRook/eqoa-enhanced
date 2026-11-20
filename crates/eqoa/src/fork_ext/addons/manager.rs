@@ -938,7 +938,14 @@ impl Manager {
             Some(old) if old.allows(&new) => return requested,
             // A bundled package exactly as a release of this client shipped it carries that release's own
             // grants: re-adopted silently, the player's choice kept (fix round 3 item 5).
-            Some(_) if crate::fork_ext::bundled::is_shipped_package(&addon.id, &addon.package_root) => {
+            Some(_)
+                if crate::fork_ext::bundled::is_shipped_package(
+                    &addon.id,
+                    &addon.package_root,
+                    &self.root,
+                    &addon.entry,
+                ) =>
+            {
                 (true, Some(new))
             }
             // The player's off stays off: its new labels show, with nothing to accept (fix round 3 item 4a).

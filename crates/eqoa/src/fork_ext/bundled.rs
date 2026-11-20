@@ -768,20 +768,87 @@ fn shipped_hashes(file: &BundledFile) -> BTreeSet<String> {
     hashes
 }
 
-/// Whether `root` holds bundled `package` as a release of this client shipped it: the folder and the id both
-/// name the bundled package, and every file this build embeds for it hashes to a shipped version of that file
-/// (`shipped_hashes`: this build's bytes and earlier releases'). A player-edited or third-party copy is not.
-pub fn is_shipped_package(package: &str, root: &Path) -> bool {
-    if !PACKAGES.contains(&package) || root.file_name().and_then(|n| n.to_str()) != Some(package) {
+/// Whether `root` is bundled `package` exactly as this client installs it (fix round 4 item 1), the only
+/// package whose wider grants are re-adopted silently: (a) `root` is, as canonical paths, the bundled install
+/// location `<install_root>/<package>` (where `install_bundled_mods` writes; the manager scans the same
+/// folder); (b) the files under it, at any depth, are exactly the files this build embeds for the package,
+/// none extra and none missing, each byte for byte this build's; (c) the manifest discovery reads there
+/// (`manifest.json` before `mod.json`) and the entry it chose are among them. Anything else is not.
+pub fn is_shipped_package(package: &str, root: &Path, install_root: &Path, entry: &Path) -> bool {
+    if !PACKAGES.contains(&package) {
         return false;
     }
-    let Some(mods_dir) = root.parent() else { return false };
-    let mut files = EMBEDDED_FILES.iter().filter(|f| f.package == package).peekable();
-    files.peek().is_some()
-        && files.all(|file| {
-            matches!(read_bounded(&mods_dir.join(file.path), MAX_BUNDLE_FILE_BYTES),
-                Ok(Some(bytes)) if shipped_hashes(file).contains(&hash(&bytes)))
+    let (Ok(root), Ok(expected)) = (root.canonicalize(), install_root.join(package).canonicalize()) else {
+        return false;
+    };
+    if root != expected || no_links(&root).is_err() {
+        return false;
+    }
+    let prefix = format!("{package}/");
+    let shipped: BTreeMap<&str, &BundledFile> = EMBEDDED_FILES
+        .iter()
+        .filter(|f| f.package == package)
+        .filter_map(|f| f.path.strip_prefix(prefix.as_str()).map(|rel| (rel, f)))
+        .collect();
+    let Some(found) = package_files(&root, shipped.len()) else {
+        return false;
+    };
+    if shipped.is_empty()
+        || found.len() != shipped.len()
+        || !found.iter().all(|rel| shipped.contains_key(rel.as_str()))
+        || !shipped.iter().all(|(rel, file)| {
+            matches!(read_bounded(&root.join(rel), MAX_BUNDLE_FILE_BYTES), Ok(Some(bytes)) if bytes == file.data)
         })
+    {
+        return false;
+    }
+    let manifest = ["manifest.json", "mod.json"].into_iter().find(|name| root.join(name).is_file());
+    let entry = entry.canonicalize().ok().and_then(|entry| relative(&root, &entry));
+    manifest.is_none_or(|name| shipped.contains_key(name))
+        && entry.is_some_and(|rel| shipped.contains_key(rel.as_str()))
+}
+
+/// `path` under `root` as a `/`-joined relative path.
+fn relative(root: &Path, path: &Path) -> Option<String> {
+    let parts = path
+        .strip_prefix(root)
+        .ok()?
+        .components()
+        .map(|c| c.as_os_str().to_str())
+        .collect::<Option<Vec<_>>>()?;
+    Some(parts.join("/"))
+}
+
+/// Every file under `root` at any depth, as relative paths; none for a link or anything but files and
+/// folders, or once there are more than `limit`.
+fn package_files(root: &Path, limit: usize) -> Option<BTreeSet<String>> {
+    let mut files = BTreeSet::new();
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for entry in fs::read_dir(&dir).ok()? {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            let meta = fs::symlink_metadata(&path).ok()?;
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                if meta.file_attributes() & 0x400 != 0 {
+                    return None;
+                }
+            }
+            if meta.file_type().is_dir() {
+                dirs.push(path);
+            } else if meta.file_type().is_file() {
+                files.insert(relative(root, &path)?);
+                if files.len() > limit {
+                    return None;
+                }
+            } else {
+                return None;
+            }
+        }
+    }
+    Some(files)
 }
 
 /// Update installed packages, complete first installs, remember package deletions.
