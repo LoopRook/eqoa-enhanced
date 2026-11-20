@@ -1844,3 +1844,17 @@ fn change_event_before_and_after_are_built_only_when_read() {
     h.execute("assert(added.data.before == nil and added.data.after.name == 'Fox')").unwrap();
     assert!(!h.drain_logs().unwrap().iter().any(|s| s.contains("data.before")), "an absent `before` is not a missing field");
 }
+
+#[test]
+fn round7c_only_payload_free_events_can_have_a_nil_record() {
+    let host = Host::new().unwrap();
+    install_field_check(&host).unwrap();
+    host.execute(
+        r#"
+        local issues = field_issues('TestFixture.EmptyRecord', nil)
+        assert(#issues == 1 and issues[1]:find('did not produce a record', 1, true),
+            'an ordinary record must be a table even without declared fields')
+        event_fields({enabled={}}, {'enabled'})
+        "#,
+    ).unwrap();
+}

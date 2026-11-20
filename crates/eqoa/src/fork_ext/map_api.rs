@@ -210,6 +210,12 @@ pub(crate) fn use_real_ui(on: bool) -> bool {
 
 #[cfg(test)]
 impl Map {
+    pub(crate) fn round7c_add_calibrated_world(&mut self, index: i32) {
+        let mut world = crate::map::testing::up(self.size).world.expect("calibrated fixture");
+        world.index = index;
+        self.home = Some(world);
+    }
+
     /// Disc-free native chrome/round-minimap scene used behind addon captures.
     /// No terrain art is fabricated; tiles remain absent without a disc.
     pub(crate) fn round4_fixture(

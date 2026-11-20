@@ -375,12 +375,7 @@ fn round7c_no_planned_row_names_a_closed_round_or_part() {
     });
 }
 
-#[test]
-fn round7c_every_refusing_member_reports_its_status_through_its_call() {
-    super::big_stack(|| {
-        reference_host(|host| {
-            host.execute(
-                r#"
+const INSPECT_REFUSALS: &str = r#"
                 local function member(path)
                     local module, name = path:match('^(frontiers_forge%.[%w_]+)%.([%w_]+)$')
                     if module then
@@ -398,13 +393,15 @@ fn round7c_every_refusing_member_reports_its_status_through_its_call() {
                     end
                     return v
                 end
-                local issues, checked = {}, 0
+                function inspect_refusals(invoke)
+                local issues, checked, names = {}, 0, {}
                 for _, row in ipairs(eqoa.capabilities.list('')) do
                     local fn = (row.status == 'not_yet' or row.status == 'unsupported')
                         and not row.path:find(':', 1, true) and member(row.path)
                     if type(fn) == 'function' then
                         checked = checked + 1
-                        local r = {pcall(fn)}
+                        names[#names + 1] = row.path
+                        local r = {invoke(row.path, fn)}
                         local value, second = r[2], r[3]
                         if not r[1] then
                             issues[#issues + 1] = row.path .. ' raised ' .. tostring(value)
@@ -425,14 +422,53 @@ fn round7c_every_refusing_member_reports_its_status_through_its_call() {
                         end
                     end
                 end
+                return issues, checked, names
+                end
+"#;
+
+#[test]
+fn round7c_every_refusing_member_reports_its_status_through_its_call() {
+    super::big_stack(|| {
+        reference_host(|host| {
+            host.execute(INSPECT_REFUSALS).unwrap();
+            host.execute(
+                r#"
+                local issues, checked, names = inspect_refusals(function(_, fn) return pcall(fn) end)
+                round7c_refusing_paths = table.concat(names, ' ')
                 assert(checked >= 30, 'only ' .. checked .. ' refusing members found')
                 assert(#issues == 0, table.concat(issues, '\n'))
                 round7c_checked = checked
                 "#,
-            )
-            .unwrap();
+            ).unwrap();
             let checked: u32 = host.lua.globals().get("round7c_checked").unwrap();
-            eprintln!("round7c refusing members checked through their call: {checked}");
+            let paths: String = host.lua.globals().get("round7c_refusing_paths").unwrap();
+            eprintln!("round7c refusing members checked through their call: {checked} {paths}");
+        });
+    });
+}
+
+#[test]
+fn round7c_refusal_checker_detects_wrong_codes_and_missing_values() {
+    super::big_stack(|| {
+        reference_host(|host| {
+            host.execute(INSPECT_REFUSALS).unwrap();
+            host.execute(
+                r#"
+                local issues = inspect_refusals(function(path, fn)
+                    if path == 'eqoa.actions.destroy' then
+                        local _, second = fn()
+                        return true, nil, {code='permission_denied', message=second.message}
+                    end
+                    if path == 'eqoa.map.images' then return true, nil end
+                    if path == 'frontiers_forge.chat.CaptureChannelTypeFromGameWindow' then
+                        local _, reason = fn()
+                        return true, nil, reason
+                    end
+                    return pcall(fn)
+                end)
+                assert(#issues == 3, 'expected three malformed returns to be caught; found ' .. #issues)
+                "#,
+            ).unwrap();
         });
     });
 }

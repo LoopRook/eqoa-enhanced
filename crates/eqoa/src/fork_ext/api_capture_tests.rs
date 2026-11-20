@@ -3476,3 +3476,129 @@ fn round7w_dialog_prompt_kind_capability_is_supported() {
     )
     .unwrap();
 }
+
+#[test]
+fn round7c_waypoint_writes_require_a_grant() {
+    use crate::fork_ext::addons::action_broker;
+    action_broker::reset_all_for_test();
+    let mut p = ready();
+    p.map = crate::map::testing::up((640, 448));
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
+    p.forge_snapshot(None);
+    host.execute(r#"
+        local req, err = eqoa.map.set_waypoint{world_id=0, x=25300, z=15200}
+        assert(req == nil and err.code == 'permission_denied', 'set requires eqoa.map.waypoint')
+        req, err = eqoa.map.clear_waypoint()
+        assert(req == nil and err.code == 'permission_denied', 'clear requires eqoa.map.waypoint')
+    "#).unwrap();
+    p.bags_broker_tick();
+    assert_eq!(p.map.waypoint(0), None);
+}
+
+#[test]
+fn round7c_waypoint_checks_the_addressed_native_ground_at_dispatch() {
+    use crate::fork_ext::addons::{action_broker, map_waypoint};
+    action_broker::reset_all_for_test();
+    map_waypoint::reset_for_test();
+    let mut p = ready();
+    p.map = crate::map::testing::up((640, 448));
+    let host = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+    p.forge_snapshot(None);
+    let set = |p: &mut Play, lua_point: &str| {
+        host.execute(&format!("req, err = eqoa.map.set_waypoint{lua_point}")).unwrap();
+        p.bags_broker_tick();
+        host.lua.load(r#"
+            if err then return err.code end
+            local r = assert(eqoa.actions.status(req))
+            return r.code or r.state
+        "#).eval::<String>().unwrap()
+    };
+    assert_eq!(set(&mut p, "{world_id=0,x=25300,z=15200}"), "completed");
+    let good = p.map.waypoint(0);
+    assert_eq!(good, Some([25300., 15200.]));
+    for point in [
+        "{world_id=99,x=25300,z=15200}",
+        "{world_id=0,x=1000,z=15200}",
+        "{world_id=0,x=3.5e38,z=15200}",
+        "{world_id=0,x=0/0,z=15200}",
+    ] {
+        assert_eq!(set(&mut p, point), "invalid_argument", "{point}");
+        assert_eq!(p.map.waypoint(0), good, "{point} left the pin alone");
+        assert_eq!(p.map.waypoint(99), None);
+    }
+    p.map = Default::default();
+    assert_eq!(set(&mut p, "{world_id=0,x=25300,z=15200}"), "not_ready");
+    assert_eq!(p.map.waypoint(0), None);
+    map_waypoint::reset_for_test();
+}
+
+#[test]
+fn round7c_disable_clears_every_world_the_mod_still_owns() {
+    use crate::fork_ext::addons::{action_broker, map_waypoint};
+    action_broker::reset_all_for_test();
+    map_waypoint::reset_for_test();
+    let mut p = ready();
+    p.map = crate::map::testing::up((640, 448));
+    p.map.round7c_add_calibrated_world(1);
+    let host = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+    p.forge_snapshot(None);
+    for world in [0, 1] {
+        host.execute(&format!("assert(eqoa.map.set_waypoint{{world_id={world}, x=22000, z=15000}})")).unwrap();
+        p.bags_broker_tick();
+        assert_eq!(p.map.waypoint(world), Some([22000., 15000.]));
+    }
+    native_events::clear(&host);
+    p.bags_broker_tick();
+    assert_eq!(p.map.waypoint(0), None, "the earlier world's owned pin was cleared");
+    assert_eq!(p.map.waypoint(1), None, "the later world's owned pin was cleared");
+    map_waypoint::reset_for_test();
+}
+
+#[test]
+fn round7c_player_owns_a_pin_replaced_at_the_same_position() {
+    use crate::fork_ext::addons::{action_broker, map_waypoint};
+    action_broker::reset_all_for_test();
+    map_waypoint::reset_for_test();
+    let mut p = ready();
+    p.map = crate::map::testing::up((640, 448));
+    assert!(p.map.click([320., 224.], false));
+    let point = p.map.waypoint(0).unwrap();
+    assert!(p.map.click([320., 224.], false));
+    assert_eq!(p.map.waypoint(0), None);
+    let host = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+    p.forge_snapshot(None);
+    host.execute(&format!("assert(eqoa.map.set_waypoint{{world_id=0, x={}, z={}}})", point[0], point[1])).unwrap();
+    p.bags_broker_tick();
+    assert!(p.map.click([320., 224.], false));
+    assert_eq!(p.map.waypoint(0), None);
+    p.bags_broker_tick();
+    assert!(p.map.click([320., 224.], false));
+    native_events::clear(&host);
+    p.bags_broker_tick();
+    assert_eq!(p.map.waypoint(0), Some(point), "the replacement belongs to the player");
+    map_waypoint::reset_for_test();
+}
+
+#[test]
+fn round7c_other_mods_identical_pin_survives_disable_in_the_same_step() {
+    use crate::fork_ext::addons::{action_broker, map_waypoint};
+    action_broker::reset_all_for_test();
+    map_waypoint::reset_for_test();
+    let mut p = ready();
+    p.map = crate::map::testing::up((640, 448));
+    let first = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+    let second = Host::with_test_capabilities(&["eqoa.map.waypoint"]).unwrap();
+    p.forge_snapshot(None);
+    let set = "assert(eqoa.map.set_waypoint{world_id=0, x=22000, z=15000})";
+    first.execute(set).unwrap();
+    p.bags_broker_tick();
+    assert_eq!(p.map.waypoint(0), Some([22000., 15000.]));
+    second.execute(set).unwrap();
+    native_events::clear(&first);
+    p.bags_broker_tick();
+    assert_eq!(p.map.waypoint(0), Some([22000., 15000.]), "the second VM put this pin");
+    native_events::clear(&second);
+    p.bags_broker_tick();
+    assert_eq!(p.map.waypoint(0), None);
+    map_waypoint::reset_for_test();
+}

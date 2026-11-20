@@ -4308,3 +4308,107 @@ fn round7c_game_windows_switch_is_saved_and_stops_a_claimed_batch() {
     result.unwrap();
     assert_eq!(later_sends, 0, "no sale after the switch stopped the batch");
 }
+
+#[test]
+fn round7c_switch_stops_batch_that_reaches_a_claim_by_talking() {
+    use crate::fork_ext::addons::{action_broker, native_events, window_takeover};
+    for (claim, npc) in [("merchant", 9002), ("bank", 9003)] {
+        action_broker::reset_all_for_test();
+        window_takeover::reset_all_for_test();
+        let host = r65fix_host(&["eqoa.actions.*", "eqoa.windows.takeover"]);
+        let mut p = r65fix_world();
+        p.forge_snapshot(None);
+        host.execute(&format!(r#"
+            assert(eqoa.windows.takeover('{claim}'))
+            batch = assert(eqoa.actions.batch({{
+                {{kind='talk', entity_id={npc}}}, {{kind='chat', text='after'}}
+            }}))
+        "#)).unwrap();
+        p.bags_broker_tick();
+        assert_eq!(p.target, npc, "conversation used the resolved {claim}");
+        if claim == "merchant" {
+            apply(&mut p, opcode(0x00B7, shop_bytes(npc, 90, 110, &[sword()], "Hello")));
+        } else {
+            apply(&mut p, opcode(0x124D, vec![]));
+        }
+        native_events::dispatch(&host).unwrap();
+        host.execute("assert(eqoa.actions.status(batch).completed == 1, 'conversation confirmed')").unwrap();
+        window_takeover::set_use_game_windows(true);
+        p.bags_broker_tick();
+        native_events::dispatch(&host).unwrap();
+        host.execute(&format!(
+            "local r = eqoa.actions.status(batch); assert(r.state == 'stopped' and r.completed == 1, '{claim}: ' .. r.state)"
+        )).unwrap();
+    }
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+}
+
+fn round7c_sale_batch_for_switch() -> (Play, Host) {
+    use crate::fork_ext::addons::{action_broker, window_takeover};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    let mut p = ready();
+    p.session.conn = Some(usize::MAX);
+    let mut a = potion();
+    a.key = 101;
+    a.equip_slot = -1;
+    let mut b = gem();
+    b.key = 102;
+    b.equip_slot = -1;
+    p.dump.inventory = list(&[a, b]);
+    p.bags_open_merchant(88);
+    p.forge_snapshot(None);
+    let host = Host::with_test_capabilities(&["eqoa.actions.*", "eqoa.windows.takeover"]).unwrap();
+    host.execute(
+        r#"
+        results = {}
+        eqoa.events.on('batch.result', function(e) results[#results + 1] = e.data end)
+        assert(eqoa.windows.takeover('merchant'))
+        local inv = assert(eqoa.inventory.get())
+        batch = assert(eqoa.actions.batch({ steps = {
+            { kind = 'sell', item = inv.items[1].ref, count = 1 },
+            { kind = 'sell', item = inv.items[2].ref, count = 1 },
+        }, require_window = 'merchant' }))
+        "#,
+    ).unwrap();
+    (p, host)
+}
+
+#[test]
+fn round7c_switch_counts_an_already_sent_step_after_its_late_reply() {
+    use crate::fork_ext::addons::{native_events, window_takeover};
+    let (mut p, host) = round7c_sale_batch_for_switch();
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    assert!(p.npcw.shop.pending, "first sale sent");
+    window_takeover::set_use_game_windows(true);
+    p.bags_sell_confirm(0, 1);
+    native_events::dispatch(&host).unwrap();
+    let sent = p.session.sends_lost;
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    assert_eq!(p.session.sends_lost, sent, "the second sale never went out");
+    host.execute(r#"
+        local r = eqoa.actions.status(batch)
+        assert(r.state == 'stopped' and r.completed == 1, 'late success count: ' .. r.completed)
+        assert(#results == 1 and results[1].completed == 1, 'Bag Viewer receives the same count once')
+    "#).unwrap();
+    window_takeover::reset_all_for_test();
+}
+
+#[test]
+fn round7c_switch_discards_a_staged_unsent_step() {
+    use crate::fork_ext::addons::{native_events, window_takeover};
+    let (mut p, host) = round7c_sale_batch_for_switch();
+    super::super::begin_iteration(&mut p, true);
+    assert!(!p.npcw.shop.pending, "sale is staged only");
+    let sent = p.session.sends_lost;
+    window_takeover::set_use_game_windows(true);
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    assert!(!p.npcw.shop.pending, "the native merchant did not consume the discarded sale");
+    assert_eq!(p.session.sends_lost, sent, "the staged sale never went out");
+    host.execute("assert(#results == 1 and results[1].state == 'stopped' and results[1].completed == 0)").unwrap();
+    window_takeover::reset_all_for_test();
+}
