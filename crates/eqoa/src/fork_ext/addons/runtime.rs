@@ -847,6 +847,8 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
             let label = match kind {
                 "chat" => "chat (ordinary lines)",
                 "command" => "command (slash lines)",
+                // its own line (`TEXT_BOXES_LABEL`)
+                "input_text" => continue,
                 _ => kind,
             };
             if !label.is_empty() && !kinds.contains(&label) {
@@ -913,8 +915,14 @@ pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec
     if declares_dialog_actions(caps) {
         lines.push("Can answer NPC dialogs".into());
     }
+    if super::native::capability_grants(caps, "eqoa.actions.input_text") {
+        lines.push(TEXT_BOXES_LABEL.into());
+    }
     lines
 }
+
+/// What `eqoa.actions.input_text` grants, said plainly in Mods & Addons (fix round 4 item 3).
+pub(crate) const TEXT_BOXES_LABEL: &str = "Text boxes: can type into and submit the game's open text boxes";
 
 fn declares_dialog_actions(caps: &[String]) -> bool {
     super::window_actions::ANSWERS_DIALOGS

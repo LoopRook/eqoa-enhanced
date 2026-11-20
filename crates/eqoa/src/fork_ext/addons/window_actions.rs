@@ -301,15 +301,28 @@ pub(crate) fn install(lua: &Lua) -> Result<()> {
                     return Err(("out_of_range", "text must be at most 512 characters without NUL".into()));
                 }
                 let submit = submit.unwrap_or(false);
-                // A chat editor's line needs the grant for what it is, submitted now or left for the player to
-                // send; dispatch judges again from what the game will actually send then (a Who-list Tell).
-                if w["dialog"]["chat"] == true && !text.is_empty() {
-                    require_capability(lua, "eqoa.actions.input_text", super::chat::line_capability(&text))?;
-                }
                 let grants = super::action_broker::LineGrants {
                     chat: require_capability(lua, "eqoa.actions.input_text", "eqoa.actions.chat").is_ok(),
                     command: require_capability(lua, "eqoa.actions.input_text", "eqoa.actions.command").is_ok(),
                 };
+                // What the box sends decides what more it needs (`EDIT_BOXES`), submitted now or left for the
+                // player to send; dispatch judges again from the box and line open then.
+                let purpose = w["dialog"]["tag"].as_u64().and_then(|p| u32::try_from(p).ok()).unwrap_or(0);
+                match edit_box_need(purpose) {
+                    None => return Err(("unsupported", "this text box is not one a mod can fill".into())),
+                    Some(EditBoxNeed::Refused(code)) => {
+                        return Err((code, "this text box is never filled by a mod".into()));
+                    }
+                    Some(need) if !text.is_empty() && !edit_box_allows(need, grants, &text) => {
+                        let cap = match need {
+                            EditBoxNeed::Line => super::chat::line_capability(&text),
+                            EditBoxNeed::Chat => "eqoa.actions.chat",
+                            _ => "eqoa.actions.command",
+                        };
+                        require_capability(lua, "eqoa.actions.input_text", cap)?;
+                    }
+                    Some(_) => {}
+                }
                 Ok(ActionKind::InputText {
                     win,
                     text,
@@ -349,4 +362,58 @@ pub(crate) fn install(lua: &Lua) -> Result<()> {
         })?,
     )?;
     Ok(())
+}
+
+/// What a mod's `input_text` needs, on top of `eqoa.actions.input_text`, for the game's open edit box, judged
+/// by what the game does when the box is submitted (`Play::edit_done`, `mapsuggest::map_edit_done`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EditBoxNeed {
+    /// The box takes a player's or guild's name for a list or invitation: nothing more.
+    Name,
+    /// The chat editor: the grant for the line it sends (H1's rule; the Who list's Tell sends `/t <name> ...`).
+    Line,
+    /// It sends the text to a chat channel: `eqoa.actions.chat`.
+    Chat,
+    /// It runs the text as a command: `eqoa.actions.command`.
+    Command,
+    /// Never for a mod (the code it is refused with).
+    Refused(&'static str),
+}
+
+/// Every edit box a mod may type into, by purpose: (purpose, what the game sends on submit, need). One table
+/// (fix round 4 item 3); a GM command edit (`admin::is_command`) is `Command`, and any other purpose is
+/// refused `unsupported` (`edit_box_need`).
+pub(crate) const EDIT_BOXES: &[(u32, &str, EditBoxNeed)] = &[
+    (0x0B0F_0000, "the chat line typed (a slash line is a command); from the Who list's Tell, `/t <name> <text>`", EditBoxNeed::Line),
+    (0x0B04_0000, "a buddy request to the named player", EditBoxNeed::Name),
+    (0x0B05_1000, "a guild invitation to the named player", EditBoxNeed::Name),
+    (0x0B05_3001, "the named player added to the ignore list", EditBoxNeed::Name),
+    (0x0B05_3002, "the named player removed from the ignore list", EditBoxNeed::Name),
+    (0x0B05_1006, "Guild Say: the text to the guild channel", EditBoxNeed::Chat),
+    (0x0B05_100B, "the guild's message of the day, shown to every member", EditBoxNeed::Chat),
+    (0x0B05_1009, "Guild Create: a new guild under the typed name (the guild command)", EditBoxNeed::Command),
+    (0x0B0E_000A, "the text run as the /alarm command", EditBoxNeed::Command),
+    (0x0B0B_1002, "a player report carrying the chat log (a report route)", EditBoxNeed::Refused("permission_denied")),
+    (crate::map::community::NAME_PURPOSE, "a community map marker's name, for the player's own suggestion", EditBoxNeed::Refused("unsupported")),
+    (crate::map::community::NOTE_PURPOSE, "a community map marker's note, sent as the player's suggestion", EditBoxNeed::Refused("unsupported")),
+];
+
+/// The table's row for `purpose`, a GM command edit's, or none (refused `unsupported`).
+pub(crate) fn edit_box_need(purpose: u32) -> Option<EditBoxNeed> {
+    EDIT_BOXES
+        .iter()
+        .find(|(p, _, _)| *p == purpose)
+        .map(|(_, _, need)| *need)
+        .or_else(|| crate::admin::is_command(purpose).then_some(EditBoxNeed::Command))
+}
+
+/// Whether `grants` cover `text` typed into a box with `need` (`line`: the chat editor's effective line).
+pub(crate) fn edit_box_allows(need: EditBoxNeed, grants: super::action_broker::LineGrants, line: &str) -> bool {
+    match need {
+        EditBoxNeed::Name => true,
+        EditBoxNeed::Line => grants.allow(line),
+        EditBoxNeed::Chat => grants.chat,
+        EditBoxNeed::Command => grants.command,
+        EditBoxNeed::Refused(_) => false,
+    }
 }

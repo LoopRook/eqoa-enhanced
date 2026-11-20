@@ -529,3 +529,17 @@ fn round7c_refusal_checker_detects_wrong_codes_and_missing_values() {
         });
     });
 }
+
+/// Fix round 4 item 3: `eqoa.actions.input_text` is disclosed as what it is, on its own line.
+#[test]
+fn round7c_text_boxes_label_says_what_input_text_grants() {
+    let temp = TempDir::new("text-boxes");
+    package(&temp.0, "typist", json!({"capabilities": ["eqoa.actions.input_text", "eqoa.actions.chat"]}));
+    assert_eq!(
+        lines(&one(&temp.0)),
+        [
+            "Actions: can act on its own (chat (ordinary lines))",
+            "Text boxes: can type into and submit the game's open text boxes",
+        ]
+    );
+}

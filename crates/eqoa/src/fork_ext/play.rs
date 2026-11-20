@@ -3208,20 +3208,27 @@ fn dispatch_window_action(
             if crate::editbox::paste_chars(text, true) != *text {
                 return refuse("invalid_argument", "the text has characters the game's keyboard cannot type");
             }
-            // The line the game sends from this editor (`Play::edit_done`): the Who list's Tell sends
-            // `/t <name> <text>`, the chat editor the text itself. Judged now, submitted or left to send.
-            if !text.is_empty() && play.edit.purpose == 0x0B0F_0000 {
-                let line = match &play.who_tell {
-                    Some(name) => format!("/t {name} {text}"),
-                    None => text.clone(),
+            // What the open box sends on submit (`EDIT_BOXES`, `Play::edit_done`) decides what more it needs,
+            // judged now, submitted or left to send. The chat editor's line: the Who list's Tell sends
+            // `/t <name> <text>`, otherwise the text itself.
+            {
+                use crate::fork_ext::addons::window_actions::{EditBoxNeed, edit_box_allows, edit_box_need};
+                let need = match edit_box_need(play.edit.purpose) {
+                    None => return refuse("unsupported", "this text box is not one a mod can fill"),
+                    Some(EditBoxNeed::Refused(code)) => return refuse(code, "this text box is never filled by a mod"),
+                    Some(need) => need,
                 };
-                if !grants.allow(&line) {
+                let line = match (&play.who_tell, need) {
+                    (Some(name), EditBoxNeed::Line) => format!("/t {name} {text}"),
+                    _ => text.clone(),
+                };
+                if !text.is_empty() && !edit_box_allows(need, *grants, &line) {
                     return refuse(
                         "permission_denied",
-                        if line.starts_with('/') {
-                            "the editor would send a slash command: requires eqoa.actions.command"
-                        } else {
-                            "the editor would send chat: requires eqoa.actions.chat"
+                        match need {
+                            EditBoxNeed::Chat => "this box sends chat to a channel: requires eqoa.actions.chat",
+                            EditBoxNeed::Line if !line.starts_with('/') => "the editor would send chat: requires eqoa.actions.chat",
+                            _ => "this box sends a command: requires eqoa.actions.command",
                         },
                     );
                 }
