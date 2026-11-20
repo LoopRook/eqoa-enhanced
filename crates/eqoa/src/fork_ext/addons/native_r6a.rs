@@ -559,7 +559,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ("eqoa.windows.ButtonHint", "button label"),
         (
             "eqoa.windows.Dialog",
-            "kind text options selection tag title chat password style style_id",
+            "kind text options selection tag title chat password style style_id prompt_kind",
         ),
         (
             "eqoa.mastery.Mastery",

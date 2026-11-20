@@ -2835,3 +2835,305 @@ fn entity_updates_keep_the_list_right_through_removals_and_the_changed_keys_are_
     assert_eq!(changed(&json!([1]), &json!({"x": 1})), ["records"]);
     assert!(changed(&json!({"a": 1}), &json!({"a": 1})).is_empty());
 }
+
+struct Round7wResetFeatures;
+
+impl Drop for Round7wResetFeatures {
+    fn drop(&mut self) {
+        crate::live::set_features(crate::live::Features::default());
+    }
+}
+
+fn round7w_open(
+    p: &mut Play,
+    kind: &str,
+) -> crate::fork_ext::addons::action_broker::DispatchOutcome {
+    use crate::fork_ext::addons::action_broker::ActionKind;
+    dispatch_broker_action(
+        p,
+        &ActionKind::OpenWindow {
+            kind: kind.into(),
+            arg: 0,
+        },
+    )
+}
+
+fn round7w_assert_opens(p: &mut Play, kind: &str, mode: i32) {
+    use crate::fork_ext::addons::action_broker::DispatchOutcome;
+    p.mode = 0;
+    assert!(
+        matches!(round7w_open(p, kind), DispatchOutcome::Completed { .. }),
+        "{kind}"
+    );
+    assert_eq!(p.mode, mode, "{kind}");
+}
+
+#[test]
+fn round7w_auction_and_browse_open_the_auction() {
+    let _reset = Round7wResetFeatures;
+    let mut p = ready();
+    p.dump.bank.p78cc = true;
+    round7w_assert_opens(&mut p, "auction", 39);
+    round7w_assert_opens(&mut p, "auction_browse", 39);
+}
+
+#[test]
+fn round7w_auction_search_opens_the_search_form() {
+    let _reset = Round7wResetFeatures;
+    let mut p = ready();
+    crate::live::set_features(crate::live::Features(Some(crate::live::Features::AUCTION)));
+    round7w_assert_opens(&mut p, "auction_search", 39);
+}
+
+#[test]
+fn round7w_auction_requires_the_games_offer() {
+    use crate::fork_ext::addons::action_broker::DispatchOutcome;
+    let _reset = Round7wResetFeatures;
+    let mut p = ready();
+    for (bank, word) in [(false, None), (true, Some(0))] {
+        p.dump.bank.p78cc = bank;
+        crate::live::set_features(crate::live::Features(word));
+        for kind in ["auction", "auction_browse", "auction_search"] {
+            p.mode = 0;
+            let outcome = round7w_open(&mut p, kind);
+            assert!(
+                matches!(outcome, DispatchOutcome::Refused { code: "not_ready", reason } if !reason.is_empty()),
+                "{kind} bank={bank} word={word:?}: expected not_ready"
+            );
+            assert_eq!(p.mode, 0, "{kind} bank={bank} word={word:?}");
+        }
+    }
+}
+
+#[test]
+fn round7w_mail_opens_inbox_and_compose_opens_compose() {
+    let mut p = ready();
+    round7w_assert_opens(&mut p, "mail", 24);
+    round7w_assert_opens(&mut p, "mail_compose", 23);
+}
+
+#[test]
+fn round7w_tell_and_reply_open_their_own_forms() {
+    let mut p = ready();
+    begin_iteration(&mut p, false);
+    let host = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
+    for (kind, mode) in [("tell", 28), ("reply", 29)] {
+        p.mode = 0;
+        let code = format!(
+            "local id, err = eqoa.actions.open_window('{kind}'); assert(id ~= nil, tostring(err and (err.code .. ': ' .. err.message)))"
+        );
+        host.execute(&code).unwrap();
+        begin_iteration(&mut p, true);
+        assert_eq!(p.mode, mode, "{kind}");
+    }
+}
+
+#[test]
+fn round7w_who_opens_and_sends_the_list_request() {
+    let mut p = ready();
+    p.session.record = Some(Vec::new());
+    let expected = crate::wholist::Who::default().open();
+    round7w_assert_opens(&mut p, "who", 35);
+    assert_eq!(
+        p.session.record.as_deref(),
+        Some(&[(drdp::TYPE_GUARANTEED, expected)][..])
+    );
+    assert!(p.who.pending);
+}
+
+#[test]
+fn round7w_options_opens_from_manual_camera() {
+    use crate::fork_ext::addons::action_broker::DispatchOutcome;
+    let mut p = ready();
+    assert!(matches!(
+        round7w_open(&mut p, "options"),
+        DispatchOutcome::Refused { code: "not_ready", .. }
+    ));
+    assert_eq!(p.mode, 0);
+    p.bags_start_built();
+    p.mode = 38;
+    assert!(matches!(
+        round7w_open(&mut p, "options"),
+        DispatchOutcome::Completed { .. }
+    ));
+    assert_eq!(p.mode, 34);
+}
+
+#[test]
+fn round7w_search_uses_the_offered_servers_who_fallback() {
+    use crate::fork_ext::addons::action_broker::DispatchOutcome;
+    crate::s2::with_rules(crate::s2::Rules::retail(), || {
+        let mut p = ready();
+        assert!(matches!(
+            round7w_open(&mut p, "search"),
+            DispatchOutcome::Refused { code: "unsupported", .. }
+        ));
+        assert_eq!(p.mode, 0);
+    });
+    let rules = crate::s2::Rules {
+        player_search: true,
+        ..crate::s2::Rules::retail()
+    };
+    crate::s2::with_rules(rules, || {
+        let mut p = ready();
+        p.dump.player.level = 60;
+        p.session.record = Some(Vec::new());
+        round7w_assert_opens(&mut p, "search", 35);
+        assert!(p.search_mode && p.who.pending);
+        assert_eq!(
+            p.session.record.as_deref(),
+            Some(
+                &[(
+                    drdp::TYPE_GUARANTEED,
+                    crate::playersearch::search_levels(60)
+                )][..]
+            )
+        );
+    });
+}
+
+#[test]
+fn round7w_open_window_remaining_kinds_match_action_table() {
+    use crate::fork_ext::addons::action_broker::DispatchOutcome;
+    let mut p = ready();
+    p.bags_start_built();
+    p.guild.in_guild = true;
+
+    for (kind, mode) in [
+        ("summary", 12),
+        ("trainer", 12),
+        ("skills", 12),
+        ("abilities", 5),
+        ("spellbook", 5),
+        ("quests", 22),
+        ("mastery", 40),
+        ("factions", 41),
+        ("friends", 18),
+        ("buddies", 18),
+        ("ignore", 26),
+        ("guild", 21),
+        ("support", 31),
+        ("support_inbox", 32),
+        ("start", 13),
+        ("menu", 13),
+        ("inventory", 13),
+        ("bags", 13),
+    ] {
+        round7w_assert_opens(&mut p, kind, mode);
+    }
+
+    p.mode = 0;
+    p.map.open = false;
+    assert!(matches!(
+        round7w_open(&mut p, "map"),
+        DispatchOutcome::Completed { .. }
+    ));
+    assert!(p.map.open);
+
+    p.mode = 0;
+    p.craft_outs.clear();
+    assert!(matches!(
+        round7w_open(&mut p, "recipes"),
+        DispatchOutcome::Completed { .. }
+    ));
+    assert!(
+        p.craft_outs
+            .iter()
+            .any(|o| matches!(o, crate::craft::CraftOut::OpenRecipe(0)))
+    );
+
+    p.mode = 0;
+    p.craft_outs.clear();
+    assert!(matches!(
+        round7w_open(&mut p, "experiment"),
+        DispatchOutcome::Completed { .. }
+    ));
+    assert!(
+        p.craft_outs
+            .iter()
+            .any(|o| matches!(o, crate::craft::CraftOut::OpenExperiment))
+    );
+}
+
+#[test]
+fn round7w_window_capture_names_mercenary_and_dye_modes() {
+    let mut p = ready();
+    for (mode, name) in [
+        (61, "mercenary_items"),
+        (62, "mercenary_spells"),
+        (63, "dye_picker"),
+    ] {
+        p.mode = mode;
+        let view = api_capture::r6a::windows_json(&p);
+        assert_eq!(view["mode"], name, "mode {mode}");
+        assert_eq!(view["windows"][0]["kind"], name, "mode {mode}");
+    }
+}
+
+fn round7w_prompt(p: &Play, expected: &str) {
+    assert_eq!(p.mode, 14);
+    let view = api_capture::r6a::windows_json(p);
+    let dialog = &view["windows"][0]["dialog"];
+    assert_eq!(dialog["kind"], "confirm");
+    assert_eq!(dialog["style"], "yes_no");
+    assert_eq!(dialog["prompt_kind"], expected);
+}
+
+#[test]
+fn round7w_capture_names_group_invite() {
+    let mut p = ready();
+    p.show_invite("Alden");
+    round7w_prompt(&p, "group_invite");
+}
+
+#[test]
+fn round7w_capture_names_pet_dismiss() {
+    let mut p = ready();
+    p.pet_id = 1;
+    p.do_action(0x050E_0000, 0);
+    round7w_prompt(&p, "pet_dismiss");
+}
+
+#[test]
+fn round7w_capture_names_quit() {
+    let mut p = ready();
+    p.start_actions(vec![(0x0A01_0000, 0)]);
+    round7w_prompt(&p, "quit");
+}
+
+#[test]
+fn round7w_capture_names_guild() {
+    let mut p = ready();
+    p.guild.in_guild = true;
+    p.guild_action(0x0B05_1008, 0);
+    round7w_prompt(&p, "guild");
+}
+
+#[test]
+fn round7w_capture_names_report() {
+    let mut p = ready();
+    p.edit.text = crate::ui::wide("Example report");
+    p.edit_done(0x0B0B_1002);
+    round7w_prompt(&p, "report");
+}
+
+#[test]
+fn round7w_capture_uses_other_for_ambiguous_summon_prompts() {
+    let mut p = ready();
+    p.summon_prompt("Alden", 0);
+    round7w_prompt(&p, "other");
+    p.summon_prompt("Alden", 1);
+    round7w_prompt(&p, "other");
+}
+
+#[test]
+fn round7w_dialog_prompt_kind_capability_is_supported() {
+    let host = Host::with_test_capabilities(&[]).unwrap();
+    host.execute(
+        r#"
+        local cap = eqoa.capabilities.get("eqoa.windows.Dialog.prompt_kind")
+        assert(cap and cap.status == "supported", "Dialog.prompt_kind must be supported")
+        "#,
+    )
+    .unwrap();
+}

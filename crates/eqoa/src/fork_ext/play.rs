@@ -2012,7 +2012,15 @@ fn dispatch_broker_action(
                 "quests" => play.start_actions(vec![(0x0B0A_0000, 0)]),
                 "mastery" => play.start_actions(vec![(0x0208_0000, 0)]),
                 "factions" => play.start_actions(vec![(0xAA00_0001, 0)]),
-                "options" => play.open_options(),
+                "options" => {
+                    if play.start.is_none() || !play.hud_ready() {
+                        return DispatchOutcome::Refused {
+                            code: "not_ready",
+                            reason: "options UI assets not loaded".into(),
+                        };
+                    }
+                    play.start_actions(vec![(0x0B0D_0002, 0)]);
+                }
                 "friends" | "buddies" => play.start_actions(vec![(0x0B05_0000, 0)]),
                 "ignore" => play.start_actions(vec![(0x0B05_3000, 0)]),
                 "guild" => {
@@ -2024,30 +2032,32 @@ fn dispatch_broker_action(
                     }
                     play.do_action(0x0B05_1001, 0);
                 }
-                "mail" => play.start_actions(vec![(0x0B0B_0000, 0)]),
-                "mail_compose" => play.start_actions(vec![(0x0B0B_0002, 0)]),
-                "auction" | "auction_browse" => play.start_actions(vec![(0x0B0D_0000, 0)]),
-                "auction_search" => play.start_actions(vec![(0x0B0D_0001, 0)]),
+                "mail" => play.start_actions(vec![(0x0B0B_0002, 0)]),
+                "mail_compose" => play.start_actions(vec![(0x0B0B_0000, 0)]),
+                "tell" => play.start_actions(vec![(0x0B0D_0000, 0)]),
+                "reply" => play.start_actions(vec![(0x0B0D_0001, 0)]),
+                "auction" | "auction_browse" | "auction_search" => {
+                    if !crate::live::features().auction(play.dump.bank.p78cc) {
+                        return DispatchOutcome::Refused {
+                            code: "not_ready",
+                            reason: "auction is not offered by the current server or bank".into(),
+                        };
+                    }
+                    play.do_action(0xA801_0000, 0);
+                }
                 "support" => play.start_actions(vec![(0x0B0B_1000, 0)]),
                 "support_inbox" => play.start_actions(vec![(0x0B0B_1001, 0)]),
                 "recipes" => play.start_actions(vec![(0xA701_0000, *arg)]),
                 "experiment" => play.start_actions(vec![(0xA702_0000, 0)]),
-                "who" => {
-                    play.search_mode = false;
-                    play.who_open = true;
-                    play.mode = 35;
-                }
+                "who" => play.do_action(0x0B03_0004, 0),
                 "search" => {
-                    let Some(art) = crate::searchwnd::Art::current() else {
+                    if !crate::s2::get().player_search {
                         return DispatchOutcome::Refused {
-                            code: "not_ready",
-                            reason: "search UI assets not loaded".into(),
+                            code: "unsupported",
+                            reason: "server does not offer player search".into(),
                         };
-                    };
-                    play.search.open(play.dump.player.level as i32, art);
-                    play.search_mode = false;
-                    play.who_open = true;
-                    play.mode = 35;
+                    }
+                    play.do_action(0xFF00_0001, 0);
                 }
                 "start" | "menu" => {
                     if play.start.is_none() {
