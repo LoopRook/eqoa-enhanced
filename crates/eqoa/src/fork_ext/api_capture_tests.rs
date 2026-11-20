@@ -3620,6 +3620,7 @@ fn round7c_disabled_mods_pin_does_not_return_after_a_logout() {
     assert_eq!(a.map.waypoint(0), Some([22000., 15000.]));
     native_events::clear(&host);
     drop(a);
+    assert!(crate::settings::waypoints().is_empty(), "cleared when the world closed");
     let mut b = ready();
     b.map = crate::map::testing::up((640, 448));
     b.forge_snapshot(None);
