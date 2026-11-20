@@ -149,7 +149,7 @@ impl Disclosure {
     }
 
     fn from_json(value: &Json) -> Option<Self> {
-        let strings = |key: &str| {
+        let strings = |key: &str| -> Option<Vec<String>> {
             value[key].as_array()?.iter().map(|value| value.as_str().map(str::to_owned)).collect()
         };
         Some(Self {
