@@ -234,7 +234,7 @@ mod tests {
         testing::reset(false);
         bindpage::reset_in_memory();
         bindpage::register("eqoa_stats_box", "toggle", "b", "Toggle Stats Box");
-        assert!(bindpage::set_key("eqoa_stats_box", "toggle", "f8"));
+        assert!(bindpage::set_key("eqoa_stats_box", "toggle", "f10"));
         bindpage::register("third_party", "open", "f11", "Open");
         assert!(bindpage::set_key("third_party", "open", "f12"));
         let mut native = binds();
@@ -269,7 +269,7 @@ mod tests {
         bindpage::register("third_party", "open", "f11", "Open");
         assert_eq!(
             bindpage::get_key("eqoa_stats_box", "toggle").as_deref(),
-            Some("f8")
+            Some("f10")
         );
         assert_eq!(
             bindpage::get_key("third_party", "open").as_deref(),
@@ -279,7 +279,7 @@ mod tests {
         assert_eq!(bindpage::dispatch_keypress("b"), None);
         assert_eq!(bindpage::dispatch_keypress("f11"), None);
         assert_eq!(
-            bindpage::dispatch_keypress("f8"),
+            bindpage::dispatch_keypress("f10"),
             Some(("eqoa_stats_box".into(), "toggle".into()))
         );
         std::fs::remove_dir_all(root).unwrap();

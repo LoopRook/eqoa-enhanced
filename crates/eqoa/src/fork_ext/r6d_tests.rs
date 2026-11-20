@@ -32,7 +32,7 @@ fn rig() -> (Play, Host) {
         r#"
         results = {}
         eqoa.events.on("action.result", function(e) results[#results + 1] = e.data end)
-        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "u" }, function()
             called = true
             last_req, last_err = next_fn()
         end)
@@ -46,7 +46,7 @@ fn press_k(host: &Host) {
     CORE.with(|c| {
         c.borrow_mut().emit(
             "input.key",
-            serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+            serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
         )
     });
     native_events::dispatch(host).unwrap();

@@ -1837,7 +1837,7 @@ fn round6b_items_use_equip_swap_quick_slot_and_stale_handles() {
         eqoa.events.on("action.result", function(e)
             results[#results + 1] = e.data
         end)
-        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "u" }, function()
             last_req, last_err = next_fn()
         end)
         local inv = assert(eqoa.inventory.get())
@@ -1854,7 +1854,7 @@ fn round6b_items_use_equip_swap_quick_slot_and_stale_handles() {
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
             )
         });
         native_events::dispatch(&host).unwrap();
@@ -1959,7 +1959,7 @@ fn round6b_merchant_buy_sell_bank_move_bank_money_and_loot() {
         eqoa.events.on("action.result", function(e)
             results[#results + 1] = e.data
         end)
-        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "u" }, function()
             last_req, last_err = next_fn()
         end)
         local inv = assert(eqoa.inventory.get())
@@ -1978,7 +1978,7 @@ fn round6b_merchant_buy_sell_bank_move_bank_money_and_loot() {
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
             )
         });
         native_events::dispatch(&host).unwrap();
@@ -2136,7 +2136,7 @@ fn round6b_transactions_route_through_native_consumers_and_camera_hook() {
         eqoa.events.on("action.result", function(e)
             results[#results + 1] = e.data
         end)
-        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "u" }, function()
             last_req, last_err = next_fn()
         end)
         local inv = assert(eqoa.inventory.get())
@@ -2156,7 +2156,7 @@ fn round6b_transactions_route_through_native_consumers_and_camera_hook() {
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
             )
         });
         native_events::dispatch(&host).unwrap();
@@ -2287,7 +2287,7 @@ fn round6c_no_false_confirmations_unrelated_invadd_or_corpse_close() {
         eqoa.events.on("action.result", function(e) ares[#ares + 1] = e.data end)
         eqoa.events.on("batch.progress", function(e) bprog[#bprog + 1] = e.data end)
         eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
-        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "u" }, function()
             last_batch, last_err = eqoa.actions.batch(spec_fn())
         end)
         local inv = assert(eqoa.inventory.get())
@@ -2334,7 +2334,7 @@ fn round6c_no_false_confirmations_unrelated_invadd_or_corpse_close() {
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
             )
         });
         native_events::dispatch(&host).unwrap();
@@ -2443,7 +2443,7 @@ fn round6c_contention_retains_staged_deposit_and_never_confirms_on_player_reply(
         ares, bres = {}, {}
         eqoa.events.on("action.result", function(e) ares[#ares + 1] = e.data end)
         eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
-        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "u" }, function()
             last_req, last_err = next_fn()
         end)
         local inv = assert(eqoa.inventory.get())
@@ -2457,7 +2457,7 @@ fn round6c_contention_retains_staged_deposit_and_never_confirms_on_player_reply(
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
             )
         });
         native_events::dispatch(&host).unwrap();
@@ -2579,7 +2579,7 @@ fn round6c_loot_partial_decrease_and_noop_loot_all_yield_unknown_and_stop_batch(
         ares, bres = {}, {}
         eqoa.events.on("action.result", function(e) ares[#ares + 1] = e.data end)
         eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
-        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "u" }, function()
             last_batch, last_err = eqoa.actions.batch(spec_fn())
         end)
         local l = assert(eqoa.loot.get())
@@ -2593,7 +2593,7 @@ fn round6c_loot_partial_decrease_and_noop_loot_all_yield_unknown_and_stop_batch(
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+                serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
             )
         });
         native_events::dispatch(&host).unwrap();
@@ -2650,7 +2650,7 @@ fn r6f3_host() -> Host {
         ares, bres = {}, {}
         eqoa.events.on("action.result", function(e) ares[#ares + 1] = e.data end)
         eqoa.events.on("batch.result", function(e) bres[#bres + 1] = e.data end)
-        eqoa.input.bind({ id = "go", label = "Go", default_key = "k" }, function()
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "u" }, function()
             last_req, last_err = next_fn()
         end)
     "#,
@@ -2665,7 +2665,7 @@ fn r6f3_press(host: &Host, code: &str) {
     CORE.with(|c| {
         c.borrow_mut().emit(
             "input.key",
-            serde_json::json!({"key":"k","down":true,"repeat":false,"synthetic":false,"text":""}),
+            serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
         )
     });
     native_events::dispatch(host).unwrap();
