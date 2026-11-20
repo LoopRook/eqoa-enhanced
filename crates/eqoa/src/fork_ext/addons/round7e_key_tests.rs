@@ -395,20 +395,9 @@ fn press_key(rt: &mut Runtime, mods: (bool, bool, bool), key: &Key, hosts: &[&Ho
     input::set_modifiers(NONE);
 }
 
-/// What the game does with a key pressed with `mods` held: the name `App::key_name`
-/// gives it (a combo where a row or a macro is on that, else the key's own), through
-/// the real key dispatch.
+/// What the game does with a key pressed with `mods` held (see `GameKeys`).
 fn game_sends(mods: (bool, bool, bool), key: &Key) -> Option<Sent> {
-    let plain = binds::name_of(key).unwrap();
-    let game = settings::binds();
-    let (c, a, s) = mods;
-    let name = if c || a || s {
-        let combo = binds::combo_name(c, a, s, &plain);
-        if game.combo_bound(&combo) { combo } else { plain }
-    } else {
-        plain
-    };
-    KeyEdge::default().key(&name, true, false, false, &game)
+    GameKeys::new().press(mods, key, None)
 }
 
 fn mod_key_of(addon: &str) -> String {
@@ -793,4 +782,224 @@ fn round7e_h3_save_changes_keeps_a_swap() {
     s.cancel();
     assert_eq!(mod_key_of("alpha"), "space");
     assert_eq!(settings::binds().key(jump), Some("b"));
+}
+
+// ---- fix round 2 ------------------------------------------------------------------------
+
+/// The game's own naming of a key (`App::key_name`, viewer.rs), written out branch by branch,
+/// and its key dispatch (`KeyEdge`). It takes what the App takes as arguments: the key,
+/// its place on the keyboard (`ev.base`), the modifiers (`self.mods`), and the two flags
+/// the App works out first (`capture`: a Controls page waits for a key, `typing`: an edit
+/// box has the keyboard). It leaves out where those flags come from, the window events
+/// themselves, and `KeyEdge`'s `typing` mode, which no test here uses.
+struct GameKeys {
+    key_names: std::collections::HashMap<String, String>,
+    edge: KeyEdge,
+}
+
+impl GameKeys {
+    fn new() -> GameKeys {
+        GameKeys { key_names: Default::default(), edge: KeyEdge::default() }
+    }
+
+    fn name(
+        &mut self,
+        mods: (bool, bool, bool),
+        logical: &Key,
+        base: Option<&'static str>,
+        down: bool,
+        repeat: bool,
+        capture: bool,
+        typing: bool,
+    ) -> Option<String> {
+        // let plain = crate::binds::name_of(&ev.logical_key)?;
+        let plain = binds::name_of(logical)?;
+        // let own = ev.base.map(str::to_string).unwrap_or_else(|| plain.clone());
+        let own = base.map(str::to_string).unwrap_or_else(|| plain.clone());
+        // if ev.state == ElementState::Released { return Some(self.key_names.remove(&own).unwrap_or(plain)); }
+        if !down {
+            return Some(self.key_names.remove(&own).unwrap_or(plain));
+        }
+        // if ev.repeat && let Some(n) = self.key_names.get(&own) { return Some(n.clone()); }
+        if repeat && let Some(n) = self.key_names.get(&own) {
+            return Some(n.clone());
+        }
+        // let (c, a, sh) = self.mods;
+        let (c, a, sh) = mods;
+        // let name = if (c || a || sh) && !typing {
+        //     let combo = crate::binds::combo_name(c, a, sh, &own);
+        //     if capture || crate::settings::with_binds(|b| b.combo_bound(&combo)) { combo } else { plain }
+        // } else { plain };
+        let name = if (c || a || sh) && !typing {
+            let combo = binds::combo_name(c, a, sh, &own);
+            if capture || settings::with_binds(|b| b.combo_bound(&combo)) { combo } else { plain }
+        } else {
+            plain
+        };
+        // self.key_names.insert(own, name.clone()); Some(name)
+        self.key_names.insert(own, name.clone());
+        Some(name)
+    }
+
+    /// What the game does with a key going down (None: nothing) under `mods`.
+    fn press(&mut self, mods: (bool, bool, bool), logical: &Key, base: Option<&'static str>) -> Option<Sent> {
+        let name = self.name(mods, logical, base, true, false, false, false)?;
+        self.edge.key(&name, true, false, false, &settings::binds())
+    }
+}
+
+fn rt_key(rt: &mut Runtime, id: usize, down: bool, key: &Key, base: Option<&'static str>) {
+    let state = if down { ElementState::Pressed } else { ElementState::Released };
+    rt.scripted_key_based(id, key, base, None, state, true);
+}
+
+/// A press of `key` with `mods` held, through the same route a window key takes.
+fn press_based(rt: &mut Runtime, mods: (bool, bool, bool), key: &Key, base: Option<&'static str>, hosts: &[&Host]) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(5000);
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    input::set_modifiers(mods);
+    rt_key(rt, id, true, key, base);
+    rt_key(rt, id, false, key, base);
+    for host in hosts {
+        native_events::dispatch(host).unwrap();
+    }
+    input::set_modifiers(NONE);
+}
+
+const SHIFT: (bool, bool, bool) = (false, false, true);
+
+#[test]
+fn round7e_fix2_h1_shift_on_a_named_key_is_the_games_plain_key() {
+    for (combo, who) in [
+        ("shift+space", "Jump"),
+        ("shift+tab", "Target"),
+        ("shift+f5", "Group"),
+        ("shift+up", "Quick menu"),
+        ("shift+`", "Target"),
+    ] {
+        reset();
+        let _host = bind("alpha", "");
+        refused(ROWS.len(), combo, who);
+        assert_eq!(mod_key_of("alpha"), "", "{combo}");
+    }
+}
+
+#[test]
+fn round7e_fix2_h1_shift_space_does_not_fire_a_mod_with_jump() {
+    reset();
+    let host = bind("alpha", "");
+    let mut rt = runtime();
+    assert!(bindpage::set_key("alpha", "act", "shift+space"));
+    let space = Key::Named(NamedKey::Space);
+    assert_eq!(
+        GameKeys::new().press(SHIFT, &space, None),
+        Some(Sent::Key("space".into())),
+        "the game takes Shift+Space as Space: Jump"
+    );
+    press_based(&mut rt, SHIFT, &space, None, &[&host]);
+    hits(&host, 0);
+    // control: a mod that no game control shares fires on its Shift combo
+    assert!(bindpage::set_key("alpha", "act", "shift+u"));
+    press_based(&mut rt, SHIFT, &Key::Character("U".into()), Some("u"), &[&host]);
+    hits(&host, 1);
+}
+
+#[test]
+fn round7e_fix2_h1_a_game_row_on_a_shifted_symbol_is_the_games_press() {
+    reset();
+    let host = bind("alpha", "");
+    let mut rt = runtime();
+    let slot = row_named("bar1_slot1").unwrap();
+    let mut game = settings::binds();
+    game.bind_key(slot, "!");
+    settings::set_binds(game);
+    // Controls: the mod may not have Shift+1 (the game takes it as !)
+    refused(ROWS.len(), "shift+1", "Bar 1: slot 1");
+    assert!(bindpage::set_key("alpha", "act", "shift+1"));
+    let bang = Key::Character("!".into());
+    assert_eq!(GameKeys::new().press(SHIFT, &bang, Some("1")), Some(Sent::Slot(0, 0)));
+    press_based(&mut rt, SHIFT, &bang, Some("1"), &[&host]);
+    hits(&host, 0);
+}
+
+#[test]
+fn round7e_fix2_h1_a_macro_on_a_shifted_symbol_is_the_games_press_too() {
+    reset();
+    let _host = bind("alpha", "");
+    let mut game = settings::binds();
+    game.set_trigger(0, None, vec![Input::Key("!".into())]).unwrap();
+    settings::set_binds(game);
+    refused(ROWS.len(), "shift+1", "Macro 1");
+}
+
+#[test]
+fn round7e_fix2_m2_a_release_is_named_as_its_press_was() {
+    reset();
+    let host = bind("alpha", "");
+    host.execute("log = {}; eqoa.events.on('input.key', function(e) log[#log + 1] = e.data.combo .. (e.data.down and '+' or '-') end)")
+        .unwrap();
+    let mut rt = runtime();
+    let u = Key::Character("u".into());
+    // Ctrl+U down, Ctrl let go, U let go
+    input::set_modifiers(CTRL);
+    rt_key(&mut rt, 9001, true, &u, None);
+    input::set_modifiers(NONE);
+    rt_key(&mut rt, 9001, false, &u, None);
+    // a plain U down, Ctrl taken, U let go: still a plain U
+    rt_key(&mut rt, 9002, true, &u, None);
+    input::set_modifiers(CTRL);
+    rt_key(&mut rt, 9002, false, &u, None);
+    input::set_modifiers(NONE);
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(table.concat(log, ',') == 'ctrl+u+,ctrl+u-,u+,u-', table.concat(log, ','))")
+        .unwrap();
+}
+
+#[test]
+fn round7e_fix2_m2_the_game_names_a_release_the_same_way() {
+    // the mirror agrees: the game's own release is named as its press (viewer.rs key_names)
+    reset();
+    let mut game = GameKeys::new();
+    let u = Key::Character("u".into());
+    let mut b = settings::binds();
+    b.bind_key(row_named("bar1_slot1").unwrap(), "ctrl+u");
+    settings::set_binds(b);
+    assert_eq!(game.name(CTRL, &u, None, true, false, false, false).as_deref(), Some("ctrl+u"));
+    assert_eq!(game.name(NONE, &u, None, false, false, false, false).as_deref(), Some("ctrl+u"));
+}
+
+#[test]
+fn round7e_fix2_l3_super_is_no_plain_key() {
+    reset();
+    let host = bind("alpha", "u");
+    let mut rt = runtime();
+    // Cmd+U is not a plain U for a mod
+    input::set_super(true);
+    press_based(&mut rt, NONE, &Key::Character("u".into()), None, &[&host]);
+    input::set_super(false);
+    hits(&host, 0);
+    press_based(&mut rt, NONE, &Key::Character("u".into()), None, &[&host]);
+    hits(&host, 1);
+    // Cmd+C, V, X and Cmd+, are the client's as Ctrl+C, V, X are
+    for key in ["super+c", "super+v", "super+x", "super+,"] {
+        refused(ROWS.len(), key, "client");
+    }
+    let _b = bind("beta", "super+c");
+    assert_eq!(mod_key_of("beta"), "", "a default on a client key is refused");
+}
+
+#[test]
+fn round7e_fix2_l3_window_modifier_events_carry_super() {
+    use winit::event::{Modifiers, WindowEvent};
+    use winit::keyboard::ModifiersState;
+    reset();
+    input::observe_modifiers(&WindowEvent::ModifiersChanged(Modifiers::from(ModifiersState::SUPER)));
+    let host = bind("alpha", "u");
+    let mut rt = runtime();
+    press_based(&mut rt, NONE, &Key::Character("u".into()), None, &[&host]);
+    hits(&host, 0);
+    input::observe_modifiers(&WindowEvent::ModifiersChanged(Modifiers::from(ModifiersState::empty())));
+    press_based(&mut rt, NONE, &Key::Character("u".into()), None, &[&host]);
+    hits(&host, 1);
 }

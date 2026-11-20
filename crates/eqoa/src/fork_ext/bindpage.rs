@@ -226,11 +226,22 @@ pub fn session_begin() {
 /// when the window opened, in memory and in `mod-keys.opt`, with the game's keys that
 /// `options.rs` has just put back.
 pub fn session_cancel() {
+    let errors = restore_session(|addon, id, key| match key {
+        Some(key) => save_mod_bind(addon, id, key),
+        None => forget_mod_bind(addon, id),
+    });
+    for error in errors {
+        eprintln!("settings: mod key not put back: {error}");
+    }
+}
+
+fn restore_session(mut write: impl FnMut(&str, &str, Option<&str>) -> Result<(), String>) -> Vec<String> {
     let Some(snapshot) = SESSION.lock().unwrap().take() else {
-        return;
+        return Vec::new();
     };
     let game = crate::settings::with_binds(Clone::clone);
     let mut binds = MOD_BINDS.lock().unwrap();
+    let mut errors = Vec::new();
     for (addon, id, stored) in snapshot {
         let Some(b) = binds.iter_mut().find(|b| b.addon_id == addon && b.id == id) else {
             continue;
@@ -238,16 +249,13 @@ pub fn session_cancel() {
         if b.stored == stored {
             continue;
         }
-        let written = match &stored {
-            Some(key) => save_mod_bind(&addon, &id, key),
-            None => forget_mod_bind(&addon, &id),
-        };
-        if let Err(error) = written {
-            eprintln!("settings: mod key not put back: {error}");
+        if let Err(error) = write(&addon, &id, stored.as_deref()) {
+            errors.push(format!("{addon}.{id}: {error}"));
         }
         b.stored = stored;
     }
     resolve(&game, &mut binds);
+    errors
 }
 
 pub fn reset_defaults() {
@@ -1152,6 +1160,31 @@ mod tests {
             dispatch_keypress("f10"),
             Some(("eqoa_stats_box".into(), "toggle".into()))
         );
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+    }
+
+    #[test]
+    fn round7e_fix2_a_cancel_whose_write_fails_leaves_memory_and_file_agreeing() {
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+        register("alpha", "act", "b", "Alpha");
+        session_begin();
+        assert!(set_key("alpha", "act", "u"));
+        let errors = restore_session(|_, _, _| Err("disk full".into()));
+        assert_eq!(errors.len(), 1, "the failure is reported: {errors:?}");
+        assert_eq!(get_key("alpha", "act"), Some("u".into()), "memory stays with the file");
+        let file = String::from_utf8(crate::settings::testing::kept(KEYS_FILE).unwrap()).unwrap();
+        assert!(file.contains("mod.alpha.act=u"), "{file}");
+        // control: with the write working the key is put back
+        session_begin();
+        assert!(set_key("alpha", "act", "y"));
+        assert!(restore_session(|a, i, k| match k {
+            Some(k) => save_mod_bind(a, i, k),
+            None => forget_mod_bind(a, i),
+        })
+        .is_empty());
+        assert_eq!(get_key("alpha", "act"), Some("u".into()));
         crate::settings::testing::reset(false);
         reset_in_memory();
     }

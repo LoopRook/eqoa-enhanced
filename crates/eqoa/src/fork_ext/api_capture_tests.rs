@@ -710,6 +710,23 @@ fn performance_busy_world_zero_addons_frame_and_packet_allocation_bound() {
         chat_allocs as f64 / 600.,
         chat_bytes as f64 / 600.
     );
+    // a key with modifiers held, press and release, with nothing listening
+    let key = winit::keyboard::Key::Character("u".into());
+    input::set_modifiers((true, false, true));
+    let (_, key_time, key_allocs, key_bytes) = measure(|| {
+        for _ in 0..600 {
+            input::route_mod_key_based(&key, Some("u"), true, false, false, true, false);
+            input::route_mod_key_based(&key, Some("u"), false, false, false, true, false);
+        }
+    });
+    input::set_modifiers((false, false, false));
+    eprintln!(
+        "PERF zero-addons key_us={:.3} allocs/key={:.1} bytes/key={:.1}",
+        key_time.as_secs_f64() * 1e6 / 1200.,
+        key_allocs as f64 / 1200.,
+        key_bytes as f64 / 1200.
+    );
+    assert_eq!(key_allocs, 0, "zero-addon key allocations");
     assert_eq!(menu_allocs, 0, "zero-addon menu allocations");
     assert_eq!(frame_allocs, 0, "zero-addon frame allocations");
     assert_eq!(event_allocs, 0, "zero-addon entity packet allocations");

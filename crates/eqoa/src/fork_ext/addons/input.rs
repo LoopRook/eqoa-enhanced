@@ -167,6 +167,8 @@ pub(crate) fn set_modifiers(held: (bool, bool, bool)) {
     MODIFIERS.with(|m| m.set(held));
 }
 
+pub(crate) fn set_super(_held: bool) {}
+
 pub(crate) fn modifiers() -> (bool, bool, bool) {
     MODIFIERS.with(|m| m.get())
 }

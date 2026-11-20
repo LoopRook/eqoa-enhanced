@@ -406,6 +406,20 @@ impl Runtime {
         state: ElementState,
         plain_play: bool,
     ) -> bool {
+        self.scripted_key_based(id, logical, None, text, state, plain_play)
+    }
+
+    /// `scripted_key` with the key's own name by its place on the keyboard (`base`), as a
+    /// window key carries it.
+    pub(crate) fn scripted_key_based(
+        &mut self,
+        id: usize,
+        logical: &Key,
+        base: Option<&'static str>,
+        text: Option<&str>,
+        state: ElementState,
+        plain_play: bool,
+    ) -> bool {
         let down = state.is_pressed();
         let keyboard = match self.graphics.as_mut() {
             Some(Graphics::Managed(active)) => {
@@ -425,7 +439,7 @@ impl Runtime {
                 down,
                 repeat: false,
                 synthetic: false,
-                base: None,
+                base,
             },
             plain_play,
             keyboard,
