@@ -107,6 +107,9 @@ pub(super) struct Disclosure {
     replaces: Vec<String>,
     permissions: Vec<String>,
     pub(super) blocked: bool,
+    /// The package's enabled-flag key in `state.json`, so staleness is judged per package (fix round 4
+    /// item 2); none in records an earlier build of this branch wrote.
+    key: Option<String>,
 }
 
 impl Disclosure {
@@ -127,6 +130,7 @@ impl Disclosure {
             replaces,
             permissions: addon.extensions.permissions.clone(),
             blocked: false,
+            key: Storage::key(addon).ok(),
         }
     }
 
@@ -145,13 +149,17 @@ impl Disclosure {
     }
 
     fn to_json(&self) -> Json {
-        json!({
+        let mut value = json!({
             "native": self.native,
             "capabilities": self.capabilities,
             "replaces": self.replaces,
             "permissions": self.permissions,
             "blocked": self.blocked,
-        })
+        });
+        if let Some(key) = &self.key {
+            value["key"] = json!(key);
+        }
+        value
     }
 
     fn from_json(value: &Json) -> Option<Self> {
@@ -164,6 +172,7 @@ impl Disclosure {
             replaces: strings("replaces")?,
             permissions: strings("permissions")?,
             blocked: value["blocked"].as_bool()?,
+            key: value["key"].as_str().map(str::to_owned),
         })
     }
 }
@@ -510,16 +519,22 @@ impl Storage {
         write_json(&self.disclosures_path()?, &beside)
     }
 
-    /// The records in `disclosures.json`, when that file is readable and was written with `enabled`; none
-    /// otherwise (missing, unreadable or stale), never an error.
+    /// The records in `disclosures.json` that still describe `state.json`: a record is kept while its package's
+    /// enabled flag is what it was when the record was written; one an older build changed since reads as
+    /// absent (that package adopts its disclosure once). A missing or unreadable file: none, never an error.
     fn disclosures_beside(&self, enabled: &serde_json::Map<String, Json>) -> BTreeMap<String, Disclosure> {
         let Ok(Some(value)) = self.disclosures_path().and_then(|path| read_json(&path)) else {
             return BTreeMap::new();
         };
-        if value["schemaVersion"].as_u64() != Some(1) || value["enabled"].as_object() != Some(enabled) {
+        let (Some(1), Some(written)) = (value["schemaVersion"].as_u64(), value["enabled"].as_object()) else {
             return BTreeMap::new();
-        }
-        parse_disclosures(&value["disclosures"]).unwrap_or_default()
+        };
+        let mut records = parse_disclosures(&value["disclosures"]).unwrap_or_default();
+        records.retain(|_, record| match &record.key {
+            Some(key) => written.get(key) == enabled.get(key),
+            None => written == enabled,
+        });
+        records
     }
 
     fn registry(&self) -> Result<Registry, String> {
