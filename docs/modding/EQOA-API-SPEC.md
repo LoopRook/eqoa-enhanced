@@ -337,7 +337,7 @@ A mod can hide pieces of the game's HUD, ask where they are, and draw in the gam
 | `eqoa.hud.show(token:Token)` | `true` if the claim was released, `false` if it was already gone; `stale_handle` for a value that is not this mod's token. It never releases another mod's claim. |
 | `eqoa.hud.hidden_by(element:string)` | The ids of the mods hiding any part of that element, sorted. |
 | `eqoa.hud.visible(element:string?)` | Whether a piece is being drawn now, counting the player's hide-UI key and every mod's claims. `element` is one of the names below, or `"hud"` (the default: the HUD as a whole), `"all"` (true while none of the pieces `all` covers is hidden) or `"stats_box"` (also `"plain_play"`: the HUD's right-hand side is up, as in plain play). `"mana_bars"` always answers true. `false` outside the world and for a name it does not know. |
-| `eqoa.hud.frame(size?)` | `Frame`: how the game's 640 x 448 HUD frame maps onto the window. `size = {width, height}` asks about another window size. |
+| `eqoa.hud.frame(size?)` | `Frame`: how the game's 640 x 448 HUD frame maps onto the window. `size = {width, height}` asks about another window size (a field left out counts as 640 or 448); with no argument, the window as it is. |
 | `eqoa.hud.layout(size?)` | `Layout`: where the game's HUD pieces are now, including the player's Move HUD changes. |
 
 Elements for `hide`, `show` and `hidden_by`: `health`, `power`, `experience_main`, `experience_secondary`, `compass`, `target`, `group_panel`, `group_markers`, `pet`, `effects`, `hotbar`, `chat`, `minimap`, and `all` (every piece except `minimap`, which is hidden only by name). Hiding the minimap also turns off its clicks.
@@ -354,7 +354,7 @@ Drawing in the HUD's own style, in the game's HUD pass (under the game's windows
 |---|---|
 | `eqoa.hud.text(spec)` | Text in the game's own HUD font. `spec = {x, y, text, color?, scale?, align?, outline?, shadow?, anchor?, vertical?, clip_width?, target_fade?}`: position in HUD-frame coordinates; `color` is a list of three or four numbers 0..1 (red, green, blue, alpha; default white); `scale` defaults to 1; `align` and `anchor` are `"left"` (the default), `"center"` or `"right"`; `vertical` is `"top"` (the default), `"center"` or `"bottom"`; `outline` and `shadow` (default false) add a black edge or drop shadow. Instead of `x`, `y`: `col` (1..2) and `row` (1..8) place the text in the Stats Box's grid. |
 | `eqoa.hud.gauge(spec)` | One of the game's bar gauges. `spec = {x, y, art, fill, lit?, anchor?, vertical?}`: `art` is the game's gauge art number (7 health, 9 power), `fill` 0..1, `lit` (default true) draws the gauge lit. |
-| `eqoa.hud.image(spec)` | A piece of the game's UI art, or a texture of the mod's. Game art: `{ui_id:int, x, y, w?, h?, color?, anchor?, vertical?, target_fade?}`; `ui_id = "panel"` draws a window backing (148 by 132 unless `w`, `h` are given). A texture: `{texture:TextureInfo, x, y, w?, h?, shape?, anchor?, vertical?}` (`width`, `height` are accepted for `w`, `h`; the size defaults to the texture's own) with `shape = "square"` (default) or `"circle"`, which cuts the picture to a circle (it must be square). `anchor` and `vertical` are as for text. |
+| `eqoa.hud.image(spec)` | A piece of the game's UI art, or a texture of the mod's. Game art: `{ui_id:int, x, y, w?, h?, color?, anchor?, vertical?, target_fade?}`; `w` and `h` default to the art's own size; `ui_id = "panel"` draws a window backing (148 by 132 unless `w`, `h` are given). A texture: `{texture:TextureInfo, x, y, w?, h?, shape?, anchor?, vertical?}` (`width`, `height` are accepted for `w`, `h`; the size defaults to the texture's own) with `shape = "square"` (default) or `"circle"`, which cuts the picture to a circle (it must be square). `anchor` and `vertical` are as for text. |
 | `eqoa.hud.panel(spec)` | The game's window backing and border: `{x, y, w, h, anchor?, vertical?}`. |
 
 `target_fade = true` on text and images fades them with the game's target plate when the target changes.
@@ -1020,7 +1020,7 @@ The files in the `mods` folder itself are never changed by a mod: its private da
 | A private file; all private data of a mod, settings included | 1 MiB; 16 MiB | tested |
 | Files open at once through `io.open` | 16 | tested |
 | HUD draw calls per mod per frame (`eqoa.hud.text` and the like) | 256 | tested |
-| ImGui calls per mod per frame | 131,072 | tested |
+| ImGui calls in one run of a mod's handlers | 131,072 | tested |
 | Drawn ImGui geometry per mod per frame | 524,288 index units (an outlined shape costs up to 24 a point, so about 21,000 points) | tested |
 | ImGui scopes open at once (`Begin`, `BeginChild`, pushes) | 64 | tested |
 | Mods running at once | 16 | tested |
@@ -1036,7 +1036,7 @@ The files in the `mods` folder itself are never changed by a mod: its private da
 | Fonts and sounds held | 16 each | tested |
 | Imported copies kept | 3 | tested |
 
-Two of these rows rest on tests that show the limit is enforced without hitting the number exactly: geometry (a batch of 312,000 units is accepted and a second one refused) and JSON save (a value just under 14 MiB is saved); the numbers are the code's constants. The test of the 16-mod limit needs a graphics adapter.
+The ImGui call count starts afresh for each run of a mod's handlers: once for the entry and the frame's events, once for `render`, once for `settings.render`. Two of these rows rest on tests that show the limit is enforced without hitting the number exactly: geometry (a batch of 312,000 units is accepted and a second one refused) and JSON save (a value just under 14 MiB is saved); the numbers are the code's constants. The test of the 16-mod limit needs a graphics adapter.
 
 Design intent, not part of the promise (the client is tuned this way today and no test pins the number): textures up to 2,048 pixels a side, 128 per mod, 64 MiB decoded; media files up to 16 MiB; fonts and sounds up to 64 MiB together; a font size up to 256; `require` nested 32 deep and 1 MiB a source file; settings 32 deep and 1 MiB; 1,024 entries per listing; the last 1,000 chat lines kept and asked for at once; 64 log lines between frames; 128 subscriptions; 32 option buttons; 32 pointer areas per frame; 20 wheel steps a call; four map views of 16 to 1,024 pixels; 32 entries in a manifest list; batches of 1 to 64 steps; 512 characters typed into a text box; a command's `args` 8 levels deep and 256 values; the timing of diagnostics (§2); and for hidden window sessions (§7) the 25-unit walk-away, the 15-second idle time, the 10-second wait and the 3-second re-list hold.
 
