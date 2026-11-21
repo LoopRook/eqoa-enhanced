@@ -811,7 +811,7 @@ with op `0x004C` (merchant) or `0x124D` (bank) as the player asking: it sets the
 **Gates.** Focused with the disc (`--only round,wasm,footprint,paths --filter round7 round65 bag_viewer
 bundled`): **268 passed, 0 failed, 1 ignored, 4 SKIP lines** (the deliberate no-adapter test and three bundled
 UI picture comparisons with no reviewed goldens, unchanged). wasm, footprint and paths PASS; no upstream line.
-GitHub CI: CI_C_PLACEHOLDER
+GitHub CI run **44850955415 at 2c125fd1 (code as 6a7cd234): success** (addons 660 passed / 0 failed / 25 ignored / 17 SKIP; full 3302 / 0 / 37 / 378 SKIP; wasm, footprint, paths, player-release 20/0, tools 201/0/1 SKIP). `cleanup` run.
 
 **What the owner should retest** (in addition to the list above):
 - Clicking Sell 1 on two items quickly, near a merchant with no window open: the first sells, and the second
