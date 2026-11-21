@@ -822,7 +822,7 @@ An action call returns `RequestId, nil` once the request is accepted into the mo
 | `kind` | string | The action's name, for example `"sell"`. |
 | `state` | string | `"queued"`, `"dispatched"`, then one final state: `"completed"`, `"refused"`, `"cancelled"` or `"unknown"`. |
 | `phase` | string | How far it got: `"queued"`, `"dispatch"` (the client acted or refused) or `"server"` (it concerns the server's answer). |
-| `ok` | bool? | nil while the outcome is not known: `queued`, `dispatched` (sent, waiting for the server), `unknown`, and `cancelled` after the request was sent (the server may still act). true for `completed`; false for `refused` and for `cancelled` before anything was sent. Do not use it to tell whether a request is finished: read `state`. |
+| `ok` | bool? | nil while the outcome is not known: `queued`, `dispatched` (sent, waiting for the server), `unknown`, and `cancelled` by zoning or logout after the request was sent (the server may still act). true for `completed`; false for `refused` and for `cancelled` before anything was sent. Do not use it to tell whether a request is finished: read `state`. |
 | `code`, `reason` | string? | Why, when refused, cancelled or unknown: an error code (§1) and a sentence. |
 | `queued_tick`, `dispatched_tick`, `completed_tick` | uint, uint?, uint? | 30 Hz game steps at each stage. |
 | `detail` | table? | Extra facts for some actions (for example `{typed, submitted}` for `input_text`). |
@@ -830,14 +830,14 @@ An action call returns `RequestId, nil` once the request is accepted into the mo
 - `completed` means the client did it (a local action such as targeting) or the server's answer confirmed it (loot, buy, sell, bank, opening a corpse or a merchant).
 - `refused` means a check failed or the server said no. `reason` carries the server's words when it gave any.
 - `unknown` means the request was sent and no answer the client can tie to it came within 10 seconds. The client does not guess and does not retry. Show it; do not treat it as success or failure.
-- `cancelled` means it was cancelled by the mod, or by zoning, logging out, or the mod being disabled.
+- `cancelled` means it was cancelled before it was sent (by the mod's `cancel`), or by zoning, logging out, or the mod being disabled.
 
 The `action.result` event carries the `ActionResult` and fires when a request is dispatched to the server (`state = "dispatched"`) and again at its final state; an action with no server step fires once, with its final state. Nothing fires when the request is queued.
 
 | Function | Returns |
 |---|---|
 | `eqoa.actions.status(id:RequestId\|BatchId)` | The latest `ActionResult` (or `BatchResult`). `not_found` once the record has been dropped: the client keeps the latest 256 results per mod (tested). |
-| `eqoa.actions.cancel(id:RequestId\|BatchId)` | `true` if it cancelled something. A queued request is never sent. A request already sent stops being waited for (its result becomes `cancelled`); the server may still carry it out. `not_found` if the request is no longer pending. With a `BatchId` it is `eqoa.actions.stop_batch`. |
+| `eqoa.actions.cancel(id:RequestId\|BatchId)` | `true` if it cancelled the request: one not yet sent is never sent, and its result is `cancelled`. `false` if it was already sent to the server: that cannot be undone, so nothing is cancelled, the request keeps waiting and its real result (`completed`, `refused` or `unknown`) arrives as usual. `not_found` if the request is no longer pending. With a `BatchId` it is `eqoa.actions.stop_batch`. |
 | `eqoa.actions.stop()` | Queues the game's stop: ends auto-attack, auto-run, follow and the pending cast, whoever started them (the player's own included). |
 
 Limits, as built and tested: 32 requests may wait per mod (one more is refused with `busy`); at most 8 are dispatched per mod per game step, refilling at one per step (30 a second), and 64 per step for all mods together, shared fairly; a request that waits more than 1 second for its turn is refused with `rate_limited`. Only one transaction at a time runs against each of the pack, a corpse, a merchant and the bank, for all mods together: a second one is refused with `busy`.

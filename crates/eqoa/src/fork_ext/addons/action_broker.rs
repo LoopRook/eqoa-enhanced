@@ -974,10 +974,13 @@ impl BrokerState {
         Ok(vm_state.retained.iter().rev().find(|r| r.id == req.id).cloned())
     }
 
-    fn cancel(&mut self, req: RequestId) -> std::result::Result<bool, (&'static str, String)> {
+    /// `Some(true)`: cancelled (it was never sent). `Some(false)`: already sent to the server, which cannot be
+    /// undone: nothing is cancelled, the request keeps waiting and its real result is delivered (round 7H,
+    /// as a stopped batch's sent step is). `None`: not pending.
+    fn cancel(&mut self, req: RequestId) -> std::result::Result<Option<bool>, (&'static str, String)> {
         let now_tick = self.tick;
         let Some(vm_state) = self.vms.get_mut(&req.vm) else {
-            return Ok(false);
+            return Ok(None);
         };
         if let Some(pos) = vm_state.queued.iter().position(|q| q.id == req.id) {
             let item = vm_state.queued.remove(pos).expect("queued item");
@@ -997,38 +1000,34 @@ impl BrokerState {
             };
             vm_state.upsert_retained(rec.clone());
             vm_state.pending_events.push_back(rec);
-            return Ok(true);
+            return Ok(Some(true));
+        }
+        if vm_state.in_flight.get(&req.id).is_some_and(|f| f.native_sent) {
+            return Ok(Some(false));
         }
         if let Some(inflight) = vm_state.in_flight.remove(&req.id) {
-            let native_sent = inflight.native_sent;
-            if !native_sent {
-                self.expired_staged_kinds.push(inflight.kind);
-            }
+            // staged, not yet sent: the client still holds it, so it is cancelled
+            self.expired_staged_kinds.push(inflight.kind);
             let rec = ActionResultRecord {
                 id: inflight.id,
                 vm: inflight.vm,
                 kind: inflight.kind,
                 state: "cancelled",
-                phase: if native_sent { "server" } else { "dispatch" },
+                phase: "dispatch",
                 ok: Some(false),
                 code: Some("cancelled".into()),
-                reason: Some(if native_sent {
-                    "cancelled while awaiting server reply"
-                } else {
-                    "cancelled before dispatch"
-                }
-                .into()),
+                reason: Some("cancelled before dispatch".into()),
                 queued_tick: inflight.queued_tick,
-                dispatched_tick: native_sent.then_some(inflight.dispatched_tick),
+                dispatched_tick: None,
                 completed_tick: Some(now_tick),
                 detail: inflight.detail,
             };
             let vm_state = self.vms.get_mut(&req.vm).expect("vm exists");
             vm_state.upsert_retained(rec.clone());
             vm_state.pending_events.push_back(rec);
-            return Ok(true);
+            return Ok(Some(true));
         }
-        Ok(false)
+        Ok(None)
     }
 
     fn clear_vm(&mut self, vm: u64, reason: &str) {
@@ -3903,8 +3902,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 );
             }
             match BROKER.with(|b| b.borrow_mut().cancel(req)) {
-                Ok(true) => lua.pack_multi((true, Value::Nil)),
-                Ok(false) => error(
+                Ok(Some(cancelled)) => lua.pack_multi((cancelled, Value::Nil)),
+                Ok(None) => error(
                     lua,
                     "eqoa.actions.cancel",
                     "not_found",
@@ -5160,7 +5159,7 @@ mod tests {
             assert_eq!(overflow.0, "busy");
         }
         // Cancel #32 before dispatch
-        assert!(BROKER.with(|b| b.borrow_mut().cancel(ids[31])).unwrap());
+        assert_eq!(BROKER.with(|b| b.borrow_mut().cancel(ids[31])).unwrap(), Some(true));
         assert_eq!(
             BROKER.with(|b| b.borrow().status(ids[31]).unwrap()).unwrap().state,
             "cancelled"
