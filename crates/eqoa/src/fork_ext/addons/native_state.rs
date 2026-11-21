@@ -804,7 +804,7 @@ fn install_math(lua: &Lua) -> Result<()> {
                     lua,
                     "eqoa.windows.open",
                     "busy",
-                    "summary open already queued this tick",
+                    "16 client window requests are already waiting",
                 );
             }
             lua.pack_multi((true, Value::Nil))

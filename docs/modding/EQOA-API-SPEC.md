@@ -37,6 +37,7 @@ This is the reference for the native Lua mod API of EQOA Enhanced, **as built**:
 - a field the client does not know is nil. Absent is never reported as 0, -1 or an empty string: zero health is a real value, unknown health is nil;
 - a function that changes something returns `true, nil` or `nil, Error`;
 - nothing in `eqoa` raises a Lua error for an ordinary failure. (Passing a wrong type where a table or function is required can raise in a few functions; ImGui misuse raises as ImGui does.)
+- these take no arguments, and refuse one with `invalid_argument`: `eqoa.client.get`, `eqoa.client.display`, `eqoa.player.get`, `eqoa.player.stats`, `eqoa.target.get`, `eqoa.group.get`, `eqoa.entities.list`, `eqoa.abilities.list`, `eqoa.hotbar.list`, `eqoa.effects.list`, `eqoa.chat.get_channel`, `eqoa.combat.get_counters`, `eqoa.input.get`, `eqoa.fonts.default`, `eqoa.settings.load`, `eqoa.actions.assist`, `eqoa.actions.target_target`, `eqoa.actions.toggle_stats_box`. Other functions ignore arguments they do not take.
 
 **Error codes**
 
