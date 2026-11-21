@@ -377,4 +377,12 @@ test assumed LF. The tests now read the pages with either ending (a CI checkout 
 
 ### Gates (review round 1)
 
-REVIEW1_GATES_PLACEHOLDER
+- Local, with the disc linked (`EQOA_ISO`), `python tools/run_gates.py --only round,wasm,footprint,paths
+  --filter docs_` at bd74b1bf: **round 9 passed, 0 failed, 0 ignored, 0 SKIP lines**; wasm PASS; footprint
+  PASS (no upstream file touched, no budget change); paths PASS.
+- GitHub run **44899435026 at 42753ca3: success**, pushed, waited for and cleaned up in one command
+  (`ci_gates.py push`, `status`, `cleanup`): addons 684 passed / 0 failed / 25 ignored / 17 SKIP; full 3327
+  passed / 0 failed / 37 ignored / 378 SKIP; wasm, footprint, paths success; player-release 20 passed; tools
+  201 passed / 1 SKIP. The nine `docs_` tests need no disc and no graphics adapter and ran there.
+- The only commit after that run adds these lines to this report.
+- The API surface is unchanged: no regeneration commit.
