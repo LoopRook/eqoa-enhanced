@@ -156,8 +156,8 @@ No test pins these numbers (or the test needs a graphics adapter and skips witho
   second after a burst of 32; the window's 128 entries; log rotation at 5 MiB.
 - 128 subscriptions and timers per mod; 32 option buttons; 32 pointer areas per frame; the one-second text
   capture hold; 64 log lines between frames; batch length 1 to 64.
-- Hidden window sessions: 25 units walk-away, 15 seconds idle, 10 seconds unanswered, the 3-second re-list
-  grace.
+- Hidden window sessions: 25 units walk-away, 10 seconds unanswered, the 3-second re-list grace. (The 15-second idle
+  timeout is pinned since round 7H by `round7h_fix5_hidden_session_idle_timeout_is_15_seconds`.)
 - 16 mods at once; ImGui calls, geometry and scope budgets; texture size, count and bytes; media and font
   and sound byte sizes; `require` depth; settings depth and size; the 1,024-entry listing cap; four map
   views; how a large JSON value is sliced over frames.

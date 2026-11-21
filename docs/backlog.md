@@ -394,3 +394,11 @@ A font restored after going missing is retried after a face or size change or af
   2026-11-20, passes alone). Measure over an exact interval or allow the timer's granularity; do not raise the cap.
 - **Why Shift+Space did not jump in the owner's 15163407 test is unexplained** (by the code it should have; a Forge
   UI suppressing keys is the builder's guess). The behaviour is explicit and tested from 5d58d9c5 on.
+
+## Left from the round 7H recheck (Hydrogen, 2026-11-21)
+
+- **LOW: accepting a group invite while the selection is on No queues two key presses [136, 134].** 134 is held in
+  `key_queue` until the next HUD frame (`crates/eqoa/src/play.rs` around 7133-7156, `fork_ext/play.rs` 3178-3193). If a
+  server packet replaces the box within that frame, 134 lands on the new box without re-checking `prompt_answerable`.
+  Safe today (a new Yes/No box resets its selection to No; untagged OK-only boxes have no action). Hardening: clear the
+  queued presses when a new box opens, via a fork hook rather than editing upstream's `dialog.rs`.
