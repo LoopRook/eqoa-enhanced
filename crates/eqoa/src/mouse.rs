@@ -41,7 +41,7 @@
 //!   eaves had taken it all the way in to the character).
 //! - while the player moves (the keys, a stick, autorun: `moving`), the
 //!   left button in the follow orbit looks round as it does standing, and
-//!   the run goes on the way it went (the GM Jibrish's ask of 2026-11-17, as
+//!   the run goes on the way it went (a GM's ask of 2026-11-17, as
 //!   World of Warcraft's left button: "character retains the direction that
 //!   was moving when started"). The follow orbit's walk goes the way the
 //!   camera looks, so the view it goes by is kept as the look began
@@ -56,10 +56,17 @@
 //!   button on the move steered as the right does (F3 20261025-044637).
 //! - both buttons run forward (the left stick all the way up), steered as
 //!   the right button steers, and nothing else walks meanwhile: the keys'
-//!   and the sticks' walk are left out (`both_run`; the GM Jibrish's ask of
+//!   and the sticks' walk are left out (`both_run`; a GM's ask of
 //!   2026-11-17, "It should override other movement keys"; A and D had
 //!   added a sidestep, a diagonal, which the right button with W and A still
-//!   runs).
+//!   runs). In the follow orbit A and D (or a stick to the side) turn that
+//!   run off the view instead, the body itself turned to it (`lean`: an
+//!   eighth of a turn at a full push, left or right), so it runs the
+//!   diagonal facing its way with the run's own animation, never the
+//!   strafe's, and the camera stays behind the view; let go, the body faces
+//!   the view again (a GM's petition 5331: "When holding both mouse buttons
+//!   down and moving, hitting A or D should angle you to the right or left,
+//!   but not initiate strafe animation").
 //! - a body the mouse turns (the steer, first person, the follow camera:
 //!   `set_heading`) takes its run round with it: on a floor or in a liquid
 //!   its velocity turns as it does, so half a turn at a run runs on the new
@@ -131,6 +138,9 @@ const EASE_BACK_S: f32 = 0.06;
 /// ...and goes at least this fast (radians a second), so it ends: from half
 /// a turn about 0.27 s, from a quarter about 0.23 s. Both are ours.
 const EASE_BACK_MIN: f32 = 1.5;
+/// The most both buttons' run turns off the view (`Mouse::lean`): an eighth
+/// of a turn, A or D's (a stick's push to the side in proportion). Ours.
+const LEAN: f32 = std::f32::consts::FRAC_PI_4;
 /// The walk camera's pi and two pi (`viwalkcamera.cpp`'s literals).
 const PI: f32 = std::f32::consts::PI;
 const TWO_PI: f32 = std::f32::consts::TAU;
@@ -361,6 +371,13 @@ pub struct Mouse {
     /// caller's, before `look`): the left button's look in the follow orbit
     /// then keeps the walk on the view it began with (`walk_view`)
     pub moving: bool,
+    /// how far the keys and the sticks ask to the side this frame, -1 (A,
+    /// left) to 1 (D, right): the caller's, before `look`, as `moving`;
+    /// both buttons' run turns off the view by it (`lean`)
+    pub side: f32,
+    /// how far the body is turned off the view by both buttons' run, as the
+    /// last look left it (radians, left positive: `lean`)
+    leaned: f32,
     /// the view the follow orbit's walk keeps (`walk_view`), the orbit's
     /// angle it was taken at, and whether the camera is easing back there
     kept: Option<Kept>,
@@ -739,12 +756,44 @@ impl Mouse {
     /// direction as last drawn: the view the walk keeps taken or held
     /// (`keep_view`), the look (`look_held`), then the hold's angle noted
     /// or the ease back stepped (`ease_back`).
+    /// Both buttons' run turned off the view (`lean`) is taken out first, so
+    /// the look steers the view, and put back after at this frame's `side`.
     fn look_on(&mut self, cam: &mut WalkCamera<Ee>, eye: Vect3<Ee>, dx: f32, dy: f32, inverted: bool, frame_s: f32) -> [f32; 2] {
+        if self.leaned != 0.0 {
+            let h = cam.walk.phys.angles.x - F::new(self.leaned);
+            set_heading(cam, h);
+            self.leaned = 0.0;
+        }
         self.keep_view(cam, eye);
         let stick = look_held(cam, self.held, dx, dy, inverted, frame_s, self.steered);
         self.steered = self.held[1] && cam.camera_mode == 3;
         self.ease_back(cam, frame_s);
+        let lean = self.lean_for(cam.camera_mode);
+        if lean != 0.0 {
+            // the camera stays where the look put it, behind the view
+            let h = cam.walk.phys.angles.x + F::new(lean);
+            set_heading(cam, h);
+            self.leaned = lean;
+        }
         stick
+    }
+
+    /// How far both buttons' run turns the body off the view in camera
+    /// `mode` this frame (the module's doc; petition 5331): in the follow
+    /// orbit, `side`'s share of `LEAN`, to the right (a smaller heading) for
+    /// D; none with a button let go or in another camera.
+    fn lean_for(&self, mode: i32) -> f32 {
+        if mode != 3 || !self.running() {
+            return 0.0;
+        }
+        -self.side.clamp(-1.0, 1.0) * LEAN
+    }
+
+    /// How far the body is turned off the view by both buttons' run
+    /// (`controls::Client::lean`): the camera steered behind the view is put
+    /// behind it, not the body.
+    pub fn lean(&self) -> f32 {
+        self.leaned
     }
 }
 
@@ -930,8 +979,25 @@ pub fn take_pointer(window: &winit::window::Window) -> Option<Grab> {
     } else {
         return None;
     };
-    window.set_cursor_visible(false);
+    set_cursor_visible(window, false);
     Some(grab)
+}
+
+/// The cursor shown or hidden over the window. In a page not through winit:
+/// its web `Window::set_cursor_visible` takes the canvas's RefCell mutably
+/// (winit 0.30.13's window.rs:244), and winit calls the client with that
+/// RefCell borrowed: its visibilitychange handler holds it across the
+/// `Occluded(true)` it sends (an `if let` on `canvas.borrow()`), which the
+/// client answers by giving the pointer back (`let_go_pointer`), and its
+/// ResizeObserver across a `Resized`: "RefCell already borrowed", the client
+/// stopped (Firefox, 2026-11-21, and four before). The canvas's style is set
+/// instead (`web::set_cursor_visible`), as winit sets it; the client sets no
+/// cursor through winit in a page, so winit never writes that style itself.
+fn set_cursor_visible(window: &winit::window::Window, visible: bool) {
+    #[cfg(target_arch = "wasm32")]
+    crate::web::set_cursor_visible(window, visible);
+    #[cfg(not(target_arch = "wasm32"))]
+    window.set_cursor_visible(visible);
 }
 
 /// Puts the cursor at `at` (window pixels), a confined one's way back to
@@ -947,7 +1013,7 @@ pub fn put_pointer(window: &winit::window::Window, at: (f64, f64)) {
 /// other window).
 pub fn give_pointer(window: &winit::window::Window, home: Option<(f64, f64)>) {
     let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None);
-    window.set_cursor_visible(true);
+    set_cursor_visible(window, true);
     #[cfg(windows)]
     unclip(window);
     #[cfg(not(target_arch = "wasm32"))]
@@ -1633,8 +1699,8 @@ mod tests {
     }
 
     /// The left button held while the player moves looks round the follow
-    /// orbit as it does standing, and the run goes on as it went (the GM
-    /// Jibrish's ask of 2026-11-17): the view the walk goes by kept as the
+    /// orbit as it does standing, and the run goes on as it went (a
+    /// GM's ask of 2026-11-17): the view the walk goes by kept as the
     /// look began (`walk_view`), the camera held where the look put it; let
     /// go, the camera eases back behind the run in about a quarter second,
     /// the same at 30 and 165 frames a second, the run going on its way all
@@ -1754,6 +1820,49 @@ mod tests {
             let mut s = walk;
             both_run(&mut s);
             assert_eq!(s, [walk[0], walk[1], 0.0, -1.0], "{walk:?}");
+        }
+    }
+
+    /// Petition 5331 (a GM: "When holding both mouse buttons down and moving,
+    /// hitting A or D should angle you to the right or left, but not initiate
+    /// strafe animation"): both buttons held in the follow orbit, D turns the
+    /// run an eighth of a turn right of the view and A left, the body facing
+    /// the way it runs, running (locomotion 3, not the strafe's 10 or 11), the
+    /// camera behind the view (`look_on` takes the turn out before the look
+    /// and puts it back after); let go of the key, the body faces the view
+    /// again at once and runs on along it. The control: no key to the side,
+    /// the run goes straight along the view, as `both_run` leaves it.
+    #[test]
+    fn both_buttons_with_a_or_d_run_angled_off_the_view() {
+        for (side, lean) in [(1.0f32, -LEAN), (-1.0, LEAN), (0.0, 0.0)] {
+            let mut r = Rig::new();
+            let mut m = Mouse::default();
+            let t = Instant::now();
+            m.button(false, true, t);
+            m.button(true, true, t);
+            assert!(m.running());
+            let mut sticks = [0.0, 0.0, side, 0.0];
+            both_run(&mut sticks);
+            m.side = side;
+            let way = r.way(&mut m, sticks, 90, 16, false);
+            let h = r.cam.walk.phys.angles.x.0;
+            let view = wrapped(r.cam.cur.orbit.x.0 - PI);
+            let case = format!("side {side}: heading {h}, view {view}, way {way}, lean {}", m.lean());
+            // (the camera's own `Process` drags it a little round the run
+            // in this rig; the walker puts it back behind the view as drawn,
+            // `Walker::camera_behind_as_drawn`)
+            assert!((wrapped(h - view) - lean).abs() < 0.05, "the body an eighth of a turn off the view: {case}");
+            assert_eq!(m.lean(), lean, "{case}");
+            assert!(wrapped(way - h).abs() < 0.02, "it runs the way it faces: {case}");
+            assert_eq!(r.cam.walk.phys.loco_state, 3, "running, not strafing: {case}");
+            // the key let go: the body back to the view, the run along it
+            m.side = 0.0;
+            let way = r.way(&mut m, sticks, 60, 16, false);
+            let h = r.cam.walk.phys.angles.x.0;
+            let view = wrapped(r.cam.cur.orbit.x.0 - PI);
+            assert!(wrapped(h - view).abs() < 0.05 && m.lean() == 0.0, "let go, the body faces the view: {case}");
+            assert!(wrapped(way - h).abs() < 0.05, "and runs along it: {case}, way {way}");
+            assert_eq!(r.cam.walk.phys.loco_state, 3);
         }
     }
 

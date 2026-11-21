@@ -1,5 +1,5 @@
-//! The player's own key and button bindings (F3 20261021: jib asked to rebind
-//! every control, the keyboard's and the controller's, and dab for a legend
+//! The player's own key and button bindings (F3 20261021: a player asked to rebind
+//! every control, the keyboard's and the controller's, and another for a legend
 //! of the keyboard). The client's addition, not the game's: the PS2 has no
 //! such thing, and the game's own paths (`VIWndGame::OnKeyDown`, the windows'
 //! keys, `PadKeys`, `UpdateControls`) and the client's keyboard dispatch
@@ -36,19 +36,24 @@
 //! dispatch alike, and V, the jump's key before, stays the jump's beside Space
 //! (nothing else claims it). Space, while the jump's row has it, is still the
 //! attack's wherever it makes no jump (`KeyEdge::space_attacks`): on a server
-//! that never offered one (Sandstorm's, eqoa.live's, eqoaclassic's Live
+//! that never offered one (the reference server's, eqoa.live's, eqoaclassic's Live
 //! shard) and with a window up (the corpse's ✕, a trade's chat line, the
 //! fishing cast), so a player there finds Space as it was. A layout kept
 //! before (`keys.opt`) keeps every row it moved, each line read onto today's
 //! defaults (a row it put on G takes G, the attack the key that row left), and
 //! a macro it put on G keeps G (`Binds::from_text`).
 //!
-//! The ability bars' slots (Jibwiz's ticket 1913, "allow you to keybind each
+//! The ability bars' slots (a player's ticket 1913, "allow you to keybind each
 //! key", for PC players: `hudmenu::Stacked`) are rows of no key and no button
 //! (`Pad::KeysOnly`): a key the player puts on one uses that slot's ability
-//! (`Alias::Slot`, `Play::bar_slot_key`), the first two bars' ten, whether the
-//! bars are drawn stacked or as the game's carousel. Nothing is on them until
-//! the player puts a key there.
+//! (`Alias::Slot`, `Play::bar_slot_key`), every bar's: the first two bars'
+//! ten, and bars 3 and 4's ten more (the server owner, 2026-11-18: "They need
+//! to be able to be keybound in the keybinding menu"), each used while
+//! Ability Bars shows its bar, whether the bars are drawn stacked or as the
+//! game's carousel; and the Utility Bars' (the same day: "otherwise work the
+//! same way"), the four item quick slots and the weapon sets with bare hands
+//! (on a server that keeps them). Nothing is on them until the player puts a
+//! key there.
 //!
 //! With nothing moved every key is itself and every button its own field
 //! (`Binds::default`, the tests). Kept per device in `keys.opt` beside the
@@ -58,7 +63,7 @@
 //! keys/buttons. lets make a similar native solution"; 2026-11-10: "we are
 //! using pcsx2 macro system, but it is not the same yet": PCSX2's Macro
 //! Buttons, `pcsx2/SIO/Pad/Pad.cpp`;
-//! `claude-notes/vanilla-macros-pcsx2-20261110.md`): `MACROS` of them, each
+//! the maintainer's notes): `MACROS` of them, each
 //! as PCSX2 keeps one (`Macro`):
 //! its triggers (any one of them runs it, each a chord of keys, controller
 //! buttons and sticks' ways, every one of them held), the game's buttons
@@ -154,6 +159,25 @@ pub const ROWS: &[Row] = &[
     row("bar2_slot3", "Bar 2: slot 3", &[], Pad::KeysOnly, BAR_HELP),
     row("bar2_slot4", "Bar 2: slot 4", &[], Pad::KeysOnly, BAR_HELP),
     row("bar2_slot5", "Bar 2: slot 5", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar3_slot1", "Bar 3: slot 1", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar3_slot2", "Bar 3: slot 2", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar3_slot3", "Bar 3: slot 3", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar3_slot4", "Bar 3: slot 4", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar3_slot5", "Bar 3: slot 5", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar4_slot1", "Bar 4: slot 1", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar4_slot2", "Bar 4: slot 2", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar4_slot3", "Bar 4: slot 3", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar4_slot4", "Bar 4: slot 4", &[], Pad::KeysOnly, BAR_HELP),
+    row("bar4_slot5", "Bar 4: slot 5", &[], Pad::KeysOnly, BAR_HELP),
+    row("items_slot1", "Item slot 1", &[], Pad::KeysOnly, ITEM_HELP),
+    row("items_slot2", "Item slot 2", &[], Pad::KeysOnly, ITEM_HELP),
+    row("items_slot3", "Item slot 3", &[], Pad::KeysOnly, ITEM_HELP),
+    row("items_slot4", "Item slot 4", &[], Pad::KeysOnly, ITEM_HELP),
+    row("sets_slot1", "Weapon set 1", &[], Pad::KeysOnly, SET_HELP),
+    row("sets_slot2", "Weapon set 2", &[], Pad::KeysOnly, SET_HELP),
+    row("sets_slot3", "Weapon set 3", &[], Pad::KeysOnly, SET_HELP),
+    row("sets_slot4", "Weapon set 4", &[], Pad::KeysOnly, SET_HELP),
+    row("sets_slot5", "Weapon set: bare hands", &[], Pad::KeysOnly, SET_HELP),
     row("cycle_target", "Target: {1405}, group, {418}", &["`", "~"], b(bit::L1), "Each press the next of the player, the group and the pet; held, aim as with Tab. On the map |7 zooms out."),
     row("quick_chat", "Quick chat", &["z"], b(bit::L2), "Again, it closes the quick chat."),
     row("next_target", "Target: the next (hold: aim)", &["tab"], b(bit::R1), "Held: the view at the eyes, the target the one nearest the crosshair. In a window Tab is |8; on the map |8 zooms in."),
@@ -189,19 +213,37 @@ pub const ROWS: &[Row] = &[
     row("art", "Art: Frontiers' or 2002's", &["f9"], Pad::None, "Everything drawn swaps between Frontiers' art and the 2002 disc's (EverQuest Online Adventures, USA, SLUS-20470), at once; the first time, it asks for that disc."),
     row("hide_ui", "Hide UI", &["h"], Pad::None, "Hides everything over the world: the HUD, the chat, the names over heads, the damage numbers and the target's rings. Again, or any window coming up, shows them."),
     row("minimap", "Minimap", &["n"], Pad::None, "Shows or hides the minimap, as Extended's Map page does, and keeps it. On the map: a community marker suggested."),
+    row("quest_helper", "Quest Helper", &["u"], Pad::None, "Shows or hides the Quest Helper (the quests' marks on the map and the minimap, and the quest tracker), as Extended's Map page does, and keeps it."),
     row("controls", "Controls", &["f1"], Pad::None, "This page, from play."),
 ];
 
 /// What a key on an ability bar's slot row does (`bar_slot`).
-const BAR_HELP: &str = "Uses the ability on this slot, as clicking it does. No key until you give it one. Extended > UI > HUD > Stacked Spell Bars shows the first two bars above the chat box.";
+const BAR_HELP: &str = "Uses the ability on this slot, as clicking it does. No key until you give it one. Bars 3 and 4 are there with Extended > UI > HUD > Ability Bars at 3 or 4. Stacked Spell Bars (the same page) shows the bars above the chat box, Spell Bar Layout (HUD Layout) stacks them or stands them in two columns, and Move HUD moves them.";
 
-/// The ability bar and its slot (each from 0) a row is the key of: the
-/// first two bars' ten (`bar1_slot1` .. `bar2_slot5`).
+/// What a key on an item quick slot's row does (`bar_slot`).
+const ITEM_HELP: &str = "Uses the item on this quick slot, as clicking it on the Utility Bars does (Extended > UI > HUD > Stacked Spell Bars shows them). No key until you give it one.";
+
+/// What a key on a weapon set's row does (`bar_slot`).
+const SET_HELP: &str = "Takes up this weapon set, on a server that keeps weapon sets, as clicking it on the Utility Bars does. No key until you give it one.";
+
+/// The bar and its slot (each from 0) a row is the key of: every ability
+/// bar's (`bar1_slot1` .. `bar4_slot5`), bars 3 and 4 the client's own
+/// (`hudmenu::BAR_MENUS`); then the Utility Bars', the item quick slots'
+/// (`items_slot1` .. 4, bar `hudmenu::ITEMS_BAR`) and the weapon sets'
+/// (`sets_slot1` .. 5, the fifth bare hands, bar `hudmenu::SETS_BAR`).
 pub fn bar_slot(row: usize) -> Option<(usize, usize)> {
-    let id = ROWS.get(row)?.id.strip_prefix("bar")?;
+    let id = ROWS.get(row)?.id;
     let (bar, slot) = id.split_once("_slot")?;
-    let (bar, slot) = (bar.parse::<usize>().ok()?, slot.parse::<usize>().ok()?);
-    ((1..=2).contains(&bar) && (1..=5).contains(&slot)).then(|| (bar - 1, slot - 1))
+    let slot = slot.parse::<usize>().ok()?;
+    let (bar, most) = match bar {
+        "items" => (crate::hudmenu::ITEMS_BAR, 4),
+        "sets" => (crate::hudmenu::SETS_BAR, crate::gear::ENTRIES),
+        _ => {
+            let bar = bar.strip_prefix("bar")?.parse::<usize>().ok()?;
+            ((1..=crate::hudmenu::MAX_BARS as usize).contains(&bar).then_some(bar - 1)?, 5)
+        }
+    };
+    (1..=most).contains(&slot).then_some((bar, slot - 1))
 }
 
 /// A row's index by its name.
@@ -1462,7 +1504,7 @@ pub fn key_of(name: &str) -> Key {
 }
 
 /// A key's name with the modifiers held written before it, in the order
-/// ctrl, alt, shift ("ctrl+alt+shift+1"; Jibwiz's ticket 1950: Shift+1 binds
+/// ctrl, alt, shift ("ctrl+alt+shift+1"; a player's ticket 1950: Shift+1 binds
 /// as Shift+1, not as the "!" it types): `base` the key's own, as it is
 /// without them (`base_name`).
 pub fn combo_name(ctrl: bool, alt: bool, shift: bool, base: &str) -> String {
@@ -1741,7 +1783,7 @@ mod tests {
     fn a_row_moves_or_swaps() {
         let mut b = Binds::default();
         let (talk, attack, cycle, use_) = (row_named("talk").unwrap(), row_named("attack").unwrap(), row_named("cycle_target").unwrap(), row_named("use").unwrap());
-        // jib's: Confirm (E, ✕ in a window) on Q, Talk takes E
+        // a player's: Confirm (E, ✕ in a window) on Q, Talk takes E
         assert_eq!(b.bind_key(use_, "q"), Moved::Swapped(talk));
         assert_eq!((b.key(use_), b.key(talk)), (Some("q"), Some("e")));
         assert_eq!((b.alias("q"), b.alias("e")), (Alias::To("e"), Alias::To("q")));
@@ -1788,18 +1830,30 @@ mod tests {
         assert!(ROWS.iter().enumerate().all(|(k, r)| !r.keys.is_empty() || matches!(r.pad, Pad::Button(_)) || bar_slot(k).is_some()));
     }
 
-    /// The bars' slots (ticket 1913): ten rows, none with a key until given
-    /// one; a key put on one sends that bar's slot (and is let go as it), is
-    /// kept in `keys.opt` and read back; a slot moved onto another slot's key
-    /// swaps; a row's own key put there leaves that row with none. The
-    /// control: with nothing moved the key is itself.
+    /// The bars' slots (ticket 1913; bars 3 and 4, the server owner's of
+    /// 2026-11-18): twenty rows, none with a key until given one; a key put
+    /// on one sends that bar's slot (and is let go as it), is kept in
+    /// `keys.opt` and read back; a slot moved onto another slot's key swaps;
+    /// a row's own key put there leaves that row with none. The control: with
+    /// nothing moved the key is itself.
     #[test]
     fn a_bars_slot_takes_a_key() {
         let slots: Vec<usize> = (0..ROWS.len()).filter(|&k| bar_slot(k).is_some()).collect();
-        assert_eq!(slots.len(), 10);
+        assert_eq!(slots.len(), 29, "four bars of five, four item slots, four sets and bare hands");
+        assert_eq!(bar_slot(row_named("items_slot1").unwrap()), Some((crate::hudmenu::ITEMS_BAR, 0)));
+        assert_eq!(bar_slot(row_named("items_slot4").unwrap()), Some((crate::hudmenu::ITEMS_BAR, 3)));
+        assert_eq!(bar_slot(row_named("sets_slot5").unwrap()), Some((crate::hudmenu::SETS_BAR, 4)));
         assert_eq!(bar_slot(row_named("bar1_slot1").unwrap()), Some((0, 0)));
         assert_eq!(bar_slot(row_named("bar2_slot5").unwrap()), Some((1, 4)));
+        assert_eq!(bar_slot(row_named("bar3_slot1").unwrap()), Some((2, 0)));
+        assert_eq!(bar_slot(row_named("bar4_slot5").unwrap()), Some((3, 4)));
         assert_eq!(bar_slot(row_named("attack").unwrap()), None);
+        assert_eq!(ROWS[row_named("bar4_slot2").unwrap()].label, "Bar 4: slot 2");
+        let mut b4 = Binds::default();
+        assert_eq!(b4.bind_key(row_named("bar4_slot2").unwrap(), "shift+2"), Moved::Freed(None));
+        assert_eq!(b4.alias("shift+2"), Alias::Slot(3, 1));
+        assert_eq!(KeyEdge::default().key("shift+2", true, false, false, &b4), Some(Sent::Slot(3, 1)));
+        assert_eq!(Binds::from_text(&b4.to_text()).alias("shift+2"), Alias::Slot(3, 1), "kept: {}", b4.to_text());
         let mut b = Binds::default();
         assert!(slots.iter().all(|&k| b.key(k).is_none()), "no key by default");
         assert_eq!(b.alias("7"), Alias::Same, "the control");

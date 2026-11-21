@@ -394,6 +394,18 @@ pub fn pointer_locked() -> bool {
     web_sys::window().and_then(|w| w.document()).and_then(|d| d.pointer_lock_element()).is_some()
 }
 
+/// The cursor hidden over the window's canvas (`cursor: none`, as winit
+/// hides it) or shown again (`mouse::set_cursor_visible`): winit's own
+/// `set_cursor_visible` panics inside its callbacks that hold the canvas
+/// (window.rs:244). `WindowExtWebSys::canvas` only reads the canvas's
+/// RefCell, which those callbacks allow.
+pub fn set_cursor_visible(window: &winit::window::Window, visible: bool) {
+    use winit::platform::web::WindowExtWebSys;
+    let Some(canvas) = window.canvas() else { return };
+    let style = canvas.style();
+    let _ = if visible { style.remove_property("cursor").map(|_| ()) } else { style.set_property("cursor", "none") };
+}
+
 /// Whether a connected gamepad can rumble (`window.eqoaCanRumble`).
 pub fn can_rumble() -> bool {
     let Some(w) = web_sys::window() else { return false };
@@ -467,6 +479,13 @@ fn keep_crash(info: &std::panic::PanicHookInfo) {
 #[wasm_bindgen]
 pub fn update_notices() -> bool {
     crate::settings::update_notices()
+}
+
+/// An account name and a password the client sends Station (either may be
+/// empty): the page takes them out of every crash report it sends
+/// (`window.eqoaSecret`, web/notices.js).
+pub fn secret(account: &str, password: &str) {
+    call_page("eqoaSecret", &js_sys::Array::of2(&account.into(), &password.into()));
 }
 
 /// The client has stopped (`title`; `detail` says why): the page's notice
@@ -771,6 +790,15 @@ async fn gfx_on(canvas: web_sys::HtmlCanvasElement, again: Option<wgpu::Backend>
     let instance = if webgl {
         desc.backends = wgpu::Backends::GL;
         wgpu::Instance::new(desc)
+    } else if again.is_some() {
+        // WebGPU again, and only WebGPU: with the detection, a browser that
+        // has no WebGPU adapter for the moment (Chrome's, for a while after
+        // its graphics card hung) left wgpu only WebGL2, asked for on a
+        // canvas that has had a "webgpu" context, which gives none (every
+        // try of 2026-11-21's crash report "canvas.getContext() returned
+        // null"): WebGL2 is `remake`'s, on a fresh canvas
+        desc.backends = wgpu::Backends::BROWSER_WEBGPU;
+        wgpu::Instance::new(desc)
     } else {
         wgpu::util::new_instance_with_webgpu_detection(desc).await
     };
@@ -871,6 +899,10 @@ thread_local! {
     static FELL_BACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// `remake` went on to WebGL2 after WebGPU's tries.
     static TRIED_FALLBACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// `remake`'s last WebGL2 try was refused a context on a fresh canvas:
+    /// the browser blocks the page from WebGL2 too, so keeping WebGL2 for
+    /// its next load is no help (`give_up`).
+    static WEBGL_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// A fresh canvas in the page's in place of its own, for WebGL2 after
@@ -931,18 +963,34 @@ pub fn remake() -> Option<Result<viewer::PendingGfx, String>> {
     wasm_bindgen_futures::spawn_local(async move {
         let r = async {
             let mut last = String::new();
+            // the fresh canvas, once a leg has made it
+            let mut fresh: Option<web_sys::HtmlCanvasElement> = None;
+            WEBGL_REFUSED.with(|r| r.set(false));
             for leg in crate::gpulost::page::plan(backend) {
                 let canvas = if leg.fresh_canvas {
-                    TRIED_FALLBACK.with(|t| t.set(true));
-                    status(&format!(
-                        "graphics: no new WebGPU device within {} s ({last}): trying WebGL2",
-                        crate::gpulost::page::total_ms(&crate::gpulost::page::WEBGPU_PAUSES_MS) / 1000
-                    ));
-                    // WebGL2's own losses on the old canvas are not this one's
-                    WEBGL_LOST.with(|l| l.set(false));
-                    fresh_canvas()?
+                    match &fresh {
+                        Some(c) => {
+                            status(&format!(
+                                "graphics: the browser refuses both WebGPU and WebGL2 for now ({last}): trying WebGL2 for {} s more",
+                                crate::gpulost::page::total_ms(leg.pauses_ms) / 1000
+                            ));
+                            c.clone()
+                        }
+                        None => {
+                            TRIED_FALLBACK.with(|t| t.set(true));
+                            status(&format!(
+                                "graphics: no new WebGPU device within {} s ({last}): trying WebGL2",
+                                crate::gpulost::page::total_ms(&crate::gpulost::page::WEBGPU_PAUSES_MS) / 1000
+                            ));
+                            // WebGL2's own losses on the old canvas are not this one's
+                            WEBGL_LOST.with(|l| l.set(false));
+                            let c = fresh_canvas()?;
+                            fresh = Some(c.clone());
+                            c
+                        }
+                    }
                 } else {
-                    if leg.backend == wgpu::Backend::Gl {
+                    if leg.backends == [wgpu::Backend::Gl] {
                         let mut waited = 0;
                         while !WEBGL_BACK.with(std::cell::Cell::get) {
                             if waited >= WEBGL_BACK_MS {
@@ -960,16 +1008,22 @@ pub fn remake() -> Option<Result<viewer::PendingGfx, String>> {
                     // each try a new instance and adapter (a failed try's
                     // surface let go); the fresh canvas's window is made by
                     // `recover` on the device that comes
-                    match gfx_on(canvas.clone(), Some(leg.backend), leg.fresh_canvas).await {
-                        Ok(p) => {
-                            if leg.fresh_canvas {
-                                FELL_BACK.with(|f| f.set(true));
+                    for &b in leg.backends {
+                        match gfx_on(canvas.clone(), Some(b), leg.fresh_canvas).await {
+                            Ok(p) => {
+                                if leg.fresh_canvas && b == wgpu::Backend::Gl {
+                                    FELL_BACK.with(|f| f.set(true));
+                                }
+                                WEBGL_REFUSED.with(|r| r.set(false));
+                                return Ok(p);
                             }
-                            return Ok(p);
-                        }
-                        Err(e) => {
-                            log(&format!("graphics: try {} for a new {:?} device: {e}", k + 1, leg.backend));
-                            last = e;
+                            Err(e) => {
+                                log(&format!("graphics: try {} for a new {b:?} device: {e}", k + 1));
+                                if b == wgpu::Backend::Gl && leg.fresh_canvas && e.contains("getContext") {
+                                    WEBGL_REFUSED.with(|r| r.set(true));
+                                }
+                                last = e;
+                            }
                         }
                     }
                 }
@@ -1007,6 +1061,15 @@ fn short_why() -> String {
 /// process that keeps losing WebGPU's devices may still draw on.
 pub fn give_up(why: &str) {
     let backend = BACKEND.with(std::cell::Cell::get);
+    if WEBGL_REFUSED.with(std::cell::Cell::get) {
+        // the browser refused the page WebGL2 as well as WebGPU: nothing is
+        // kept for the next load, which may well have both again
+        crash(
+            "The graphics stopped",
+            &format!("{why}. The browser refused this page both WebGPU and WebGL2 for over 3 minutes after the graphics card stopped (browsers block a page from the graphics card for a while after it hangs). Reload the page to play again; if it happens again, restart the browser."),
+        );
+        return;
+    }
     if backend == Some(wgpu::Backend::BrowserWebGpu) || TRIED_FALLBACK.with(std::cell::Cell::get) {
         call_page("eqoaWebglKeep", &JsValue::from_str(why));
         crash("The graphics stopped", &format!("{why}. This page will use WebGL2 from now on in this browser (the start card says so, and can go back to WebGPU)."));
@@ -1372,12 +1435,12 @@ fn world_loader(disc: &WebDisc) -> crate::pregame::host::WorldLoader {
                 for name in SHARED.iter().copied().chain(["CHAR.ESF", "ITEM.ESF", "ARIAL.CSF", "UI.CSF", "ARIALUI.CSF", "ITEMICON.ESF", "SPELLFX.CSF", "FX.CSF", "ADDART.CSF"]) {
                     add(&mut lib, &mut d, name).await?;
                     // a server's patch's own names for CHAR.ESF's art (`s2`:
-                    // Sandstorm's set 9), as natively
+                    // the reference server's set 9), as natively
                     if name == "CHAR.ESF" {
                         crate::s2::get().register_art(&mut lib);
                     }
                 }
-                // a server's patch's own art (`s2`: Sandstorm's ss-art.csf,
+                // a server's patch's own art (`s2`: the reference server's ss-art.csf,
                 // robes 4 and 5), out of the server's folder, as natively
                 let rules = crate::s2::get();
                 if let Some(b) = rules.folder_bytes(&rules.art_file) {

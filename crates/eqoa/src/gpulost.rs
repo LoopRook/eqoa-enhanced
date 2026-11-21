@@ -78,6 +78,17 @@ pub fn watch(device: &wgpu::Device, recovered: bool) {
             mark(&format!("out of graphics memory ({n} times this run; a texture pack's budget now {} MB)", render::pack_limits().budget >> 20));
             return;
         }
+        // the window's surface refusing a call (Windows took it away or
+        // changed it: a minimised window, a display gone to sleep): the
+        // window's, not the device's, made again from the window by the
+        // next frame (`surface`), never a panic (the crash reports of
+        // 2026-11-19/21, "In Surface::configure  Invalid surface")
+        if let wgpu::Error::Validation { description, .. } = &e
+            && is_surface_error(description)
+        {
+            surface_failed(description);
+            return;
+        }
         if recovered {
             let text = e.to_string();
             let line = text.lines().take(3).collect::<Vec<_>>().join(" ");
@@ -92,6 +103,32 @@ pub fn watch(device: &wgpu::Device, recovered: bool) {
         // anything else as wgpu's default handler takes it
         panic!("wgpu error: {e}\n");
     }));
+}
+
+/// A surface call's validation error that reached the device's handler (one
+/// made outside the error scopes `viewer`'s `Gfx` puts round its own).
+static SURFACE_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Whether a validation error's words are a surface call's: wgpu names the
+/// call it came from ("In Surface::configure", "In
+/// Surface::get_current_texture_view", "In Surface::present").
+pub fn is_surface_error(description: &str) -> bool {
+    description.contains("In Surface::") || description.contains("Error in Surface::")
+}
+
+/// The window's surface refused a call (`is_surface_error`): taken by the
+/// next frame (`take_surface_failed`), said in the log once until then.
+pub fn surface_failed(why: &str) {
+    if !SURFACE_FAILED.swap(true, Ordering::SeqCst) {
+        let line = why.split_whitespace().collect::<Vec<_>>().join(" ");
+        crate::say(&format!("graphics: the window's surface refused a call ({line}): it is made again"));
+    }
+}
+
+/// Whether the window's surface refused a call since the last frame asked
+/// (`surface_failed`).
+pub fn take_surface_failed() -> bool {
+    SURFACE_FAILED.swap(false, Ordering::SeqCst)
 }
 
 /// The device taken as lost, said in the log once a loss.
@@ -358,7 +395,8 @@ pub fn test(device: &wgpu::Device, now: i64) {
 /// every try), each try a fresh adapter; then WebGL2, on a fresh canvas (one
 /// that has had a "webgpu" context never gives a "webgl2" one), which a
 /// Chrome whose GPU process keeps failing still draws on (in software if it
-/// must). On WebGL2 (chosen, or fallen back to: never back to WebGPU in that
+/// must); refused, WebGL2 on that canvas for 2 minutes more. On WebGL2
+/// (chosen, or fallen back to: never back to WebGPU in that
 /// page) WebGL2 again on its canvas once the browser gives the context back.
 pub mod page {
     use render::wgpu::Backend;
@@ -370,12 +408,23 @@ pub mod page {
     /// WebGL2's on a fresh canvas after WebGPU's 50 s: the browser has had
     /// its time; a few tries, 7.25 s.
     pub const FALLBACK_PAUSES_MS: [i32; 4] = [0, 250, 2000, 5000];
+    /// Both refused (2026-11-21's crash report: Chrome after a
+    /// `DXGI_ERROR_DEVICE_HUNG`, no WebGPU adapter for 50 s, then
+    /// `getContext("webgl2")` null on the fresh canvas too: a browser blocks
+    /// a page from the graphics card for a while after it hung): WebGL2 again
+    /// on the fresh canvas, every 10 s for 2 minutes more, the game going on
+    /// meanwhile, before the page stops. WebGL2 alone: `gfx_on` makes its
+    /// surface before it asks for an adapter, so a WebGPU try would take the
+    /// fresh canvas's "webgpu" context, and no "webgl2" one comes after it.
+    pub const BLOCKED_PAUSES_MS: [i32; 12] = [10_000; 12];
 
-    /// One leg of the way: the backend, the pauses before each try, and
-    /// whether the canvas is replaced by a fresh one first.
+    /// One leg of the way: the backends tried, in order, at each try, the
+    /// pauses before each try, and whether it is on a fresh canvas in place
+    /// of the lost device's (made by the first leg that wants it, kept by
+    /// the legs after).
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Leg {
-        pub backend: Backend,
+        pub backends: &'static [Backend],
         pub pauses_ms: &'static [i32],
         pub fresh_canvas: bool,
     }
@@ -383,11 +432,12 @@ pub mod page {
     /// The legs, in order, for a device lost on `drawn`.
     pub fn plan(drawn: Backend) -> Vec<Leg> {
         if drawn == Backend::Gl {
-            return vec![Leg { backend: Backend::Gl, pauses_ms: &WEBGL_PAUSES_MS, fresh_canvas: false }];
+            return vec![Leg { backends: &[Backend::Gl], pauses_ms: &WEBGL_PAUSES_MS, fresh_canvas: false }];
         }
         vec![
-            Leg { backend: Backend::BrowserWebGpu, pauses_ms: &WEBGPU_PAUSES_MS, fresh_canvas: false },
-            Leg { backend: Backend::Gl, pauses_ms: &FALLBACK_PAUSES_MS, fresh_canvas: true },
+            Leg { backends: &[Backend::BrowserWebGpu], pauses_ms: &WEBGPU_PAUSES_MS, fresh_canvas: false },
+            Leg { backends: &[Backend::Gl], pauses_ms: &FALLBACK_PAUSES_MS, fresh_canvas: true },
+            Leg { backends: &[Backend::Gl], pauses_ms: &BLOCKED_PAUSES_MS, fresh_canvas: true },
         ]
     }
 
@@ -403,14 +453,23 @@ mod tests {
     use render::wgpu::Backend;
 
     /// WebGPU is tried again for 45-60 s, no pause over 5 s and none
-    /// shorter than the one before; then WebGL2 on a fresh canvas. On WebGL2
-    /// only WebGL2, on its own canvas: a page fallen back never goes back to
-    /// WebGPU (the backend it draws on is WebGL2's from then). The control:
-    /// the old schedule's 16 s, too short for Roach's driver reset.
+    /// shorter than the one before; then WebGL2 on a fresh canvas; then,
+    /// refused, WebGL2 on that canvas for 2 minutes more (never WebGPU there:
+    /// its surface would take the canvas from WebGL2). Only the first leg
+    /// is on the lost device's canvas, and it asks for WebGPU alone (that
+    /// canvas gives no "webgl2" context). On WebGL2 only WebGL2, on its own
+    /// canvas: a page fallen back never goes back to WebGPU (the backend it
+    /// draws on is WebGL2's from then). The control: the old schedule's 16 s,
+    /// too short for Roach's driver reset.
     #[test]
     fn page_remake_plan() {
         let p = page::plan(Backend::BrowserWebGpu);
-        assert_eq!(p.iter().map(|l| (l.backend, l.fresh_canvas)).collect::<Vec<_>>(), [(Backend::BrowserWebGpu, false), (Backend::Gl, true)]);
+        assert_eq!(
+            p.iter().map(|l| (l.backends, l.fresh_canvas)).collect::<Vec<_>>(),
+            [(&[Backend::BrowserWebGpu][..], false), (&[Backend::Gl][..], true), (&[Backend::Gl][..], true)]
+        );
+        assert!(p.iter().all(|l| l.fresh_canvas || !l.backends.contains(&Backend::Gl)), "no WebGL2 asked of WebGPU's canvas");
+        assert!((100_000..=180_000).contains(&page::total_ms(p[2].pauses_ms)), "both refused: 2 minutes more");
         let w = p[0].pauses_ms;
         let total = page::total_ms(w);
         assert!((45_000..=60_000).contains(&total), "WebGPU waits {total} ms");
@@ -419,7 +478,7 @@ mod tests {
         assert!(w[0] <= 250, "the first try comes at once, as a lone GPU-process restart wants");
         let g = page::plan(Backend::Gl);
         assert_eq!(g.len(), 1);
-        assert_eq!((g[0].backend, g[0].fresh_canvas), (Backend::Gl, false), "no flip back to WebGPU");
+        assert_eq!((g[0].backends, g[0].fresh_canvas), (&[Backend::Gl][..], false), "no flip back to WebGPU");
         assert!(g[0].pauses_ms.iter().all(|&ms| ms <= 5000));
         assert!(p[1].pauses_ms.iter().all(|&ms| ms <= 5000) && page::total_ms(p[1].pauses_ms) < 15_000, "the fallback is quick once WebGPU had its 50 s");
         assert!(page::total_ms(&page::WEBGL_PAUSES_MS) < 45_000, "the control: the old 16 s schedule is short of a TDR");
@@ -469,6 +528,17 @@ mod tests {
         assert!(threw_out_of_memory("GPUDevice.createBuffer: RangeError: Failed to execute 'createBuffer' on 'GPUDevice': createBuffer failed, size (1099511627776) is too large for the implementation when mappedAtCreation == true"), "Chrome's words in the page test");
         assert!(!threw_out_of_memory("GPUDevice.createBuffer: Unable to create buffer."), "the control: Safari's lost device");
         assert!(!threw_out_of_memory("GPUQueue.writeTexture: RangeError: offset"), "the control: not createBuffer's");
+    }
+
+    /// The NVIDIA crash report's words (2026-11-21, "In Surface::configure
+    /// Invalid surface") are the window's surface's, as an acquire's are;
+    /// the controls: a buffer's or a pipeline's validation error is not.
+    #[test]
+    fn surface_errors_are_the_windows() {
+        assert!(is_surface_error("Validation Error\n\nCaused by:\n  In Surface::configure\n    Invalid surface\n"));
+        assert!(is_surface_error("Validation Error\n\nCaused by:\n  In Surface::get_current_texture_view\n    Surface is not configured for presentation\n"));
+        assert!(!is_surface_error("Validation Error\n\nCaused by:\n  In Device::create_buffer, label = 'vertices'\n    Buffer size 0 is invalid\n"), "the control");
+        assert!(!is_surface_error("In a render pass\n  Surface texture used after present"), "the control: a pass's words, not a surface call's");
     }
 
     #[test]

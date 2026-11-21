@@ -10,7 +10,7 @@
 //! every setting back as it was and applies.
 //!
 //! The client's own on the game's Interface page: Profanity Filter under its
-//! rows (the GM Jibrish's petition 1490), Off, Medium (only racial slurs) or
+//! rows (a GM's petition 1490), Off, Medium (only racial slurs) or
 //! High (petition 1625), High by default as the game is at every login; it is the server's filter of what the player hears, told to a
 //! server that asks for it (go-eqoa-server's 0x7E60,
 //! `Session::agree_profanity_filter`), taken by Save Changes and put back by
@@ -19,12 +19,12 @@
 //! The client's own, beside the game's: an Extended row between Sound and
 //! Save Changes (the menu a row longer), its words the client's (no
 //! WORDS.TXT entry). It opens a menu of its own over the options menu, drawn
-//! as that one is, of four groups (the GM Jibrish's petitions 1631 and 1634,
+//! as that one is, of four groups (a GM's petitions 1631 and 1634,
 //! 2026-11-11: `GROUPS`): Graphics (Video, World, Lighting, Characters,
 //! natively Textures, Weather), UI (HUD, HUD Layout, Name Plates, Map, Number Colors,
 //! Merc Colors, DPS Meter, Chat), Other (General, Combat, Camera, natively
 //! Sound), Touch Controls (Size & Look, Layout: every row of the touch
-//! screen's pad, the GM Jibcrotwo's petition 2084) and the Multi-boxing
+//! screen's pad, a GM's petition 2084) and the Multi-boxing
 //! settings. A group opens a menu of its
 //! categories in the place of the groups' (`CATEGORIES`), the Multi-boxing
 //! settings, a group of one, its page at once; each category opens a page laid
@@ -93,9 +93,10 @@
 //!   weather's own);
 //! - UI: Ability Bars (the game's 2, or 3 or 4: the HUD's quick menus and
 //!   the spell book's slots, `hudmenu`), Stacked Spell Bars (2026-11-13,
-//!   Jibwiz's ticket 1913, Off by default: On, on a computer, the first two
-//!   bars as two rows of five above the chat box at 95% with no name bar,
-//!   each slot a key on the Controls page; `hudmenu::Stacked`), Update Notices (one setting for
+//!   a player's ticket 1913, Off by default: On, on a computer, every bar shown
+//!   as a row of five above the chat box at 95% with no name bar, in one
+//!   column or two (HUD Layout's Spell Bar Layout), each slot a key on the
+//!   Controls page; `hudmenu::Stacked`), Update Notices (one setting for
 //!   every window: off, the game never asks to restart into a newer build,
 //!   which starts the next time the game does; `update::asks`, and a page's
 //!   Reload notice, `web/main.js`), Text (Sharp or Smooth: the game's font
@@ -109,12 +110,20 @@
 //!   left, the HUD's pieces outlined and dragged with the mouse or a finger,
 //!   a bar at the top with Lock and Reset, `hudlayout`; not kept, as it is a
 //!   mode, and Triangle leaves it) and Reset HUD (Reset: every piece back
-//!   where the game puts it at once, kept, by ✕, left or right);
+//!   where the game puts it at once, kept, by ✕, left or right); Spell Bar
+//!   Layout (2026-11-18, the server owner's "stack 4 spell bars, or 2 columns
+//!   of 2, side by side": Stacked, the default, or 2 Columns, how the Stacked
+//!   Spell Bars stand with Ability Bars at 3 or 4, `hudmenu::Layout`; off
+//!   where the server keeps the game's two bars); Utility Bar Layout (the
+//!   same day: Upper Left, the default, or Below, where the item quick slots
+//!   and the weapon sets stand while the spell bars are stacked,
+//!   `hudmenu::UtilityLayout`; turned, the Utility Bars go where it puts
+//!   them, a move of theirs forgotten; off with the stacked bars);
 //! - Controller: Controller Focus (which controllers this window reads:
 //!   Auto, Window, Pad 1 to 4 or Off, `input::pick`, kept for each window of
 //!   the client open, `multibox`; what it reads now is said beside Back),
 //!   Capture Controller (one setting for every window), and the touch
-//!   screen's pad (`touch`; 2026-11-09, Jibrish's petition 1386): Touch
+//!   screen's pad (`touch`; 2026-11-09, a GM's petition 1386): Touch
 //!   Stick Size and Touch Button Size (sliders and their numbers: the sticks
 //!   and the buttons, each 50 to 200% of the pad as it was in fives, drawn
 //!   larger than it was only as far as the window has room, `touch::layout`;
@@ -213,13 +222,13 @@
 //!   the nearest creature fighting the player targeted); Weapon Swap Back (Off
 //!   by default; On: a weapon set used again puts back what it took off, the
 //!   server's, work board 1581: `gear::use_message`);
-//! - Chat (2026-11-10, the GM Jibrish's petition 1463: "This should be off by
+//! - Chat (2026-11-10, a GM's petition 1463: "This should be off by
 //!   default for ps2 players and a toggle option"): Item Links (On by default:
 //!   items linked from the inventory into the chat line, drawn purple in the
 //!   chat box and opened in a window, `itemlink`, the server asked for them:
 //!   `Session::agree_item_links`; Off: none, the server sends the plain names a
 //!   PS2 gets), the page saying when this server has no links; Chat Always
-//!   Shown (2026-11-13, Jibwiz's ticket 1914, Off by default: On, the chat box
+//!   Shown (2026-11-13, a player's ticket 1914, Off by default: On, the chat box
 //!   stays open at its five rows, the last lines in it, never sliding away);
 //!   R2 Channel Switch (2026-11-18, the server owner's, Off by default: On,
 //!   with R2 held the d-pad's left and right step the chat channel, Say,
@@ -235,7 +244,7 @@
 //! menu puts them back, and Save Changes keeps them with the game's
 //! (`client.opt`).
 //!
-//! Auto Save Options (Other > General; Waldorf's ticket 2002, 2026-11-13, Off
+//! Auto Save Options (Other > General; a player's ticket 2002, 2026-11-13, Off
 //! by default, the game's): On, every step back (a page to the menu, an
 //! Extended page or menu up a step, the Controls and Macros pages) keeps what
 //! was changed as Save Changes does, the game's, the client's and the keys
@@ -760,7 +769,7 @@ impl WndOptions {
     }
 
     /// A step back (a page to the menu, an Extended page or menu up a step)
-    /// with Auto Save Options on (Waldorf's ticket 2002): everything changed
+    /// with Auto Save Options on (a player's ticket 2002): everything changed
     /// kept as Save Changes keeps it (the four held settings taken,
     /// `settings::save`: game.opt, client.opt and keys.opt), with no box and
     /// no "Saving...", and what Triangle on the menu would put back made
@@ -951,6 +960,9 @@ impl WndOptions {
                     // (`Session::agree_power_bars`), the bars drawn or not
                     // under the group's, the pet's and the raid list's health
                     86 => c.power_bars = !c.power_bars,
+                    // Health Numbers: the percentages drawn or not over the
+                    // bars from the next frame (`hud`, `raidlist`)
+                    HEALTH_NUMBERS => c.health_numbers = !c.health_numbers,
                     // Buff Window: the server told from the next frame
                     // (`Session::agree_buffs`), ours or the game's strip
                     // drawn (`buffwnd`)
@@ -1090,6 +1102,17 @@ impl WndOptions {
                     // Spell Bar Opacity (ticket 1953): the stacked bars' frames
                     // from the next frame (`hudmenu::HudMenus::draw_stacked`)
                     SPELL_BAR_OPACITY => slide(&mut c.spell_bar_opacity, 0, 100, 10),
+                    // Spell Bar Layout (2026-11-18): Stacked or 2 Columns, the
+                    // stacked bars from the next frame
+                    // (`hudmenu::HudMenus::draw_stacked`)
+                    SPELL_BAR_LAYOUT => c.spell_bar_layout = c.spell_bar_layout.other(),
+                    // Utility Bar Layout (2026-11-18): Upper Left or Below,
+                    // the Utility Bars put where it has them (a move of
+                    // theirs, from the other side, forgotten)
+                    UTILITY_LAYOUT => {
+                        c.utility_layout = c.utility_layout.other();
+                        crate::hudlayout::reset_piece(crate::hudlayout::Piece::UtilityBars);
+                    }
                     // Pets Pass Through (ticket 1977): every creature's capsule
                     // set again from the next frame (`Play::place_actors`)
                     PETS_PASS => c.pets_pass = !c.pets_pass,
@@ -1579,7 +1602,7 @@ impl WndOptions {
 
     /// `DrawInterfacePage`: Auto Attack, 3rd Person Camera, Camera Pitch
     /// Axis, Soft Keyboard and (feature 0x200) Vibration; then the client's
-    /// Profanity Filter (the GM Jibrish's petition 1490), its words the
+    /// Profanity Filter (a GM's petition 1490), its words the
     /// client's.
     fn draw_interface(&mut self, vui: &Vui, r: &mut dyn Raster, o: &GameOptions) {
         let mut items = vec![10, 0, 1, 6];
@@ -1804,7 +1827,7 @@ const CENTER: [i32; 2] = [320, 246];
 /// Extended's rows, by the item each changes (`change`), and their labels.
 /// A row is drawn by its item (`value_text`, or `slider_at` for a slider)
 /// and shown on the page of the category that lists it (`CATEGORIES`).
-const EXTENDED_ITEMS: [(i32, &str); 100] = [
+const EXTENDED_ITEMS: [(i32, &str); 103] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1905,6 +1928,9 @@ const EXTENDED_ITEMS: [(i32, &str); 100] = [
     (PACK_PRECACHE, "Precache Textures"),
     (PACK_COMPRESS, "Pack Compression"),
     (PACK_REBUILD, "Rebuild Pack Cache"),
+    (SPELL_BAR_LAYOUT, "Spell Bar Layout"),
+    (UTILITY_LAYOUT, "Utility Bar Layout"),
+    (HEALTH_NUMBERS, "Health Numbers"),
 ];
 
 /// What a page says beside Back while a row the server turns off is chosen
@@ -1923,17 +1949,17 @@ fn chat_tab_kind(item: i32) -> Option<usize> {
     usize::try_from(item - CHAT_TAB_FIRST).ok().filter(|&k| k < crate::chat::KINDS)
 }
 
-/// Spell Bar Opacity's item (Jibwiz's ticket 1953).
+/// Spell Bar Opacity's item (a player's ticket 1953).
 const SPELL_BAR_OPACITY: i32 = 102;
 /// Pets Pass Through's item (Thorinoak's ticket 1977).
 const PETS_PASS: i32 = 103;
 /// Same Shortcuts on Every Character's item (Piedpiper's ticket 1987).
 const SHARED_SHORTCUTS: i32 = 104;
-/// Auto Save Options' item (Waldorf's ticket 2002).
+/// Auto Save Options' item (a player's ticket 2002).
 const AUTO_SAVE: i32 = 105;
 /// Move Touch Pad's, Reset Touch Pad's and Button Layout's items (the server
 /// owner's of 2026-11-14, "the apk client cant resize or move touch pad
-/// display"; the GM Jibcrotwo's petition 2084).
+/// display"; a GM's petition 2084).
 const MOVE_TOUCH: i32 = 106;
 const RESET_TOUCH: i32 = 107;
 const TOUCH_LAYOUT: i32 = 108;
@@ -1943,7 +1969,7 @@ const TARGET_LEVEL: i32 = 120;
 /// Weather's item (2026-11-15, with Flora's and Environment's sliders). 130,
 /// not the next free, is this lane's, as Target Level's 120.
 const WEATHER: i32 = 130;
-/// Weapon Swap Back's item (jibrish, 2026-11-16, work board 1581). 140, not
+/// Weapon Swap Back's item (a GM, 2026-11-16, work board 1581). 140, not
 /// the next free, as Weather's 130.
 const WEAPON_SWAP_BACK: i32 = 140;
 /// R2 Channel Switch's item (the server owner, 2026-11-18). 150, not the next
@@ -1960,8 +1986,22 @@ pub(crate) const PACK_MEMORY: i32 = 160;
 pub(crate) const PACK_PRECACHE: i32 = 170;
 pub(crate) const PACK_COMPRESS: i32 = 180;
 pub(crate) const PACK_REBUILD: i32 = 190;
+/// Spell Bar Layout's item (the server owner, 2026-11-18: "When players turn
+/// on 4 they need to be able to stack 4 spell bars, or 2 columns of 2, side by
+/// side"). 200, not the next free, as Rebuild Pack Cache's 190; the server's
+/// `qol::SPELL_BARS` turns it off with the bars.
+pub(crate) const SPELL_BAR_LAYOUT: i32 = 200;
+/// Utility Bar Layout's item (the server owner, 2026-11-18: "They can go in
+/// the upper left, side by side vertical, or down below and the player
+/// decides"). 210, as Spell Bar Layout's 200; off with the stacked bars.
+pub(crate) const UTILITY_LAYOUT: i32 = 210;
+/// Health Numbers' item (Live petition 5393, Spoony: "add the option to
+/// overlay health as a number, or percentage, over party bars. Including
+/// pets."). 220, as Utility Bar Layout's 210; the server's `qol::POWER_BARS`
+/// turns it off with Power Bars.
+pub(crate) const HEALTH_NUMBERS: i32 = 220;
 
-/// Slow When Not Focused's item (the GM Jibrish's petition 1634; natively:
+/// Slow When Not Focused's item (a GM's petition 1634; natively:
 /// a page's pace in the back is the browser's).
 const SLOW_UNFOCUSED: i32 = 82;
 
@@ -2015,7 +2055,7 @@ struct Category {
     group: Group,
 }
 
-/// Extended's first menu (the GM Jibrish's petitions 1631, "when they open
+/// Extended's first menu (a GM's petitions 1631, "when they open
 /// extended they see 3 options, graphics, UI and other", and 1634, a
 /// "Multi-boxing settings" folder off it): each opens a menu of its
 /// categories, a group of one category its page at once.
@@ -2054,10 +2094,12 @@ const ALL_CATEGORIES: [Category; 25] = [
     Category { name: "HUD", items: &[22, 90, 30, 40, 58, 83], note: Note::None, group: Group::Ui },
     // the group's and the raid's windows (2026-11-12, Power Bars: HUD's page
     // was full, so Raid List came with it)
-    Category { name: "Group & Raid", items: &[49, 86, 88], note: Note::None, group: Group::Ui },
+    // Health Numbers (2026-11-21, Live petition 5393) after Power Bars, the
+    // other thing drawn on the same bars
+    Category { name: "Group & Raid", items: &[49, 86, HEALTH_NUMBERS, 88], note: Note::None, group: Group::Ui },
     // Minimap Scroll Frame (2026-11-13) here: Map's page was full
     // Spell Bar Opacity (2026-11-13, ticket 1953) here: HUD's page is full
-    Category { name: "HUD Layout", items: &[76, 77, 91, SPELL_BAR_OPACITY], note: Note::Hud, group: Group::Ui },
+    Category { name: "HUD Layout", items: &[76, 77, 91, SPELL_BAR_OPACITY, SPELL_BAR_LAYOUT, UTILITY_LAYOUT], note: Note::Hud, group: Group::Ui },
     Category { name: "Name Plates", items: &[27, 34, 85, TARGET_LEVEL], note: Note::None, group: Group::Ui },
     Category { name: "Map", items: &[41, 42, 87, 43, 44, 45], note: Note::None, group: Group::Ui },
     Category { name: "Number Colors", items: &crate::numcolor::NUMBER_ITEMS, note: Note::None, group: Group::Ui },
@@ -2070,7 +2112,7 @@ const ALL_CATEGORIES: [Category; 25] = [
     Category { name: "Size & Look", items: &[59, 60, 61, 62], note: Note::Reads, group: Group::Touch },
     Category { name: "Sound", items: &[32], note: Note::Output, group: Group::Other },
     Category { name: "Multi-boxing settings", items: MULTIBOX, note: Note::Reads, group: Group::Multibox },
-    // the chat tabs (2026-11-13, Jibwiz's ticket 1951): each kind of line to
+    // the chat tabs (2026-11-13, a player's ticket 1951): each kind of line to
     // Main or a tab of its own, the talk on one page and the game's on another
     Category { name: "Chat Tabs: Talk", items: &[92, 93, 94, 95, 96], note: Note::ChatTabs, group: Group::Ui },
     Category { name: "Chat Tabs: Game", items: &[97, 98, 99, 100, 101], note: Note::ChatTabs, group: Group::Ui },
@@ -2244,6 +2286,7 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         49 => on_off(c.raid_list),
         58 => on_off(c.pet_effects),
         86 => on_off(c.power_bars),
+        HEALTH_NUMBERS => on_off(c.health_numbers),
         88 => wide(if c.raid_mercs { "Shown" } else { "Hidden" }),
         83 => on_off(c.buff_window),
         85 => on_off(c.head_marks),
@@ -2287,6 +2330,11 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
             }
         }
         90 => on_off(c.stacked_bars),
+        // Spell Bar Layout: Off where the server keeps the game's two bars
+        SPELL_BAR_LAYOUT if crate::settings::qol::off(crate::settings::qol::SPELL_BARS) => on_off(false),
+        SPELL_BAR_LAYOUT => wide(c.spell_bar_layout.name()),
+        UTILITY_LAYOUT if crate::settings::qol::off(crate::settings::qol::SPELL_BARS) => on_off(false),
+        UTILITY_LAYOUT => wide(c.utility_layout.name()),
         78 => on_off(c.auto_cast),
         79 => on_off(c.auto_target),
         WEAPON_SWAP_BACK => on_off(c.weapon_swap_back),
@@ -2948,6 +2996,16 @@ mod tests {
         assert_eq!(value_text(&vui, 86), Some(wide(vui.words.get(552, vui.language))));
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::power_bars(), "and back: two values");
+        goto!(HEALTH_NUMBERS);
+        assert_eq!(w.item, HEALTH_NUMBERS, "Health Numbers");
+        assert!(!settings::health_numbers(), "off by default: the game's bars");
+        assert_eq!(value_text(&vui, HEALTH_NUMBERS), Some(wide(vui.words.get(552, vui.language))));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::health_numbers(), cues.last()), (true, Some(&11)), "on: the percentages over the bars");
+        assert_eq!(value_text(&vui, HEALTH_NUMBERS), Some(wide(vui.words.get(551, vui.language))));
+        assert!(settings::power_bars() && settings::raid_list(), "moving no other row");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(!settings::health_numbers(), "and back: two values");
         goto!(88);
         assert_eq!(w.item, 88, "Raid Mercenaries");
         assert_eq!((settings::raid_mercs(), value_text(&vui, 88)), (false, Some(wide("Hidden"))), "Hidden by default");
@@ -3537,7 +3595,7 @@ mod tests {
     }
 
     /// Extended opens on its groups: Graphics, UI, Other and the
-    /// Multi-boxing settings (the GM Jibrish's petitions 1631 and 1634), a
+    /// Multi-boxing settings (a GM's petitions 1631 and 1634), a
     /// window as the options menu's with its bottom where that one's is. Each
     /// group opens its categories' menu (the Multi-boxing settings, a group
     /// of one, its page at once), each category its page on its first row,
@@ -3643,8 +3701,8 @@ mod tests {
             of(1),
             vec![
                 ("HUD", vec!["Ability Bars", "Stacked Spell Bars", "Text", "HUD", "Pet Effects", "Buff Window"]),
-                ("Group & Raid", vec!["Raid List", "Power Bars", "Raid Mercenaries"]),
-                ("HUD Layout", vec!["Move HUD", "Reset HUD", "Minimap Scroll Frame", "Spell Bar Opacity"]),
+                ("Group & Raid", vec!["Raid List", "Power Bars", "Health Numbers", "Raid Mercenaries"]),
+                ("HUD Layout", vec!["Move HUD", "Reset HUD", "Minimap Scroll Frame", "Spell Bar Opacity", "Spell Bar Layout", "Utility Bar Layout"]),
                 ("Name Plates", vec!["Name Distance", "Overlapping Names", "Quest Markers", "Target Level"]),
                 ("Map", vec!["Map", "Minimap", "Map Pointer", "Map Markers", "Quest Helper", "Quest Tracker"]),
                 ("Number Colors", n[..6].to_vec()),
@@ -4135,13 +4193,13 @@ mod tests {
         for k in [key::DOWN, key::DOWN, key::DOWN, key::CROSS] {
             w.key(&vui, &mut NullRaster, &mut o, k, 0, &mut cues, &mut ups);
         }
-        let off_rows = [44, 45, 85, TARGET_LEVEL, 70, 71, 72, 64, 65, 66, 67, 68, 69, 80, 81, 86, 83, 58, 78, 79, 22, 90];
+        let off_rows = [44, 45, 85, TARGET_LEVEL, 70, 71, 72, 64, 65, 66, 67, 68, 69, 80, 81, 86, HEALTH_NUMBERS, 83, 58, 78, 79, 22, 90, SPELL_BAR_LAYOUT, UTILITY_LAYOUT];
         qol::set_off(0xFFF);
         for &(item, _) in EXTENDED_ITEMS.iter() {
             assert_eq!(qol::item_off(item, TARGET_LEVEL), off_rows.contains(&item), "row {item}");
         }
         let off_text = Some(wide(vui.words.get(552, vui.language)));
-        for item in [44, TARGET_LEVEL, 70, 86, 83, 58, 78, 90] {
+        for item in [44, TARGET_LEVEL, 70, 86, HEALTH_NUMBERS, 83, 58, 78, 90, SPELL_BAR_LAYOUT, UTILITY_LAYOUT] {
             for k in path_to(&w, item) {
                 w.key(&vui, &mut NullRaster, &mut o, k, 0, &mut cues, &mut ups);
                 w.draw(&vui, &mut NullRaster, &o, &mut ups);
@@ -4336,7 +4394,7 @@ mod tests {
         assert_eq!(once.len(), listed.len(), "an item on two pages");
     }
 
-    /// Auto Save Options (Waldorf's ticket 2002). Off (the control, the
+    /// Auto Save Options (a player's ticket 2002). Off (the control, the
     /// game's): Faction Messages (held) and Damage Numbers changed on Game's
     /// page, Triangle to the menu keeps nothing, Triangle there puts them
     /// back and nothing is written. Turned on on Other > General's page, the

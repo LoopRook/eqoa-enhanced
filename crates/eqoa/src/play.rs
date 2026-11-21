@@ -180,7 +180,7 @@ struct ActorAt {
 /// `VICSprite::NameColors`.
 const NAME_COLORS: [[f32; 4]; 3] = [[212.0 / 255.0, 192.0 / 255.0, 111.0 / 255.0, 1.0], [100.0 / 255.0, 175.0 / 255.0, 220.0 / 255.0, 1.0], [90.0 / 255.0, 1.0, 80.0 / 255.0, 1.0]];
 
-/// A mercenary's name (the GM Jibrish's petition 1488, 2026-11-11: "Change
+/// A mercenary's name (a GM's petition 1488, 2026-11-11: "Change
 /// mercenary name colors to match that of pets, with a slight reddish tint"):
 /// `NAME_COLORS[1]`, the pet's (100, 175, 220), with red brought up and the
 /// rest down a little. A server tells which creatures are mercs
@@ -199,7 +199,7 @@ pub struct Plate {
     pub mark: Option<u8>,
 }
 
-/// A quest mark's colour (the GM Jibrish's petition 1813: "yellow ! and ?").
+/// A quest mark's colour (a GM's petition 1813: "yellow ! and ?").
 const MARK_COLOR: [f32; 4] = [1.0, 0.86, 0.1, 1.0];
 
 /// A quest mark's size against its name's at `MARK_NEAR` from the camera.
@@ -247,7 +247,7 @@ pub struct Play {
     /// `m_p07578`: the 0x40's interval in the game's clock's ticks (983.04
     /// a second): 100 (101.7 ms), or what 0x07B2 sets. The PS2 keeps it for
     /// the program's run; here a login starts at 100 again (no server we
-    /// know sends 0x07B2: none in Sandstorm's captures, none in
+    /// know sends 0x07B2: none in the reference server's captures, none in
     /// go-eqoa-server).
     send_interval: u32,
     puppets: Vec<Option<Puppet>>,
@@ -258,7 +258,7 @@ pub struct Play {
     pub abilities: std::collections::BTreeMap<i64, net::dump::Ability>,
     ability_token: u32,
     /// S2's record of the pad, which 0x0032 carries on a server whose patch
-    /// has it (`s2::Presses`: Sandstorm's live S2)
+    /// has it (`s2::Presses`: the reference server's live S2)
     presses: crate::s2::Presses,
     /// The HUD's quick menus.
     pub hud_menus: crate::hudmenu::HudMenus,
@@ -267,7 +267,7 @@ pub struct Play {
     /// A 0x0033 for a slot past the game's ten (the Extended page's Ability
     /// Bars) waiting for its 0x00B4: (display index, slot, the session's
     /// clock when it was sent, in ms). A server that keeps only the game's slots
-    /// (Sandstorm, measured 2026-10-23: slots 10 and 13 dropped, slot 3
+    /// (the reference server, measured 2026-10-23: slots 10 and 13 dropped, slot 3
     /// answered) never answers it, and the player is told (`slot_unanswered`).
     slot_asked: Option<(i64, i64, i64)>,
     /// The live client's weapon sets, kept by a server that sends them
@@ -386,6 +386,10 @@ pub struct Play {
     /// keyboard, not a pad or the touch screen. With the options' Soft
     /// Keyboard on (`compact`) it gives the edit boxes their compact face.
     pub keyboard: bool,
+    /// The last input was a finger on the touch screen (`point`): the
+    /// Stacked Spell Bars give way to the carousel, whose taps a finger plays
+    /// with. A key or a pad's button since clears it (petition 2448).
+    pub touched: bool,
     /// The pad's motors as `Rumble` asked (motor, level, ms), for the
     /// viewer's pad to take.
     pub rumbles: Vec<(u8, u8, i32)>,
@@ -673,7 +677,7 @@ pub struct Play {
     /// next.
     projectiles: std::collections::BTreeMap<u32, (Option<esf::Model>, Vec<GpuModel>)>,
     casts: Vec<crate::spells::Cast>,
-    /// The pets in a zone's prop (`petart`: Zerkziee's catapult): their rams
+    /// The pets in a zone's prop (`petart`: a player's catapult): their rams
     /// and shots, and each prop's drawn bounds.
     petart: crate::petart::State,
     pet_tops: crate::petart::Tops,
@@ -753,13 +757,13 @@ const GUIDE_WAIT_MS: u32 = 3000;
 
 /// How long a monster's name and level stay in the target's info window from
 /// the server's answer to a press of □ or Q (`Play::mob_info_shown`): a tap is
-/// let go before the answer comes, and the GM Jibrish's petition 1459 asks for
+/// let go before the answer comes, and a GM's petition 1459 asks for
 /// a press; held longer, the window stays while held.
 pub const MOB_INFO_MS: u32 = 3000;
 
 /// The colour a 0x00DB's number is drawn in, from what follows its body
 /// (`rest`): a server's patch's three bytes when it colours them (`patch`:
-/// Sandstorm's S2, `s2::Rules::damage_rgb`, read as ever, and nothing else
+/// the reference server's S2, `s2::Rules::damage_rgb`, read as ever, and nothing else
 /// then), else its tag's row's (`numcolor::rgb`, with the rows `choices`) when
 /// the server offered tags (`tags`); none, the game's own colour.
 fn number_rgb(patch: bool, rest: &[u8], tags: bool, choices: &[crate::numcolor::Choice; crate::numcolor::ROWS]) -> Option<[u8; 3]> {
@@ -842,7 +846,7 @@ fn far_pose_every(far: u32) -> u32 {
 /// where the player now stands, as `Respawn` (0x00B2) and `Msg000D` end with
 /// `SetSky(m_camera, 1)`. A sky that only fades in after a port held every
 /// weather change behind its 30 s (`VIAtmosphere::SetWeather` waits on a
-/// change under way), and Sandstorm sends the weather just before each port.
+/// change under way), and the reference server sends the weather just before each port.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Atmos {
     Weather(u8, bool),
@@ -856,7 +860,7 @@ pub const WORLD_FILES: [&str; 6] = ["TUNARIA.ESF", "RATHE.ESF", "ODUS.ESF", "LAV
 /// patch's table, else CLIENT's six: `s2::Rules::world_file`), unless the
 /// dump says the world is not on the disc (`m_p0662C`), when its path is
 /// loaded; the path too for an id past the table. A file name in capitals.
-/// The login took the path alone, so a vampire standing in Sandstorm's
+/// The login took the path alone, so a vampire standing in the reference server's
 /// Sanctuary (world 7, SECRETS.ESF) logged in to Tunaria's hills (F3
 /// 20261025-055704); a teleport there already went by the id.
 pub fn login_world_file(player: &net::session::Player) -> String {
@@ -1005,7 +1009,7 @@ mod login_world {
     }
 
     /// A login goes to the world the dump's id names in the world table,
-    /// whatever its path says: Sandstorm's patch's seventh is Secrets
+    /// whatever its path says: the reference server's patch's seventh is Secrets
     /// again. The dump's flag, or an id past the table, loads the path. The
     /// control: the path alone, as the login had it, goes to Tunaria.
     #[test]
@@ -1814,7 +1818,7 @@ fn hush(cs: &mut CSprite<Ee>, s: &mut crate::sound::Sound) {
 }
 
 /// `ApplyLook`'s `SetVisible`: a creature whose `Flag1` is up (state byte
-/// 154's bit 1, an invisible one: Sandstorm sets it on the caster's own
+/// 154's bit 1, an invisible one: the reference server sets it on the caster's own
 /// channel) has its skins hidden (`VIClientPart06D00::Apply`'s
 /// `SetSkinsVisible`), the body and all it wears; what it holds, its helm and
 /// its name stay. No creature (none sent yet) is shown.
@@ -2074,7 +2078,7 @@ fn labels_by(plates: &[Plate], view: &PlateView, view_proj: glam::Mat4, width: i
 }
 
 /// How much smaller a merc's tag is drawn than its name: two of the font's
-/// pixels off its `height` (the GM Jibrish's petition 1587, 2026-11-11:
+/// pixels off its `height` (a GM's petition 1587, 2026-11-11:
 /// "Lower the font size of mercenary display tags by 2"), the name the
 /// font's own size.
 fn tag_size(height: u32) -> f32 {
@@ -2184,7 +2188,7 @@ mod entity_actors {
 
     const SIGNPOST: u32 = 0x6A82352C;
     const HUMAN: u32 = 0x70D898C6;
-    /// Sandstorm's blocker: a box of collision, nothing to draw.
+    /// the reference server's blocker: a box of collision, nothing to draw.
     const BLOCKER: u32 = 0x6F412342;
 
     /// TUNARIA's zones round Freeport's open ground and CHAR.ESF, and the
@@ -2464,7 +2468,7 @@ mod entity_actors {
         assert_eq!(send(&mut p, &mut w, HUMAN, 0), human, "the model changed");
     }
 
-    /// Sandstorm's blockers (F3 20261028-233048, an unnamed creature where
+    /// the reference server's blockers (F3 20261028-233048, an unnamed creature where
     /// the player stood; a quest's gate the players ran past): CHAR.ESF's
     /// 0x6F412342 is a SimpleSprite with an empty prim buffer and a
     /// collision buffer, a closed box 5 a side about its origin. With nothing
@@ -2581,8 +2585,8 @@ mod entity_actors {
 /// (200), or farther is never targeted.
 const CYCLE_REACH2: f32 = 40000.0;
 
-/// Whether `c` is a familiar, which no target cycle takes (the GM Jibwiz's
-/// petitions 1881 and 1903, Brother's 1902, 2026-11-13: "Only direct mouse
+/// Whether `c` is a familiar, which no target cycle takes (a GM's
+/// petitions 1881 and 1903, another's 1902, 2026-11-13: "Only direct mouse
 /// targeting, or pressing and holding the target button to go into first
 /// person with a cross hair ... should target heal bot. The cycle targeting
 /// should not"); a click, the crosshair, a name and the 6 key still do. A
@@ -3017,7 +3021,7 @@ mod far_poses {
     /// A few far characters are posed every frame, as near ones are; a
     /// crowd takes turns, about `FAR_POSE_BUDGET` a frame. The control: one
     /// frame in four however few (the client's before) poses a quarter of
-    /// Sandstorm's 24.
+    /// the reference server's 24.
     #[test]
     fn far_characters_are_posed_every_frame_unless_a_crowd() {
         for few in [1, 3, 24, FAR_POSE_BUDGET] {
@@ -3035,7 +3039,7 @@ mod held {
     use super::*;
 
     /// A player turned into a creature keeps its weapons on its channel
-    /// (Sandstorm's bard in Mouse Form, `pcaps/ps2_main_capture.pcap`: both
+    /// (the reference server's bard in Mouse Form, `pcaps/ps2_main_capture.pcap`: both
     /// hands 0xF4DD991A, type 5): the creature's sprite holds no items, so
     /// none is attached and both hands swing hand to hand. The same items on
     /// a sprite that holds them hang on its nodes, the override first. The
@@ -3142,7 +3146,7 @@ mod held {
         crate::raceopts::set_looks(Default::default());
     }
 
-    /// A Wisp casts no shadow (petition 1449, the GM Jibrish: "people can tell
+    /// A Wisp casts no shadow (petition 1449, a GM: "people can tell
     /// its just an invisible human"): every model of its puppet (its armour,
     /// the wisp in its helm, the sword in its hand, its helm, its cape) is
     /// cleared of casting into Sun Shadows' and Light Shadows' maps as the
@@ -3379,8 +3383,8 @@ mod held {
         let mut player = None;
         apply(&lib, &mut g, &mut player, &entity(2), None, 0, 0, Some(&races), false);
         let p = player.as_ref().unwrap();
-        assert_eq!(p.held, [Some((sword, 11)), Some((bow, 21)), Some((shield, 20))]);
-        assert_eq!(nodes(&player), [11, 20, 21], "each item's model on its node");
+        assert_eq!(p.held, [Some((sword, 49)), Some((bow, 50)), Some((shield, 51))], "the hands' seats (racebody: petition 2493)");
+        assert_eq!(nodes(&player), [49, 50, 51], "each item's model on its seat");
         assert_eq!(p.projectile, [Some(0), Some(0x845F_ECDD)], "the second hand's bow shoots its arrow");
         assert_eq!(crate::spells::hand_attack_types(entity(2).creature.as_ref().unwrap(), holds(&player)), [1, 7]);
 
@@ -3398,7 +3402,7 @@ mod held {
         assert!(nodes(&late).is_empty());
         let made_anew = apply(&lib, &mut g, &mut late, &entity(2), None, 0, 33, Some(&races), false);
         assert!(made_anew.is_none(), "the puppet kept");
-        assert_eq!(nodes(&late), [11, 20, 21]);
+        assert_eq!(nodes(&late), [49, 50, 51]);
     }
 
     /// The player's own sprite, the walker's, holds items as its puppet's
@@ -3429,7 +3433,7 @@ mod held {
             races: vec![net::creation::Race { id: 29, like: 9, city: 0, bonus: [0; 7], class_mask: 0x7FFF, body: [GARGOYLE, GARGOYLE], name: "Gargoyle".into(), short: "GAR".into(), desc: String::new() }],
         });
         p.grant_walker(&mut walker, &lib);
-        assert_eq!(holds(&walker), Some((true, Some(11), Some(20))));
+        assert_eq!(holds(&walker), Some((true, Some(49), Some(51))));
     }
 
     /// The player's own emotes, the walker's (`PlayEmote`'s `SetAction`), are
@@ -3490,7 +3494,7 @@ impl Play {
         crate::racelabel::clear();
         // Msg000D reads `m_speed` out of the dump
         let speed = dump.speed;
-        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, stood_sent: false, last_pos: [0.0; 3], send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), regional: Default::default(), regional_clock: web_time::Instant::now(), retail_weather: 0, weather_fog: None, abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), autocast: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), aloft_vy: vec![None; MAX_SLOTS], airs: vec![Default::default(); MAX_SLOTS], carried: vec![false; MAX_SLOTS], carry_buf: vec![Default::default(); MAX_SLOTS], actors: vec![None; MAX_SLOTS], actor_passes: vec![false; MAX_SLOTS], shortcuts: (false, false), self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, mob_info: None, talk_held: false, mob_shown_at: None, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), links: Default::default(), buffs: Default::default(), link_draft: None, event_no: 0, next_links: None, shift: false, wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, hc_fall: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), petart: Default::default(), pet_tops: Default::default(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_wait_since: None, cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, chat_unsent: 0, reopened: 0, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, ride: None, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, rumbles: Vec::new(), glyphs: Default::default(), wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default(), record: Default::default(), raid: Default::default(), meter: Default::default(), merc: Default::default(), dyepick: Default::default() };
+        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, stood_sent: false, last_pos: [0.0; 3], send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), regional: Default::default(), regional_clock: web_time::Instant::now(), retail_weather: 0, weather_fog: None, abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), autocast: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), aloft_vy: vec![None; MAX_SLOTS], airs: vec![Default::default(); MAX_SLOTS], carried: vec![false; MAX_SLOTS], carry_buf: vec![Default::default(); MAX_SLOTS], actors: vec![None; MAX_SLOTS], actor_passes: vec![false; MAX_SLOTS], shortcuts: (false, false), self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, mob_info: None, talk_held: false, mob_shown_at: None, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), links: Default::default(), buffs: Default::default(), link_draft: None, event_no: 0, next_links: None, shift: false, wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, hc_fall: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), petart: Default::default(), pet_tops: Default::default(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_wait_since: None, cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, chat_unsent: 0, reopened: 0, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, ride: None, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, touched: false, rumbles: Vec::new(), glyphs: Default::default(), wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default(), record: Default::default(), raid: Default::default(), meter: Default::default(), merc: Default::default(), dyepick: Default::default() };
         p.take_abilities();
         p.npcw_world_entry();
         // world entry: LoadModels and StreamFillCache under the loading screen
@@ -3869,6 +3873,7 @@ impl Play {
                 }
                 Event::Opcode { op: 0x0D41, data } => self.mail_recv(&data),
                 Event::Opcode { op: crate::gram::OP_LIVE_MAIL, data } => self.mail_offer(&data),
+                Event::Opcode { op: crate::mailattach::OP_MAIL_ATTACH, data } => self.mail_attach(&data),
                 Event::Opcode { op: 0x1402, data } => self.cm_msgs.push(data),
                 Event::Opcode { op: 0x0468, data } => {
                     if let Some(o) = self.guild.recv_0468(&data) {
@@ -4815,7 +4820,7 @@ impl Play {
     /// `VIClientPart06D00::LoadRes` puts on the actor whatever sprite the
     /// dictionary has (model 0 is the null sprite, which meets nothing). So
     /// an entity with no puppet, its model holding nothing to draw, still
-    /// has its actor: Sandstorm's blockers are CHAR.ESF's 0x6F412342, a
+    /// has its actor: the reference server's blockers are CHAR.ESF's 0x6F412342, a
     /// SimpleSprite with an empty prim buffer and a collision buffer, an
     /// invisible wall (F3 20261028-233048).
     fn place_actors(&mut self, walker: &mut Walker, lib: &Library) {
@@ -5542,8 +5547,8 @@ impl Play {
     /// `Respawn` there, then `SendOpSigned(73, token)`. The PS2 does both in
     /// one go, its frame stopped in `Respawn`'s `EnterWorld` until the world
     /// and the zones round the arrival are in, so the answer and its first
-    /// 0x40 from the arrival leave together (Sandstorm's captures,
-    /// `claude-notes/world-change-state-resync.md`); here the move is done
+    /// 0x40 from the arrival leave together (the reference server's captures,
+    /// the maintainer's notes); here the move is done
     /// when the loading screen comes down (`loading_step`), and the token
     /// waits for it (`arrival`). With no self (`m_selfId` -1) nothing
     /// moves, and a move into a world the table lacks cannot be made: both
@@ -5634,7 +5639,7 @@ impl Play {
     /// while a move of the server's is not done (`arrival`): the PS2's
     /// frame stops in `Respawn` until it stands at the arrival, where this
     /// client went on walking the world it was leaving, and sent the new
-    /// world's number with the old world's place (Sandstorm answered that
+    /// world's number with the old world's place (the reference server answered that
     /// with 0x07D2, "This character has been modified by a customer service
     /// representative").
     fn position_due(&mut self, walk: &vi::walk::WalkPhysics<Ee>, clock: i64) {
@@ -5697,7 +5702,7 @@ impl Play {
         self.stood_sent = false;
         let moving = if world as i64 != self.player.world {
             // the world table: the disc's six, or the server's patch's
-            // (`s2`: Sandstorm's eight)
+            // (`s2`: the reference server's eight)
             match crate::s2::get().world_file(world as i64) {
                 Some(f) => {
                     eprintln!("play: teleport to world {world} ({f}) at {pos:?}");
@@ -5918,6 +5923,7 @@ impl Play {
         // a mouse means a keyboard beside it (the edit boxes' compact face,
         // with the options' Soft Keyboard on); a finger, none
         self.keyboard = !finger;
+        self.touched = finger;
         let (Click::Target(x, y) | Click::Interact(x, y) | Click::Right(x, y)) = c;
         let f = render::ui::frame_from_window(size, [x as f32, y as f32]);
         // the map, while it is up: its buttons and glyphs; a right click is △;
@@ -5983,6 +5989,19 @@ impl Play {
             let bars_at = if self.hud_menus.stacked { [f[0] - side - stacked[0], f[1] - up - stacked[1]] } else { [f[0] - side - menus[0], f[1] + up - menus[1]] };
             if crate::hud::fork_hud::hud_menu_visible(&self.hud_menus) && let Some(k) = self.hud_menus.point(bars_at) {
                 // the pad key it stands for in S2's record, let go at once
+                self.note_hud_key(k, true);
+                self.hud_key(k);
+                self.note_hud_key(k, false);
+                return true;
+            }
+            // the Utility Bars (2026-11-18) where they were put, a piece of
+            // their own, at the side Utility Bar Layout draws them at
+            let utility = moved(crate::hudlayout::Piece::UtilityBars);
+            let utility_at = match crate::settings::utility_layout() {
+                crate::hudmenu::UtilityLayout::UpperLeft => [f[0] + side - utility[0], f[1] + up - utility[1]],
+                crate::hudmenu::UtilityLayout::Below => [f[0] - side - utility[0], f[1] - up - utility[1]],
+            };
+            if let Some(k) = self.hud_menus.point_utility(utility_at) {
                 self.note_hud_key(k, true);
                 self.hud_key(k);
                 self.note_hud_key(k, false);
@@ -6356,7 +6375,7 @@ impl Play {
     /// current one back), `/t` goes as typed, `/r` to whoever last sent a
     /// tell. A command it does not know goes to the server as typed, where
     /// the game answers it with word 826 itself: the client's own, as
-    /// Sandstorm's S2 forwards them, so the server's commands (a GM's
+    /// the reference server's S2 forwards them, so the server's commands (a GM's
     /// `/goto`, go-eqoa-server's dev console) can be typed with a slash.
     /// Plain text goes to the current channel. Not here: the crafting
     /// commands.
@@ -6795,7 +6814,7 @@ impl Play {
     /// server that offered it (go-eqoa-server's `world.jump`, 0x7E28), a jump
     /// asked of the walk, which takes off at its next frame if the client and
     /// the walk allow (`controls::Client::may_jump`, `Walker::ask_jump`). On a
-    /// server that never offered it (Sandstorm's, eqoa.live's) nothing at all.
+    /// server that never offered it (the reference server's, eqoa.live's) nothing at all.
     pub fn jump_key(&mut self, walker: &mut Walker) {
         if self.session.jumps {
             walker.ask_jump();
@@ -6855,8 +6874,10 @@ impl Play {
     }
 
     /// `ToggleFollow` (`/follow`, the quick command): on, the target when it
-    /// is another of the group's members, else word 1195 ("You must target a
-    /// group member to follow.") and off; on, off. `UpdateControls` steers it.
+    /// is another of the group's members (or another player in the scene,
+    /// where the server allows it: `player_in_scene`), else word 1195 ("You
+    /// must target a group member to follow.") and off; on, off.
+    /// `UpdateControls` steers it.
     fn toggle_follow(&mut self) {
         self.following = !self.following;
         if self.following {
@@ -6879,9 +6900,14 @@ impl Play {
     /// whose plate says player (`p256` 2, as `InviteEntity` asks), not an
     /// NPC, a pet or a merc. Any such may be followed, in a group or not (the
     /// owner, 2026-11-11: "any player can follow any player"; CLIENT's
-    /// `ToggleFollow` takes group members only, word 1195 else).
+    /// `ToggleFollow` takes group members only, word 1195 else), except on a
+    /// server that says group members only (`qol::FOLLOW_GROUP_ONLY`, the Live
+    /// shard's; Live petition 5400, Innoruuk: "Auto follow currently allowing
+    /// to auto follow people not in group"; the owner 2026-11-21: group only on
+    /// Live), where this is never true.
     fn player_in_scene(&self, id: u32) -> bool {
-        self.entities.slots.iter().flatten().any(|e| e.id == id && e.creature.as_ref().is_some_and(|c| c.p256 == 2))
+        !crate::settings::qol::off(crate::settings::qol::FOLLOW_GROUP_ONLY)
+            && self.entities.slots.iter().flatten().any(|e| e.id == id && e.creature.as_ref().is_some_and(|c| c.p256 == 2))
     }
 
     /// What `UpdateControls` changed (`Walker::frame_with`): autorun off
@@ -6986,7 +7012,7 @@ impl Play {
             rooted: self.rooted,
             // IsTimedOut (8 s with nothing arriving) is not applied:
             // go-eqoa-server sends nothing while nothing changes, so it would
-            // stop a player standing still (the Sandstorm capture's longest
+            // stop a player standing still (the reference server capture's longest
             // silence is 2.6 s)
             timed_out: false,
             // the keyboard's held axes: the viewer's (`game_keys`)
@@ -6995,6 +7021,9 @@ impl Play {
             steer: false,
             // the view the walk keeps: the viewer's (`Mouse::walk_view`)
             walk_view: None,
+            // the two buttons' run turned off the view: the viewer's
+            // (`Mouse::lean`)
+            lean: 0.0,
             // `IsModal`: the manual camera
             modal: self.mode == 38,
             // the server's word (`Session::flying`, `walker`)
@@ -7168,6 +7197,7 @@ impl Play {
             self.presses.key(key, down, self.session.timer() as u32, crate::input::from_device());
         }
         self.keyboard = false;
+        self.touched = false;
         if self.typing.is_some() || self.window_key(key, down) {
             return;
         }
@@ -7826,8 +7856,13 @@ impl Play {
             let paint = rgb.map_or_else(|| "game".to_string(), |c| format!("{:02x}{:02x}{:02x}", c[0], c[1], c[2]));
             eprintln!("damage: {attacker:08x} {amount:+} {defender:08x} after [{after}] colour {paint}");
         }
-        // who fights whom, for auto-cast and auto targeting (`autocast`)
-        self.auto_hit(attacker, defender);
+        // who fights whom, for auto-cast and auto targeting (`autocast`): a
+        // hit alone (a damage figure is negative, a heal's positive), so a
+        // creature that heals the player (a familiar, the server's Healbot) is
+        // never taken for one fighting it (petition 2378)
+        if amount < 0 {
+            self.auto_hit(attacker, defender);
+        }
         let me = self.self_id32();
         let now = self.session.now();
         // the player's own hit: after a swap the swing timer follows the
@@ -8242,8 +8277,8 @@ impl Play {
 
     /// Whether a member of this player's group invites into it: on a server
     /// that offered it (`Session::member_invites`), unless it told that the
-    /// group's leader lets only the leader invite (`Session::group_reg`, the GM
-    /// Jibrish's petition 1476: "Allow anyone in my group to invite").
+    /// group's leader lets only the leader invite (`Session::group_reg`, a
+    /// GM's petition 1476: "Allow anyone in my group to invite").
     fn members_invite(&self) -> bool {
         self.session.member_invites && self.session.group_reg.is_none_or(|g| g.members_invite)
     }
@@ -8559,7 +8594,7 @@ impl Play {
                 self.who_open = true;
                 self.mode = 35;
             }
-            // a server's patch's Group menu (`s2`, Sandstorm's player
+            // a server's patch's Group menu (`s2`, the reference server's player
             // search): Search, in the patch's window (`searchwnd`) on the
             // player's levels, or in the who window when the patch's window
             // is not this shape; Register, Unregister
@@ -9133,29 +9168,53 @@ impl Play {
         }
     }
 
-    /// A key on an ability bar's slot (`binds::bar_slot`, Jibwiz's ticket
-    /// 1913): in play (and the manual camera), the ability on it used as a
-    /// click on it uses it, its bar lit; nothing for an empty slot, a bar
-    /// the carousel does not hold, or with a window up.
+    /// A key on an ability bar's slot (`binds::bar_slot`, a GM's ticket
+    /// 1913; bars 3 and 4, the server owner's of 2026-11-18): in play (and the
+    /// manual camera), the ability on it used as a click on it uses it, its
+    /// bar's selection on it (bars 3 and 4 are menus 4 and 5,
+    /// `hudmenu::BAR_MENUS`), and in S2's record as the click's circle,
+    /// pressed and let go (`note_hud_key`; a 0x0032 carries it where the S2
+    /// asks); nothing for an empty slot, a bar Ability Bars does not show, or
+    /// with a window up. The Utility Bars' keys the same (the same day:
+    /// "otherwise work the same way"): an item quick slot's item used as a
+    /// click on it uses it (`hudmenu::ITEMS_BAR`), a weapon set taken up
+    /// (`hudmenu::SETS_BAR`, on a server that keeps them).
     pub fn bar_slot_key(&mut self, bar: usize, slot: usize) {
         if (self.mode != 0 && self.mode != 38) || self.typing.is_some() || self.map.open {
             return;
         }
-        if bar >= self.ability_bars() as usize {
+        let shown = match bar {
+            crate::hudmenu::ITEMS_BAR => true,
+            crate::hudmenu::SETS_BAR => self.gear.on,
+            b => b < self.ability_bars() as usize,
+        };
+        if !shown {
             return;
         }
+        let Some(menu) = crate::hudmenu::key_menu(bar) else { return };
         let Some((msg, id)) = self.hud_menus.slot_entry(bar, slot) else { return };
-        self.hud_menus.menus[bar].sel = slot as i32;
+        self.hud_menus.menus[menu].sel = slot as i32;
         eprintln!("play: bar {} slot {} key: {msg:#x} {id}", bar + 1, slot + 1);
+        // circle (135) as the click's, without its hold (`auto_use_held`
+        // reads the menu up, not this bar)
+        let noted = !self.is_dead();
+        if noted {
+            self.presses.key(135, true, self.session.timer() as u32, crate::input::from_device());
+        }
         self.use_hud_entry(msg, id);
+        if noted {
+            self.presses.key(135, false, self.session.timer() as u32, crate::input::from_device());
+        }
     }
 
     /// Stacked Spell Bars are drawn (`hudmenu`'s doc, ticket 1913): the
-    /// Extended row on, and play on a computer: the last input the keyboard's
-    /// or the mouse's (a controller's or a finger's keeps the carousel, whose
-    /// d-pad walk they need), never on a phone.
+    /// Extended row on, on a computer, whatever was pressed last but a finger:
+    /// a controller walks and uses the stacked bars with its d-pad as the
+    /// arrows do (a player's petition 2448: they fell back to the carousel at
+    /// the pad's first press). A finger on the touch screen keeps the
+    /// carousel, whose taps it plays with; never on a phone.
     pub fn stacked_bars(&self) -> bool {
-        crate::settings::stacked_bars() && self.keyboard && !cfg!(target_os = "android")
+        stacked_for(crate::settings::stacked_bars(), self.touched)
     }
 
     /// A memorize past the game's ten slots that the server left unanswered
@@ -10517,25 +10576,57 @@ impl Play {
                         _ => Vec::new(),
                     }
                 };
-                // Stacked Spell Bars (ticket 1913): the first two bars in two
-                // rows above the chat box, no name bar; a piece of their own
-                // to move (petition 5229), not the chat box's
+                // Stacked Spell Bars (ticket 1913): every bar shown in rows
+                // above the chat box, stacked or in two columns (Spell Bar
+                // Layout, 2026-11-18), no name bar; a piece of their own to
+                // move (petition 5229), not the chat box's
                 self.hud_menus.stacked = self.stacked_bars();
+                // played with a controller (no key, mouse or finger last):
+                // the selection's name over the bars (petition 2457)
+                self.hud_menus.named = !self.keyboard && !self.touched;
                 if self.hud_menus.stacked {
                     let (anchor, vertical) = (r.ui.anchor, r.ui.vertical);
                     r.ui.anchor = Anchor::Right;
                     r.ui.vertical = Vertical::Bottom;
-                    let m = crate::hudlayout::begin(r.ui, crate::hudlayout::Piece::SpellBars);
                     let [left, top] = crate::chat::WndChat::full_top_left(vui, &r);
-                    if crate::hud::fork_hud::hud_menu_visible(&self.hud_menus) { self.hud_menus.draw_stacked(vui, &mut r, top, left, bars); }
+                    // the Utility Bars (2026-11-18): the item quick slots and
+                    // the weapon sets the carousel held, a piece of their own,
+                    // at the upper left or on the chat box under the spell
+                    // bars (Utility Bar Layout)
+                    let utility = crate::settings::utility_layout();
+                    let lift = crate::hudmenu::HudMenus::utility_height(bars, utility);
+                    let m = crate::hudlayout::begin(r.ui, crate::hudlayout::Piece::SpellBars);
+                    let shown = crate::hud::fork_hud::hud_menu_visible(&self.hud_menus);
+                    if shown { self.hud_menus.draw_stacked(vui, &mut r, top - lift, left, bars, crate::settings::spell_bar_layout()); }
+                    // the name not counted in the piece: against the screen's
+                    // edge it moves, the bars do not (petition 2547)
+                    let screen = crate::hudlayout::screen_x(r.ui, &m);
+                    let m = crate::hudlayout::seal(r.ui, m);
+                    if shown { self.hud_menus.draw_name(vui, &mut r, now as i64, false, Some(screen), &name); }
+                    crate::hudlayout::end(r.ui, m);
+                    if utility == crate::hudmenu::UtilityLayout::UpperLeft {
+                        r.ui.anchor = Anchor::Left;
+                        r.ui.vertical = Vertical::Top;
+                    }
+                    let m = crate::hudlayout::begin(r.ui, crate::hudlayout::Piece::UtilityBars);
+                    let at = match utility {
+                        crate::hudmenu::UtilityLayout::UpperLeft => crate::hudmenu::UPPER_LEFT_AT,
+                        crate::hudmenu::UtilityLayout::Below => [left, top],
+                    };
+                    if shown { self.hud_menus.draw_utility(vui, &mut r, bars, utility, at); }
+                    let screen = crate::hudlayout::screen_x(r.ui, &m);
+                    let m = crate::hudlayout::seal(r.ui, m);
+                    if shown { self.hud_menus.draw_name(vui, &mut r, now as i64, true, Some(screen), &name); }
                     crate::hudlayout::end(r.ui, m);
                     (r.ui.anchor, r.ui.vertical) = (anchor, vertical);
                 } else {
+                    self.hud_menus.hide_utility();
                     let m = crate::hudlayout::begin(r.ui, crate::hudlayout::Piece::QuickMenus);
                     crate::hud::fork_hud::draw_hud_menus(&mut self.hud_menus, vui, &mut r, now as i64, &name);
                     crate::hudlayout::end(r.ui, m);
                 }
             } else {
+                self.hud_menus.hide_utility();
                 self.hud_menus.stacked = false;
             }
             // Move HUD (`hudlayout`): the pieces outlined and named, the bar
@@ -10647,7 +10738,7 @@ impl Play {
     /// model too, whose actor holds the null sprite (`VIClientPart06D00::
     /// Create`), so `CycleTarget` and `TargetCentre` take it, the rings go
     /// round it and its numbers float over it, where no body is drawn (F3
-    /// 20261024-203920: Sandstorm's Ice Statue in Geyvax Cave, model 0,
+    /// 20261024-203920: the reference server's Ice Statue in Geyvax Cave, model 0,
     /// targetable only on a PS2).
     fn in_scene(&self, e: &net::entity::Entity) -> bool {
         e.world as i64 == self.player.world
@@ -10662,7 +10753,7 @@ impl Play {
     /// NPC/PC Display and Distance against the server's offer
     /// (`net::session::OP_ENTITY_VIEW`): the slots read are the player's
     /// number within the server's most, the game's 24 from a server that
-    /// offered none (Sandstorm, eqoa.live), and a server that offered is told
+    /// offered none (the reference server, eqoa.live), and a server that offered is told
     /// both whenever either changes (it fills that many from that far from
     /// its next pass; what was past a lowered number is dropped here at once,
     /// and its puppets with it). The view distance draws farther on any
@@ -10670,7 +10761,7 @@ impl Play {
     /// The effects on the pet the server sent (`Session::agree_pet_effects`, which
     /// each frame tells it what Extended's Pet Effects says), those not over now:
     /// their icons in their order, for the row under the pet's bar. None with the
-    /// row off, from a server that sends none (Sandstorm, eqoa.live), or with no
+    /// row off, from a server that sends none (the reference server, eqoa.live), or with no
     /// pet; the game shows a pet's effects nowhere, and nor does this client
     /// anywhere else.
     /// With the buff window up they are its third row instead (`buffwnd`).
@@ -11031,8 +11122,8 @@ impl Play {
     }
 
     /// The server's answer to a talk to a monster with nothing to say
-    /// (go-eqoa-server's `world.mob_info`, `net::session::OP_MOB_INFO`; the GM
-    /// Jibrish's petition 1459, 2026-11-10: "press the mob information button
+    /// (go-eqoa-server's `world.mob_info`, `net::session::OP_MOB_INFO`; a
+    /// GM's petition 1459, 2026-11-10: "press the mob information button
     /// on monster ... This should ONLY show the monsters name and level,
     /// nothing else"), for the target it still is: the info window shows them,
     /// as a pet's, for [`MOB_INFO_MS`] from now (`now`, the session's clock)
@@ -11274,7 +11365,7 @@ impl Play {
                 drawn: cs.h.nodes.iter().map(|n| glam::Mat4::from_cols_array_2d(&Matrix44::mul(&n.world, &p.centre).to_cols())).collect(),
                 still: c.velocity.iter().all(|v| v.abs() < 0.05),
             });
-            holders.push(crate::decorlights::Holder { name: &c.name, at: e.actor_pos, heading: e.actor_hpr[0], scale: if e.scale > 0.0 { e.scale } else { 1.0 }, bones });
+            holders.push(crate::decorlights::Holder { name: &c.name, at: e.actor_pos, heading: e.actor_hpr[0], scale: if e.scale > 0.0 { e.scale } else { 1.0 }, bones, art: crate::decorlights::is_art(e.drawn_model) });
         }
         holders
     }
@@ -11617,7 +11708,7 @@ mod commands {
     }
 
     /// The quest guide speaks only where the server does not (the user's
-    /// "so sandstorm can benefit without server additions"; no mixing): its
+    /// "so [the reference server] can benefit without server additions"; no mixing): its
     /// marks once the wait into the world is over on a server that offered
     /// none; the server's alone, the guide off for good, once it offers its
     /// own, even after a world change takes the offer back; a scripted run's
@@ -11877,7 +11968,7 @@ mod commands {
         assert_eq!(also.cam.walk.phys.position.y.0, floor - 2.0, "a dump's SetLocation as it is");
     }
 
-    /// Sandstorm's boon (F3 pass 25): "A great wind stirs across Freeport.",
+    /// the reference server's boon (F3 pass 25): "A great wind stirs across Freeport.",
     /// then every player there is moved (0x00B2) 71 up into its sky, all to
     /// one point. From Freeport's coach, 358 away, a PS2 reads no zone for it
     /// (the four round the point are in its cache: `loading::needs_read`) and
@@ -11965,9 +12056,9 @@ mod commands {
     /// out until then: within a world (a far port) and across worlds
     /// (Tunaria's Freeport to Odus), the answer is handed on with the first
     /// 0x40 from the arrival and nothing between them, so the two leave in
-    /// one packet, as Sandstorm's captures show a PS2 sending them. Sent at
+    /// one packet, as the reference server's captures show a PS2 sending them. Sent at
     /// once on the 0x00B2, with the old world's place sent as the new
-    /// world's meanwhile, is what Sandstorm kicked with 0x07D2. Answered at
+    /// world's meanwhile, is what the reference server kicked with 0x07D2. Answered at
     /// once: a world the table lacks (no move), and no self. Controls: the
     /// 0x40 goes out every update before the move and after it, so the
     /// silence between is the move's; the 0x40 at the arrival is the walk's
@@ -12316,7 +12407,7 @@ mod commands {
         });
     }
 
-    /// A creature with no body (model 0: Sandstorm's Ice Statue in Geyvax
+    /// A creature with no body (model 0: the reference server's Ice Statue in Geyvax
     /// Cave, 0x101076) is targeted as on a PS2, where its actor holds the
     /// null sprite and `CycleTarget` asks only for an actor: R1 picks it, the
     /// mouse finds it (an upright two high where its body would stand), and
@@ -12427,11 +12518,11 @@ mod commands {
     }
 
     /// R1 and Tab in a window wider than 4:3 go in the console's order (F3
-    /// 20261026-154639, jib at 1707x932: "a *slightly* higher preference to
+    /// 20261026-154639, a tester at 1707x932: "a *slightly* higher preference to
     /// targeting mobs in front of you and close"). How far off the middle a
     /// creature is counts as the game's camera measures it
     /// (`walker.view(4/3)`); the window's projection draws its x at 4/3 over
-    /// the aspect of that (0.73 at jib's shape, x squared 0.53), and at the
+    /// the aspect of that (0.73 at the tester's shape, x squared 0.53), and at the
     /// game's in a window narrower than 4:3. From a camera at the origin
     /// looking along -z: A, 40 ahead (0.28), then B, 13 away and 5 to the
     /// side (0.405), then C, past the 4:3 picture's side, which only the
@@ -12798,7 +12889,7 @@ mod commands {
 
     /// The target box's level (Live petition 5130): the target creature's,
     /// once the server offered it, with Target Level on. The controls: no
-    /// offer (Sandstorm, any other server), Target Level off, no target, a
+    /// offer (the reference server, any other server), Target Level off, no target, a
     /// target that is not a creature: none, the game's box.
     #[test]
     fn the_target_box_has_its_level_only_where_the_server_offered_it() {
@@ -13006,7 +13097,7 @@ mod commands {
     }
 
     /// NPC/PC Display and Distance against the server: one that offered
-    /// nothing (the control: Sandstorm's, eqoa.live's) is told nothing and the
+    /// nothing (the control: the reference server's, eqoa.live's) is told nothing and the
     /// game's 24 are read; an offer is answered once with the player's numbers
     /// (the slots within it), again when either changes; a lowered number
     /// drops what was past it.
@@ -13137,6 +13228,109 @@ mod commands {
         assert_eq!(live.len(), 22);
         assert_eq!(live[..11], retail[..]);
         assert_eq!(live[21] & !1, 0x76, "circle, the pad read, pressed this frame");
+    }
+
+    /// A key put on a bar's slot (the server owner, 2026-11-18: "When players
+    /// cast their keybinded spell, it should cast"): with Ability Bars at 4,
+    /// bar 3's first slot's key uses slot 10's ability and bar 4's fifth slot
+    /// 19's, each 0x0032 the game's with that slot, the selection put on that
+    /// bar's own menu (4, 5) and the items' left; on a patch with S2's record
+    /// it carries circle pressed this frame, as a click's does. A bar Ability
+    /// Bars does not show, an empty slot and a window up send nothing.
+    #[test]
+    fn a_bar_slots_key_casts_its_spell() {
+        struct Rec(std::rc::Rc<std::cell::RefCell<Vec<Vec<u8>>>>);
+        impl net::session::Datagrams for Rec {
+            fn send_to(&mut self, d: &[u8], _: [u8; 4], _: u16) {
+                self.0.borrow_mut().push(d.to_vec());
+            }
+            fn recv_from(&mut self) -> Option<(Vec<u8>, [u8; 4], u16)> {
+                None
+            }
+        }
+        crate::settings::testing::reset(false);
+        crate::settings::set_client(crate::settings::ClientOptions { ability_bars: 4, ..crate::settings::client() });
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        // a session of its own for each case (its first sends; nothing
+        // acknowledges them here), the bars built as a frame builds them
+        let fresh = || -> Play {
+            let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 5000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+            s.self_id = Some(0x100);
+            s.expansion = 2;
+            let mut p = Play::new(s, Player::default(), Box::default());
+            p.mode = 0;
+            for (id, slot, name) in [(1, 0, "Fire Bolt"), (2, 10, "Ice Comet"), (3, 19, "Lightning Strike"), (4, 7, "Gate")] {
+                p.abilities.insert(id, net::dump::Ability { id, valid: 1, slot, name: name.into(), icon_front: 100 + id, ..Default::default() });
+            }
+            p.ability_token = 0x55;
+            p.target = 0x4242;
+            let bars = p.hud_bars();
+            p.hud_menus.build(&p.abilities, &p.dump.inventory, &p.gear, bars);
+            p
+        };
+        let key = |p: &mut Play, bar: usize, slot: usize, r: crate::s2::Rules| -> Option<Vec<u8>> {
+            crate::s2::with_rules(r, || {
+                p.session.flush();
+                sent.borrow_mut().clear();
+                p.bar_slot_key(bar, slot);
+                p.session.flush();
+            });
+            guaranteed(&sent.borrow()).into_iter().find(|m| m.starts_with(&[0x32, 0x00]))
+        };
+        let retail = crate::s2::Rules::retail;
+        let used = |slot: u8| Some(vec![0x32, 0x00, 0x55, 0, 0, 0, slot, 0x42, 0x42, 0, 0]);
+
+        let mut p = fresh();
+        p.hud_menus.menus[2].sel = 3;
+        assert_eq!(key(&mut p, 0, 0, retail()), used(0), "the control: bar 1's first slot");
+        assert_eq!(key(&mut p, 2, 0, retail()), used(10), "bar 3's first slot: slot 10");
+        assert_eq!((p.hud_menus.menus[4].sel, p.hud_menus.menus[2].sel), (0, 3), "bar 3's menu selected, the items' left");
+        assert_eq!(key(&mut p, 3, 4, retail()), used(19), "bar 4's fifth slot: slot 19");
+        assert_eq!(p.hud_menus.menus[5].sel, 4);
+
+        let mut p = fresh();
+        let live = key(&mut p, 2, 0, crate::s2::Rules { use_skill_record: true, ..retail() }).expect("0x0032 sent");
+        assert_eq!(live.len(), 22);
+        assert_eq!(live[21] & !1, 0x76, "circle, the pad read, pressed this frame, as a click's");
+
+        // nothing sent, each followed by the same session's control
+        let mut p = fresh();
+        assert_eq!(key(&mut p, 2, 1, retail()), None, "an empty slot");
+        p.mode = 1;
+        assert_eq!(key(&mut p, 2, 0, retail()), None, "a window up");
+        p.mode = 0;
+        assert_eq!(key(&mut p, 2, 0, retail()), used(10), "the control: in play");
+
+        crate::settings::set_client(crate::settings::ClientOptions { ability_bars: 2, ..crate::settings::client() });
+        let mut p = fresh();
+        assert_eq!(key(&mut p, 2, 0, retail()), None, "two bars shown: no third");
+        assert_eq!(key(&mut p, 1, 2, retail()), used(7), "the control: bar 2's third slot (7)");
+
+        // the Utility Bars' keys (2026-11-18): an item quick slot's item used
+        // as a click uses it (0x003E with 1), a weapon set taken up (0x0022);
+        // nothing for an empty slot, nor for the sets on a server without them
+        let sends = |p: &mut Play, bar: usize, slot: usize| -> Vec<Vec<u8>> {
+            p.session.flush();
+            sent.borrow_mut().clear();
+            p.bar_slot_key(bar, slot);
+            p.session.flush();
+            guaranteed(&sent.borrow())
+        };
+        let op = |m: Vec<Vec<u8>>, code: u8| m.into_iter().find(|m| m.starts_with(&[code, 0x00]));
+        let (items, sets) = (crate::hudmenu::ITEMS_BAR, crate::hudmenu::SETS_BAR);
+        let mut p = fresh();
+        p.dump.inventory.items.push(net::dump::NetItem { quick_slot: 1, inv_index: 9, quantity: 1, item: net::dump::Item { name: "Healing Potion".into(), p4c: 2, ..Default::default() }, ..Default::default() });
+        let bars = p.hud_bars();
+        p.hud_menus.build(&p.abilities, &p.dump.inventory, &p.gear, bars);
+        assert_eq!(op(sends(&mut p, items, 0), 0x3E), None, "an empty item slot");
+        assert_eq!(op(sends(&mut p, sets, 4), 0x22), None, "no weapon sets on this server");
+        assert_eq!(op(sends(&mut p, items, 1), 0x3E), Some(vec![0x3E, 0x00, 9, 0, 0, 0, 0x42, 0x42, 0, 0, 1]), "the second item slot's potion used");
+        assert_eq!(p.hud_menus.menus[2].sel, 1);
+        p.gear.on = true;
+        let bars = p.hud_bars();
+        p.hud_menus.build(&p.abilities, &p.dump.inventory, &p.gear, bars);
+        assert_eq!(op(sends(&mut p, sets, 4), 0x22), Some(vec![0x22, 0x00, 4]), "bare hands taken up");
+        crate::settings::testing::reset(false);
     }
 
     /// ConnectShard's hello: the patch's bytes after the opcode when it has
@@ -13273,7 +13467,7 @@ mod commands {
         assert_eq!(p.attack.due, now.wrapping_sub(crate::attackclock::PRESS_TO_FIRST_HIT).wrapping_add(4000), "the player's own");
     }
 
-    /// A server's patch's Group menu (`s2`, Sandstorm's player search):
+    /// A server's patch's Group menu (`s2`, the reference server's player search):
     /// Search opens the who window on the search's results (mode 35, the
     /// request out), and the who list proper takes the window back; without
     /// the patch (the control) its message does nothing, as no retail menu
@@ -13293,7 +13487,7 @@ mod commands {
         assert_eq!((p.mode, p.search_mode, p.who_open), (0, false, false));
     }
 
-    /// Sandstorm's live S2 (`searchwnd`): its Search opens the patch's own
+    /// the reference server's live S2 (`searchwnd`): its Search opens the patch's own
     /// window over play, on the player's own levels, with nothing asked
     /// yet (the who window stays shut); while it is up it has the keys, its
     /// Search asks with its filter, and △ closes it and lets the player
@@ -13348,7 +13542,7 @@ mod commands {
         });
     }
 
-    /// A server's patch that colours damage (`s2`: Sandstorm's S2) has the
+    /// A server's patch that colours damage (`s2`: the reference server's S2) has the
     /// three bytes after 0x00DB's body colour the number, the player's own
     /// hit and one taken alike; without it (the control) they are passed
     /// over and the number is the game's white.
@@ -13378,7 +13572,7 @@ mod commands {
     }
 
     /// What colours a number (`number_rgb`): a patch's three bytes when it
-    /// colours them, whatever else is chosen, and no tag read then (Sandstorm's
+    /// colours them, whatever else is chosen, and no tag read then (the reference server's
     /// path as it was); else a tag's row's colour from a server that offered
     /// tags, Default the game's (none); a byte from a server that made no
     /// offer, no byte, or three bytes are no tag.
@@ -13781,9 +13975,9 @@ mod commands {
     }
 
     /// The run speed is the server's, as `UpdateGame` hands `m_speed` to
-    /// the walk each frame: the dump's at world entry (Sandstorm's
+    /// the walk each frame: the dump's at world entry (the reference server's
     /// 8.833333), then 0x00F8's `SetSpeed` (Spirit of the Wolf's 11.483333
-    /// and a snare's 7.243333 in a Sandstorm capture, the walk speed 3 with
+    /// and a snare's 7.243333 in a reference server capture, the walk speed 3 with
     /// either; a stop, 0, stops the walk too), and a dump's again (Msg000D:
     /// no SetSpeed, the walk speed kept). The control is the walk's own
     /// speed, the client's until 2026-10-23, which no buff moved (the user:
@@ -13889,9 +14083,47 @@ mod commands {
         assert_eq!(p.control_client().follow, Follow::Lost, "gone from the scene: lost");
     }
 
+    /// On a server that says group members only (`qol::FOLLOW_GROUP_ONLY`,
+    /// Live's; Live petition 5400, the owner 2026-11-21: group only on Live): a
+    /// player in the scene outside the group is word 1195, as CLIENT's
+    /// `ToggleFollow` has it, and a group member is still followed. The
+    /// controls: told nothing, or told other bits only, that player is
+    /// followed (an older server keeps today's rule).
+    #[test]
+    fn follow_takes_group_members_only_where_the_server_says() {
+        let mut p = play();
+        p.self_at = Some(([0.0; 3], None));
+        let put = |p: &mut Play, k: usize, id: u32| {
+            p.entities.slots[k] = Some(net::entity::Entity { id, creature: Some(net::entity::Creature { p256: 2, ..Default::default() }), ..Default::default() });
+        };
+        put(&mut p, 0, 0x400);
+        put(&mut p, 1, 0x200);
+        grouped(&mut p, &[0x100, 0x200]);
+        let follow = |p: &mut Play, t: u32| {
+            p.following = false;
+            p.target = t;
+            p.chat.clear();
+            p.do_action(0x0B0E_0007, 0);
+        };
+        for (bits, any) in [(0, true), (crate::settings::qol::SPELL_BARS | 0xFFF, true), (crate::settings::qol::FOLLOW_GROUP_ONLY, false), (0x7FFF | crate::settings::qol::FOLLOW_GROUP_ONLY, false)] {
+            p.session.qol_off = bits;
+            crate::settings::qol::set_off(bits);
+            follow(&mut p, 0x400);
+            if any {
+                assert!(p.following && p.follow_id == 0x400 && p.chat.is_empty(), "bits {bits:#x}: a player outside the group");
+            } else {
+                assert!(!p.following && last_line(&p) == "(word 1195)", "bits {bits:#x}: a player outside the group refused");
+            }
+            follow(&mut p, 0x200);
+            assert!(p.following && p.follow_id == 0x200 && p.chat.is_empty(), "bits {bits:#x}: a group member");
+            assert_ne!(p.control_client().follow, Follow::Lost, "bits {bits:#x}: the member steered to");
+        }
+        crate::settings::qol::set_off(0);
+    }
+
     /// What `UpdateControls` is given: off; the member gone from the group
     /// or not in the scene, lost; and while following the run is 1.05 times
-    /// the speed the server gave (the dump's, Sandstorm's 8.833333).
+    /// the speed the server gave (the dump's, the reference server's 8.833333).
     #[test]
     fn the_follow_handed_to_the_controls() {
         let speed = f32::from_bits(0x410D5555);
@@ -14177,5 +14409,26 @@ mod hardcore_tests {
         assert_eq!(hardcore_fall_lines(&f), ["You have fallen.", "Slain by a Zek sentry in Tallon's fortress.", "This Hardcore character's journey is over."]);
         let none = net::hardcore::FallNotice { killer: String::new(), place: String::new(), ..f };
         assert_eq!(hardcore_fall_lines(&none), ["You have fallen.", "This Hardcore character's journey is over."], "nothing known: no middle line");
+    }
+}
+
+/// Whether the Stacked Spell Bars are drawn: the row on, the last input no
+/// finger, not on a phone (`Play::stacked_bars`).
+fn stacked_for(on: bool, touched: bool) -> bool {
+    on && !touched && !cfg!(target_os = "android")
+}
+
+#[cfg(test)]
+mod stacked_pad_tests {
+    /// Petition 2448: a controller's press keeps the stacked bars; a finger
+    /// gives way to the carousel. The control: the row off, never stacked.
+    #[test]
+    fn a_controller_keeps_the_stacked_bars() {
+        if cfg!(target_os = "android") {
+            return;
+        }
+        assert!(super::stacked_for(true, false), "a pad or a key since: stacked");
+        assert!(!super::stacked_for(true, true), "a finger: the carousel");
+        assert!(!super::stacked_for(false, false), "the control: the row off");
     }
 }
