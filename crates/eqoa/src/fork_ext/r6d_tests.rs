@@ -381,7 +381,8 @@ fn round6d_review_d_text_dialog_done_and_report_confirm_refused_at_queue_time() 
 fn round6d_dialog_answer_walks_the_confirm_and_the_report_guard_holds() {
     let (mut p, host) = rig();
     p.mode = 14;
-    p.mbox.prompt(&crate::ui::wide("Sure?"), 1, 0, 0, 0);
+    // a group invitation: the prompt a mod may accept (round 7H fix 1 refuses the others)
+    p.mbox.prompt(&crate::ui::wide("Join the group?"), 1, 0, 0x0702_0000, 0);
     gesture(&mut p, &host, "local w = eqoa.windows.find('confirm'); sel = w.dialog.selection; return eqoa.actions.dialog_answer(w.ref, 1)");
     assert!(last_ok(&host));
     host.execute("assert(sel == 2, 'a yes/no box starts on No')").unwrap();

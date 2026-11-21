@@ -3160,6 +3160,15 @@ fn dispatch_window_action(
             if let Err(e) = gate(play, "answer") {
                 return e;
             }
+            // The game's box answers Yes for its OK button and for Yes on a Yes/No box (`MBox::key`):
+            // that is accepting, which a mod may do only for the prompts listed as answerable.
+            if play.mode == 14 {
+                use crate::fork_ext::addons::window_actions::{PROMPT_CONFIRM_CONTRACT, prompt_answerable};
+                let accepts = play.mbox.kind == 0 || (play.mbox.kind == 1 && *option == 1);
+                if accepts && !prompt_answerable(play.mbox.p1, play.mbox.p2) {
+                    return refuse("not_yet", PROMPT_CONFIRM_CONTRACT);
+                }
+            }
             let keys = match (play.mode, w["dialog"]["kind"].as_str()) {
                 (9, _) if *option == 1 => Ok(vec![134]),
                 (7, _) => walk(w["selected_row"].as_u64(), *option, &[134]),

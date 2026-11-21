@@ -172,6 +172,17 @@ fn confirm_gated_bound() -> bool {
     }
 }
 
+/// The game's Yes/No prompts (its message box, mode 14) a native mod may accept, by the tags the box answers
+/// with: `(p1, p2)` as upstream `Play::dialog_key` reads them. A group invitation only, for now; the list may
+/// grow (summons and resurrection, `p1` 2, get their own kinds in the dialogs round). Declining or cancelling
+/// any prompt is always allowed. Every mod route to the box's answer is `dialog_answer` (`fork_ext/play.rs`
+/// `dispatch_window_action`: row actions never reach mode 14, text boxes are mode 2, batches have no answer
+/// step), which checks this (owner's rule, round 7H fix 1).
+pub(crate) fn prompt_answerable(p1: i32, p2: i32) -> bool {
+    matches!((p1, p2), (0, 0x0702_0000))
+}
+pub(crate) const PROMPT_CONFIRM_CONTRACT: &str = "accepting this game prompt is the player's choice: a mod may decline it, and may accept it only once the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer";
+
 pub(crate) fn install(lua: &Lua) -> Result<()> {
     let gated = confirm_gated_bound();
     if gated {
