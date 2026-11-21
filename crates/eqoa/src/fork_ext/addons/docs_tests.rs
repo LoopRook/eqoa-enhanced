@@ -26,7 +26,10 @@ fn docs() -> PathBuf {
 
 fn page(name: &str) -> String {
     let path = docs().join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    // a checkout may give the pages either line ending
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+        .replace("\r\n", "\n")
 }
 
 /// The generated surface file: path -> status.
@@ -379,12 +382,22 @@ fn docs_every_eqoa_name_in_the_pages_exists_in_the_surface_file() {
                 if !known {
                     unknown.push(format!("{name}:{}: {path}", index + 1));
                 }
+                // a name that only refuses is never written as if it worked: its line says so (or asks
+                // the client about it)
+                let refuses = matches!(surface.get(&path).map(String::as_str), Some("unsupported" | "not_yet"));
+                if refuses && !["unsupported", "not_yet", "eqoa.capabilities."].iter().any(|word| line.contains(word)) {
+                    unknown.push(format!(
+                        "{name}:{}: {path} only refuses, and the line does not say `unsupported` or `not_yet`",
+                        index + 1
+                    ));
+                }
             }
         }
     }
     assert!(
         unknown.is_empty(),
-        "{} name(s) the pages give that the client does not have (docs/modding/eqoa-1-surface.json):\n{}",
+        "{} name(s) the pages give that the client does not have, or does not support and the page does not say \
+         (docs/modding/eqoa-1-surface.json):\n{}",
         unknown.len(),
         unknown.join("\n")
     );
