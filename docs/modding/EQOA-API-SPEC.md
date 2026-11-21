@@ -433,7 +433,7 @@ Paths are relative and are looked up in the mod's own package, then the shared r
 
 | Function | Returns |
 |---|---|
-| `eqoa.textures.load(path:string)` | `TextureInfo` from a PNG file. Any failure (missing, not a PNG, too large) is `not_found`, with the reason as a diagnostic. JPEG is not decoded: `eqoa.textures.formats.jpeg` is `unsupported`, `eqoa.textures.formats.png` and `eqoa.textures.formats.rgba` are supported. |
+| `eqoa.textures.load(path:string)` | `TextureInfo` from a PNG file. Any failure (missing, not a PNG, too large) is `not_found`, with the reason as a diagnostic. JPEG is not decoded. The formats are capability flags, not Lua values (there is no `eqoa.textures.formats` table): `eqoa.capabilities.has("eqoa.textures.formats.png")` and `...rgba` are true, `...jpeg` is false (`unsupported`). |
 | `eqoa.textures.rgba(bytes:string, width:uint, height:uint)` | `TextureInfo` from raw pixels: exactly `width * height * 4` bytes, each side 1..2048. |
 | `eqoa.textures.release(texture:Texture?)` | `true`. Releasing nil or twice is fine. |
 | `eqoa.fonts.load(path:string, size:number=16)` | `FontInfo = {font:Font, status:string, reason:string?}` for a TTF or OTF file at a pixel size up to 256. `status` is `"pending"` (it will be ready on a later frame), `"ready"`, or `"fallback"`: the file could not be used and `font` is the default font. Use it with `ImGui.PushFont`. `unavailable` before the drawing context exists. |

@@ -207,8 +207,9 @@ pub(crate) fn textures(lua: &Lua, bank: &Rc<RefCell<Textures>>) -> Result<()> {
             lua.pack_multi((true, Value::Nil))
         })?,
     )?;
-    describe(lua, "eqoa.textures.formats.png", "supported", Some(2), "");
-    describe(lua, "eqoa.textures.formats.rgba", "supported", Some(2), "");
+    // Capability flags, not Lua values (round 7H): a mod probes them with `eqoa.capabilities.has`.
+    describe(lua, "eqoa.textures.formats.png", "supported", Some(2), "PNG files load: a capability flag, probed with eqoa.capabilities.has; there is no eqoa.textures.formats table");
+    describe(lua, "eqoa.textures.formats.rgba", "supported", Some(2), "raw RGBA pixels load: a capability flag, probed with eqoa.capabilities.has; there is no eqoa.textures.formats table");
     Ok(())
 }
 fn texture_info(lua: &Lua, ud: AnyUserData) -> Result<Table> {

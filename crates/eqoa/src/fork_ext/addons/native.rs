@@ -1001,7 +1001,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         "eqoa.textures.formats.jpeg",
         "unsupported",
         None,
-        "the client decodes PNG only; convert JPEG to PNG or pass RGBA pixels",
+        "the client decodes PNG only; convert JPEG to PNG or pass RGBA pixels (a capability flag, probed with eqoa.capabilities.has; there is no eqoa.textures.formats table)",
     );
     bind(
         lua,
