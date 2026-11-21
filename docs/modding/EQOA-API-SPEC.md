@@ -628,7 +628,7 @@ The server sends titles only: there are no objective or progress fields. Every `
 - `mode` names what has the game's controls; `native_mode` is the game's own number for it (table below).
 - `windows` lists what is up: the window of the mode, then any overlays (`inventory`, `map`, `search`, `typing`). The last one has `focused = true`.
 - `any_window_open` is true when `windows` is not empty. `busy` is true when the mode is not plain play (`normal` or `manual_camera`), the start menu is up or any window is open: plain-play keys do not reach the game then.
-- `active` is declared and is never filled in this client: find the focused window in `windows` instead.
+- `active` is the `WindowRef` of the focused window (the last one in `windows`), nil when nothing is open.
 
 `windows.changed` carries `{before:Windows, after:Windows, changed:string[]}` when the final state of a client iteration differs from the last.
 
@@ -874,7 +874,7 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 | `eqoa.actions.chat(text:string)` | Sends a line as if typed into chat, in the current channel. The line must be shorter than 128 UTF-16 units and contain no line break (`invalid_argument`). A second argument is refused with `unsupported`: to speak in a particular channel use `command` with that channel's slash command. Grants: rule 4 above. |
 | `eqoa.actions.command(text:string)` | The same, for a command: a leading `/` is added if the text has none (and does not start with `#`). The game's own rules for each command still apply. |
 | `eqoa.actions.autorun(on:bool?)` | Auto-run on or off; toggles with no argument. |
-| `eqoa.actions.follow(entity)` | Follows an entity in view (it is targeted first). `not_ready` if the game will not follow it. See the note below for `nil`. |
+| `eqoa.actions.follow(entity)` | Follows an entity in view (it is targeted first). `not_ready` if the game will not follow it. `follow(nil)` only stops following: when nothing is being followed it completes and does nothing. |
 | `eqoa.actions.camera({heading?, pitch?, distance?, mode?})` | Sets the camera: radians, game units, `mode` 0..3. At least one field. `busy` when the game has the camera locked. |
 | `eqoa.actions.drop_quest(quest:QuestRef)` | Drops a quest from the journal. No confirmation is asked: the call is the decision. |
 | `eqoa.actions.mastery_share(fraction:number)` | Sets the share of experience going to Class Mastery: 0..1 in steps of 0.01. |
@@ -896,7 +896,6 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 
 **Under review, not part of the promise.** These behave as described today, and may be corrected before or after the freeze; do not build on them:
 
-- `follow(nil)` stops following, but when nothing is being followed it starts following the current target (the game's follow key toggles).
 - `stop()` ends auto-attack, auto-run and follow whoever started them, the player included.
 - `equip` toggles; there is no "wear" or "take off" form.
 - `cycle_target` accepts `"hostile"` and `"friendly"` and treats them as no filter.

@@ -1995,16 +1995,10 @@ fn dispatch_broker_action(
                     };
                 }
             } else if play.following {
+                // `follow(nil)` only stops a follow: the game's toggle turns it off
                 play.do_action(0x0B0E_0007, 0);
-            } else {
-                play.do_action(0x0B0E_0007, 0);
-                if !play.following {
-                    return DispatchOutcome::Refused {
-                        code: "not_ready",
-                        reason: "no followable target selected".into(),
-                    };
-                }
             }
+            // nothing followed: `follow(nil)` does nothing (never the toggle, which would follow the target)
             DispatchOutcome::Completed { detail: None }
         }
         ActionKind::SetWaypoint { vm, addon, world, x, z, label } => {
