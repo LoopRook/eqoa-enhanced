@@ -3208,7 +3208,16 @@ fn round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame_body() {
     }
     // bags.lua rescans at most once per SCAN_MIN (0.25 s): 4 a second is the design's ceiling. A slow
     // runner sees a few extra invalidations (3.4 on GitHub's Windows runner, 2026-11-19), so the bound is the cap.
-    assert!(open.lists_per_s <= 4.0, "the open window asks for the zone's creature list {:.1} times a second", open.lists_per_s);
+    // Counted over a window of `secs`, one scan every 0.25 s gives at most `secs / 0.25 + 1` scans (the one at the
+    // window's start and one per interval after it): bounding the rate at 4.0 flaked at 4.1 to 4.2 on a run of about
+    // a second (CI and this PC, 2026-11-20). The cap itself is unchanged.
+    let scans = open.lists_per_s * open.secs;
+    assert!(
+        scans <= open.secs * 4.0 + 1.0 + 1e-6,
+        "the open window asked for the zone's creature list {scans:.0} times in {:.2} s ({:.1} a second; at most one per 0.25 s)",
+        open.secs,
+        open.lists_per_s
+    );
     assert!(open.mod_ms < list_ms, "the open Bags window costs {:.3} ms a frame; one look at the zone is {list_ms:.3} ms", open.mod_ms);
     if !cfg!(debug_assertions) {
         assert!(open.mod_ms < RELEASE_OPEN_MS, "the open Bags window costs {:.3} ms a frame (budget {RELEASE_OPEN_MS}; before the fixes about 60)", open.mod_ms);
