@@ -203,7 +203,6 @@ fn install_event_fields(lua: &mlua::Lua) {
     // The press as the game names it, the modifiers held written before the key
     // ("ctrl+u"): what a key binding is matched by (round 7).
     super::native::describe(lua, "eqoa.events.input.key.data.combo", "supported", Some(7), "");
-    super::native::describe(lua, "eqoa.events.input.key.data.game_key", "supported", Some(7), "");
 }
 
 fn event_round(name: &str) -> u8 {

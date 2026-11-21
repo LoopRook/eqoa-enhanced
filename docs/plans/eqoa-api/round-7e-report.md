@@ -407,3 +407,307 @@ which is why n=1 alone passes; with both broken the table's wrong answers fail f
 - Not verified: the live client; real keyboards on German or UK layouts, a real numpad (the layouts and the numpad
   are tested with synthetic events carrying the logical key and the key's place that those keyboards send); the
   App's `key_input` ordering, as before.
+
+
+# Owner test fix 1 (owner: "I was able to assign Shift+Space, however, jump works just fine")
+
+Branch `feat/eqoa-api-r7e`, develop merged first (fast-forward to a3da75d8: the branch was already inside develop,
+15163407 included my round-3 work). Upstream lines: none new (`options.rs` stays +2/-0, footprint PASS).
+
+## Cause, in two sentences
+
+**What I could prove:** a mod key on a combo the game does NOT have bound (Shift+Space with nothing on it) is refused
+in the live order; I traced and ran that and it holds (below). **What I found that is accepted and wrong:** when a game
+control already holds the combo itself (a bar slot, say, on Shift+Space), `mod_row_capture` treated
+it as an exact owner and swapped or freed that control for the mod, without asking what the game would act on for the
+press *after* the control let go: with the combo free again the game takes Shift+Space as Space, Jump's, so the mod was
+accepted and was dead at once (Jump works fine; the row is marked). That matches the owner's words, but **I cannot
+see the owner's state**: their saved files end without a `shift+space` (the session was cancelled or overwritten), so I
+could not confirm that a control held Shift+Space at that moment. The lead should ask the owner (below).
+
+## The live path, traced (the instructions' step 2)
+
+Order in the client: `window_event` -> `fork_report::event` -> `report_viewer::addon_event` (the mod runtime sees
+`ModifiersChanged` and the key FIRST: `Runtime::event` -> `observe_modifiers`, then `route_key` -> `route_mod_key_based`)
+-> `handle_window_event` -> `key_input` -> `key_name(capture = true)` -> `Play::capture_key` -> `WndOptions` ->
+`ControlsPage::capture_key` -> the mod hook (`bindpage::capture_key`).
+- **Which function receives the key / what name:** the hook gets the page's name, which `App::key_name` makes with the
+  capture flag: `shift+space` (viewer.rs: the combo whenever `capture` is true). Space is `Key::Named(Space)` on Windows
+  in every modifier state (winit 0.30.13 `keyboard_layout.rs`: `vkey_to_non_char_key` runs first and returns it), so it
+  takes the same branch as the keys the tests press.
+- **Is the learned record filled before the capture decision?** Yes: the mod runtime runs before `key_input`, and the
+  learning in `route_mod_key_based` comes BEFORE the "is anyone listening / is this plain play" returns, so
+  `plain_play == false` on the Options page does not skip it. (If no VM is active at that moment `route_key` returns
+  early and nothing is learned; the capture then falls back to the static rule, which gives the same answer for Space.)
+- **Does the Options page's `plain_play` matter at press time?** There is no mod press while Options is up; the
+  press-time names are only made in play.
+- Verified by running the order in tests: `round7e_owner1_*` (below) enter at the mod runtime (`Runtime::scripted_key_based`
+  with the modifiers set through `observe_modifiers`, `plain_play` false), then `GameKeys` for `App::key_name`, then the
+  real `WndOptions` (open, rows, ✕, `capture_key`, draw). **The gap that remains** (and where the earlier tests entered):
+  `Runtime::event`'s own match on the window event (needs a `Window`), `App::key_input` and `key_name` themselves, the
+  real `self.mods` and `typing`, and winit's `KeyEvent`. The earlier tests called the hook with a hand-written name and
+  never had a game control already on the combo, which is the state that was accepted wrongly.
+
+## Why the tests missed it
+
+The Shift+Space tests all started from a clean layout (nothing on `shift+space`), the one state where the exact-owner
+branch is not taken. The branch that was wrong is the one where a control already has the combo.
+
+## The fix
+
+`mod_row_capture`: when a game row is going to give up the combo (swap or free), the layout AFTER that change is checked
+with `game_owner` first; if the game would then act on the plain key and a control has it, the capture is refused naming
+that control (`shadow_text`), and nothing has changed (the layout is only a copy until `set_binds`). Also: every Controls
+capture, refusal and kept key now writes one line to `eqoa.log` (`controls: mod row N given shift+space: the game acts on
+space for that press (it has row jump on it)`, `controls: refused: ...`, `controls: mod X.Y kept ...`), and a saved mod key
+the game has the press of says so once (`controls: mod X.Y on shift+space does nothing: the game acts on space for that
+press`), so an odd result in the next test can be read from the log.
+
+## Tests
+
+`round7e_owner1_*` (all in `round7e_key_tests.rs`):
+- `shift_and_friends_over_a_game_key_are_refused_in_the_live_order`: Shift+Space, Shift+Tab, Shift+Enter, Shift+Up,
+  Shift+F5, Ctrl+Space, Alt+Space, each through the live order, each refused. `a_shifted_character_is_what_it_types`:
+  Shift+1 (types `!`, nothing has it) is accepted.
+- `shift_space_is_refused_after_the_swaps_the_owner_made`: fresh, after a swap then cancel, after Jump taking a mod key
+  then cancel, after Defaults then cancel, after a swap saved and swapped back: always refused with Jump on Space.
+- `a_saved_shift_space_is_marked_says_jump_and_does_not_fire` (step 4): the saved key is kept as it is, the row is marked
+  and says "Jump ... the game's control wins", and a Shift+Space press fires Jump only (the game acts; the mod does not;
+  nothing fires twice).
+- `a_game_control_on_shift_space_cannot_hand_it_to_a_mod_that_jump_then_beats`: **the reproduction.** On the unfixed code
+  it failed (`round7e_key_tests.rs:418`: the capture was accepted); with the fix it passes, including the control that
+  a combo whose plain key nothing has (`shift+u`) is still handed over by the usual swap.
+- Negative control for the live-order tests: `R7E_BREAK=1` (the combo treated as its own name, no plain-key rule)
+  fails three of the four `owner1` tests (:1267, :1345, :1357); with it off all pass.
+
+## What the owner should retest
+
+1. Give a bar slot (or any game control) Shift+Space, then give a MOD Shift+Space: refused, the note names Jump, the
+   slot keeps Shift+Space.
+2. With nothing on Shift+Space, give a mod Shift+Space: refused naming Jump (this was already so in every test).
+3. If it is still accepted somewhere: send `eqoa.log`; the `controls:` lines say which kind of row was given the key, what
+   name the page got, what the game acts on for it and what it has there. Please also say which row (game or mod) took
+   Shift+Space, and whether any control already had it.
+4. A mod already saved on Shift+Space: its row is marked with ! and says Jump's wins; pressing Shift+Space jumps and
+   the mod does nothing.
+
+## Gates
+- Local with the disc (`EQOA_ISO`): `--filter round7e_ fork_ext:: options:: settings:: bindpage:: binds:: play::fork_hooks::`:
+  1120 passed, 0 failed, 26 ignored (unrelated SKIPs); 0 SKIP among the `round7e_` tests. wasm, footprint, paths PASS.
+- CI run https://github.com/LoopRook/eqoa-enhanced/actions/runs/44792534526 on b895c0a5: success. addons 663 / 0 failed;
+  full 3300 / 0 failed (378 SKIP: no disc or GPU in CI); wasm, footprint, paths, player-release (20), tools (201)
+  success. `ci_gates.py cleanup` run.
+- Not verified: the live client itself (Runtime::event, App::key_input and key_name are not run by any test), and
+  that this is the state the owner was in (see "Cause").
+
+
+# Owner test fix 1, part 2: the live behaviour is the rule (owner's correction, 2026-11-20)
+
+The section above describes the first reading (a Shift+Space mod key should be refused). **It is superseded**: the owner
+says that with a mod on Shift+Space and Jump on Space, Shift+Space fires the mod and does not jump, plain Space still
+jumps, and that is wanted. The lead decided the live behaviour is the rule. Commits: `fix(input): a modifier plus a key
+the game uses plain is a key of its own ...` and `test(input): a bare mod key is never consumed`, then this report.
+Upstream lines: none new (`options.rs` stays +2/-0, footprint PASS).
+
+## 1. The mechanism (file:line), and the honest answer
+
+**I could not find a mechanism in the code that makes the game not act on plain Space for that press.** What I checked:
+- `viewer.rs:5667-5686` (`App::key_name`): with the combo not bound in the game and no capture waiting, the press is named
+  by the plain key (`space`); `viewer.rs:5870+` sends it on through `KeyEdge` unchanged; `viewer.rs:5018-5027` (the jump
+  match) tests `(None, Key::Named(Space))` and does not read the modifiers. So **before any mod holds the combo,
+  Shift+Space jumps** (on a server that has jumps).
+- `Binds::combo_bound` / `alias` (`binds.rs:594-609, 744-746`) read only the game's own rows and macros: there is no fork
+  hook that adds mod keys to them (`grep fork_ext::bindpage binds.rs` finds nothing).
+- The press-time code before my change (`input.rs` `route_mod_key_based`, `runtime.rs` `route_key`) never consumed a
+  press for a mod: `wants_capture` came from ImGui, text capture, or Forge's `SetKeySuppressed` only
+  (`input.rs wants_key_capture`, `capture.rs`), and a consumed event is the only way the game never sees a key
+  (`report_viewer.rs addon_event` returns true, `viewer.rs:5480` returns).
+- The Controls capture writes game binds only when it swaps or frees a game row (`bindpage.rs mod_row_capture`).
+By the code alone Shift+Space jumped as well, so the owner's build behaved differently from what I can read: a mod that
+claims keys itself (`eqoa.input.claim_key` with suppress, which Wereoxxs UI in the owner's mod list does call:
+`SetKeySuppressed` is in their `eqoa.log`) is the one candidate I can name, and I cannot confirm it. **That is why the
+behaviour is now made explicit instead of incidental**: see the rule.
+
+## 2. The rule, now stated once (`bindpage.rs`, the "THE RULE" block)
+
+- A key is a NAME: the modifiers held written before the key (Super first, then Ctrl, Alt, Shift). Shift+Space is not Space.
+- A mod may hold a modifier combination over a key the game uses plain. While it does, **that press is the mod's alone**:
+  the mod fires and the key event is consumed in `Runtime::route_key` (`input::mod_owns_press` -> `bindpage::owns_press`), so
+  the game does not act on the plain key for it. The plain key keeps working for the game. A bare key is never taken.
+- A real conflict is the SAME NAME bound in the game: a game row, or a key in a macro's trigger, by that exact name (a bare
+  key the game uses, or the combination itself bound there). The game's control wins at press time and Controls marks it. On
+  Controls a game row on that name is swapped or freed for the mod as before (a macro's key is refused).
+- Controls (capture, marks, defaults, saved keys), the static rule and press-time firing all use that one rule
+  (`game_owner`, `firing`). Nothing is decided by what a press types: the layout guessing is gone (`shifted`, `game_press`,
+  the learned record, the event field `game_key`, and the surface rows for it).
+- German Shift+7 (types `/`, the command key): the rule gives **no conflict**, because the key is the name `shift+7` and the
+  game has no `shift+7` bound; the mod owns that press and the command line does not open for it. The bare `/` is the
+  game's and untouched. Same for the UK Shift+' (types `@`) and the numpad with NumLock off (Ctrl+Numpad1 is `ctrl+1` by
+  its place, though it arrives as End).
+
+## 3. Tests: every assertion changed (before -> after, and why)
+
+All in `round7e_key_tests.rs`. Old = refused/blocked by the plain-key (shadow) rule; new = the owner's rule.
+| test | before | after |
+|---|---|---|
+| `fix_h1_a_ctrl_combo_over_a_plain_game_key_..._never_fires` | Ctrl+W refused on Controls; a saved ctrl+w never fires | renamed `..._is_the_mods_and_w_still_walks`: accepted, no mark; Ctrl+W fires the mod and the press is consumed; W alone is not consumed and still reaches the game |
+| `fix2_h1_shift_on_a_named_key_is_the_games_plain_key` | Shift+Space/Tab/F5/Up/` refused naming the control | `..._is_a_key_of_its_own_for_a_mod`: all (and Shift+Enter) accepted, no mark |
+| `fix2_h1_shift_space_does_not_fire_a_mod_with_jump` | mod never fires on Shift+Space (Jump acts) | `..._belongs_to_the_mod_and_space_still_jumps`: before a mod holds it the press reaches the game; after, the mod fires and the press is consumed; Space alone reaches the game and the mod does not fire |
+| `fix2_h1_a_game_row_on_a_shifted_symbol_is_the_games_press` | Shift+1 refused (game on `!`) | accepted: `!` and `shift+1` are different names; fires, consumed |
+| `fix2_h1_a_macro_on_a_shifted_symbol_is_the_games_press_too` | Shift+1 refused (macro on `!`) | `..._same_name_still_refuses_the_mod`: a macro on bare `!` does not hold Shift+1; a macro on `shift+1` itself still refuses |
+| `fix3_a_german_shift_7_types_slash_and_the_game_acts` | mod did not fire (game acts on `/`) | `..._is_the_mods_by_its_name_not_by_what_it_types`: fires and consumed; bare `/` untouched; US Shift+7 the same name |
+| `fix3_a_uk_shift_quote_types_at_and_the_game_acts` | mod did not fire (slot on `@`) | `..._is_the_mods_by_its_name_even_with_a_game_row_on_at`: fires, consumed |
+| `fix3_the_numpad_with_numlock_off_arrives_as_end` | mod blocked by End (Orbit right) | `..._is_named_by_its_place`: ctrl+1 / shift+1 fire and are consumed; End alone not |
+| `fix3_a_capture_uses_what_the_real_press_typed` | German Shift+7 capture refused | `..._is_accepted_whatever_the_layout_types` |
+| `fix3_the_marks_use_what_presses_showed_and_nothing_is_written` | mark appears once a press showed Shift+7 types `/` | `fix3_a_mark_means_the_same_name_is_the_games`: no mark for shift+7; a game row on exactly `shift+7` marks it and names the row |
+| `owner1_shift_and_friends_over_a_game_key_are_refused_in_the_live_order` | 7 combos refused | `..._are_accepted_in_the_live_order` (live order: modifiers, mod runtime, `GameKeys`, real Options window) |
+| `owner1_shift_space_is_refused_after_the_swaps_the_owner_made` | refused in 5 states | `..._is_accepted_...` in the same 5 states; Jump keeps Space |
+| `owner1_a_saved_shift_space_is_marked_says_jump_and_does_not_fire` | marked, says Jump, mod silent | `..._fires_the_mod_and_not_jump_and_is_not_marked`: this is the owner's live case |
+| `owner1_a_game_control_on_shift_space_cannot_hand_it_to_a_mod_that_jump_then_beats` | refused (Jump would beat it) | `..._is_a_real_conflict_and_swaps_as_any_game_key`: a saved mod key loses at press time and is marked; given on Controls the slot is freed and the mod fires (consumed) |
+New: `owner1_a_bare_mod_key_is_never_consumed_only_a_modifier_combination_is`. Unchanged and still passing: bare-key conflicts
+(`round7e_legacy_conflicts...`, marks, defaults, macro refusal), the client keys, release naming, normalisation, the
+zero-allocation key path, H3 cancel/save.
+
+## 4. Negative controls (`R7E_BREAK=n`, same binary, one run per n)
+- n=1 (a mod never owns a press): 8 tests fail (the shift+space, ctrl+w, German/UK/numpad, saved shift+space, game-control cases).
+- n=2 (the game never has an exact key): 18 tests fail (every conflict, mark, swap and default test).
+- n=4 (bare keys consumed too): passed at the time: no test then asserted it; `owner1_a_bare_mod_key_is_never_consumed...` now does
+  (control run for it is with the manager-row build below).
+
+## 5. What the owner should retest
+1. A mod on Shift+Space, Jump on Space: Shift+Space fires the mod, does not jump; Space jumps. No `!` on the row.
+2. Give a game control (a bar slot) Shift+Space: then a mod Shift+Space: the slot loses it (the usual note); and a mod already
+   saved on a name a game control has: marked, the game wins.
+3. German/UK keyboards if available: a mod on Shift+7 owns that press.
+4. Local gates: see Gates.
+
+## Gates (owner test fix 1)
+- Local with the disc: `--filter round7e_ fork_ext:: options:: settings:: bindpage:: binds:: play::fork_hooks::`: 1121 passed,
+  0 failed, 26 ignored (unrelated SKIPs); wasm, footprint, paths PASS. CI for this and the next section runs once on the final
+  commit (see Owner request 1).
+
+
+# Owner request 1: a Controls key that opens the Mods & Addons window (default F10)
+
+Separate commit: `feat(input): a Controls key (default F10) opens and closes the Mods & Addons window`. Fork-owned files
+only (`fork_ext/bindpage.rs`, `fork_ext/addons/{input,runtime,mod}.rs`, tests, notes); **no upstream line**; footprint PASS.
+
+## What it is
+
+- A row **Mods & Addons** on Controls, beside the mod-key rows, default key **F10**, held in one constant
+  (`bindpage::MANAGER_DEFAULT_KEY`; the row's id is `MANAGER_ADDON`/`MANAGER_ID` = `enhanced`/`mods_addons`).
+- It IS a mod binding like any other (`MOD_BINDS`), that no mod owns: so every rule of mod keys applies by construction: the
+  one conflict rule, swap/free notes, never-a-mod-key list, `mod-keys.opt`, Options cancel (`session_begin/cancel`), the
+  default that never takes a key in use, resolve order. It exists with no mod enabled because the runtime registers it as it
+  starts (`Runtime::from_env` -> `register_manager_row`); tests that never build a runtime are unaffected.
+- The key path: `Runtime::route_key` asks `input::manager_key_pressed` first (plain play, no menu/editor has the keyboard, not
+  a repeat or synthetic, the row's key held with its modifiers: a lock and a compare, **no allocation**; only on a match does
+  it make a name and ask `bindpage::manager_wins`, the same `firing_press` rule as for a mod). A win calls
+  `addons::request_toggle()`; the frame (`Runtime::apply_requests`, the same place the Options row's open request is taken)
+  opens the window, or closes it when it is open. A modified combination on the row is consumed like any mod's
+  (`owns_press` sees the row among the holders); a bare key (F10) is not.
+- **The existing guarantees of the Options route are untouched**: the Options row still uses `request_open()` (which also
+  closes Options and is what `play.rs`'s test about HUD elements and mode 34 covers: `Play`'s
+  `health_redraw` test still passes); the key path uses a different flag (`request_toggle`) and touches nothing else, because the
+  world is already showing.
+
+## F10: checked, as asked
+- Default rows (`binds.rs ROWS`): F1 Controls (`controls`), F5..F8 group, F9 art; no row has F10. F3/F11/F12 are
+  `binds::reserved`. Bundled mods' `default_key`: stats box `b`, map search `f2` and `f4`, bag viewer none, no other bundled
+  mod binds a key. F10 is free. A player whose saved layout already has F10 on a game control or macro, or a mod key (a mod
+  that sorts first by name), gets the row empty and the help says who has it (tests below). Existing players updating: F10
+  applies unless taken, because nothing is saved for the row until they choose.
+- **Old builds read the file safely.** 0.6.0 (`git show v0.6.0:crates/eqoa/src/fork_ext/bindpage.rs`): `load_saved_key`
+  looks up ONLY `mod.<addon>.<id>=` for a mod it has registered (`text.lines().find_map(|line| line.strip_prefix(&prefix))`);
+  `mod.enhanced.mods_addons=` is never asked for, so it is ignored; `save_mod_bind` rewrites the file keeping every line that
+  is not the mod's own prefix, so the entry survives an old build's saves too. The file's format is unchanged.
+
+## The F10 caution (Windows system key): what the code shows, and what it cannot
+- **Delivered as an ordinary key press: yes.** winit 0.30.13 (`platform_impl/windows/keyboard.rs`, the `WM_KEYDOWN | WM_SYSKEYDOWN`
+  arm of `process_message`) builds a `KeyEvent` for `WM_SYSKEYDOWN` too (only Alt+F4 is excluded) and the logical key comes from
+  `vkey_to_non_char_key` (`keyboard_layout.rs:838 VK_F10 => Key::Named(F10)`); `binds::name_of` names it `f10`
+  (`binds.rs:1418`) and `key_of` maps it back (`binds.rs:1456`). The client's own table therefore already knows F10.
+- **Menu mode / swallowing the next key: NOT established from the code.** After dispatching the event, winit's
+  `public_window_callback_inner` (`event_loop.rs:1767-1771`) sets `result = DefWindowProc` for every `WM_SYSKEYDOWN` (so Alt+F4
+  and Alt+Space work), and `WM_SYSKEYUP` returns `DefWindowProc` only when the window has a native menu
+  (`event_loop.rs:1773-1778`). What Windows then does with F10 on a window with no menu bar (it may start the keyboard menu
+  loop on the system menu) cannot be read from this code; this client's windows have no native menu. **The owner should test:**
+  press F10 in the world: the manager should open; press F10 again: it should close; then check that the next key (Space) still
+  works at once and that nothing flashes at the window's title. If it ever sticks, rebind the row (the note says so).
+
+## Tests (`round7e_mgr1_*`, real key path as far as a test reaches)
+Entry: `Runtime::scripted_key_based` (the `route_key` path a window key takes) and the real Controls page; the manager's
+open flag through `Runtime::apply_requests` and `manager_open` (the draw itself needs a graphics device).
+- a fresh install gives F10 and F10 in the world opens the manager, F10 again closes it, F9 does nothing; the row exists with
+  no mod enabled (`extra_rows() == 1`); the Options route's open request is not used;
+- not fired while not plain play (a menu) or while text capture is active (chat or an editor); fires in plain play;
+- F10 on a game row, or a macro: the row starts empty and names the control; a mod default sorts by name (a mod called `alpha`
+  has F10 first, `zeta` loses it to the row);
+- giving the row F9 (Art's) swaps like a mod key (Art takes F10); F9 now opens it, F10 does not; Alt+Enter and Ctrl+C are refused
+  as for a mod (F3/F11/F12 are refused by the page itself);
+- a saved key a game control has is kept, marked `!`, and does nothing at press time;
+- **no key set: 0 allocations over 300 presses of F10 and another key; with F10 set, other keys: 0 allocations**; a key set
+  survives a restart (`mod.enhanced.mods_addons=f9` in the file, reloaded) and an Options cancel puts it back (F10 -> F9 restored);
+- the existing zero-addon test (`performance_busy_world_zero_addons_...`) now registers the row and calls the manager's key test in
+  its key loop: still 0 allocations.
+**Not covered:** `Runtime::draw` opening the real ImGui window (needs a device), a real keyboard, and F10's system-key behaviour above.
+
+## Negative controls (`R7E_BREAK=n`, one build, one run per n)
+n=11 (the manager key never asks): 3 `mgr1` tests fail (fresh install, swap, menu/chat); n=12 (plain play not checked): the
+menu/chat test fails; n=13 (the manager acts where the game has the key): `a_saved_key_a_game_control_has_is_marked_and_does_nothing`
+fails. For the owner-fix part of this branch the same build gives: n=1 (no mod owns a press): 9 tests fail; n=2 (the game never has an
+exact key): 21 tests fail; n=4 (bare keys consumed): `a_bare_mod_key_is_never_consumed...` fails.
+
+## Gates
+(see below)
+- Local with the disc: `--filter round7e_ fork_ext:: options:: settings:: bindpage:: binds:: play::fork_hooks::`: 1127 passed,
+  0 failed, 26 ignored (unrelated SKIPs; 0 SKIP among `round7e_`). wasm, footprint, paths PASS.
+- CI covers both parts (owner test fix 1 part 2 and owner request 1) on one commit. First run 44807567399 on 09f44a34: only
+  `round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame` failed ("the open window asks for the zone's creature list
+  4.2 times a second", limit 4.0): a timing-rate test in the Bag Viewer, untouched by this work (the same kind of runner flake as
+  b8e63048's "3.4/s"); it passes locally. Second run **44814404090 on 0dae9fd1: success**: addons 670 passed / 0 failed / 25 ignored
+  (17 SKIP); full 3307 / 0 failed (378 SKIP, no disc or GPU in CI); wasm, footprint, paths, player-release (20), tools (201)
+  success. `ci_gates.py cleanup` run.
+- Not verified: the live client (the real window key path, `Runtime::draw` opening the ImGui window, F10 as a Windows system key
+  and whether it leaves the next key alone), real German/UK keyboards.
+
+## Recheck of b5e7e85a: two findings on the Mods & Addons key, and one note
+
+Commits: `test(input): manager key owns its press with no mod and is blocked where the window is not usable, on the old behaviour`
+(the 4 new tests, run on the old code: **all 4 failed for the intended reasons**), then `fix(input): the manager row owns its
+combination press with no mod enabled; its key does nothing where the window is not usable`. No upstream line.
+
+**1. A combination on the row with zero mods.** Cause: `Runtime::route_key` returned early when nothing runs, before
+`mod_owns_press` and `capture.press`, so the toggle was queued and the game also saw the press. Fix: the early return also requires that no
+enabled binding is on a modifier combination (`bindpage::any_combo_bound`, an atomic updated by `resolve`); `mod_owns_press` asks the
+same atomic first. So with the default F10 or no key, nothing changes (no allocation, no lock: the existing 0-allocation tests pass);
+with a combination on the row the press is consumed, **and so are its repeats and its release** (a press that was consumed keeps its owner
+in `Capture`, so a release after Shift was let go first is still the row's). Tests: `round7e_mgr2_a_combo_on_the_manager_row_owns_its_press_
+with_no_mod_enabled` (press and release, zero hosts), and a `route_key` unit test in `runtime.rs` (`round7e_mgr2_a_manager_combo_is_consumed_on_
+press_repeat_and_release_with_no_mod`: press, repeat, release with Shift let go first, then a plain Space is the game's). Control `R7E_BREAK=21`
+(the old early return): 3 tests fail (`round7e_key_tests.rs:1607`, `:1629`, `runtime.rs:1662`).
+
+**2. Where the window is not usable.** `Play::manager_key_blocked()` (fork_ext/play.rs): the loading screen (`loading.up()`), the full map
+(`map.open`) and a world change in progress. At character select there is no play (`is_plain_play` is already false) and a game window,
+typing, death or search are already outside `addon_input_available`. `report_viewer::addon_event` tells `bindpage::set_manager_blocked`
+before each key; the manager row then does nothing and is not consumed (a bare key never is; a combination is not either while blocked).
+**I did NOT change `addon_input_available()`**, so ordinary mod keys fire exactly when they did: in particular they still fire on the
+loading screen and with the full map up (the test asserts this, so the difference is visible). Mod keys during loading are probably also
+wrong, as you say; I did not widen the change. Tests: `round7e_mgr2_the_manager_key_is_blocked_while_loading_and_while_the_map_is_up`
+(a real `Play`: fresh = loading = blocked, after loading in the world = usable, `map.show()` = blocked, and `addon_input_available`
+unchanged: true with the map up, false in a game window), `round7e_mgr2_the_manager_key_does_nothing_where_the_window_would_not_be_usable`
+(F10 does nothing and a combination is not consumed while blocked; the same press works when unblocked). Controls: `R7E_BREAK=22` (blocked ignored):
+the second test fails at `:1622`; `R7E_BREAK=23` (the predicate always false): the Play test fails at `play.rs:5392`. **Not covered:** the wiring in
+`report_viewer::addon_event` (needs a `Window` and the App).
+
+**3. Known consequence, in the player note:** on a German keyboard a mod on Shift+7 owns that press, so the command line no longer opens from
+Shift+7 there; the player chose the binding and can rebind either side. The note also says the key does nothing on the loading screen, with
+the full map up, or while the world changes.
+
+### Gates (recheck round)
+- Local with the disc: `--filter round7e_ fork_ext:: options:: settings:: bindpage:: binds:: play::fork_hooks::`: 1131 passed, 0 failed,
+  26 ignored (unrelated SKIPs; 0 SKIP among `round7e_`). wasm, footprint, paths PASS.
+- CI run https://github.com/LoopRook/eqoa-enhanced/actions/runs/44848190242 on d41614f9: success. addons 673 passed / 0 failed / 25 ignored
+  (17 SKIP); full 3311 / 0 failed (378 SKIP: no disc or GPU in CI); wasm, footprint, paths, player-release (20), tools (201) success.
+  `ci_gates.py cleanup` run.
+- Not verified: the live client, and the `report_viewer::addon_event` wiring of the blocked flag.

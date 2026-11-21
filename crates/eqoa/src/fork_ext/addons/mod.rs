@@ -16,6 +16,16 @@ pub(crate) fn request_open() {
     OPEN_REQUEST.store(true, std::sync::atomic::Ordering::Release);
     CLOSE_OPTIONS_ON_OPEN.store(true, std::sync::atomic::Ordering::Release);
 }
+static TOGGLE_REQUEST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The manager key was pressed in the world: the window opens, or closes if it is open. (Unlike
+/// `request_open`, which Options' Addon Manager row uses and which closes Options, nothing else
+/// is touched: the world is already showing.)
+pub(crate) fn request_toggle() {
+    TOGGLE_REQUEST.store(true, std::sync::atomic::Ordering::Release);
+}
+pub(crate) fn take_toggle_request() -> bool {
+    TOGGLE_REQUEST.swap(false, std::sync::atomic::Ordering::AcqRel)
+}
 pub(crate) fn take_open_request() -> bool {
     OPEN_REQUEST.swap(false, std::sync::atomic::Ordering::AcqRel)
 }

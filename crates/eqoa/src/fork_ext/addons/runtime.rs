@@ -224,6 +224,7 @@ impl Runtime {
         let _ = super::native_core::time();
         crate::fork_ext::mods::auto_create_mods_dir();
         crate::fork_ext::bundled::install_bundled_mods_if_needed();
+        crate::fork_ext::bindpage::register_manager_row();
         let mut runtime = Self::new(Paths::select(
             crate::fork_ext::mods::mods_dir(),
             std::env::var_os("EQOA_FORGE_MODS").map(PathBuf::from),
@@ -297,6 +298,27 @@ impl Runtime {
     pub fn request_open(&mut self) {
         self.open = true;
         self.error = None;
+    }
+    /// The manager key: open the window, or close it when it is open.
+    pub(super) fn toggle_manager(&mut self) {
+        if self.open {
+            self.open = false;
+        } else {
+            self.request_open();
+        }
+    }
+    pub(super) fn manager_open(&self) -> bool {
+        self.open
+    }
+    /// What the frame does with the requests made since the last: the Options row's open, the
+    /// manager key's toggle.
+    pub(super) fn apply_requests(&mut self) {
+        if super::take_open_request() {
+            self.request_open();
+        }
+        if super::take_toggle_request() {
+            self.toggle_manager();
+        }
     }
     pub fn event(&mut self, window: &Window, event: &WindowEvent, plain_play: bool) -> bool {
         super::input::observe_modifiers(event);
@@ -447,11 +469,25 @@ impl Runtime {
     }
 
     fn route_key(&mut self, event: KeyRoute<'_>, plain_play: bool, keyboard: bool) -> bool {
-        // No mod runs, nothing is held by one and no editor has the keyboard: the key is the
-        // game's alone, and nothing here has any work for it.
+        // The manager key opens and closes the Mods & Addons window, with or without a mod.
+        if super::input::manager_key_pressed(
+            event.logical,
+            event.base,
+            event.down,
+            event.repeat,
+            event.synthetic,
+            plain_play,
+            keyboard,
+        ) {
+            super::request_toggle();
+        }
+        // No mod runs, nothing is held by one, no editor has the keyboard and no binding (the
+        // Mods & Addons row among them) is on a modifier combination that could own a press:
+        // the key is the game's alone, and nothing here has any work for it.
         if self.capture.is_empty()
             && !super::native_events::has_consumers()
             && !super::input::is_text_capture_active()
+            && !crate::fork_ext::bindpage::any_combo_bound()
         {
             return false;
         }
@@ -471,8 +507,18 @@ impl Runtime {
             plain_play,
             keyboard,
         );
-        let wants_capture =
-            super::input::wants_key_capture(keyboard, code, event.synthetic, plain_play);
+        // A press a mod owns (a modifier combination it holds) is the mod's alone: consumed, so
+        // the game does not also act on the plain key (`bindpage`, the rule).
+        let wants_capture = super::input::wants_key_capture(keyboard, code, event.synthetic, plain_play)
+            || super::input::mod_owns_press(
+                event.logical,
+                event.base,
+                event.down,
+                event.repeat,
+                event.synthetic,
+                plain_play,
+                keyboard,
+            );
         if event.down {
             self.capture.press(event.button, wants_capture) == Owner::Addon
         } else {
@@ -532,9 +578,7 @@ impl Runtime {
                 }
             }
         }
-        if super::take_open_request() {
-            self.request_open();
-        }
+        self.apply_requests();
         if self.graphics.is_none() && self.error.is_none() {
             match self.launch(self.open) {
                 Launch::Dormant => {
@@ -1586,6 +1630,45 @@ mod tests {
         queue_scripted_key(&mut context, &Key::Named(NamedKey::Enter), None, true);
         chat_frame(&mut context, &mut chat);
         assert!(chat.submitted, "the key also reaches ImGui's key queue");
+    }
+
+    #[test]
+    fn round7e_mgr2_a_manager_combo_is_consumed_on_press_repeat_and_release_with_no_mod() {
+        crate::settings::testing::reset(false);
+        crate::fork_ext::bindpage::reset_in_memory();
+        crate::fork_ext::bindpage::register_manager_row();
+        assert!(crate::fork_ext::bindpage::set_key(
+            crate::fork_ext::bindpage::MANAGER_ADDON,
+            crate::fork_ext::bindpage::MANAGER_ID,
+            "shift+space"
+        ));
+        let mut runtime = Runtime::new(Paths::select(PathBuf::new(), None, None, None));
+        let space = Key::Named(NamedKey::Space);
+        super::super::input::set_modifiers((false, false, true));
+        let mut route = |down: bool, repeat: bool| {
+            runtime.route_key(
+                KeyRoute {
+                    button: Button::ScriptedKey(77),
+                    logical: &space,
+                    down,
+                    repeat,
+                    synthetic: false,
+                    base: None,
+                },
+                true,
+                false,
+            )
+        };
+        assert!(route(true, false), "the press");
+        assert!(route(true, true), "its repeats");
+        // Shift is let go first: the release is still the row's, as its press was
+        super::super::input::set_modifiers((false, false, false));
+        assert!(route(false, false), "the release, so the game never sees one without a press");
+        // a plain Space is the game's, press and release
+        assert!(!route(true, false));
+        assert!(!route(false, false));
+        crate::fork_ext::bindpage::reset_in_memory();
+        let _ = super::super::take_toggle_request();
     }
 
     #[test]

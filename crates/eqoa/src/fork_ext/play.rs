@@ -5383,10 +5383,34 @@ mod tests {
             "releasing the chat claim keeps the minimap up in mode 33"
         );
     }
+
+    #[test]
+    fn round7e_mgr2_the_manager_key_is_blocked_while_loading_and_while_the_map_is_up() {
+        let mut p = play();
+        // a fresh play is on the loading screen
+        assert!(p.loading.up());
+        assert!(p.manager_key_blocked(), "no manager window over the loading screen");
+        let _ = p.loading.wait.take();
+        assert!(!p.manager_key_blocked(), "in the world it is usable");
+        p.map.show();
+        assert!(p.manager_key_blocked(), "the full map owns the screen: the window would open unseen");
+        // an ordinary mod key's rule is not changed by this
+        let ordinary = p.addon_input_available();
+        assert!(ordinary, "the map does not stop ordinary mod keys (unchanged)");
+        p.mode = 34;
+        assert!(!p.addon_input_available(), "a game window still does (unchanged)");
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Play {
+    /// The Mods & Addons key works only where its window would be shown and usable: not on the
+    /// loading screen, not with the full map up (the window would open unseen behind it), not
+    /// while the world changes. (Character select, and a game window or typing, are not plain play
+    /// at all.) This does NOT change `addon_input_available`, which ordinary mod keys use.
+    pub(crate) fn manager_key_blocked(&mut self) -> bool {
+        self.loading.up() || self.map.open || self.world_change.is_some()
+    }
     pub(crate) fn addon_input_available(&mut self) -> bool {
         matches!(self.mode, 0 | 38)
             && !self.window_up()

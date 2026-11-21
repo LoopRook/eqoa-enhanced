@@ -836,7 +836,6 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.hotbar.changed.data.changed` | supported | 2 |  |
 | `eqoa.events.input.key.data.combo` | supported | 7 |  |
 | `eqoa.events.input.key.data.down` | supported | 2 |  |
-| `eqoa.events.input.key.data.game_key` | supported | 7 |  |
 | `eqoa.events.input.key.data.key` | supported | 2 |  |
 | `eqoa.events.input.key.data.repeat` | supported | 2 |  |
 | `eqoa.events.input.key.data.synthetic` | supported | 2 |  |

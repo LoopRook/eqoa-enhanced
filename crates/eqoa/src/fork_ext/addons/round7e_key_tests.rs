@@ -452,19 +452,21 @@ fn round7e_fix_h1_a_mod_bound_to_a_combo_fires_on_that_combo_only() {
 }
 
 #[test]
-fn round7e_fix_h1_a_ctrl_combo_over_a_plain_game_key_is_refused_and_never_fires() {
+fn round7e_fix_h1_a_ctrl_combo_over_a_plain_game_key_is_the_mods_and_w_still_walks() {
+    // Owner rule: Ctrl+W is a key of its own. A mod may have it; W alone is Walk forward's.
     reset();
     let host = bind("alpha", "");
     let mut rt = runtime();
-    // Ctrl+W is pressed by the game as W (Walk forward): the mod may not have it
-    refused(ROWS.len(), "ctrl+w", "Walk forward");
-    assert_eq!(mod_key_of("alpha"), "");
-    // an old saved key of the kind: the game acts, the mod does not
-    assert!(bindpage::set_key("alpha", "act", "ctrl+w"));
+    capture(&mut ControlsPage::default(), ROWS.len(), "ctrl+w");
+    assert_eq!(mod_key_of("alpha"), "ctrl+w", "accepted: no refusal");
+    assert!(!controls_text(ROWS.len()).contains(&"!".into()), "and no mark");
     let w = Key::Character("w".into());
-    assert_eq!(game_sends(CTRL, &w), Some(Sent::Key("w".into())));
-    press_key(&mut rt, CTRL, &w, &[&host]);
-    hits(&host, 0);
+    assert!(press_consumed(&mut rt, CTRL, &w, None, &[&host]), "the mod's press is the mod's alone");
+    hits(&host, 1);
+    // control: W alone is not taken from the game and does not fire the mod
+    assert!(!press_consumed(&mut rt, NONE, &w, None, &[&host]));
+    assert_eq!(game_sends(NONE, &w), Some(Sent::Key("w".into())));
+    hits(&host, 1);
 }
 
 #[test]
@@ -869,44 +871,58 @@ fn press_based(rt: &mut Runtime, mods: (bool, bool, bool), key: &Key, base: Opti
 
 const SHIFT: (bool, bool, bool) = (false, false, true);
 
+/// A press and release of `key` with `mods` held, through the mod runtime; whether the PRESS was
+/// consumed (a consumed press never reaches the game: `window_event` returns on it).
+fn press_consumed(rt: &mut Runtime, mods: (bool, bool, bool), key: &Key, base: Option<&'static str>, hosts: &[&Host]) -> bool {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(8000);
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    input::set_modifiers(mods);
+    let state = ElementState::Pressed;
+    let taken = rt.scripted_key_based(id, key, base, None, state, true);
+    let released = rt.scripted_key_based(id, key, base, None, ElementState::Released, true);
+    assert_eq!(taken, released, "a release follows its press's owner");
+    for host in hosts {
+        native_events::dispatch(host).unwrap();
+    }
+    input::set_modifiers(NONE);
+    taken
+}
+
 #[test]
-fn round7e_fix2_h1_shift_on_a_named_key_is_the_games_plain_key() {
-    for (combo, who) in [
-        ("shift+space", "Jump"),
-        ("shift+tab", "Target"),
-        ("shift+f5", "Group"),
-        ("shift+up", "Quick menu"),
-        ("shift+`", "Target"),
-    ] {
+fn round7e_fix2_h1_shift_on_a_named_key_is_a_key_of_its_own_for_a_mod() {
+    // Owner rule: a modifier plus a key the game uses plain is a legitimate separate key.
+    for combo in ["shift+space", "shift+tab", "shift+f5", "shift+up", "shift+`", "shift+enter"] {
         reset();
         let _host = bind("alpha", "");
-        refused(ROWS.len(), combo, who);
-        assert_eq!(mod_key_of("alpha"), "", "{combo}");
+        capture(&mut ControlsPage::default(), ROWS.len(), combo);
+        assert_eq!(mod_key_of("alpha"), combo, "{combo}: accepted");
+        assert!(!controls_text(ROWS.len()).contains(&"!".into()), "{combo}: no mark");
     }
 }
 
 #[test]
-fn round7e_fix2_h1_shift_space_does_not_fire_a_mod_with_jump() {
+fn round7e_fix2_h1_shift_space_belongs_to_the_mod_and_space_still_jumps() {
     reset();
     let host = bind("alpha", "");
     let mut rt = runtime();
-    assert!(bindpage::set_key("alpha", "act", "shift+space"));
     let space = Key::Named(NamedKey::Space);
-    assert_eq!(
-        GameKeys::new().press(SHIFT, &space, None),
-        Some(Sent::Key("space".into())),
-        "the game takes Shift+Space as Space: Jump"
-    );
-    press_based(&mut rt, SHIFT, &space, None, &[&host]);
+    // before any mod holds it, Shift+Space is the game's plain Space (Jump)
+    assert!(!press_consumed(&mut rt, SHIFT, &space, None, &[&host]), "nothing owns it: it reaches the game");
+    assert_eq!(GameKeys::new().press(SHIFT, &space, None), Some(Sent::Key("space".into())));
     hits(&host, 0);
-    // control: a mod that no game control shares fires on its Shift combo
-    assert!(bindpage::set_key("alpha", "act", "shift+u"));
-    press_based(&mut rt, SHIFT, &Key::Character("U".into()), Some("u"), &[&host]);
+    // a mod holds Shift+Space: the mod fires, the game never sees the press
+    assert!(bindpage::set_key("alpha", "act", "shift+space"));
+    assert!(press_consumed(&mut rt, SHIFT, &space, None, &[&host]), "owned: consumed, so no jump");
+    hits(&host, 1);
+    // Space alone still reaches the game and does not fire the mod
+    assert!(!press_consumed(&mut rt, NONE, &space, None, &[&host]));
+    assert_eq!(GameKeys::new().press(NONE, &space, None), Some(Sent::Key("space".into())));
     hits(&host, 1);
 }
 
 #[test]
-fn round7e_fix2_h1_a_game_row_on_a_shifted_symbol_is_the_games_press() {
+fn round7e_fix2_h1_a_game_row_on_a_shifted_symbol_does_not_stop_shift_1_being_a_mod_key() {
     reset();
     let host = bind("alpha", "");
     let mut rt = runtime();
@@ -914,23 +930,32 @@ fn round7e_fix2_h1_a_game_row_on_a_shifted_symbol_is_the_games_press() {
     let mut game = settings::binds();
     game.bind_key(slot, "!");
     settings::set_binds(game);
-    // Controls: the mod may not have Shift+1 (the game takes it as !)
-    refused(ROWS.len(), "shift+1", "Bar 1: slot 1");
-    assert!(bindpage::set_key("alpha", "act", "shift+1"));
+    // the slot is on the bare key `!`; Shift+1 is the name `shift+1`: a different key
+    capture(&mut ControlsPage::default(), ROWS.len(), "shift+1");
+    assert_eq!(mod_key_of("alpha"), "shift+1");
     let bang = Key::Character("!".into());
-    assert_eq!(GameKeys::new().press(SHIFT, &bang, Some("1")), Some(Sent::Slot(0, 0)));
-    press_based(&mut rt, SHIFT, &bang, Some("1"), &[&host]);
-    hits(&host, 0);
+    assert!(press_consumed(&mut rt, SHIFT, &bang, Some("1"), &[&host]));
+    hits(&host, 1);
 }
 
 #[test]
-fn round7e_fix2_h1_a_macro_on_a_shifted_symbol_is_the_games_press_too() {
+fn round7e_fix2_h1_a_macro_on_the_same_name_still_refuses_the_mod() {
     reset();
     let _host = bind("alpha", "");
     let mut game = settings::binds();
     game.set_trigger(0, None, vec![Input::Key("!".into())]).unwrap();
     settings::set_binds(game);
+    // a macro on the bare `!` does not hold Shift+1
+    capture(&mut ControlsPage::default(), ROWS.len(), "shift+1");
+    assert_eq!(mod_key_of("alpha"), "shift+1");
+    // a macro on the SAME name (shift+1) does
+    reset();
+    let _host = bind("alpha", "");
+    let mut game = settings::binds();
+    game.set_trigger(0, None, vec![Input::Key("shift+1".into())]).unwrap();
+    settings::set_binds(game);
     refused(ROWS.len(), "shift+1", "Macro 1");
+    assert_eq!(mod_key_of("alpha"), "");
 }
 
 #[test]
@@ -1008,32 +1033,28 @@ fn round7e_fix2_l3_window_modifier_events_carry_super() {
 
 const CTRL_SHIFT: (bool, bool, bool) = (true, false, true);
 
-/// Whether the game acts on this press (a row or a macro on the name `App::key_name` gives it).
-fn game_acts(mods: (bool, bool, bool), logical: &Key, base: Option<&'static str>) -> bool {
-    let name = GameKeys::new().name(mods, logical, base, true, false, false, false).unwrap();
-    let game = settings::binds();
-    game.row_on(&name).is_some() || game.key_in_macros(&name)
-}
-
 #[test]
-fn round7e_fix3_a_german_shift_7_types_slash_and_the_game_acts() {
+fn round7e_fix3_a_german_shift_7_is_the_mods_by_its_name_not_by_what_it_types() {
+    // Rule: the name decides. A mod on shift+7 owns that press on every layout, so on a German
+    // layout (where it types `/`, the command key) it fires and the command line does not open.
     reset();
     let host = bind("alpha", "");
     let mut rt = runtime();
     assert!(bindpage::set_key("alpha", "act", "shift+7"));
     let slash = Key::Character("/".into());
-    assert!(game_acts(SHIFT, &slash, Some("7")), "Shift+7 types /, the command key");
-    press_based(&mut rt, SHIFT, &slash, Some("7"), &[&host]);
-    hits(&host, 0);
-    // control: where Shift+7 types & (US), nothing of the game's is on it and the mod fires
-    let amp = Key::Character("&".into());
-    assert!(!game_acts(SHIFT, &amp, Some("7")));
-    press_based(&mut rt, SHIFT, &amp, Some("7"), &[&host]);
+    assert!(press_consumed(&mut rt, SHIFT, &slash, Some("7"), &[&host]));
     hits(&host, 1);
+    // the bare key `/` is the game's: the mod does not fire on it, and it is not taken
+    assert!(!press_consumed(&mut rt, NONE, &slash, Some("/"), &[&host]));
+    hits(&host, 1);
+    // US: Shift+7 types & and is the same name
+    let amp = Key::Character("&".into());
+    assert!(press_consumed(&mut rt, SHIFT, &amp, Some("7"), &[&host]));
+    hits(&host, 2);
 }
 
 #[test]
-fn round7e_fix3_a_uk_shift_quote_types_at_and_the_game_acts() {
+fn round7e_fix3_a_uk_shift_quote_is_the_mods_by_its_name_even_with_a_game_row_on_at() {
     reset();
     let host = bind("alpha", "");
     let mut rt = runtime();
@@ -1043,51 +1064,37 @@ fn round7e_fix3_a_uk_shift_quote_types_at_and_the_game_acts() {
     settings::set_binds(game);
     assert!(bindpage::set_key("alpha", "act", "shift+'"));
     let at = Key::Character("@".into());
-    assert!(game_acts(SHIFT, &at, Some("'")));
-    press_based(&mut rt, SHIFT, &at, Some("'"), &[&host]);
-    hits(&host, 0);
-    let quote = Key::Character("\"".into());
-    assert!(!game_acts(SHIFT, &quote, Some("'")));
-    press_based(&mut rt, SHIFT, &quote, Some("'"), &[&host]);
+    assert!(press_consumed(&mut rt, SHIFT, &at, Some("'"), &[&host]), "shift+' is the mod's, though it types @");
     hits(&host, 1);
+    let quote = Key::Character("\"".into());
+    assert!(press_consumed(&mut rt, SHIFT, &quote, Some("'"), &[&host]));
+    hits(&host, 2);
 }
 
 #[test]
-fn round7e_fix3_the_numpad_with_numlock_off_arrives_as_end() {
+fn round7e_fix3_the_numpad_with_numlock_off_is_named_by_its_place() {
+    // Numpad1 with NumLock off arrives as End but is `1` by its place: Ctrl+Numpad1 is `ctrl+1`.
     reset();
     let host = bind("alpha", "");
     let mut rt = runtime();
-    // Target: self is on 1 by default; move it, so a wrong guess of "1" finds nothing
-    let mut game = settings::binds();
-    game.bind_key(row_named("target_self").unwrap(), "y");
-    settings::set_binds(game);
     let end = Key::Named(NamedKey::End);
     for (mods, combo) in [(CTRL, "ctrl+1"), (SHIFT, "shift+1")] {
         assert!(bindpage::set_key("alpha", "act", combo));
-        assert!(game_acts(mods, &end, Some("1")), "{combo}: the game takes it as End (Orbit right)");
-        press_based(&mut rt, mods, &end, Some("1"), &[&host]);
-        hits(&host, 0);
+        assert!(press_consumed(&mut rt, mods, &end, Some("1"), &[&host]), "{combo}");
     }
-    // control: the digit row's 1 with Ctrl is no game control now, and the mod fires
-    assert!(bindpage::set_key("alpha", "act", "ctrl+1"));
-    let one = Key::Character("1".into());
-    assert!(!game_acts(CTRL, &one, Some("1")));
-    press_based(&mut rt, CTRL, &one, Some("1"), &[&host]);
-    hits(&host, 1);
+    hits(&host, 2);
+    // End alone (Orbit right) is the game's, untouched
+    assert!(!press_consumed(&mut rt, NONE, &end, None, &[&host]));
+    hits(&host, 2);
 }
 
 #[test]
-fn round7e_fix3_a_capture_uses_what_the_real_press_typed() {
+fn round7e_fix3_a_capture_is_accepted_whatever_the_layout_types() {
     reset();
     let _host = bind("alpha", "");
     let mut rt = runtime();
-    // a German Shift+7 pressed: the client learns it types /
+    // a German Shift+7 pressed (it types /): the name is shift+7, a key of its own
     press_based(&mut rt, SHIFT, &Key::Character("/".into()), Some("7"), &[]);
-    refused(ROWS.len(), "shift+7", "/");
-    assert_eq!(mod_key_of("alpha"), "");
-    // control: with no press seen, the US table says & (nothing's) and the key is accepted
-    reset();
-    let _host = bind("alpha", "");
     capture(&mut ControlsPage::default(), ROWS.len(), "shift+7");
     assert_eq!(mod_key_of("alpha"), "shift+7");
 }
@@ -1188,16 +1195,437 @@ fn round7e_fix3_nothing_listening_means_no_key_work() {
 }
 
 #[test]
-fn round7e_fix3_the_marks_use_what_presses_showed_and_nothing_is_written() {
+fn round7e_fix3_a_mark_means_the_same_name_is_the_games() {
     reset();
     let _host = bind("alpha", "");
-    let mut rt = runtime();
+    // no game control holds shift+7: no mark, on any layout
     assert!(bindpage::set_key("alpha", "act", "shift+7"));
-    let before = testing::kept(MOD_KEYS);
-    // no press seen: the US table says Shift+7 types &, which nothing has: no mark
-    assert!(!controls_text(ROWS.len()).contains(&"!".into()));
-    // a German Shift+7 is pressed: it types /, the command key, and the row is marked
+    let mut rt = runtime();
     press_based(&mut rt, SHIFT, &Key::Character("/".into()), Some("7"), &[]);
-    assert!(controls_text(ROWS.len()).contains(&"!".into()), "marked once a press showed it");
-    assert_eq!(testing::kept(MOD_KEYS), before, "what was learned is not written anywhere");
+    assert!(!controls_text(ROWS.len()).contains(&"!".into()));
+    // a game row on that very name: the mod is marked and says whose it is
+    let slot = row_named("bar1_slot1").unwrap();
+    let mut game = settings::binds();
+    game.bind_key(slot, "shift+7");
+    settings::set_binds(game);
+    let text = controls_text(ROWS.len());
+    assert!(text.contains(&"!".into()), "marked: {text:?}");
+    assert!(text.join(" ").contains("Bar 1: slot 1"), "{text:?}");
+}
+
+// ---- owner test fix 1: the capture as the live client orders it -------------------------------
+//
+// The order in the client: the window's ModifiersChanged and the key reach the mod runtime
+// (`report_viewer::addon_event` -> `Runtime::event` -> `route_key`, with the Options page up so
+// `plain_play` is false), then `App::key_input` names the key with the capture waiting
+// (`key_name(capture = true)`, `GameKeys` here) and hands the name to the Options window, whose
+// Controls page asks the mod hook. The test enters at the Options window (`WndOptions`) and the
+// mod runtime (`Runtime::scripted_key_based`); only `Runtime::event`'s own match on the window
+// event and `App::key_input` are not run (they need a `Window` and the App).
+
+fn live_capture(
+    row: usize,
+    mods: (bool, bool, bool),
+    logical: &Key,
+    base: Option<&'static str>,
+) -> (String, String) {
+    use winit::event::{Modifiers, WindowEvent};
+    use winit::keyboard::ModifiersState;
+    let mut s = Session::open();
+    let mut rt = runtime();
+    for _ in 0..row {
+        s.press(key::DOWN);
+    }
+    s.press(key::CROSS);
+    let mut state = ModifiersState::empty();
+    state.set(ModifiersState::CONTROL, mods.0);
+    state.set(ModifiersState::ALT, mods.1);
+    state.set(ModifiersState::SHIFT, mods.2);
+    input::observe_modifiers(&WindowEvent::ModifiersChanged(Modifiers::from(state)));
+    // the mod runtime sees the key first; the Options page is up, so it is not plain play
+    rt.scripted_key_based(7001, logical, base, None, ElementState::Pressed, false);
+    // then the game's naming with the capture waiting, and the page
+    let name = GameKeys::new().name(mods, logical, base, true, false, true, false).unwrap();
+    s.w.capture_key(&s.vui, &name, &mut Vec::new());
+    s.draw();
+    rt.scripted_key_based(7001, logical, base, None, ElementState::Released, false);
+    input::observe_modifiers(&WindowEvent::ModifiersChanged(Modifiers::from(ModifiersState::empty())));
+    let waiting = if s.w.capturing().is_some() { "waiting" } else { "done" };
+    (name, format!("{}/{}", mod_key_of("alpha"), waiting))
+}
+
+#[test]
+fn round7e_owner1_shift_and_friends_over_a_game_key_are_accepted_in_the_live_order() {
+    // Owner (2026-11-20): "you can have a key that is already bound, plus a modifier".
+    let cases: [(&str, (bool, bool, bool), Key, Option<&'static str>); 7] = [
+        ("shift+space", SHIFT, Key::Named(NamedKey::Space), None),
+        ("shift+tab", SHIFT, Key::Named(NamedKey::Tab), None),
+        ("shift+enter", SHIFT, Key::Named(NamedKey::Enter), None),
+        ("shift+up", SHIFT, Key::Named(NamedKey::ArrowUp), None),
+        ("shift+f5", SHIFT, Key::Named(NamedKey::F5), None),
+        ("ctrl+space", CTRL, Key::Named(NamedKey::Space), None),
+        ("alt+space", ALT, Key::Named(NamedKey::Space), None),
+    ];
+    let mut wrong = Vec::new();
+    for (name, mods, logical, base) in cases {
+        reset();
+        let _alpha = bind("alpha", "");
+        let _beta = bind("beta", "b");
+        let (got, result) = live_capture(ROWS.len(), mods, &logical, base);
+        if got != name || result != format!("{name}/done") {
+            wrong.push(format!("{name}: named {got:?}, mod key/capture {result:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+#[test]
+fn round7e_owner1_a_shifted_character_is_what_it_types() {
+    // Shift+1 types ! on a US keyboard: nothing of the game's is on !, so it is accepted
+    reset();
+    let _alpha = bind("alpha", "");
+    let (name, result) = live_capture(ROWS.len(), SHIFT, &Key::Character("!".into()), Some("1"));
+    assert_eq!((name.as_str(), result.as_str()), ("shift+1", "shift+1/done"));
+}
+
+/// Shift+Space given to the mod on `row` in `s`, in the live order (see `live_capture`):
+/// what the mod's key is after, and whether the page is still waiting.
+fn shift_space_in(s: &mut Session, rt: &mut Runtime, row: usize, who: &str) -> String {
+    use winit::event::{Modifiers, WindowEvent};
+    use winit::keyboard::ModifiersState;
+    for _ in 0..row {
+        s.press(key::DOWN);
+    }
+    s.press(key::CROSS);
+    let space = Key::Named(NamedKey::Space);
+    input::observe_modifiers(&WindowEvent::ModifiersChanged(Modifiers::from(ModifiersState::SHIFT)));
+    rt.scripted_key_based(7101, &space, None, None, ElementState::Pressed, false);
+    let name = GameKeys::new().name(SHIFT, &space, None, true, false, true, false).unwrap();
+    s.w.capture_key(&s.vui, &name, &mut Vec::new());
+    s.draw();
+    rt.scripted_key_based(7101, &space, None, None, ElementState::Released, false);
+    input::observe_modifiers(&WindowEvent::ModifiersChanged(Modifiers::from(ModifiersState::empty())));
+    for _ in 0..row {
+        s.press(key::UP);
+    }
+    format!("{}/{}", mod_key_of(who), if s.w.capturing().is_some() { "waiting" } else { "done" })
+}
+
+#[test]
+fn round7e_owner1_shift_space_is_accepted_after_the_swaps_the_owner_made() {
+    let jump = row_named("jump").unwrap();
+    let mut wrong = Vec::new();
+    for scenario in ["fresh", "swap then cancel", "jump takes then cancel", "defaults then cancel", "swap saved then swapped back"] {
+        reset();
+        let _alpha = bind("alpha", "b");
+        let _beta = bind("beta", "");
+        let mut rt = runtime();
+        let mut s = Session::open();
+        match scenario {
+            "swap then cancel" => {
+                s.give(ROWS.len(), "space");
+                s.cancel();
+                s = Session::open();
+            }
+            "jump takes then cancel" => {
+                s.give(jump, "b");
+                s.cancel();
+                s = Session::open();
+            }
+            "defaults then cancel" => {
+                s.give(crate::bindpage::defaults() as usize, "unused");
+                s.cancel();
+                s = Session::open();
+            }
+            "swap saved then swapped back" => {
+                s.give(ROWS.len(), "space");
+                s.save();
+                s = Session::open();
+                s.give(jump, "space");
+                s.save();
+                s = Session::open();
+            }
+            _ => {}
+        }
+        assert_eq!(settings::binds().key(jump), Some("space"), "{scenario}: Jump is on Space");
+        let result = shift_space_in(&mut s, &mut rt, ROWS.len() + 1, "beta");
+        if result != "shift+space/done" {
+            wrong.push(format!("{scenario}: {result}"));
+        }
+        assert_eq!(settings::binds().key(jump), Some("space"), "{scenario}: Jump keeps Space");
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+#[test]
+fn round7e_owner1_a_saved_shift_space_fires_the_mod_and_not_jump_and_is_not_marked() {
+    reset();
+    testing::put(MOD_KEYS, b"mod.alpha.act=shift+space\n");
+    let host = bind("alpha", "");
+    let mut rt = runtime();
+    assert_eq!(mod_key_of("alpha"), "shift+space");
+    assert!(!controls_text(ROWS.len()).contains(&"!".into()), "no conflict: no mark");
+    let space = Key::Named(NamedKey::Space);
+    // the live behaviour: the mod fires and the game never sees the press (no jump)
+    assert!(press_consumed(&mut rt, SHIFT, &space, None, &[&host]));
+    hits(&host, 1);
+    // Space alone still reaches the game and jumps
+    assert!(!press_consumed(&mut rt, NONE, &space, None, &[&host]));
+    assert_eq!(GameKeys::new().press(NONE, &space, None), Some(Sent::Key("space".into())));
+    hits(&host, 1);
+}
+
+#[test]
+fn round7e_owner1_a_game_control_on_shift_space_is_a_real_conflict_and_swaps_as_any_game_key() {
+    reset();
+    let host = bind("alpha", "");
+    let mut rt = runtime();
+    let slot = row_named("bar1_slot1").unwrap();
+    let mut game = settings::binds();
+    game.bind_key(slot, "shift+space");
+    settings::set_binds(game);
+    // the same name is bound in the game: the game's control wins a saved one at press time
+    assert!(bindpage::set_key("alpha", "act", "shift+space"));
+    let space = Key::Named(NamedKey::Space);
+    assert!(!press_consumed(&mut rt, SHIFT, &space, None, &[&host]), "the game acts: not consumed");
+    hits(&host, 0);
+    assert!(controls_text(ROWS.len()).contains(&"!".into()), "and the row is marked");
+    // giving the mod the key on Controls frees the slot, as between two game rows
+    assert!(bindpage::set_key("alpha", "act", ""));
+    capture(&mut ControlsPage::default(), ROWS.len(), "shift+space");
+    assert_eq!(mod_key_of("alpha"), "shift+space");
+    assert_eq!(settings::binds().key(slot), None, "the slot has none now");
+    assert!(press_consumed(&mut rt, SHIFT, &space, None, &[&host]));
+    hits(&host, 1);
+}
+
+#[test]
+fn round7e_owner1_a_bare_mod_key_is_never_consumed_only_a_modifier_combination_is() {
+    reset();
+    let host = bind("alpha", "u");
+    let mut rt = runtime();
+    let u = Key::Character("u".into());
+    assert!(!press_consumed(&mut rt, NONE, &u, Some("u"), &[&host]), "a bare key reaches the game as always");
+    hits(&host, 1);
+    assert!(bindpage::set_key("alpha", "act", "ctrl+u"));
+    assert!(press_consumed(&mut rt, CTRL, &u, Some("u"), &[&host]), "Ctrl+U is the mod's alone");
+    hits(&host, 2);
+}
+
+// ---- owner request 1: the Controls key that opens the Mods & Addons window --------------------
+
+use super::super::{request_toggle, take_open_request, take_toggle_request};
+
+const MGR: (&str, &str) = (bindpage::MANAGER_ADDON, bindpage::MANAGER_ID);
+
+fn mgr_key() -> String {
+    bindpage::get_key(MGR.0, MGR.1).unwrap_or_default()
+}
+
+/// A press and release with the plain-play flag as given; whether the manager asked to toggle.
+fn press_for_manager(rt: &mut Runtime, key: &Key, plain_play: bool) -> bool {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(12000);
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    let _ = take_toggle_request(); // only what THIS press asks
+    rt.scripted_key_based(id, key, None, None, ElementState::Pressed, plain_play);
+    rt.scripted_key_based(id, key, None, None, ElementState::Released, plain_play);
+    // report it, and leave the request for the frame (`apply_requests`) as the press made it
+    let asked = take_toggle_request();
+    if asked {
+        request_toggle();
+    }
+    asked
+}
+
+/// A fresh settings state with no request left over from another test.
+fn mgr_reset() {
+    reset();
+    bindpage::set_manager_blocked(false);
+    let _ = take_toggle_request();
+    let _ = take_open_request();
+}
+
+fn f(n: u8) -> Key {
+    Key::Named(match n {
+        9 => NamedKey::F9,
+        10 => NamedKey::F10,
+        _ => unreachable!(),
+    })
+}
+
+#[test]
+fn round7e_mgr1_a_fresh_install_has_f10_and_it_opens_and_closes_the_manager() {
+    mgr_reset();
+    bindpage::register_manager_row();
+    assert_eq!(mgr_key(), "f10", "the default, one constant");
+    assert_eq!(bindpage::MANAGER_DEFAULT_KEY, "f10");
+    assert_eq!(bindpage::extra_rows(), 1, "the row is there with no mod enabled");
+    let mut rt = runtime();
+    assert!(!rt.manager_open());
+    assert!(press_for_manager(&mut rt, &f(10), true), "F10 in the world asks for the manager");
+    rt.apply_requests();
+    assert!(rt.manager_open(), "opened");
+    assert!(!take_open_request(), "the Options route's open request is not used");
+    assert!(press_for_manager(&mut rt, &f(10), true));
+    rt.apply_requests();
+    assert!(!rt.manager_open(), "closed again");
+    // control: F9 is not the key
+    assert!(!press_for_manager(&mut rt, &f(9), true));
+    let _ = take_toggle_request();
+}
+
+#[test]
+fn round7e_mgr1_it_is_not_fired_while_a_menu_or_chat_has_the_keyboard() {
+    mgr_reset();
+    bindpage::register_manager_row();
+    let mut rt = runtime();
+    assert!(!press_for_manager(&mut rt, &f(10), false), "a menu has the keyboard (not plain play)");
+    input::testing_text_capture(true);
+    assert!(!press_for_manager(&mut rt, &f(10), true), "typing in chat or an editor");
+    input::testing_text_capture(false);
+    assert!(press_for_manager(&mut rt, &f(10), true), "control: plain play");
+}
+
+#[test]
+fn round7e_mgr1_a_key_a_game_control_has_leaves_the_row_empty_and_names_it() {
+    mgr_reset();
+    let slot = row_named("bar1_slot1").unwrap();
+    let mut game = settings::binds();
+    game.bind_key(slot, "f10");
+    settings::set_binds(game);
+    bindpage::register_manager_row();
+    assert_eq!(mgr_key(), "", "the default never takes a key in use");
+    let text = controls_text(ROWS.len()).join(" ");
+    assert!(text.contains("Bar 1: slot 1"), "{text}");
+    // a macro's key the same
+    mgr_reset();
+    let mut game = settings::binds();
+    game.set_trigger(0, None, vec![Input::Key("f10".into())]).unwrap();
+    settings::set_binds(game);
+    bindpage::register_manager_row();
+    assert_eq!(mgr_key(), "");
+    // a mod's default for it: the first by name has it (the row's id is `enhanced`)
+    mgr_reset();
+    let _alpha = bind("alpha", "f10");
+    bindpage::register_manager_row();
+    assert_eq!((mgr_key().as_str(), mod_key_of("alpha").as_str()), ("", "f10"), "alpha sorts first");
+    mgr_reset();
+    let _zeta = bind("zeta", "f10");
+    bindpage::register_manager_row();
+    assert_eq!((mgr_key().as_str(), mod_key_of("zeta").as_str()), ("f10", ""), "enhanced sorts first");
+}
+
+#[test]
+fn round7e_mgr1_giving_it_a_key_a_game_control_has_swaps_as_for_a_mod_key() {
+    mgr_reset();
+    bindpage::register_manager_row();
+    let art = row_named("art").unwrap();
+    assert_eq!(settings::binds().key(art), Some("f9"));
+    capture(&mut ControlsPage::default(), ROWS.len(), "f9");
+    assert_eq!(mgr_key(), "f9");
+    assert_eq!(settings::binds().key(art), Some("f10"), "Art took the key the row left");
+    let mut rt = runtime();
+    assert!(press_for_manager(&mut rt, &f(9), true), "F9 opens it now");
+    assert!(!press_for_manager(&mut rt, &f(10), true), "F10 does not");
+    // the client's own keys are refused, as for a mod
+    // (F3, F11 and F12 are refused by the page itself before any row is asked)
+    refused(ROWS.len(), "alt+enter", "client");
+    refused(ROWS.len(), "ctrl+c", "client");
+    assert_eq!(mgr_key(), "f9");
+}
+
+#[test]
+fn round7e_mgr1_a_saved_key_a_game_control_has_is_marked_and_does_nothing() {
+    mgr_reset();
+    let slot = row_named("bar1_slot1").unwrap();
+    let mut game = settings::binds();
+    game.bind_key(slot, "f10");
+    settings::set_binds(game);
+    testing::put(MOD_KEYS, b"mod.enhanced.mods_addons=f10\n");
+    bindpage::register_manager_row();
+    assert_eq!(mgr_key(), "f10", "an old saved key is kept as it is");
+    assert!(controls_text(ROWS.len()).contains(&"!".into()), "and marked");
+    let mut rt = runtime();
+    assert!(!press_for_manager(&mut rt, &f(10), true), "the game's control wins at press time");
+}
+
+#[test]
+fn round7e_mgr1_no_key_set_means_no_key_work_and_a_key_survives_a_restart_and_a_cancel() {
+    use super::super::perf_alloc::measure;
+    mgr_reset();
+    bindpage::register_manager_row();
+    assert!(bindpage::set_key(MGR.0, MGR.1, ""));
+    let mut rt = runtime();
+    let u = Key::Character("u".into());
+    // no key set: F10 and every other key cost no allocation
+    rt.scripted_key_based(13001, &f(10), None, None, ElementState::Pressed, true);
+    rt.scripted_key_based(13001, &f(10), None, None, ElementState::Released, true);
+    let (_, _, allocs, _) = measure(|| {
+        for _ in 0..300 {
+            for (key, base) in [(&f(10), None), (&u, Some("u"))] {
+                rt.scripted_key_based(13002, key, base, None, ElementState::Pressed, true);
+                rt.scripted_key_based(13002, key, base, None, ElementState::Released, true);
+            }
+        }
+    });
+    assert_eq!(allocs, 0, "no key set: nothing on the key path allocates");
+    assert!(!take_toggle_request());
+    // with the default key set, the other keys still allocate nothing
+    assert!(bindpage::set_key(MGR.0, MGR.1, "f10"));
+    let (_, _, allocs, _) = measure(|| {
+        for _ in 0..300 {
+            rt.scripted_key_based(13003, &u, Some("u"), None, ElementState::Pressed, true);
+            rt.scripted_key_based(13003, &u, Some("u"), None, ElementState::Released, true);
+        }
+    });
+    assert_eq!(allocs, 0, "a key that is not the manager's costs nothing");
+    // a key kept across a restart
+    assert!(bindpage::set_key(MGR.0, MGR.1, "f9"));
+    let kept = testing::kept(MOD_KEYS).unwrap();
+    assert!(String::from_utf8_lossy(&kept).contains("mod.enhanced.mods_addons=f9"));
+    mgr_reset();
+    testing::put(MOD_KEYS, &kept);
+    bindpage::register_manager_row();
+    assert_eq!(mgr_key(), "f9");
+    // a cancelled Options session puts it back
+    let mut s = Session::open();
+    s.give(ROWS.len(), "f10");
+    assert_eq!(mgr_key(), "f10");
+    s.cancel();
+    assert_eq!(mgr_key(), "f9");
+}
+
+#[test]
+fn round7e_mgr2_a_combo_on_the_manager_row_owns_its_press_with_no_mod_enabled() {
+    mgr_reset();
+    bindpage::register_manager_row();
+    assert!(bindpage::set_key(MGR.0, MGR.1, "shift+space"));
+    let mut rt = runtime(); // no mod, no host: nothing is running
+    let space = Key::Named(NamedKey::Space);
+    // press, and its release, are the row's alone: the game never sees either (taken == released)
+    assert!(press_consumed(&mut rt, SHIFT, &space, None, &[]), "Shift+Space is the manager's: no jump");
+    assert!(take_toggle_request(), "and it asked to open the manager");
+    // Space alone is the game's and asks for nothing
+    assert!(!press_consumed(&mut rt, NONE, &space, None, &[]));
+    assert!(!take_toggle_request());
+}
+
+#[test]
+fn round7e_mgr2_the_manager_key_does_nothing_where_the_window_would_not_be_usable() {
+    mgr_reset();
+    bindpage::register_manager_row();
+    let mut rt = runtime();
+    let space = Key::Named(NamedKey::Space);
+    bindpage::set_manager_blocked(true);
+    // the bare default key: nothing, and nothing consumed
+    assert!(!press_for_manager(&mut rt, &f(10), true), "blocked: F10 does nothing");
+    // a combination: not consumed either, so the game still gets it
+    assert!(bindpage::set_key(MGR.0, MGR.1, "shift+space"));
+    assert!(!press_consumed(&mut rt, SHIFT, &space, None, &[]), "blocked: not consumed");
+    assert!(!take_toggle_request());
+    // control: where it is usable the same press is the row's
+    bindpage::set_manager_blocked(false);
+    assert!(press_consumed(&mut rt, SHIFT, &space, None, &[]));
+    assert!(take_toggle_request());
 }

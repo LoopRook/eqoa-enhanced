@@ -34,6 +34,101 @@ pub struct ModBind {
 
 static MOD_BINDS: Mutex<Vec<ModBind>> = Mutex::new(Vec::new());
 
+/// The Controls row that opens and closes the Mods & Addons window (the addon manager),
+/// beside the mod rows (owner, 2026-11-20). It is a mod binding like any other (the same
+/// rule, notes, saved file, cancel) that no mod owns: it is there with no mod enabled and
+/// the client acts on it itself (`manager_wins`, `Runtime::route_key`). Its default key is
+/// this one constant: change it here. An old build reads `mod.enhanced.mods_addons=` as
+/// the entry of a mod it does not have, and ignores it.
+pub(crate) const MANAGER_ADDON: &str = "enhanced";
+pub(crate) const MANAGER_ID: &str = "mods_addons";
+pub(crate) const MANAGER_LABEL: &str = "Mods & Addons";
+pub(crate) const MANAGER_DEFAULT_KEY: &str = "f10";
+
+/// Whether the client is somewhere the Mods & Addons window would not be shown or usable (the
+/// loading screen, the full map, a world change; at character select and with a game window up
+/// there is no plain play at all). The viewer tells this before each key
+/// (`report_viewer::addon_event`); the manager row then does nothing and takes no press. It
+/// never changes when an ordinary mod key fires.
+static MANAGER_BLOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn set_manager_blocked(blocked: bool) {
+    MANAGER_BLOCKED.store(blocked, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(crate) fn manager_blocked() -> bool {
+    MANAGER_BLOCKED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Whether any enabled binding is on a modifier combination: only then can a press be a
+/// mod's alone (`owns_press`), so with none the key path has nothing to ask.
+static ANY_COMBO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn any_combo_bound() -> bool {
+    ANY_COMBO.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Puts the row among the mod rows (the runtime does this as it starts).
+pub(crate) fn register_manager_row() {
+    register(MANAGER_ADDON, MANAGER_ID, MANAGER_DEFAULT_KEY, MANAGER_LABEL);
+}
+
+fn is_manager(b: &ModBind) -> bool {
+    b.addon_id == MANAGER_ADDON && b.id == MANAGER_ID
+}
+
+/// The key the manager row has now, ready to compare with a key event without making a name
+/// (so a key press with no mod key set costs no allocation).
+struct ManagerKey {
+    mods: (bool, bool, bool, bool),
+    key: winit::keyboard::Key,
+    base: String,
+}
+
+static MANAGER_KEY: Mutex<Option<ManagerKey>> = Mutex::new(None);
+
+fn set_manager_key(key: Option<&str>) {
+    let spec = key.filter(|k| !k.is_empty()).map(|k| {
+        let ((sup, ctrl, alt, shift), base) = parse_key(k);
+        ManagerKey { mods: (sup, ctrl, alt, shift), key: binds::key_of(base), base: base.to_string() }
+    });
+    *MANAGER_KEY.lock().unwrap() = spec;
+}
+
+/// Whether a key event is the manager row's key (its modifiers held, its key): a cheap test that
+/// makes no name and allocates nothing.
+pub(crate) fn manager_key_matches(
+    key: &winit::keyboard::Key,
+    base: Option<&str>,
+    mods: (bool, bool, bool, bool),
+) -> bool {
+    use winit::keyboard::Key;
+    let guard = MANAGER_KEY.lock().unwrap();
+    let Some(spec) = guard.as_ref() else {
+        return false;
+    };
+    if spec.mods != mods {
+        return false;
+    }
+    match (&spec.key, key) {
+        (Key::Named(a), Key::Named(b)) => a == b,
+        (Key::Character(_), _) => match base {
+            Some(base) => base == spec.base,
+            None => matches!(key, Key::Character(c) if c.eq_ignore_ascii_case(&spec.base)),
+        },
+        _ => false,
+    }
+}
+
+/// Whether the manager row is what acts on this press (`combo`): it has the key and no game
+/// control, macro, client key or winning mod does (the one rule, `firing_press`).
+pub(crate) fn manager_wins(combo: &str) -> bool {
+    let combo = normalize_key(&combo.to_ascii_lowercase());
+    let game = crate::settings::with_binds(Clone::clone);
+    let binds = MOD_BINDS.lock().unwrap();
+    firing_press(&game, &binds, &combo).is_some_and(|i| is_manager(&binds[i]))
+}
+
 pub fn register(addon: &str, id: &str, default_key: &str, description: &str) -> bool {
     // The game's keys first: the lock below must not be held while they load.
     let game = crate::settings::with_binds(Clone::clone);
@@ -77,8 +172,9 @@ pub fn set_addon_enabled(addon_id: &str, enabled: bool) {
 pub fn reset_in_memory() {
     let mut binds = MOD_BINDS.lock().unwrap();
     binds.clear();
+    set_manager_key(None);
+    ANY_COMBO.store(false, std::sync::atomic::Ordering::Relaxed);
     *SESSION.lock().unwrap() = None;
-    LEARNED.lock().unwrap().clear();
 }
 
 pub fn get_key(addon: &str, id: &str) -> Option<String> {
@@ -117,7 +213,11 @@ pub fn help_or_defaults(row: i32) -> String {
         let binds = MOD_BINDS.lock().unwrap();
         if let Some(i) = enabled_index(&binds, idx) {
             let b = &binds[i];
-            let mut help = format!("{} (from mod: {}).", b.description, b.addon_id);
+            let mut help = if is_manager(b) {
+                "Opens the Mods & Addons window, and closes it again. It has no mod; it is the client's own.".to_string()
+            } else {
+                format!("{} (from mod: {}).", b.description, b.addon_id)
+            };
             if let Some(why) = conflict_text(&game, &binds, i) {
                 help.push(' ');
                 help.push_str(&why);
@@ -284,6 +384,7 @@ pub fn capture_key(
     cues: &mut Vec<i32>,
 ) -> bool {
     let key_name = normalize_key(&name.to_ascii_lowercase());
+    trace_capture(row, &key_name);
     if row < ROWS.len() {
         return game_row_capture(capture, note, row, name, &key_name, cues);
     }
@@ -292,16 +393,24 @@ pub fn capture_key(
 
 // ---- keys in common between mods and the game (round 7) --------------------------------
 //
-// One press does one thing. PRECEDENCE, all of it decided here and nowhere else:
-//   1. a control the game has on the key (`game_owner`: a row, a macro's trigger, or the
-//      row the game takes a modified key as when nothing is bound to the combo) wins;
-//   2. else, among mods, a key the player saved beats a default (`priority`), then the
-//      addon id, then the binding id (so it does not depend on the order mods loaded);
-//   3. a key the client keeps for itself (`never_mod_key`) is no mod's at all.
-// A mod's key is the name the game gives the press: the modifiers held written before
-// it (`binds::combo_name`), so Ctrl+U is not U. Giving a row a key another has swaps or
-// frees as the Controls page does between two game rows. Nothing here rewrites a saved
-// key on its own: an old shared key is marked and settled at press time.
+// One press does one thing. THE RULE (owner, 2026-11-20), decided here and nowhere else:
+//   * A key is a NAME: the modifiers held written before the key (`binds::combo_name`, then
+//     Super first, `normalize_key`). Shift+Space is a key of its own, not Space. A mod may
+//     hold a modifier combination over a key the game uses plain; while it does, that
+//     combination BELONGS TO THE MOD: the mod fires and the press is the mod's alone (the
+//     game does not act on the plain key for it, `owns_press`, consumed in
+//     `Runtime::route_key`); the plain key keeps working for the game.
+//   * A real conflict is the SAME NAME bound in the game (`game_owner`: a game row, or a key in
+//     a macro's trigger, by that exact name: a bare key the game uses, or the combination
+//     itself bound there). The game's control wins at press time (`firing`), and Controls
+//     marks it; giving a mod such a key swaps or frees the game row as the page does between
+//     two game rows (a macro's key is refused).
+//   * Among mods: a key the player saved beats a default (`resolve`), then the addon id, then
+//     the binding id (so it does not depend on the order mods loaded) (`priority`).
+//   * A key the client keeps for itself (`never_mod_key`) is no mod's at all.
+// Nothing here rewrites a saved key on its own: an old shared key is marked and settled at
+// press time. What a press TYPES (a layout's Shift+7) never decides anything: the name of
+// the combination does.
 
 /// Keys the client takes for itself, beside or before the game's key handling
 /// (`App::key_input`, `clipboard_key`): full screen, the report keys, Escape's
@@ -347,29 +456,6 @@ pub(crate) fn normalize_key(name: &str) -> String {
     if sup { format!("super+{named}") } else { named }
 }
 
-/// What real presses on this machine have shown: a combo (`shift+7`) and the key it typed
-/// there (`/` on a German layout). Only in memory; a static rule (`shifted`) fills in
-/// where no press has been seen. Learned from `input.rs` as keys arrive.
-static LEARNED: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
-
-pub(crate) fn learn(combo: &str, typed: &str) {
-    let mut learned = LEARNED.lock().unwrap();
-    match learned.iter_mut().find(|(c, _)| c == combo) {
-        Some((_, t)) if t == typed => {}
-        Some((_, t)) => *t = typed.to_string(),
-        None => learned.push((combo.to_string(), typed.to_string())),
-    }
-}
-
-fn learned(combo: &str) -> Option<String> {
-    LEARNED
-        .lock()
-        .unwrap()
-        .iter()
-        .find(|(c, _)| c == combo)
-        .map(|(_, t)| t.clone())
-}
-
 /// Whether any mod has a row on Controls (so a capture there can use what presses showed).
 pub(crate) fn has_rows() -> bool {
     !MOD_BINDS.lock().unwrap().is_empty()
@@ -394,63 +480,6 @@ fn game_row(game: &Binds, key: &str) -> Option<usize> {
     })
 }
 
-/// What a key types with Shift held (the US layout's): a letter its lower-case self (a key's
-/// name is lower case), a digit or a symbol the one over it. Another key is itself.
-fn shifted(base: &str) -> String {
-    let mut chars = base.chars();
-    let (Some(c), None) = (chars.next(), chars.next()) else {
-        return base.to_string();
-    };
-    let over = match c {
-        '1' => '!',
-        '2' => '@',
-        '3' => '#',
-        '4' => '$',
-        '5' => '%',
-        '6' => '^',
-        '7' => '&',
-        '8' => '*',
-        '9' => '(',
-        '0' => ')',
-        '-' => '_',
-        '=' => '+',
-        '[' => '{',
-        ']' => '}',
-        '\\' => '|',
-        ';' => ':',
-        '\'' => '"',
-        ',' => '<',
-        '.' => '>',
-        '/' => '?',
-        '`' => '~',
-        other => other.to_ascii_lowercase(),
-    };
-    over.to_string()
-}
-
-/// The name the game acts on for a press named `key`, WHERE NO REAL PRESS IS AT HAND (a
-/// default key, a key read from a file, the marks on Controls, a capture): `App::key_name`'s
-/// rule (viewer.rs): the combo where the game has that combo bound (`Binds::combo_bound`),
-/// else the plain name, which is the key typed. What a press typed is what a real press
-/// showed (`learn`), else the key's own name, or with Shift the US layout's character
-/// (`shifted`): a guess, so at worst a wrong or missing mark on another layout. At press time
-/// nothing here is used: the press has its own facts (`input.rs`, `firing_press`). Super is
-/// no modifier the game names, so it is dropped. A key with no modifier is itself.
-fn game_press(game: &Binds, key: &str) -> String {
-    let ((_, ctrl, alt, shift), base) = parse_key(key);
-    if !(ctrl || alt || shift) {
-        return base.to_string();
-    }
-    let bare = binds::combo_name(ctrl, alt, shift, base);
-    if game.combo_bound(&bare) {
-        return bare;
-    }
-    if let Some(typed) = learned(&bare) {
-        return typed;
-    }
-    if shift { shifted(base) } else { base.to_string() }
-}
-
 fn owner_of(game: &Binds, key: &str) -> Option<Owner> {
     if let Some(r) = game_row(game, key) {
         return Some(Owner::Row(r));
@@ -459,11 +488,27 @@ fn owner_of(game: &Binds, key: &str) -> Option<Owner> {
     (!ms.is_empty()).then_some(Owner::Macros(ms))
 }
 
-/// What the game does with a press named `key`, and whether it does it under another name
-/// (the combo has no row or macro of its own, so the game takes the press as the plain key).
-fn game_owner(game: &Binds, key: &str) -> Option<(Owner, bool)> {
-    let name = game_press(game, key);
-    owner_of(game, &name).map(|owner| (owner, name != key))
+/// What the game has on a key by that exact name: a row (moved there or by default), or a
+/// key in a macro's trigger. The game names no Super combination, so those are never its own.
+fn game_owner(game: &Binds, key: &str) -> Option<Owner> {
+    owner_of(game, key)
+}
+
+/// One line in the log for every key a Controls row is given: which kind of row, the name the
+/// page was handed, and what the game has on that exact name. A key that was taken when the
+/// player expected a refusal (or the reverse) can then be read from the log.
+fn trace_capture(row: usize, key: &str) {
+    let game = crate::settings::with_binds(Clone::clone);
+    let has = match owner_of(&game, key) {
+        Some(Owner::Row(r)) => format!("row {}", ROWS[r].id),
+        Some(Owner::Macros(ms)) => crate::bindpage::macro_names(&ms),
+        None => "nothing".to_string(),
+    };
+    crate::say(&format!(
+        "controls: {} row {row} given {key}: the game has {has} on that name{}",
+        if row < ROWS.len() { "game" } else { "mod" },
+        if never_mod_key(key) { "; the client's own key" } else { "" },
+    ));
 }
 
 fn enabled_index(binds: &[ModBind], nth: usize) -> Option<usize> {
@@ -536,6 +581,16 @@ fn resolve(game: &Binds, binds: &mut [ModBind]) {
             binds[i].current_key = default;
         }
     }
+    set_manager_key(binds.iter().find(|b| is_manager(b) && b.enabled).map(|b| b.current_key.as_str()));
+    ANY_COMBO.store(
+        binds.iter().any(|b| {
+            b.enabled && {
+                let ((sup, ctrl, alt, shift), _) = parse_key(&b.current_key);
+                sup || ctrl || alt || shift
+            }
+        }),
+        std::sync::atomic::Ordering::Relaxed,
+    );
 }
 
 /// The binding that does something on a key, if any (rules 1 to 3), from what is known
@@ -547,31 +602,52 @@ fn firing(game: &Binds, binds: &[ModBind], key: &str) -> Option<usize> {
     holders(binds, key, None).first().copied()
 }
 
-/// The binding that does something on THIS press (rules 1 to 3): `combo` is how mods name
-/// it (the modifiers held written before the key), `game_key` the name the game acts on for
-/// the same press, worked out from the event itself as `App::key_name` does (the combo
-/// where the game has it bound, else the key the press typed, on whatever layout). No table.
-fn firing_press(game: &Binds, binds: &[ModBind], combo: &str, game_key: &str) -> Option<usize> {
-    if combo.is_empty() || never_mod_key(combo) || owner_of(game, game_key).is_some() {
-        return None;
-    }
-    holders(binds, combo, None).first().copied()
+/// The binding that does something on THIS press, by the press's own name (`combo`: the
+/// modifiers held written before the key): none when the game has that exact name (a bare key
+/// it uses, or the combination bound there) or it is the client's.
+fn firing_press(game: &Binds, binds: &[ModBind], combo: &str) -> Option<usize> {
+    firing(game, binds, combo)
 }
 
 /// Whether the mod binding `addon`/`id` acts on this press now (see `firing_press`). The bind
 /// callback asks this at press time, so a key two controls share still does one thing.
-pub(crate) fn fires(addon: &str, id: &str, combo: &str, game_key: &str) -> bool {
+pub(crate) fn fires(addon: &str, id: &str, combo: &str) -> bool {
     let combo = normalize_key(&combo.to_ascii_lowercase());
-    let game_key = game_key.to_ascii_lowercase();
     let game = crate::settings::with_binds(Clone::clone);
     let binds = MOD_BINDS.lock().unwrap();
-    firing_press(&game, &binds, &combo, &game_key)
-        .is_some_and(|i| binds[i].addon_id == addon && binds[i].id == id)
+    let winner = firing_press(&game, &binds, &combo);
+    if winner.is_none() && !never_mod_key(&combo) && owner_of(&game, &combo).is_some() {
+        // said once per key and binding: a mod key the game has by that name
+        static SAID: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let line = format!("{addon}.{id} {combo}");
+        let mut said = SAID.lock().unwrap();
+        if binds.iter().any(|b| b.addon_id == addon && b.id == id && b.current_key == combo) && !said.contains(&line) {
+            said.push(line);
+            crate::say(&format!("controls: mod {addon}.{id} on {combo} does nothing: the game has that key"));
+        }
+    }
+    winner.is_some_and(|i| binds[i].addon_id == addon && binds[i].id == id)
+}
+
+/// Whether this press is a mod's alone: it carries a modifier (so it is a key of its own,
+/// not the plain key the game uses) and a mod holds it and would fire. The window's key
+/// event is then consumed (`Runtime::route_key`): the game does not act on the plain key for
+/// it. A bare key is never taken from the game this way.
+pub(crate) fn owns_press(combo: &str) -> bool {
+    let ((sup, ctrl, alt, shift), _) = parse_key(combo);
+    if !(sup || ctrl || alt || shift) {
+        return false;
+    }
+    let combo = normalize_key(&combo.to_ascii_lowercase());
+    let game = crate::settings::with_binds(Clone::clone);
+    let binds = MOD_BINDS.lock().unwrap();
+    // the manager row's press is its own only where its window is usable
+    firing_press(&game, &binds, &combo).is_some_and(|i| !(is_manager(&binds[i]) && manager_blocked()))
 }
 
 enum Other {
-    Game(usize, bool),
-    Macros(Vec<usize>, bool),
+    Game(usize),
+    Macros(Vec<usize>),
     Mod(usize),
 }
 
@@ -582,8 +658,8 @@ fn other_on(game: &Binds, binds: &[ModBind], i: usize) -> Option<Other> {
         return None;
     }
     match game_owner(game, key) {
-        Some((Owner::Row(r), plain)) => return Some(Other::Game(r, plain)),
-        Some((Owner::Macros(ms), plain)) => return Some(Other::Macros(ms, plain)),
+        Some(Owner::Row(r)) => return Some(Other::Game(r)),
+        Some(Owner::Macros(ms)) => return Some(Other::Macros(ms)),
         None => {}
     }
     holders(binds, key, Some(i)).first().map(|&j| Other::Mod(j))
@@ -602,7 +678,7 @@ fn game_row_shared(row: usize) -> bool {
     crate::settings::with_binds(|game| {
         binds.iter().any(|b| {
             b.enabled
-                && matches!(game_owner(game, &b.current_key), Some((Owner::Row(r), _)) if r == row)
+                && matches!(game_owner(game, &b.current_key), Some(Owner::Row(r)) if r == row)
         })
     })
 }
@@ -610,8 +686,8 @@ fn game_row_shared(row: usize) -> bool {
 /// Who has `key`, as a note names it: a game row's label, a macro, a mod's words.
 fn owner_text(game: &Binds, binds: &[ModBind], skip: usize, key: &str) -> Option<String> {
     match game_owner(game, key) {
-        Some((Owner::Row(r), _)) => return Some(row_label(r)),
-        Some((Owner::Macros(ms), _)) => return Some(crate::bindpage::macro_names(&ms)),
+        Some(Owner::Row(r)) => return Some(row_label(r)),
+        Some(Owner::Macros(ms)) => return Some(crate::bindpage::macro_names(&ms)),
         None => {}
     }
     holders(binds, key, Some(skip))
@@ -635,23 +711,13 @@ fn refused_text(game: &Binds, binds: &[ModBind], i: usize) -> String {
 /// The Controls page's words on a mod row whose key is shared, and who wins.
 fn conflict_text(game: &Binds, binds: &[ModBind], i: usize) -> Option<String> {
     let key = binds::display(&binds[i].current_key);
-    let also = |plain: bool| {
-        if plain {
-            let name = game_press(game, &binds[i].current_key);
-            format!("{key} is pressed as {} too, and that is", binds::display(&name))
-        } else {
-            format!("{key} is also")
-        }
-    };
     Some(match other_on(game, binds, i)? {
-        Other::Game(r, plain) => format!(
-            "{} {}'s, and the game's control wins: this does nothing until it has another key.",
-            also(plain),
+        Other::Game(r) => format!(
+            "{key} is also {}'s, and the game's control wins: this does nothing until it has another key.",
             row_label(r)
         ),
-        Other::Macros(ms, plain) => format!(
-            "{} in a trigger of {}, which wins: this does nothing until it has another key.",
-            also(plain),
+        Other::Macros(ms) => format!(
+            "{key} is in a trigger of {}, which wins: this does nothing until it has another key.",
             crate::bindpage::macro_names(&ms)
         ),
         Other::Mod(j) => {
@@ -787,24 +853,13 @@ fn game_row_capture(
     let had = game.macros_with(&Input::Key(name.to_string()));
     let old = game.key(row).map(str::to_string).filter(|k| !k.is_empty());
     let moved = game.bind_key(row, name);
-    // the mods on the key, and those on a modified press the game would now take as the
-    // key (Shift+Space is Jump's Space where Shift+Space has no row): `game` is only a copy
-    // until `set_binds`, so with none the client does it all
+    // the mods on that exact name (a mod on Shift+Space is not on Space): `game` is only a
+    // copy until `set_binds`, so with none the client does it all
     let exact = holders(&binds, key, None);
-    let shadowed: Vec<usize> = (0..binds.len())
-        .filter(|&i| {
-            let on = &binds[i].current_key;
-            binds[i].enabled
-                && !exact.contains(&i)
-                && !on.is_empty()
-                && on != key
-                && game_press(&game, on) == key
-        })
-        .collect();
-    if exact.is_empty() && shadowed.is_empty() {
+    if exact.is_empty() {
         return false;
     }
-    let held: Vec<usize> = exact.iter().chain(&shadowed).copied().collect();
+    let held: Vec<usize> = exact.clone();
     let mut changes: Vec<(usize, String)> = held.iter().map(|&i| (i, String::new())).collect();
     // the first mod on the key takes the key the row left, if it is free and no game row took it
     if let (Some(_), Moved::Freed(_) | Moved::Already, Some(old)) =
@@ -852,6 +907,7 @@ fn game_row_capture(
 
 /// A refusal said at once: the page's help shows its prompt while it waits.
 fn refuse(capture: &mut Option<Column>, note: &mut Option<String>, cues: &mut Vec<i32>, text: String) -> bool {
+    crate::say(&format!("controls: refused: {text}"));
     *note = Some(text);
     *capture = None;
     cues.push(9);
@@ -881,7 +937,7 @@ fn mod_row_capture(
     }
     let owner = game_owner(&game, key);
     match &owner {
-        Some((Owner::Macros(ms), false)) => {
+        Some(Owner::Macros(ms)) => {
             return refuse(
                 capture,
                 note,
@@ -892,24 +948,10 @@ fn mod_row_capture(
                 ),
             );
         }
-        // the game would take the press as the plain key too: both would act
-        Some((taken, true)) => {
-            let plain = binds::display(&game_press(&game, key));
-            let who = match taken {
-                Owner::Row(r) => row_label(*r),
-                Owner::Macros(ms) => crate::bindpage::macro_names(ms),
-            };
-            return refuse(
-                capture,
-                note,
-                cues,
-                format!("{shown} is pressed as {plain} too, which is {who}'s: choose another key."),
-            );
-        }
         _ => {}
     }
     let game_on = match owner {
-        Some((Owner::Row(r), false)) => Some(r),
+        Some(Owner::Row(r)) => Some(r),
         _ => None,
     };
     let others = holders(&binds, key, Some(i));
@@ -951,6 +993,7 @@ fn mod_row_capture(
     }
     resolve(&game, &mut binds);
     *capture = None;
+    crate::say(&format!("controls: mod {}.{} kept {key}", binds[i].addon_id, binds[i].id));
     let mut text = format!("{}: {}.", binds[i].description, binds::display(key));
     if let Some(g) = game_on {
         text.push(' ');
