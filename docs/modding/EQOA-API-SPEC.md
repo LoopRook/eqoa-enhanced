@@ -4,7 +4,7 @@ This is the reference for the native Lua mod API of EQOA Enhanced, **as built**:
 
 - **New here?** Read [GETTING-STARTED.md](GETTING-STARTED.md) first and copy [the template](template/).
 - **Stable candidate.** From Enhanced 0.7.0 `eqoa/1` is a stable candidate: a guard test stops any supported name from disappearing or changing, and we do not expect breaking changes. The final freeze comes when the API is offered to the upstream client and upstream has had its say; any change before then is listed in the release notes. From the freeze on it only grows: nothing described here is renamed, removed or changed in meaning. [VERSIONING.md](VERSIONING.md) says exactly what that covers.
-- **The client is the authority.** [SUPPORT-TABLE.md](SUPPORT-TABLE.md) lists every name with its status. It is printed by the client itself (`eqoa mod-api`) and checked against the client by a test, so it cannot drift; a second test checks this page against it. Where this page and the table ever disagree, the table is right.
+- **The client is the authority.** [SUPPORT-TABLE.md](SUPPORT-TABLE.md) lists every name with its status. It is printed by the client itself (`eqoa mod-api`) and checked against the client by a test, so it cannot drift. A second test checks the names on this page against it, both ways: every name here exists there, and every name it calls supported is described here. That test does not check the arguments, results and behaviour described here; those were read from the code. Where this page and the table ever disagree, the table is right.
 - **Feature-test, do not assume.** `eqoa.revision` rises when something is added. `eqoa.capabilities.has("eqoa.map.set_waypoint")` asks about one name (§2).
 - A few numbers below are marked **design intent, not part of the promise**: they describe how the client is tuned today and may change. Section 8 has a short list marked **under review** (one item). Everything else is the contract.
 
@@ -100,7 +100,7 @@ Every field the client reads:
 | `entryMode` | no | `"once"` or `"frame"` | How the entry is run (§3). Defaults to `"frame"`, which exists for Forge-style code; **new mods should set `"once"`**. |
 | `enabled` | no | bool | Whether the mod starts enabled the first time the client sees it. Defaults to `false`. Once the player has chosen, the player's choice is used. |
 | `capabilities` | no | list of strings | What the mod declares it uses. Informational for reading functions; **required for acting**: `eqoa.actions.<name>` or `eqoa.actions.*` (§8), `eqoa.windows.takeover` (§7), `eqoa.map.waypoint` (§7). `"large_data"` asks for the larger Lua memory (§5). Shown to the player. |
-| `replaces` | no | list of strings (at most 32) | The game windows the mod replaces completely (window kinds, §7) and the HUD pieces it replaces (`hud.<piece>`). Needed for a scope `"all"` takeover; shown to the player. A name that is neither is an error. |
+| `replaces` | no | list of strings (at most 32) | The game windows the mod replaces completely (window kinds, §7) and the HUD pieces it replaces (`hud.<piece>`). Needed for a scope `"all"` takeover; shown to the player. A name that is neither is an error. Naming a game window without also declaring `eqoa.windows.takeover` is reported as a warning and the mod still loads. |
 | `shares` | no | list of paths under `data/` (at most 32) | Private files other mods may read (§5). |
 | `commands` | no | list of identifiers (at most 32) | Commands other mods may send (§5). |
 | `permissions` | no | list of `"import"`, `"export"` | Asking the player for a file, writing one to the Desktop (§5). Shown to the player. |
@@ -204,7 +204,9 @@ Every event is an `Event = {name:string, seq:uint, time:number, tick:uint, frame
 | `player.changed` | `{before:Player?, after:Player?, changed:string[]}` | Anything in the `Player` record changed. Movement is reported at most once per game step. |
 | `player.stats_changed` | `{}` | The Character Summary numbers changed (§4). |
 | `target.changed` | `{before:EntityRef?, after:EntityRef?}` | The player's target changed. |
-| `entity.added`, `entity.changed`, `entity.removed` | `{ref:EntityRef, before:Entity?, after:Entity?, changed:string[]}` | An entity came into view (`after` only), changed, or left (`before` only: its last known state). |
+| `entity.added` | `{ref:EntityRef, after:Entity, changed:string[]}` | An entity came into view. There is no `before`. |
+| `entity.changed` | `{ref:EntityRef, before:Entity, after:Entity, changed:string[]}` | Something about an entity in view changed. |
+| `entity.removed` | `{ref:EntityRef, before:Entity, changed:string[]}` | An entity left; `before` is its last known state. There is no `after`. |
 | `group.changed` | `{before:Group?, after:Group?, changed:string[]}` | |
 | `abilities.changed`, `hotbar.changed` | `{before, after, changed}` with lists of `Ability` / `Hotbar` | |
 | `cooldown.started`, `cooldown.updated`, `cooldown.ended` | `{ability:AbilityRef?, ability_id:Id?, display_key:uint, lockout:number}` | An ability's lockout went from zero to a value, changed value, or returned to zero. |
@@ -221,7 +223,7 @@ Every event is an `Event = {name:string, seq:uint, time:number, tick:uint, frame
 | `shared.changed` | `{mod:string, path:string}` | A file another mod shares was saved or removed (§5). |
 | `mod.command` | `{from:string, command:string, args}` | Another mod sent a command (§5). |
 
-Delivery limits, as built and tested: the client keeps up to 1,024 undelivered events (2 MiB) per mod and delivers up to 256 per frame; beyond that the oldest are discarded and `events.dropped` then `state.reset` tell the mod. All of a mod's Lua in one frame shares one budget of 4 million instructions; exceeding it stops the mod. A disabled mod receives nothing.
+Delivery limits (§9): the client keeps up to 1,024 undelivered events (2 MiB) per mod and delivers up to 256 per frame; beyond that the oldest are discarded and `events.dropped` then `state.reset` tell the mod. All of a mod's Lua in one frame shares one budget of 4 million instructions; exceeding it stops the mod. A disabled mod receives nothing.
 
 ## 4. Core game state (round 2)
 
@@ -315,7 +317,7 @@ These functions read the client's own state. They need no capability. Unless a r
 
 | Function | Returns |
 |---|---|
-| `eqoa.chat.history(limit:uint=100, before_seq:uint?)` | `ChatMessage[]`, oldest first: the latest `limit` messages (0..1000, `invalid_argument` beyond), optionally only those before `before_seq`. The client keeps the last 1,000 messages of the current world. |
+| `eqoa.chat.history(limit:uint=100, before_seq:uint?)` | `ChatMessage[]`, oldest first: the latest `limit` messages (0..1000; a larger limit is refused with `invalid_argument`, not cut down), optionally only those before `before_seq`. The client keeps the last 1,000 messages of the current world (design intent, §9). |
 | `eqoa.chat.get_channel()` | The channel the player's chat line sends to: `"say"`, `"shout"`, `"group"`, `"guild"` or `"other"`. |
 | `eqoa.chat.channel_name(channel:string)` | A display label: Say, Party, Guild, Shout, Tell, System; "Unknown Message Type" for anything else. Works outside the world. |
 | `eqoa.combat.get_counters()` | `Counters = {received:uint, dropped:uint}`: combat events delivered to this mod and lost to a full queue, since it was enabled. Works outside the world. |
@@ -335,8 +337,8 @@ A mod can hide pieces of the game's HUD, ask where they are, and draw in the gam
 | `eqoa.hud.hide(element:string)` | A `Token` for this mod's claim to hide that piece. Only in the world (`not_in_world`); `invalid_argument` for an unknown element. |
 | `eqoa.hud.show(token:Token)` | `true` if the claim was released, `false` if it was already gone; `stale_handle` for a value that is not this mod's token. It never releases another mod's claim. |
 | `eqoa.hud.hidden_by(element:string)` | The ids of the mods hiding any part of that element, sorted. |
-| `eqoa.hud.visible(element:string?)` | Whether the piece (or, with no argument, the HUD as a whole) is being drawn now, counting the player's hide-UI key and every mod's claims. `false` outside the world. |
-| `eqoa.hud.frame(size?)` | `Frame`: how the game's 640 x 448 HUD frame maps onto the window. `size = {width, height}` asks about another window size. |
+| `eqoa.hud.visible(element:string?)` | Whether a piece is being drawn now, counting the player's hide-UI key and every mod's claims. `element` is one of the names below, or `"hud"` (the default: the HUD as a whole), `"all"` (true while none of the pieces `all` covers is hidden) or `"stats_box"` (also `"plain_play"`: the HUD's right-hand side is up, as in plain play). `"mana_bars"` always answers true. `false` outside the world and for a name it does not know. |
+| `eqoa.hud.frame(size?)` | `Frame`: how the game's 640 x 448 HUD frame maps onto the window. `size = {width, height}` asks about another window size (a field left out counts as 640 or 448); with no argument, the window as it is. |
 | `eqoa.hud.layout(size?)` | `Layout`: where the game's HUD pieces are now, including the player's Move HUD changes. |
 
 Elements for `hide`, `show` and `hidden_by`: `health`, `power`, `experience_main`, `experience_secondary`, `compass`, `target`, `group_panel`, `group_markers`, `pet`, `effects`, `hotbar`, `chat`, `minimap`, and `all` (every piece except `minimap`, which is hidden only by name). Hiding the minimap also turns off its clicks.
@@ -347,13 +349,13 @@ A piece stays hidden while at least one enabled mod holds a claim on it. Claims 
 
 `Layout = {player:PlayerLayout, target:TargetLayout, pet:SinglePanelLayout, group_members:GroupMemberLayout[], minimap:Rect}` with `PlayerLayout = {panel, health, power, exp}`, `TargetLayout = {panel, health, power}`, `SinglePanelLayout = {panel}`, `GroupMemberLayout = {index, panel, health, power}` (four entries), each part a `Rect = {x, y, width, height, frame_x, frame_y, frame_width, frame_height}`. `x`, `y`, `width`, `height` are window pixels (the same units as the pointer, below); the `frame_` fields are the same rectangle in the game's HUD frame, for use with the drawing calls below.
 
-Drawing in the HUD's own style, in the game's HUD pass (under the game's windows). Each call queues one thing for this frame, so call them every frame from `render`. All four are for the world only (`not_in_world`), return `true`, and give `limit_exceeded` beyond 256 calls per mod per frame (tested).
+Drawing in the HUD's own style, in the game's HUD pass (under the game's windows). Each call queues one thing for this frame, so call them every frame from `render`. All four are for the world only (`not_in_world`), return `true`, and give `limit_exceeded` beyond 256 calls per mod per frame (§9).
 
 | Function | Draws |
 |---|---|
-| `eqoa.hud.text(spec)` | Text in the game's own HUD font. `spec = {x, y, text, color?, scale?, align?, outline?, shadow?, anchor?, vertical?, clip_width?, target_fade?}`: position in HUD-frame coordinates; `color = {r, g, b, a?}` 0..1; `align`, `anchor` are `"left"`, `"center"` or `"right"`; `vertical` is `"top"`, `"center"` or `"bottom"`; `outline` and `shadow` add a black edge or drop shadow. Instead of `x`, `y`: `col` (1..2) and `row` (1..8) place the text in the Stats Box's grid. |
-| `eqoa.hud.gauge(spec)` | One of the game's bar gauges. `spec = {x, y, art, fill, lit?, anchor?, vertical?}`: `art` is the game's gauge art number (7 health, 9 power), `fill` 0..1. |
-| `eqoa.hud.image(spec)` | A piece of the game's UI art, or a texture of the mod's. Game art: `{ui_id:int, x, y, w?, h?, color?, anchor?, vertical?, target_fade?}`; `ui_id = "panel"` draws a window backing. A texture: `{texture:TextureInfo, x, y, width?, height?, shape?}` with `shape = "square"` (default) or `"circle"`, which cuts the picture to a circle (it must be square). |
+| `eqoa.hud.text(spec)` | Text in the game's own HUD font. `spec = {x, y, text, color?, scale?, align?, outline?, shadow?, anchor?, vertical?, clip_width?, target_fade?}`: position in HUD-frame coordinates; `color` is a list of three or four numbers 0..1 (red, green, blue, alpha; default white); `scale` defaults to 1; `align` and `anchor` are `"left"` (the default), `"center"` or `"right"`; `vertical` is `"top"` (the default), `"center"` or `"bottom"`; `outline` and `shadow` (default false) add a black edge or drop shadow. Instead of `x`, `y`: `col` (1..2) and `row` (1..8) place the text in the Stats Box's grid. |
+| `eqoa.hud.gauge(spec)` | One of the game's bar gauges. `spec = {x, y, art, fill, lit?, anchor?, vertical?}`: `art` is the game's gauge art number (7 health, 9 power), `fill` 0..1, `lit` (default true) draws the gauge lit. |
+| `eqoa.hud.image(spec)` | A piece of the game's UI art, or a texture of the mod's. Game art: `{ui_id:int, x, y, w?, h?, color?, anchor?, vertical?, target_fade?}`; `w` and `h` default to the art's own size; `ui_id = "panel"` draws a window backing (148 by 132 unless `w`, `h` are given). A texture: `{texture:TextureInfo, x, y, w?, h?, shape?, anchor?, vertical?}` (`width`, `height` are accepted for `w`, `h`; the size defaults to the texture's own) with `shape = "square"` (default) or `"circle"`, which cuts the picture to a circle (it must be square). `anchor` and `vertical` are as for text. |
 | `eqoa.hud.panel(spec)` | The game's window backing and border: `{x, y, w, h, anchor?, vertical?}`. |
 
 `target_fade = true` on text and images fades them with the game's target plate when the target changes.
@@ -362,7 +364,7 @@ Drawing in the HUD's own style, in the game's HUD pass (under the game's windows
 
 | Function | Returns |
 |---|---|
-| `eqoa.options.toggle({id:string, label:string?, default:bool?})` | Adds an on/off row for this mod in the game's options and returns `Toggle = {id, label, default, value, item_id}`. `value` is the saved setting. |
+| `eqoa.options.toggle({id:string, label:string?, default:bool?})` | Adds an on/off row for this mod in the game's options and returns `Toggle = {id, label, default, value, item_id}`. `label` defaults to `id` and `default` to false. `value` is the saved setting, or `default` when nothing is saved. |
 | `eqoa.options.get(id:string, addon_id:string?)` | The saved value of this mod's switch, or `nil` if there is none. With `addon_id`, another mod's switch; it reads `false` while that mod is disabled. |
 | `eqoa.options.set(id:string, value:bool)` | Saves the switch. `io_error` if it cannot be saved (the value is then unchanged). |
 | `eqoa.options.button({id:string, label:string}, callback:function)` | Adds an action row for this mod in Mods & Addons; the player choosing it runs `callback` at the next safe moment, and counts as the player's own act (see "Files the player chooses"). Returns `Button = {id:string, label:string, item_id:int}` (`item_id` is the row's number in the client's menu). Calling it again with the same `id` relabels that row. Rows go when the mod is disabled. At most 32 per mod (`quota`; design intent). |
@@ -381,7 +383,7 @@ Drawing in the HUD's own style, in the game's HUD pass (under the game's windows
 | `eqoa.input.rotate_dpad(active:bool)` | Turns the controller's D-pad a quarter turn (up becomes right) for layouts that need it. World only. |
 | `eqoa.input.pointer()` | `Pointer = {x:number, y:number, inside_window:bool}`: the mouse in window pixels. |
 | `eqoa.input.claim_pointer(rect)` | Keeps clicks and the wheel inside `rect = {x, y, width, height}` (window pixels) from the game for this frame and the next; call it every frame for each area. A `Rect` from `eqoa.hud.layout()` can be passed as it is. At most 32 areas per mod per frame (`quota`; design intent). Claims end when the pointer leaves the window or the window loses focus. The player's Move HUD drag goes first. |
-| `eqoa.input.minimap_wheel(steps:number)` | Passes wheel steps (at most 20 either way) to the game's minimap zoom. |
+| `eqoa.input.minimap_wheel(steps:number)` | Passes wheel steps to the game's minimap zoom. More than 20 either way in one call is `invalid_argument` (design intent, §9). |
 
 `Pad = {buttons:string[], left:Vec2, right:Vec2, raw_left:RawAxes, raw_right:RawAxes}`: `buttons` lists the pressed buttons by name (`select`, `l3`, `r3`, `start`, `up`, `right`, `down`, `left`, `l2`, `r2`, `l1`, `r1`, `triangle`, `circle`, `cross`, `square`); the sticks are -1..1 with right and down positive; `RawAxes = {x, y}` are the game's own 0..255 values (128 at rest).
 
@@ -434,9 +436,9 @@ Paths are relative and are looked up in the mod's own package, then the shared r
 | Function | Returns |
 |---|---|
 | `eqoa.textures.load(path:string)` | `TextureInfo` from a PNG file. Any failure (missing, not a PNG, too large) is `not_found`, with the reason as a diagnostic. JPEG is not decoded. The formats are capability flags, not Lua values (there is no `eqoa.textures.formats` table): `eqoa.capabilities.has("eqoa.textures.formats.png")` and `...rgba` are true, `...jpeg` is false (`unsupported`). |
-| `eqoa.textures.rgba(bytes:string, width:uint, height:uint)` | `TextureInfo` from raw pixels: exactly `width * height * 4` bytes, each side 1..2048. |
+| `eqoa.textures.rgba(bytes:string, width:uint, height:uint)` | `TextureInfo` from raw pixels: exactly `width * height * 4` bytes; each side at least 1 and at most the texture size limit (2,048; design intent, §9), `out_of_range` otherwise. |
 | `eqoa.textures.release(texture:Texture?)` | `true`. Releasing nil or twice is fine. |
-| `eqoa.fonts.load(path:string, size:number=16)` | `FontInfo = {font:Font, status:string, reason:string?}` for a TTF or OTF file at a pixel size up to 256. `status` is `"pending"` (it will be ready on a later frame), `"ready"`, or `"fallback"`: the file could not be used and `font` is the default font. Use it with `ImGui.PushFont`. `unavailable` before the drawing context exists. |
+| `eqoa.fonts.load(path:string, size:number=16)` | `FontInfo = {font:Font, status:string, reason:string?}` for a TTF or OTF file at a pixel size above 0 and up to 256 (design intent, §9). `status` is `"pending"` (it will be ready on a later frame), `"ready"`, or `"fallback"`: the file could not be used and `font` is the default font. Use it with `ImGui.PushFont`. `unavailable` before the drawing context exists. |
 | `eqoa.fonts.default()` | The default font's `FontInfo`. |
 | `eqoa.fonts.release(font:Font?)` | `true`. |
 | `eqoa.sound.load(path:string)` | A `Sound` from a WAV or MP3 file; `failed` if it cannot be loaded. |
@@ -453,11 +455,11 @@ Loading a texture, font or sound also fires `resource.ready` or `resource.failed
 |---|---|
 | `eqoa.settings.load()` | The mod's saved settings value, or nil if none was saved. |
 | `eqoa.settings.save(value)` | `true` once the value is safely on disk. |
-| `eqoa.settings.on_save(callback)` | Registers the function the client calls to get the value to save (on Save in Mods & Addons and when the mod is disabled). One per mod; a second call replaces the first. |
-| `eqoa.settings.on_load(callback)` | Registers the function the client calls with the saved value (when the mod is first enabled, and on Load or a profile switch in Mods & Addons). |
+| `eqoa.settings.on_save(callback)` | Registers the function the client calls to get the value to save (when the mod is disabled, and for the **Save profile** button in Mods & Addons). Returns a `Token`. One per mod; a second call replaces the first. |
+| `eqoa.settings.on_load(callback)` | Registers the function the client calls with the saved value (when the mod is first enabled, on a profile switch, and for the **Load profile** button in Mods & Addons). Returns a `Token`. The two buttons are shown only while no named profile is active. |
 | `eqoa.log.write(level:string, message:string)` | Writes a line to the game's log (`eqoa.log`) as `addon <id>: [level] message`. `level` is `"debug"`, `"info"`, `"warn"` or `"error"`; `warn` and `error` also appear in Mods & Addons. Long messages are cut. `quota` if the mod logs faster than the client drains (64 lines; design intent). |
 
-A settings value is nil, a boolean, a finite number, a string, or a table of these whose keys are either all strings or 1..n, nested at most 32 deep and at most 1 MiB when saved. No functions, handles, metatables or cycles. Settings are kept per mod and per player profile; the mod never names a file.
+A settings value is nil, a boolean, a finite number, a string, or a table of these whose keys are either all strings or 1..n, nested at most 32 deep and at most 1 MiB when saved (both design intent, §9). No functions, handles, metatables or cycles. Settings are kept per mod and per player profile; the mod never names a file.
 
 ### Private files
 
@@ -466,9 +468,9 @@ A settings value is nil, a boolean, a finite number, a string, or a table of the
 | Function | Returns |
 |---|---|
 | `eqoa.files.read(path:string)` | The file's bytes as a string. `not_found`, `permission_denied`, or `quota` for a file over 1 MiB. |
-| `eqoa.files.write(path:string, bytes:string)` | `true`. The file is replaced whole or not at all. At most 1 MiB a file and 16 MiB for the mod in total, settings included (tested; `quota`). |
+| `eqoa.files.write(path:string, bytes:string)` | `true`. The file is replaced whole or not at all. At most 1 MiB a file and 16 MiB for the mod in total, settings included (§9; `quota`). |
 | `eqoa.files.remove(path:string)` | `true` if something was removed, `false` if there was nothing. |
-| `eqoa.files.list(dir:string="", glob:string="*")` | `FileEntry[] = {path:string, kind:"file"\|"directory", size:uint?}` for the entries directly in `dir`, sorted by name; `glob` filters names with `*` and `?`. `quota` rather than a partial list when there are more than 1,024. |
+| `eqoa.files.list(dir:string="", glob:string="*")` | `FileEntry[] = {path:string, kind:"file"\|"directory", size:uint?}` for the entries directly in `dir`, sorted by name; `glob` filters names with `*` and `?`. `quota` rather than a partial list when there are more than 1,024 (design intent, §9). |
 
 #### Large JSON files
 
@@ -480,9 +482,9 @@ For data too big to handle in one frame, the client reads, parses and writes JSO
 | `eqoa.files.save_json_async(path:string, value)` | A request number. The value is copied at the call and written later; the result is `resource.ready {kind="json_saved", request}` or `resource.failed`. A private path only. Saves to one path are merged: if you save again before the last one was written, only the newest is written and reported, so track the latest request. Saving to a second path while one is in flight is `quota`. |
 | `eqoa.files.null` | The value that stands for JSON `null` in loaded data and in values to save. |
 
-A loaded value is an ordinary, changeable Lua table; arrays (also empty ones) remember that they are arrays and are saved as arrays. A value to save follows the settings rules above, plus `eqoa.files.null`. A file may be up to 16 MiB, the top value and up to 32 levels of nesting below it, and two million values to load, and 14 MiB to save (tested). A large value is handed to Lua over several frames; how it is sliced is design intent, not part of the promise.
+A loaded value is an ordinary, changeable Lua table; arrays (also empty ones) remember that they are arrays and are saved as arrays. A value to save follows the settings rules above, plus `eqoa.files.null`. A file may be up to 16 MiB, the top value and up to 32 levels of nesting below it, and two million values to load, and 14 MiB to save (§9). A large value is handed to Lua over several frames; how it is sliced is design intent, not part of the promise.
 
-An ordinary mod has 8 MiB of Lua memory. A mod that lists `"large_data"` in its `capabilities` gets 128 MiB (tested); without it a large load fails with `resource.failed` and a message that says so. The mod is not disabled.
+An ordinary mod has 8 MiB of Lua memory. A mod that lists `"large_data"` in its `capabilities` gets 128 MiB (§9); without it a large load fails with `resource.failed` and a message that says so. The mod is not disabled.
 
 #### Sharing a file with other mods
 
@@ -495,7 +497,7 @@ A mod may let others read some of its private files. In `mod.json`, `"shares": [
 
 #### Messages between mods
 
-A mod lists the commands it accepts in `mod.json`: `"commands": ["import_journal"]`. `eqoa.mods.send(mod_id:string, command:string, args?)` queues one; the receiver gets `mod.command {from, command, args}` at its next event delivery. `args` is plain JSON-like data, small (about 4 KiB; the top value and up to 8 levels of nesting below it; 256 values; `quota` beyond). `unavailable` if the target is missing or disabled; `invalid_argument` if it does not declare that command. Each sender may have 4 commands waiting per receiver (tested).
+A mod lists the commands it accepts in `mod.json`: `"commands": ["import_journal"]`. `eqoa.mods.send(mod_id:string, command:string, args?)` queues one; the receiver gets `mod.command {from, command, args}` at its next event delivery. `args` is plain JSON-like data and must be small: at most 4 KiB (§9), and not deeply nested or long (the top value and up to 8 levels of nesting below it, 256 values; design intent); `quota` beyond. `unavailable` if the target is missing or disabled; `invalid_argument` if it does not declare that command. Each sender may have 4 commands waiting per receiver (§9).
 
 #### Files the player chooses
 
@@ -503,7 +505,7 @@ With `"permissions": ["import"]` or `["export"]` in `mod.json` a mod may ask the
 
 | Function | Returns |
 |---|---|
-| `eqoa.files.import({title:string?, extensions:string[]})` | A request number. The system's file picker opens (its title starts with the mod's name); the chosen file is copied into the mod's private area and reported as `resource.ready {kind="import", request, path}` with a path to pass to `load_json` or `read`. Cancelling gives `resource.failed` with code `cancelled`. The copies are staging: the client keeps the newest three and the mod cannot write there. |
+| `eqoa.files.import({title:string?, extensions:string[]})` | A request number. The system's file picker opens (its title is the mod's name, then `title`, which defaults to "Import file"), offering files with the given extensions (a list of 1 to 16, letters and digits only). The chosen file is copied into the mod's private area and reported as `resource.ready {kind="import", request, path}` with a path to pass to `load_json` or `read`. The copy is always named `imports/import-<n>.json`, whatever the chosen file's extension. Cancelling gives `resource.failed` with code `cancelled`. The copies are staging: the client keeps the newest three (§9) and the mod cannot write there. |
 | `eqoa.files.export(private_path:string, file_name:string)` | A request number. Copies one of the mod's private files to the player's Desktop as `file_name` (one plain name ending in `.json`, `.txt`, `.csv` or `.png`). It never replaces a file: a taken name gets ` (2)`, ` (3)`, ... The result is `resource.ready {kind="export", request, path}` with the name used. |
 
 Both give `permission_denied` without the manifest permission and `busy` while the mod's previous import or export is still open.
@@ -729,10 +731,11 @@ So `not_declared` has two meanings for takeover: no `capabilities` list at all, 
 **A hidden session**
 
 - begins only when the server's open is known to answer the holding mod's own request. An open that cannot be tied to the request, or a window that was already open, stays the game's.
-- ends when the mod's action or batch is finished, when the mod releases the claim, is disabled or fails, on zoning, when the player walks more than 25 units from where the session began, and, for scope `"own"`, after 15 seconds without use. When it ends the client closes the session with the server once, quietly.
-- A request the server never answers ends as `unknown` after 10 seconds.
+- ends when the mod's action or batch is finished, when the mod releases the claim, is disabled or fails, on zoning, and when the player walks away from where the session began. When it ends the client closes the session with the server once, quietly.
+- **A scope `"own"` session that is not used ends by itself after an idle time.** Calling `eqoa.windows.takeover(kind)` again while it runs starts that time afresh. A mod that keeps showing a session (a loot list the player is reading) therefore calls `takeover` again regularly, every frame or every second, for as long as it shows it; the bundled Bag Viewer does. Both halves, the idle end and the renewal, are covered by tests and part of the contract. The idle time is 15 seconds in this client; no test pins that number and it may change, so renew far more often than that instead of counting on it. Scope `"all"` sessions have no idle time.
+- A request the server never answers ends as `unknown`.
 
-The 25-unit, 15-second and 10-second values are design intent, not part of the promise.
+The distance (25 units) and the wait for an answer (10 seconds) are design intent, not part of the promise (§9).
 
 **The server lists a corpse or merchant again by itself.** After each take the live server closes the corpse and lists it again; after each sale or purchase it sends the merchant's list again. While a hidden session runs, such a list stays hidden. The last one can arrive after the session has ended: for 3 seconds after a hidden session ends, a list from the same corpse or merchant is still held hidden and closed quietly. This applies only when the player has not asked for that window themselves. Known limit: if the player talks to the same merchant within those 3 seconds, or while the mod's sale is still unanswered, that first window is hidden too; talking again opens it. (The 3 seconds are design intent, not part of the promise.)
 
@@ -748,7 +751,7 @@ Reading the map needs no capability.
 | `eqoa.map.markers(world_id:int)` | `Marker[]` for that world (0..255): what the game's map can show. |
 | `eqoa.map.view({size?, layers?})` | A held minimap picture the mod can draw; see "Minimap views". |
 | `eqoa.map.set_guide(spec)`, `eqoa.map.clear_guide()` | The mod's own guide line; see "Guides". |
-| `eqoa.map.open()` | Opens the full map, as the player's map key does. Returns `true`. `unavailable` while the player has Map turned off, `busy` if the request cannot be queued. Needs no capability. |
+| `eqoa.map.open()` | Opens the full map, as the player's map key does. Returns `true`. `not_in_world` outside the world, `unavailable` while the player has Map turned off, `busy` if the request cannot be queued. Needs no capability. |
 | `eqoa.map.set_waypoint(point)`, `eqoa.map.clear_waypoint()` | Move or clear the player's own waypoint; see "The player's waypoint". |
 
 `MapState = {enabled:bool, open:bool, minimap:bool, markers_on:bool, world_id:int, world_name:string?, zone:Location?, bounds:Bounds?, revision:uint, waypoint:Waypoint?, search_anchor:Rect?}`
@@ -780,7 +783,7 @@ Reading the map needs no capability.
 
 #### Minimap views
 
-`eqoa.map.view({size:number?})` returns a view: the game's minimap, centred on the player, without the game's frame art, as a picture the mod draws itself (for example cut to a circle with `eqoa.hud.image`). `size` is in pixels, 16..1024 (`out_of_range` otherwise). A mod may hold four views (`quota` for a fifth). The game draws the picture only while its own minimap is hidden (`eqoa.hud.hide("minimap")`) and in view.
+`eqoa.map.view({size:number?})` returns a view: the game's minimap, centred on the player, without the game's frame art, as a picture the mod draws itself (for example cut to a circle with `eqoa.hud.image`). `size` is in pixels, 112 when omitted, and must be 16..1024 (`out_of_range` otherwise). A mod may hold four views (`quota` for a fifth). Both numbers are design intent (§9). The game draws the picture only while its own minimap is hidden (`eqoa.hud.hide("minimap")`) and in view.
 
 | Member | Meaning |
 |---|---|
@@ -836,11 +839,11 @@ The `action.result` event carries the `ActionResult` and fires when a request is
 
 | Function | Returns |
 |---|---|
-| `eqoa.actions.status(id:RequestId\|BatchId)` | The latest `ActionResult` (or `BatchResult`). `not_found` once the record has been dropped: the client keeps the latest 256 results per mod (tested). |
-| `eqoa.actions.cancel(id:RequestId\|BatchId)` | `true` if it cancelled the request: one not yet sent is never sent, and its result is `cancelled`. `false` if it was already sent to the server: that cannot be undone, so nothing is cancelled, the request keeps waiting and its real result (`completed`, `refused` or `unknown`) arrives as usual. `not_found` if the request is no longer pending. With a `BatchId` it is `eqoa.actions.stop_batch`. |
-| `eqoa.actions.stop()` | Queues the game's stop: ends auto-attack, auto-run, follow and the pending cast, whoever started them (the player's own included). |
+| `eqoa.actions.status(id:RequestId\|BatchId)` | The latest `ActionResult` (or `BatchResult`). `not_found` once the record has been dropped: the client keeps the latest 256 action results per mod (§9). |
+| `eqoa.actions.cancel(id:RequestId\|BatchId)` | `true` if it cancelled the request: one not yet sent is never sent, and its result is `cancelled`. `false` if it was already sent to the server: that cannot be undone, so nothing is cancelled, the request keeps waiting and its real result (`completed`, `refused` or `unknown`) arrives as usual. `not_found` if the request is no longer pending. With a `BatchId` it stops that batch as `eqoa.actions.stop_batch` does, except that it answers `not_found` (not `false`) when no batch is running. |
+| `eqoa.actions.stop()` | Queues the game's stop: ends auto-attack, auto-run, follow and the pending cast, whoever started them (the player's own included). See the note below. |
 
-Limits, as built and tested: 32 requests may wait per mod (one more is refused with `busy`); at most 8 are dispatched per mod per game step, refilling at one per step (30 a second), and 64 per step for all mods together, shared fairly; a request that waits more than 1 second for its turn is refused with `rate_limited`. Only one transaction at a time runs against each of the pack, a corpse, a merchant and the bank, for all mods together: a second one is refused with `busy`.
+Limits (§9): 32 requests may wait per mod (one more is refused with `busy`); at most 8 are dispatched per mod per game step, refilling at one per step (30 a second), and 64 per step for all mods together, shared fairly; a request that waits more than 1 second for its turn is refused with `rate_limited`. Only one transaction at a time runs against each of the pack, a corpse, a merchant and the bank, for all mods together: a second one is refused with `busy`.
 
 Most actions need the character alive and the game in plain play (no game window owning the controls); otherwise the result is `refused` with code `not_ready`. An entity, item, quest or window handle from an earlier world or session gives `stale_handle`.
 
@@ -866,9 +869,9 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 | `eqoa.actions.assign_ability(slot:uint, ability)` | Memorizes an ability into hotbar slot 1..20, as the Abilities window does. |
 | `eqoa.actions.unmemorize_ability(x)`, `eqoa.actions.unmemorize_all()` | Clears one memorized ability (a slot number 1..20, or an ability) or all of them. The game itself asks nothing before Unmemorize All, and neither does this. |
 | `eqoa.actions.arrange_ability(from, to)` | Moves an ability in the Abilities window's order. |
-| `eqoa.actions.loot(item:ItemRef, count:uint?)`, `eqoa.actions.loot_all()` | Takes one stack (or `count` of it) or everything from the open corpse. `window_closed` if no corpse is open. |
+| `eqoa.actions.loot(item:ItemRef, count:uint?)`, `eqoa.actions.loot_all()` | Takes one stack from the open corpse (the whole stack when `count` is omitted, else `count` of it), or everything. `window_closed` if no corpse is open. |
 | `eqoa.actions.buy(item:ItemRef, count:uint=1)`, `eqoa.actions.sell(item:ItemRef, count:uint=1)` | Buys from the open merchant's wares, sells a pack stack to it. `window_closed` if no merchant is open. |
-| `eqoa.actions.bank_move(item:ItemRef, count:uint?)` | Moves a stack between pack and bank; the direction follows from the list the item is in. An optional first argument (`"bank"` or `"withdraw"`, `"inventory"` or `"deposit"`) names the list it comes from. `window_closed` if no bank is open. |
+| `eqoa.actions.bank_move(item:ItemRef, count:uint=1)` or `(from:string, item:ItemRef, count:uint=1)` | Moves `count` of a stack between pack and bank. **Omitting `count` moves 1, not the stack**: pass `item.quantity` to move it all. The direction follows from the list the item is in. The optional `from` names that list and must agree with it (`invalid_argument` otherwise): `"bank"` or `"withdraw"` for an item in the bank, `"inventory"`, `"bags"` or `"deposit"` for one in the pack. `window_closed` if no bank is open. |
 | `eqoa.actions.bank_money(direction:"deposit"\|"withdraw", amount:uint)` | Moves tunar. |
 | `eqoa.actions.open_loot(entity?)` | Asks the server to open a corpse: the given one (`EntityRef` or id) or the nearest. Refuses anything that is not a corpse (`invalid_argument`); `not_found` if there is none. The result is `completed` when the corpse opens, `refused` with the server's reason (for example `out_of_range`), or `unknown`. The client targets the corpse for this and puts your previous target back when the mod is done, unless you chose another meanwhile. |
 | `eqoa.actions.talk(entity?, {kind="merchant"\|"bank"}?)` | Talks to an NPC: the given one or the nearest of that kind (any friendly NPC when `kind` is omitted). Refuses corpses and NPCs that are not of the kind asked for. `completed` when the merchant or bank opens. The target is put back as for `open_loot`. |
@@ -932,7 +935,7 @@ The window actions (`close_window`, `select_row`, `activate_row`, `dialog_answer
 
 ### Text boxes
 
-`eqoa.actions.input_text(window, text, submit)` needs `eqoa.actions.input_text`, which Mods & Addons shows as "Text boxes: can type into and submit the game's open text boxes". It types `text` (at most 512 characters, only characters the game's keyboard can type) into the text box that is open, and with `submit = true` confirms it, exactly as the player would. A password box is always refused (`permission_denied`).
+`eqoa.actions.input_text(window, text, submit)` needs `eqoa.actions.input_text`, which Mods & Addons shows as "Text boxes: can type into and submit the game's open text boxes". It types `text` (at most 512 characters, design intent; only characters the game's keyboard can type) into the text box that is open, and with `submit = true` confirms it, exactly as the player would. A password box is always refused (`permission_denied`).
 
 What else the mod needs depends on what the box sends. It is checked when the call is made and again when the text is typed, whether the text is submitted or left for the player to send:
 
@@ -953,9 +956,29 @@ A missing grant is refused with `permission_denied`.
 
 A batch is a list of actions the client runs one at a time, each waiting for the one before it (and for the server's answer where there is one).
 
-`eqoa.actions.batch(spec)` returns `BatchId, nil`. `spec` is a list of steps, or `{steps = {...}, require_window = "merchant"|"bank"|"loot"}`. There may be 1 to 64 steps (design intent, not part of the promise). Each step is a table `{kind = "<action>", ...}` with that action's arguments by name. It needs `eqoa.actions.batch` (or `eqoa.actions.*`) and each step's own capability (`chat` and `command` steps by rule 4; a `target_target` step counts as `assist`). A mod runs one batch at a time (`busy`).
+`eqoa.actions.batch(spec)` returns `BatchId, nil`. `spec` is a list of steps, or `{steps = {...}, require_window = "merchant"|"bank"|"loot"}` (`"corpse"` is accepted for `"loot"`). There may be 1 to 64 steps (design intent, not part of the promise). Each step is a table `{kind = "<action>", ...}` with the fields listed below. It needs `eqoa.actions.batch` (or `eqoa.actions.*`) and each step's own capability (`chat` and `command` steps by rule 4; a `target_target` step counts as `assist`). A mod runs one batch at a time (`busy`).
 
 Steps may be: `target`, `assist`, `target_target`, `interact`, `attack`, `autorun`, `stop`, `cast`, `use_item`, `equip`, `quick_slot`, `weapon_set`, `unmemorize_all`, `open_loot`, `talk`, `loot`, `loot_all`, `buy`, `sell`, `bank_move`, `bank_money`, `chat`, `command`. Any other kind is `invalid_argument`.
+
+A step's fields are not always named as the function's arguments are (`kind` is taken by the step itself):
+
+| Step `kind` | Fields |
+|---|---|
+| `target` | `target` (an entity; nil clears) |
+| `open_loot` | `entity_id?` (nearest corpse when omitted) |
+| `talk` | `entity_id?`, `kind_filter?` (`"merchant"` or `"bank"`; any friendly NPC when omitted) |
+| `attack`, `autorun` | `on?` (toggles when omitted) |
+| `cast` | `ability` |
+| `use_item`, `equip` | `item` |
+| `quick_slot` | `item`, `slot` |
+| `weapon_set` | `set` |
+| `loot` | `item`, `count?` (the whole stack when omitted) |
+| `buy` | `item` (also accepted as `ware`), `count?` (1 when omitted) |
+| `sell` | `item`, `count?` (1 when omitted) |
+| `bank_move` | `item`, `count?` (1 when omitted), `from?` |
+| `bank_money` | `direction`, `amount` |
+| `chat`, `command` | `text` |
+| `assist`, `target_target`, `interact`, `stop`, `loot_all`, `unmemorize_all` | none |
 
 `BatchResult = {batch_id, state, ok, completed, total, current_step, code, reason, queued_tick, completed_tick, failed_step}`: `state` is `"running"`, then `"completed"`, `"refused"`, `"stopped"`, `"cancelled"` or `"unknown"`; `ok` is nil while `running` and for `unknown`, true for `completed`, false for `refused`, `stopped` and `cancelled`; `completed` counts the steps done out of `total`; `current_step` is the 1-based step in hand; `failed_step` the step that ended it. (`detail` is declared and never filled; each step's own facts are in that step's `action.result`.)
 
@@ -970,7 +993,7 @@ A mod runs in its own Lua 5.1 state, apart from other mods and from the game's m
 
 **What Lua has.** The base functions (`pairs`, `ipairs`, `pcall`, `type`, `tostring`, `setmetatable`, `select`, `unpack`, ...), `string`, `table`, `math`, and `require`. From `os` only `clock`, `date`, `remove` and `rename`; from `io` only `io.open` in text modes `"r"` and `"w"` (both work on the mod's private files, like `eqoa.files`). There is no `debug`, `coroutine`, `load`, `loadstring`, `dofile`, `loadfile`, `xpcall`, `collectgarbage`, FFI or native library loading. An instruction or memory limit cannot be swallowed with `pcall`.
 
-**`require`** loads Lua source text from the mod's own folder and its `modules/` folder (and the shared `modules/` folder of the `mods` folder), up to 1 MiB a file, never bytecode. `require("eqoa")`, `require("eqoa.<module>")` and `require("bit")` return the built-in tables.
+**`require`** loads Lua source text from the mod's own folder and its `modules/` folder (and the shared `modules/` folder of the `mods` folder), up to 1 MiB a file (design intent), never bytecode. `require("eqoa")`, `require("eqoa.<module>")` and `require("bit")` return the built-in tables.
 
 **No network, no processes, no other files.** A mod cannot open sockets or URLs, start programs, read the clipboard or reach anything on disk outside the places below. Chat lines and game actions travel over the game's own connection, as the player's do.
 
@@ -985,7 +1008,7 @@ A mod runs in its own Lua 5.1 state, apart from other mods and from the game's m
 
 The files in the `mods` folder itself are never changed by a mod: its private data and private copies live in the player's configuration folder, keyed by the mod's `id`. Removing a file that came from `resources/` or `package_resources/` hides it for this mod only (and it stays hidden after a restart); writing it again brings back a private copy. A bare file name given to `eqoa.textures.load`, `eqoa.fonts.load` or `eqoa.sound.load` is looked for in `package_resources/`, then `resources/`. Links and junctions are refused. Listing, private writes and font and sound loading work on Windows, the published platform, and answer `unsupported` elsewhere.
 
-**Limits.** Tested values are part of the contract in this sense: a mod within them works.
+**Limits.** The table lists every limit a test of the client pins or exercises; these are part of the contract in this sense: a mod within them works. It is the only place on this page that calls a number tested, and a test checks each row against the constant in the code and the test that covers it.
 
 | Limit | Value | |
 |---|---|---|
@@ -994,13 +1017,25 @@ The files in the `mods` folder itself are never changed by a mod: its private da
 | A private file; all private data of a mod, settings included | 1 MiB; 16 MiB | tested |
 | Files open at once through `io.open` | 16 | tested |
 | HUD draw calls per mod per frame (`eqoa.hud.text` and the like) | 256 | tested |
-| Queued actions, dispatch rate, retained results | §8 | tested |
+| ImGui calls in one run of a mod's handlers | 131,072 | tested |
+| Drawn ImGui geometry per mod per frame | 524,288 index units (an outlined shape costs up to 24 a point, so about 21,000 points) | tested |
+| ImGui scopes open at once (`Begin`, `BeginChild`, pushes) | 64 | tested |
+| Mods running at once | 16 | tested |
+| Actions waiting per mod; dispatched per mod per game step; for all mods per step | 32; 8, refilled one a step; 64 | tested |
+| An action waiting for its turn; an action waiting for the server's answer | `rate_limited` after 1 second; `unknown` after 10 seconds | tested |
+| Action results kept per mod | 256 | tested |
+| A chat or command line | shorter than 128 UTF-16 units | tested |
+| A waypoint label | 128 bytes | tested |
 | Undelivered events per mod; events delivered per frame | 1,024 (2 MiB); 256 | tested |
-| JSON load: file size, nesting below the top value, values, loads at once | 16 MiB, 32, two million, 2 | tested |
-| Commands waiting per sender (`eqoa.mods.send`) | 4 | tested |
+| JSON load: file size, depth, values, loads at once | 16 MiB, 32, two million, 2 | tested |
+| JSON save: size | 14 MiB | tested |
+| Commands waiting per sender (`eqoa.mods.send`); a command's `args` | 4; 4 KiB | tested |
 | Fonts and sounds held | 16 each | tested |
+| Imported copies kept | 3 | tested |
 
-Design intent, not part of the promise (the client is tuned this way today; no test pins the number, or the number is expected to move): 16 mods running at once; ImGui calls and drawn geometry per mod per frame (131,072 calls; a geometry budget of about 20,000 shape points); 64 nested ImGui scopes; textures up to 2,048 pixels a side, 128 per mod, 64 MiB decoded; media files up to 16 MiB; fonts and sounds up to 64 MiB together; `require` nested 32 deep; settings 32 deep and 1 MiB; 1,024 entries per listing; 64 log lines between frames; 128 subscriptions; 32 option buttons; 32 pointer areas per frame; four map views; the timing of diagnostics (§2); the timings of hidden window sessions (§7).
+The ImGui call count starts afresh for each run of a mod's handlers: once for the entry and the frame's events, once for `render`, once for `settings.render`. Two of these rows rest on tests that show the limit is enforced without hitting the number exactly: geometry (a batch of 312,000 units is accepted and a second one refused) and JSON save (a value just under 14 MiB is saved); the numbers are the code's constants. The test of the 16-mod limit needs a graphics adapter.
+
+Design intent, not part of the promise (the client is tuned this way today and no test pins the number): textures up to 2,048 pixels a side, 128 per mod, 64 MiB decoded; media files up to 16 MiB; fonts and sounds up to 64 MiB together; a font size up to 256; `require` nested 32 deep and 1 MiB a source file; settings 32 deep and 1 MiB; 1,024 entries per listing; the last 1,000 chat lines kept and asked for at once; 64 log lines between frames; 128 subscriptions; 32 option buttons; 32 pointer areas per frame; 20 wheel steps a call; four map views of 16 to 1,024 pixels; 32 entries in a manifest list; batches of 1 to 64 steps; 512 characters typed into a text box; a command's `args` 8 levels deep and 256 values; the timing of diagnostics (§2); and for hidden window sessions (§7) the 25-unit walk-away, the 15-second idle time, the 10-second wait and the 3-second re-list hold.
 
 Going over a limit is refused with `quota`, `limit_exceeded` or `out_of_range` and reported; exceeding the memory or instruction limit stops the mod.
 

@@ -6,6 +6,12 @@
 //!   frame, no graphics adapter) with no error and no diagnostic.
 //! * Every name the generated surface file calls supported is named in the spec, and every
 //!   `eqoa.x.y` the hand-written pages name exists in the surface file.
+//! * Every limit the spec calls tested is tied to the line of code that holds the number and to the
+//!   test that covers it, and the spec calls a number tested nowhere else.
+//!
+//! What these tests do not show: that a described argument, default, result or error code is right
+//! (those were read from the code), or that an example's handlers work when a key or a result
+//! arrives (the fixture runs three frames; handlers that never fire are checked for names only).
 //!
 //! The pages are read from disk when the test runs, so a wording fix needs no rebuild.
 use super::bridge::Bridge;
@@ -20,7 +26,10 @@ fn docs() -> PathBuf {
 
 fn page(name: &str) -> String {
     let path = docs().join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    // a checkout may give the pages either line ending
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+        .replace("\r\n", "\n")
 }
 
 /// The generated surface file: path -> status.
@@ -373,12 +382,22 @@ fn docs_every_eqoa_name_in_the_pages_exists_in_the_surface_file() {
                 if !known {
                     unknown.push(format!("{name}:{}: {path}", index + 1));
                 }
+                // a name that only refuses is never written as if it worked: its line says so (or asks
+                // the client about it)
+                let refuses = matches!(surface.get(&path).map(String::as_str), Some("unsupported" | "not_yet"));
+                if refuses && !["unsupported", "not_yet", "eqoa.capabilities."].iter().any(|word| line.contains(word)) {
+                    unknown.push(format!(
+                        "{name}:{}: {path} only refuses, and the line does not say `unsupported` or `not_yet`",
+                        index + 1
+                    ));
+                }
             }
         }
     }
     assert!(
         unknown.is_empty(),
-        "{} name(s) the pages give that the client does not have (docs/modding/eqoa-1-surface.json):\n{}",
+        "{} name(s) the pages give that the client does not have, or does not support and the page does not say \
+         (docs/modding/eqoa-1-surface.json):\n{}",
         unknown.len(),
         unknown.join("\n")
     );
@@ -497,4 +516,214 @@ fn docs_readers_find_names_and_blocks() {
     assert_eq!(blocks.len(), 2);
     assert_eq!(blocks[0], (3, "local x = 1\n".to_owned()));
     assert_eq!(section("# A\nx\n## ImGui is here\nBegin\n### sub\nEnd\n## Next\nno\n", "ImGui"), "Begin\n### sub\nEnd\n");
+}
+
+// ---- limits (review round 1) --------------------------------------------------------------------
+
+fn source(relative: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(relative);
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+/// One number of a row in the spec's table of tested limits: what the row says, the line of code that
+/// holds the number, and the test that covers it.
+struct Pin {
+    /// the row's first cell, exactly
+    row: &'static str,
+    /// the number as the row's second cell writes it
+    says: &'static str,
+    /// (file under `crates/eqoa/src`, text of the code that holds the number)
+    code: (&'static str, &'static str),
+    /// (file under `crates/eqoa/src`, test function)
+    test: (&'static str, &'static str),
+}
+
+macro_rules! pin {
+    ($row:expr, $says:expr, $code_file:expr, $code:expr, $test_file:expr, $test:expr) => {
+        Pin { row: $row, says: $says, code: ($code_file, $code), test: ($test_file, $test) }
+    };
+}
+
+/// Every row of the spec's "tested" table. A row with no entry here, an entry with no row, a number the row
+/// does not state, a constant that is no longer in the code and a test that no longer exists all fail
+/// `docs_every_tested_limit_names_its_constant_and_its_test`.
+fn pins() -> Vec<Pin> {
+    let actions = "Actions waiting per mod; dispatched per mod per game step; for all mods per step";
+    let waits = "An action waiting for its turn; an action waiting for the server's answer";
+    let events = "Undelivered events per mod; events delivered per frame";
+    let json = "JSON load: file size, depth, values, loads at once";
+    let files = "A private file; all private data of a mod, settings included";
+    let commands = "Commands waiting per sender (`eqoa.mods.send`); a command's `args`";
+    let broker = "fork_ext/addons/action_broker.rs";
+    let rates = "round6b_broker_rate_limits_fairness_retention_cancel_and_reset";
+    vec![
+        pin!("Lua memory per mod", "8 MiB", "fork_ext/addons/host.rs", "set_memory_limit(8 * 1024 * 1024)",
+            "fork_ext/addons/file_io.rs", "round4_json_calls_keep_ordinary_heap_and_manifest_opt_in"),
+        pin!("Lua memory per mod", "128 MiB", "fork_ext/addons/async_json.rs", "JSON_HEAP: usize = 128 * 1024 * 1024",
+            "fork_ext/addons/file_io.rs", "round4_json_calls_keep_ordinary_heap_and_manifest_opt_in"),
+        pin!("Lua instructions per mod per frame, all handlers together", "4 million",
+            "fork_ext/addons/host.rs", "INSTRUCTION_BUDGET: u32 = 4_000_000",
+            "fork_ext/addons/native_tests.rs", "native_iteration_shares_instruction_budget_across_entry_and_callbacks"),
+        pin!(files, "1 MiB", "fork_ext/addons/file_io.rs", "MAX_BYTES: usize = 1024 * 1024",
+            "fork_ext/addons/file_io.rs", "forge_modern_io_rejects_traversal_code_other_addons_and_oversized_files"),
+        pin!(files, "16 MiB", "fork_ext/addons/sandbox.rs", "size > 16 * 1024 * 1024",
+            "fork_ext/addons/native_tests.rs", "native_storage_quota_combines_private_files_default_settings_and_named_profiles"),
+        pin!("Files open at once through `io.open`", "16", "fork_ext/addons/file_io.rs", "registry.files.len() >= 16",
+            "fork_ext/addons/file_io.rs", "forge_modern_io_iterator_gc_keeps_memory_budget_and_close_releases_it"),
+        pin!("HUD draw calls per mod per frame (`eqoa.hud.text` and the like)", "256",
+            "fork_ext/addons/hud_layer.rs", "MAX_COMMANDS_PER_MOD_PER_FRAME: usize = 256",
+            "fork_ext/addons/hud_layer.rs", "text_and_utf16_storage_survive_clear_and_command_limit_rejection"),
+        pin!("ImGui calls in one run of a mod's handlers", "131,072", "fork_ext/addons/bridge.rs", "CALL_BUDGET: usize = 131_072",
+            "fork_ext/addons/docs_tests.rs", "docs_limit_imgui_calls_are_131072_a_run"),
+        pin!("Drawn ImGui geometry per mod per frame", "524,288", "fork_ext/addons/bridge_drawlist.rs", "GEOMETRY_LIMIT: usize = 524_288",
+            "fork_ext/addons/bridge_drawlist_tests.rs", "forge_drawlist_geometry_budget_is_shared_across_invocations_in_one_frame"),
+        pin!("ImGui scopes open at once (`Begin`, `BeginChild`, pushes)", "64", "fork_ext/addons/bridge.rs", "self.stack.len() >= 64",
+            "fork_ext/addons/docs_tests.rs", "docs_limit_imgui_scopes_are_64"),
+        pin!("Mods running at once", "16", "fork_ext/addons/manager.rs", "MAX_INSTANCES: usize = 16",
+            "fork_ext/addons/manager.rs", "forge_manager_disabled_defaults_missing_root_and_sixteen_vm_cap"),
+        pin!(actions, "32", broker, "MAX_QUEUED_PER_VM: usize = 32", broker, rates),
+        pin!(actions, "8", broker, "MAX_DISPATCH_PER_TICK_PER_VM: usize = 8", broker, rates),
+        pin!(actions, "one a step", broker, "TOKEN_BUCKET_REFILL_PER_TICK: u32 = 1", broker, rates),
+        pin!(actions, "64", broker, "MAX_DISPATCH_PER_TICK_GLOBAL: usize = 64", broker, rates),
+        pin!(waits, "1 second", broker, "RATE_LIMIT_WAIT_TICKS: u64 = 30", broker, rates),
+        pin!(waits, "10 seconds", broker, "SERVER_TIMEOUT_TICKS: u64 = 300", broker, "round6b_broker_server_timeout_and_subsystem_locks"),
+        pin!("Action results kept per mod", "256", broker, "MAX_RETAINED_RESULTS_PER_VM: usize = 256", broker, rates),
+        pin!("A chat or command line", "128 UTF-16 units", broker, "encode_utf16().count() >= 128",
+            "fork_ext/r6d_tests.rs", "round7c_typed_chat_rejects_the_native_utf16_cutoff"),
+        pin!("A waypoint label", "128 bytes", "fork_ext/addons/map_views.rs", "s.as_bytes().len() <= 128",
+            "fork_ext/api_capture_tests.rs", "round7c_mod_moves_and_clears_the_players_own_waypoint"),
+        pin!(events, "1,024", "fork_ext/addons/native_events.rs", "b.pending.len() > 1024",
+            "fork_ext/addons/native_tests.rs", "native_events_share_one_retention_limit_for_sources_and_resource_completions"),
+        pin!(events, "2 MiB", "fork_ext/addons/native_events.rs", "b.pending_bytes > 2 * 1024 * 1024",
+            "fork_ext/addons/native_tests.rs", "native_events_enforce_two_mebibyte_payload_retention_without_losing_dispatch_backlog"),
+        pin!(events, "256", "fork_ext/addons/native_events.rs", "256usize.saturating_sub(b.delivered",
+            "fork_ext/addons/perf_delta_event_tests.rs", "an_event_nobody_listens_for_still_spends_the_delivery_budget"),
+        pin!(json, "16 MiB", "fork_ext/addons/async_json.rs", "READ_CAP: usize = 16 * 1024 * 1024",
+            "fork_ext/addons/file_io.rs", "round4_json_read_cap_is_enforced"),
+        pin!(json, "32", "fork_ext/addons/async_json.rs", "depth > 32", "fork_ext/addons/file_io.rs", "round4_json_depth_is_enforced"),
+        pin!(json, "two million", "fork_ext/addons/async_json.rs", "NODES: usize = 2_000_000",
+            "fork_ext/addons/file_io.rs", "round4_json_nodes_are_enforced"),
+        pin!(json, ", 2", "fork_ext/addons/async_json.rs", "s.pending >= 2",
+            "fork_ext/addons/file_io.rs", "round4_json_shared_mount_and_inflight_quota"),
+        pin!("JSON save: size", "14 MiB", "fork_ext/addons/json_save.rs", "CAP: usize = 14 * 1024 * 1024",
+            "fork_ext/addons/file_io.rs", "round4_json_private_journal_flushes_on_drop_and_reloads"),
+        pin!(commands, "4;", "fork_ext/addons/native_events.rs", ".count()>=4",
+            "fork_ext/addons/file_io.rs", "round4b_mod_commands_are_declared_bounded_and_delayed"),
+        pin!(commands, "4 KiB", "fork_ext/addons/exchange.rs", "&mut 256, &mut 4096",
+            "fork_ext/addons/file_io.rs", "round4b_review_commands_preserve_other_events_and_sender_fairness"),
+        pin!("Fonts and sounds held", "16 each", "fork_ext/addons/fonts.rs", "MAX_FONT_HANDLES: usize = 16",
+            "fork_ext/addons/fonts.rs", "forge_fonts_handle_and_size_limits"),
+        pin!("Fonts and sounds held", "16 each", "fork_ext/addons/sound.rs", "MAX_SOUND_HANDLES: usize = 16",
+            "fork_ext/addons/sound.rs", "forge_sound_handle_and_file_size_limits"),
+        pin!("Imported copies kept", "3", "fork_ext/addons/player_files.rs", ".skip(3)",
+            "fork_ext/addons/file_io.rs", "round4b_review_import_ids_survive_enable_and_staging_cannot_starve_saves"),
+    ]
+}
+
+/// The rows of the spec's limits table that end in "tested": (first cell, second cell).
+fn tested_rows(limits: &str) -> Vec<(String, String)> {
+    limits
+        .lines()
+        .filter(|line| line.starts_with("| ") && line.trim_end().ends_with("| tested |"))
+        .map(|line| {
+            let cells: Vec<&str> = line.trim().trim_matches('|').split(" | ").map(str::trim).collect();
+            assert_eq!(cells.len(), 3, "a limits row has three cells: {line}");
+            (cells[0].to_owned(), cells[1].to_owned())
+        })
+        .collect()
+}
+
+/// The check behind `docs_every_tested_limit_names_its_constant_and_its_test`, over a given spec text.
+fn limit_problems(spec: &str) -> Vec<String> {
+    let limits = section(spec, "The sandbox and its limits");
+    let rows = tested_rows(limits);
+    let pins = pins();
+    let mut problems = Vec::new();
+    if rows.len() < 15 {
+        problems.push(format!("only {} tested rows were found in the limits table", rows.len()));
+    }
+    for (row, value) in &rows {
+        let mine: Vec<&Pin> = pins.iter().filter(|pin| pin.row == row).collect();
+        if mine.is_empty() {
+            problems.push(format!("the spec calls {row:?} tested, and the docs test names no constant and no test for it"));
+        }
+        for pin in mine {
+            if !value.contains(pin.says) {
+                problems.push(format!("{row:?}: the spec says {value:?}, the code's number is written {:?}", pin.says));
+            }
+        }
+    }
+    for pin in &pins {
+        if !rows.iter().any(|(row, _)| row == pin.row) {
+            problems.push(format!("{:?} is not a row of the spec's tested limits any more", pin.row));
+        }
+        if !source(pin.code.0).contains(pin.code.1) {
+            problems.push(format!("{:?} ({}): the code no longer has {:?} in {}", pin.row, pin.says, pin.code.1, pin.code.0));
+        }
+        if !source(pin.test.0).contains(&format!("fn {}(", pin.test.1)) {
+            problems.push(format!("{:?} ({}): no test {} in {}", pin.row, pin.says, pin.test.1, pin.test.0));
+        }
+    }
+    // only that table may call a number tested
+    let from = limits.as_ptr() as usize - spec.as_ptr() as usize;
+    let outside = [&spec[..from], &spec[from + limits.len()..]];
+    for (index, line) in outside.iter().flat_map(|part| part.lines()).enumerate() {
+        if has_word(line, "tested") {
+            problems.push(format!("\"tested\" outside the limits table (line {} of the text around it): {line}", index + 1));
+        }
+    }
+    problems
+}
+
+#[test]
+fn docs_every_tested_limit_names_its_constant_and_its_test() {
+    let problems = limit_problems(&page("EQOA-API-SPEC.md"));
+    assert!(problems.is_empty(), "{} problem(s):\n{}", problems.len(), problems.join("\n"));
+}
+
+/// The negative controls of the check above, kept as a test: a changed number, a row with nothing behind it
+/// and a "tested" claim outside the table are each caught.
+#[test]
+fn docs_a_wrong_or_unbacked_tested_limit_is_caught() {
+    let spec = page("EQOA-API-SPEC.md");
+    let wrong = spec.replacen("| Action results kept per mod | 256 | tested |", "| Action results kept per mod | 512 | tested |", 1);
+    assert_ne!(wrong, spec, "the row is in the spec");
+    assert!(limit_problems(&wrong).iter().any(|p| p.contains("Action results kept per mod") && p.contains("512")));
+    let unbacked = spec.replacen("| Imported copies kept | 3 | tested |", "| Imported copies kept | 3 | tested |\n| Option buttons per mod | 32 | tested |", 1);
+    assert!(limit_problems(&unbacked).iter().any(|p| p.contains("Option buttons per mod") && p.contains("no constant")));
+    let stray = spec.replacen("## 10. Keys\n", "## 10. Keys\n\nA mod may hold 128 subscriptions (tested).\n", 1);
+    assert!(limit_problems(&stray).iter().any(|p| p.contains("outside the limits table")));
+}
+
+/// Runs `source` in one bridge invocation inside an ImGui frame, as a handler runs.
+fn in_frame(source: &str) -> mlua::Result<()> {
+    let mut context = imgui_context();
+    let host = Host::new().unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    context.frame();
+    let result = bridge.invoke(|| host.execute(source));
+    drop(context.render_legacy());
+    result
+}
+
+/// 64 ImGui scopes may be open at once (a window and 63 pushes inside it); the 65th is refused.
+#[test]
+fn docs_limit_imgui_scopes_are_64() {
+    let nested = |pushes: usize| {
+        in_frame(&format!(
+            "ImGui.Begin('scopes') for i = 1, {pushes} do ImGui.PushTextWrapPos() end \
+             for i = 1, {pushes} do ImGui.PopTextWrapPos() end ImGui.End()"
+        ))
+    };
+    nested(63).expect("a window and 63 pushes are 64 open scopes");
+    let error = nested(64).expect_err("the 65th open scope is refused").to_string();
+    assert!(error.contains("ImGui stack budget exceeded"), "{error}");
+}
+
+/// One run of a mod's handlers may make 131,072 ImGui calls; the next call is refused.
+#[test]
+fn docs_limit_imgui_calls_are_131072_a_run() {
+    in_frame("for i = 1, 131072 do ImGui.GetTime() end").expect("131,072 calls fit");
+    let error = in_frame("for i = 1, 131073 do ImGui.GetTime() end").expect_err("one call more is refused").to_string();
+    assert!(error.contains("ImGui call budget exceeded: 131073 calls (limit: 131072)"), "{error}");
 }

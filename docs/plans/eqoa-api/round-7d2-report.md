@@ -156,17 +156,24 @@ No test pins these numbers (or the test needs a graphics adapter and skips witho
   second after a burst of 32; the window's 128 entries; log rotation at 5 MiB.
 - 128 subscriptions and timers per mod; 32 option buttons; 32 pointer areas per frame; the one-second text
   capture hold; 64 log lines between frames; batch length 1 to 64.
-- Hidden window sessions: 25 units walk-away, 10 seconds unanswered, the 3-second re-list grace. (The 15-second idle
-  timeout is pinned since round 7H by `round7h_fix5_hidden_session_idle_timeout_is_15_seconds`.)
-- 16 mods at once; ImGui calls, geometry and scope budgets; texture size, count and bytes; media and font
-  and sound byte sizes; `require` depth; settings depth and size; the 1,024-entry listing cap; four map
-  views; how a large JSON value is sliced over frames.
+- Hidden window sessions: 25 units walk-away, 15 seconds idle, 10 seconds unanswered, the 3-second re-list
+  grace. (The 15-second idle timeout is pinned since round 7H by `round7h_fix5_hidden_session_idle_timeout_is_15_seconds`.)
+- Texture size, count and bytes; media and font and sound byte sizes; font size; `require` depth and source
+  size; settings depth and size; the 1,024-entry listing cap; the 1,000 chat lines; 20 wheel steps; four map
+  views and their size range; 32 entries per manifest list; 512 characters into a text box; a command's
+  depth and value count; how a large JSON value is sliced over frames.
 
-Kept as contract because a test asserts them: 8 MiB / 128 MiB memory; 4 million instructions a frame;
-1 MiB a file and 16 MiB a mod; 16 open files; 256 HUD calls a frame; the action queue (32 waiting, 8 a step,
-one a step refill, 64 a step for all, `rate_limited` after a second, `unknown` after 10 seconds, 256 results
-kept); 1,024 events (2 MiB) and 256 a frame; JSON 16 MiB / 32 deep / two million values / two loads, 14 MiB
-to save; four commands per sender; 16 fonts and 16 sounds; chat lines under 128 UTF-16 units.
+(Corrected in review round 1, below: the ImGui call, geometry and scope budgets and the 16-mod limit were
+listed here and are tested; they moved to the spec's table of tested limits.)
+
+Kept as contract because a test covers them (the spec's section 9 table; since review round 1 a docs test
+ties every row to its constant and its test): 8 MiB / 128 MiB memory; 4 million instructions a frame; 1 MiB a
+file and 16 MiB a mod; 16 open files; 256 HUD calls a frame; ImGui 131,072 calls a run, 524,288 geometry
+units a frame, 64 open scopes; 16 mods; the action queue (32 waiting, 8 a step, one a step refill, 64 a step
+for all, `rate_limited` after a second, `unknown` after 10 seconds, 256 results kept); chat lines under 128
+UTF-16 units; a 128-byte waypoint label; 1,024 events (2 MiB) and 256 a frame; JSON 16 MiB / 32 deep / two
+million values / two loads, 14 MiB to save; four commands per sender of at most 4 KiB; 16 fonts and 16
+sounds; three imported copies.
 
 Also outside the promise: the short "under review" list in the spec's actions section (defects 2 to 6
 above).
@@ -244,3 +251,138 @@ pages: `--only round,paths --filter docs_`: 5 passed, 0 failed, 0 SKIP lines; pa
 - The spec's freeze date and the plan's Results entry are Part G's.
 - The support table and surface file were not regenerated (no API change).
 - The decomp and eqoa-port oracle are not on this machine; nothing here depends on them.
+
+## Review round 1 (cross-family review of b30b5bd7, `round-7d2-review.md`: APPROVE WITH CHANGES)
+
+Every finding was checked in the code before the pages changed. No finding was wrong in substance; one was
+overstated (H2, below). Round 7 H's rows were left as they were (`Windows.active`, `follow`, `cycle_target`,
+`ActionResult.ok`, the four direct actions, `entities.status`, `abilities.scope`, the draw-list paragraph,
+`options.button`, `resource.ready`/`resource.failed`, `events.dropped`, `input.bind`).
+
+### The reviewer's findings
+
+| Finding | Verdict, with the code | What changed |
+|---|---|---|
+| H1 `bank_move`: omitting `count` moves 1; `"bags"` accepted | **Accepted.** `addons/action_broker.rs`: `let count = count.unwrap_or(1);` in both forms of the binding, and `"inventory" \| "bags" \| "deposit"`. (`loot` differs: `play.rs` `count.unwrap_or(it.quantity)`, the whole stack.) | The row gives both call forms, `count:uint=1`, "omitting `count` moves 1, not the stack", `"bags"`, and that `from` must agree with the item's list. `loot`'s row now says the whole stack is the default. |
+| H2 three limits wrongly under "no test pins the number" | **Accepted, with a correction to the reviewer's evidence.** The constants are `CALL_BUDGET = 131_072` (`addons/bridge.rs:112`), `GEOMETRY_LIMIT = 524_288` (`addons/bridge_drawlist.rs:9`) and `self.stack.len() >= 64` (`addons/bridge.rs:180`), and tests do exercise all three. But the cited tests do not pin two of the numbers: `bridge_next_tests.rs:276` only shows that 80 pushes are refused, and `wereoxxs_test.rs` asserts `measured_calls * 4 <= CALL_BUDGET` (the bundled UI fits four times over) and the refusal at an injected limit of 4,096. The geometry test brackets the limit (one batch of 312,000 units accepted, a second refused). Also found while checking: the call count is reset at every run of a mod's handlers (`addons/bridge.rs:890`, `state.calls = 0` in `invoke`), so the old "per frame" was wrong too. | The three are rows of the spec's tested table with the real numbers (the old "about 20,000 shape points" is now "524,288 index units ... about 21,000 points"); the call budget is "in one run of a mod's handlers", with a sentence saying when a run starts. Two new tests pin the two numbers exactly: `docs_limit_imgui_scopes_are_64` (64 open scopes pass, the 65th is refused) and `docs_limit_imgui_calls_are_131072_a_run` (131,072 calls pass, call 131,073 is refused with `limit: 131072`). The spec says plainly that geometry and JSON save rest on tests that do not hit the number exactly. |
+| M idle timeout marked design intent while Bag Viewer relies on renewing it | **Accepted.** `bundled-mods/eqoa_bag_viewer/modules/bags.lua` `renew_loot_session`; `addons/window_takeover.rs:321-325` (renewal), `:798-802` (idle end, scope `own` only). **No test pins the number 15**: the only expiry tests use `expire_hidden_session_for_test`, which sets the last activity to `now - HIDDEN_SESSION_TIMEOUT - 1 s` (`window_takeover.rs:893`), so they pass for any value. The behaviour is tested: `round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases` (`items_tests.rs`, the idle end) and `round65_fix_bag_viewer_loot_tab_keeps_hidden_session_alive` (`addons/bag_viewer_tests.rs`, the renewal). | The idle end and the renewal are now stated as contract ("covered by tests"), with what a mod must do (call `takeover` again every frame or second while it shows the session). The number stays as the code has it, worded "15 seconds in this client; no test pins that number and it may change, so renew far more often than that". **For the lead: a test that pins 15 s needs a clock seam or a constant-reading assertion in `window_takeover.rs`; none exists.** |
+| M `entity.*` payloads | **Accepted.** Surface file: `entity.added.data` is `after, changed, ref`; `entity.removed.data` is `before, changed, ref`. | Three rows, one per event. |
+| M `settings.on_save` / `on_load` return a `Token` | **Accepted.** `addons/native_settings.rs:97-117`. | Both rows say so. |
+| M `hud.image` texture options, `hud.visible` names | **Accepted.** `addons/hud_textures.rs:27-60` (`w`/`width`, `h`/`height`, `shape`, `anchor`, `vertical`); `addons/hud_layout.rs` `hud_element_visible` (`"hud"`, `"all"`, `"stats_box"`/`"plain_play"`, `"mana_bars"`). | Both rows rewritten. The game's internal aliases (`health_bar`, `main_exp_bar`, ...) are deliberately not listed: they are not names the API promises. |
+| M `cancel(batch)` against `stop_batch` | **Accepted.** `addons/action_broker.rs` `cancel`: `not_found` when no batch runs; `stop_batch`: `false`. | The `cancel` row states the difference. |
+| M `replaces` without the takeover capability | **Accepted.** `addons/discovery.rs:769-776`: a diagnostic, no `return`. | The manifest row says it warns and the mod still loads. |
+| M `map.open` lacks `not_in_world` | **Accepted.** `addons/native_state.rs:109-130`. | Added. |
+| M what the docs tests do not verify | **Accepted.** | The spec's header, the guide's opening and the README now say the tests check names and load the examples, and that arguments, results and behaviour were read from the code. The test file's header says the same. One of the listed gaps is closed mechanically (a page naming a path that only refuses must say so on that line; below). The others stay open and are listed under "Still not checked by any test". |
+| L `files.import` staged name | **Accepted.** `addons/player_files.rs` (always `imports/import-<n>.json`). | Stated; also that `extensions` is required (1 to 16 entries) and the title's default. |
+| L `Save profile` / `Load profile` | **Accepted.** `addons/runtime.rs:1044-1047` (shown only with no named profile). | Spec rows and the guide. |
+
+### My own second pass
+
+**(a) Defaults and omitted arguments** (every optional argument in sections 4 to 8 compared with its binding):
+
+| Where | Was | Code | Now |
+|---|---|---|---|
+| `hud.gauge` `lit` | no default given | `unwrap_or(true)` (`addons/native_state.rs`) | "default true" |
+| `hud.text` | no defaults | colour white, `scale` 1, `align`/`anchor` left, `vertical` top, `outline`/`shadow` false; `color` is a list, not `{r=...}` | stated |
+| `hud.image` game art | no size default | `w`/`h` omitted = the art's own size (`addons/hud_layer.rs`, `-1`); panel 148 by 132 | stated |
+| `hud.frame(size)` | "another window size" | a missing `width`/`height` counts as 640/448 | stated |
+| `options.toggle` | no defaults | `label` = `id`, `default` = false | stated |
+| `map.view` `size` | no default | 112 (`addons/map_views.rs:305`) | stated |
+| `files.import` | `title?` unexplained | "Import file"; `extensions` required | stated |
+| batch steps | "that action's arguments by name" | the step fields are `entity_id`, `kind_filter`, `target`, `on`, `item` (or `ware`), `count`, `from`, `direction`, `amount`, `text`, `ability`, `set`, `slot` (`addons/action_broker.rs` `parse_batch_step`); `count` defaults differ per step; `require_window` also takes `"corpse"` | a table of fields per step kind with each default |
+| `loot` `count` | "(or `count` of it)" | whole stack when omitted | stated |
+
+Checked and already right: `entities.named(exact=true)`, `chat.history(limit=100)`, `input.claim(suppress=false)`,
+`fonts.load(size=16)`, `sound.play` (`loop=false`, `volume=1`), `files.list("", "*")`, `merchant.price(quantity=1)`,
+`items.can_use` (the player's own class, race, level), `takeover` (scope `own`), `release()` and `taken()` with no
+argument, `buy`/`sell` (`count=1`), `attack()`/`autorun()` (toggle), `talk` (any friendly NPC), `open_loot`
+(nearest corpse), `open_window(arg=0)`, `input_text(submit=false)`, `stop_batch()` (the running batch),
+`hud.visible()` (`"hud"`). Not touched because round 7 H edits the rows: `input.bind` (its `label` defaults to
+`id`, `default_key` to `"b"`), `cycle_target`, `follow`.
+
+**(b) Every number: a test, or design intent.** The spec's section 9 table is now the only place that calls a
+number tested (20 rows, 33 numbers). Numbers I had left unlabelled and that no test pins are now marked
+design intent: the 1,000 chat lines (asked for and kept), 20 wheel steps, the 2,048-pixel texture side in
+`textures.rgba`, font size 256, settings 32 deep and 1 MiB, the 1,024 listing cap, the `require` source size,
+512 characters into a text box, map view size and count, a command's depth and value count, and "at most 32"
+in the manifest lists (the manifest test checks bad entries, not the cap). Newly listed as tested: 16 mods
+(`forge_manager_disabled_defaults_missing_root_and_sixteen_vm_cap`; it needs a graphics adapter), a chat line
+under 128 UTF-16 units, the 128-byte waypoint label, action results kept (256), JSON save 14 MiB, a command's
+4 KiB, three imported copies. Argument ranges that are the game's own shape (bars 1..4, slots 1..5 and 1..20,
+quick slots 1..4, weapon sets 1..5, camera modes 0..3, class ids 0..14, world ids 0..255) are stated as
+ranges, not as limits; they were read from the bindings.
+
+The test behind each row (file under `crates/eqoa/src/`):
+
+| Row | Test |
+|---|---|
+| Lua memory 8 MiB / 128 MiB | `round4_json_calls_keep_ordinary_heap_and_manifest_opt_in` (`fork_ext/addons/file_io.rs`) |
+| 4 million instructions | `native_iteration_shares_instruction_budget_across_entry_and_callbacks` (`native_tests.rs`) |
+| 1 MiB file; 16 MiB mod | `forge_modern_io_rejects_traversal_code_other_addons_and_oversized_files` (`file_io.rs`); `native_storage_quota_combines_private_files_default_settings_and_named_profiles` (`native_tests.rs`) |
+| 16 open files | `forge_modern_io_iterator_gc_keeps_memory_budget_and_close_releases_it` (`file_io.rs`) |
+| 256 HUD calls | `text_and_utf16_storage_survive_clear_and_command_limit_rejection` (`hud_layer.rs`) |
+| ImGui calls 131,072 | `docs_limit_imgui_calls_are_131072_a_run` (`docs_tests.rs`, new) |
+| Geometry 524,288 | `forge_drawlist_geometry_budget_is_shared_across_invocations_in_one_frame` (`bridge_drawlist_tests.rs`; brackets the number) |
+| 64 scopes | `docs_limit_imgui_scopes_are_64` (`docs_tests.rs`, new) |
+| 16 mods | `forge_manager_disabled_defaults_missing_root_and_sixteen_vm_cap` (`manager.rs`; needs a graphics adapter) |
+| Action queue 32 / 8 / one a step / 64; 1 second; 256 results | `round6b_broker_rate_limits_fairness_retention_cancel_and_reset` (`action_broker.rs`) |
+| 10 seconds | `round6b_broker_server_timeout_and_subsystem_locks` (`action_broker.rs`) |
+| Chat line 128 | `round7c_typed_chat_rejects_the_native_utf16_cutoff` (`fork_ext/r6d_tests.rs`) |
+| Waypoint label 128 bytes | `round7c_mod_moves_and_clears_the_players_own_waypoint` (`fork_ext/api_capture_tests.rs`) |
+| Events 1,024 / 2 MiB / 256 | `native_events_share_one_retention_limit_for_sources_and_resource_completions`, `native_events_enforce_two_mebibyte_payload_retention_without_losing_dispatch_backlog` (`native_tests.rs`); `an_event_nobody_listens_for_still_spends_the_delivery_budget` (`perf_delta_event_tests.rs`) |
+| JSON load 16 MiB / 32 / two million / 2 | `round4_json_read_cap_is_enforced`, `round4_json_depth_is_enforced`, `round4_json_nodes_are_enforced`, `round4_json_shared_mount_and_inflight_quota` (`file_io.rs`) |
+| JSON save 14 MiB | `round4_json_private_journal_flushes_on_drop_and_reloads` (`file_io.rs`; a value just under 14 MiB saves) |
+| Commands 4 per sender; 4 KiB | `round4b_mod_commands_are_declared_bounded_and_delayed`; `round4b_review_commands_preserve_other_events_and_sender_fairness` (`file_io.rs`) |
+| 16 fonts; 16 sounds | `forge_fonts_handle_and_size_limits` (`fonts.rs`); `forge_sound_handle_and_file_size_limits` (`sound.rs`) |
+| 3 imported copies | `round4b_review_import_ids_survive_enable_and_staging_cannot_starve_saves` (`file_io.rs`) |
+
+I read each constant in the code and each test's name; I did not re-read every test body to confirm it
+asserts the exact number (I did for the ImGui three, the idle timeout, the manifest cap and JSON save).
+
+### Tests added or changed (`docs_tests.rs`, now 9 tests)
+
+- `docs_every_tested_limit_names_its_constant_and_its_test`: every row of the spec's tested table has an
+  entry in the test; the row states the number; the named source file still contains the constant's text;
+  the named test function still exists; and the word "tested" appears nowhere in the spec outside that
+  section. A limit changed in code, a row added without backing, or a test renamed away, fails it.
+- `docs_a_wrong_or_unbacked_tested_limit_is_caught`: its standing negative control (a changed number, a row
+  with nothing behind it, a stray "(tested)").
+- `docs_limit_imgui_scopes_are_64`, `docs_limit_imgui_calls_are_131072_a_run`: the two exact pins.
+- `docs_every_eqoa_name_in_the_pages_exists_in_the_surface_file` now also fails when a page names a path
+  that only refuses (`unsupported`, `not_yet`) on a line that does not say so.
+
+Executed negative controls (pages read at run time, no rebuild; each restored with `git checkout`, status
+clean afterwards), `python tools/run_gates.py --only round --filter docs_`:
+
+- the spec's memory row changed to "8 MiB; 256 MiB" (at c46b830f): 8 passed, 1 failed,
+  `docs_every_tested_limit_names_its_constant_and_its_test` (`docs_tests.rs:668`):
+  `"Lua memory per mod": the spec says "8 MiB; 256 MiB with ...", the code's number is written "128 MiB"`;
+- the line "`eqoa.actions.destroy` is `unsupported`" changed to "`eqoa.actions.destroy` destroys an item."
+  (at bd74b1bf): 8 passed, 1 failed, `docs_every_eqoa_name_in_the_pages_exists_in_the_surface_file`
+  (`docs_tests.rs:397`): `EQOA-API-SPEC.md:894: eqoa.actions.destroy only refuses, and the line does not
+  say unsupported or not_yet`.
+
+Found by the first of those restores: `git checkout` wrote the spec back with CRLF line endings and one new
+test assumed LF. The tests now read the pages with either ending (a CI checkout can give CRLF).
+
+### Still not checked by any test
+
+- Defaults, argument order, result shapes and error codes as described (class (a) above): no mechanical
+  check; a wrong default is caught only by reading the binding, as the reviewer did for `bank_move`.
+- That a record field is described under the right record (the field check matches the name anywhere in
+  the spec).
+- Handlers in the guide's examples that never fire in the three fixture frames (key and result handlers).
+- The number 15 of the idle timeout, the 25 units, the 10-second wait for an open and the 3-second re-list
+  hold.
+
+### Gates (review round 1)
+
+- Local, with the disc linked (`EQOA_ISO`), `python tools/run_gates.py --only round,wasm,footprint,paths
+  --filter docs_` at bd74b1bf: **round 9 passed, 0 failed, 0 ignored, 0 SKIP lines**; wasm PASS; footprint
+  PASS (no upstream file touched, no budget change); paths PASS.
+- GitHub run **44899435026 at 42753ca3: success**, pushed, waited for and cleaned up in one command
+  (`ci_gates.py push`, `status`, `cleanup`): addons 684 passed / 0 failed / 25 ignored / 17 SKIP; full 3327
+  passed / 0 failed / 37 ignored / 378 SKIP; wasm, footprint, paths success; player-release 20 passed; tools
+  201 passed / 1 SKIP. The nine `docs_` tests need no disc and no graphics adapter and ran there.
+- The only commit after that run adds these lines to this report.
+- The API surface is unchanged: no regeneration commit.
