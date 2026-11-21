@@ -2,7 +2,9 @@
 
 A mod is a folder with a small manifest and Lua code. It runs inside the game through the `eqoa` API
 (`eqoa/1`). This page takes you from nothing to a working mod. The exact contracts are in
-[the reference](EQOA-API-SPEC.md); every example on this page is run by the client's own tests.
+[the reference](EQOA-API-SPEC.md). Every example on this page is loaded and run for a few frames by the
+client's own tests, which catch a misspelt name or an error at load; code inside a handler that waits
+for a key or a result is checked for its names only.
 
 ## 1. Where mods live
 
@@ -154,7 +156,7 @@ end)
 ```
 
 The client calls `on_load` when the mod is first enabled and `on_save` when it is disabled (and for the
-Save and Load buttons in Mods & Addons). Settings are kept per player profile. For your own files use
+**Load profile** and **Save profile** buttons in Mods & Addons). Settings are kept per player profile. For your own files use
 `eqoa.files`: a small private area that belongs to the mod.
 
 ```lua
