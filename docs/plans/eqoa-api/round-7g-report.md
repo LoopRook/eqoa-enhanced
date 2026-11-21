@@ -35,3 +35,4 @@ footprint, paths PASS; tools tests `test_eqoa1_freeze` 3 OK. Not run: full test 
 Footprint: no upstream file touched; no budget change.
 
 ## CI
+CI run 44872812881 (pushed fbaac72a9f, before the report commit): completed, success.
