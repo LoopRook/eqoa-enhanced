@@ -762,7 +762,8 @@ It depends on load, not on this change; see the CI note above.
   **266 passed, 0 failed, 1 ignored, 4 SKIP lines**: the deliberate no-adapter test, and three bundled UI
   picture comparisons with no reviewed goldens (unchanged from before). wasm, footprint and paths PASS. No
   upstream path changed. The API surface is unchanged (the support-table comparison passes).
-- GitHub CI: CI_B_PLACEHOLDER
+- GitHub CI run 44818321680 at 7eba44c5: **success** (addons 659 passed / 0 failed / 25 ignored / 17 SKIP; full
+  3300 / 0 / 37 / 378 SKIP; wasm, footprint, paths, player-release 20/0, tools 201/0/1 SKIP).
 
 #### What the owner should retest
 
@@ -772,3 +773,46 @@ It depends on load, not on this change; see the CI note above.
   merchant window during or after.
 - The same with the merchant's window open after talking to them yourself: the sale goes through that window.
 - Away from merchants: Sell 1 and Sell stack are greyed with "no merchant nearby".
+
+### Owner test fix 1, recheck fixes (LOW 1 and 2)
+
+The cross-family recheck of 7eba44c5 APPROVED the switch, the merchant re-list rule and single-item Sell, with
+three LOW findings. Reproducing tests were committed first (b75c31ac), both red on 7eba44c5.
+
+| Finding | Red | Fix | Test | Negative control → failing line |
+|---|---|---|---|---|
+| LOW 1: a second Sell 1 before the merchant answers took over the first's answer | `bag_viewer_tests.rs:4785 assertion failed: Opening merchant...` (the second click was accepted) | 92a86d3c | `round7c_bag_viewer_second_sell_before_the_merchant_answers_is_refused` | guard off → the same line |
+| LOW 2: zoning kept the loot and merchant list graces | `items_tests.rs:4697 Loot: after zoning, the same id shows its window` | 6a7cd234 | `round7c_zoning_ends_the_list_graces` (loot and merchant; each first checks that the grace holds before zoning) | both clears off → the loot line; only the merchant clear off → `items_tests.rs:4697 Merchant: after zoning, the same id shows its window` |
+
+- **LOW 1** (`bags.lua`, `open_talk_npc`): the second click is **refused, not queued**, exactly as the corpse
+  path (`open_loot_corpse`) does. It returns `busy` and the result line reads "Sell 1: still waiting for the
+  server to open the merchant" (or "the bank", or "a corpse", for the pending open's kind). The first item is
+  the one sold: the test checks one potion sold and the three pelts kept. Deposit and Withdraw share the
+  guard. `bundled-mods/SOURCE.txt` refreshed again with `tools/update_bundled_manifest.py`; the
+  exact-shipped-package and bundled tests pass against the new files.
+- **LOW 2** (`window_takeover::release_all`, called on leaving the world, a session reset and zoning): it also
+  clears `grace_loot` and `grace_merchant`.
+
+**Known limit (LOW 3, accepted, not fixed).** If the player talks to the same merchant themselves while a mod's
+sale is waiting for its re-sent list, or within the 3 s grace after the mod's last sale, that first open is
+hidden. Talking again after 3 s opens normally. Closing this needs a note on the player's own interact, which
+is an upstream line. For the upstream-seam round: in `crates/eqoa/src/play.rs`, `Play::interact_with_target`,
+just before `let mut w = net::stream::Writer::op(op);` (line 1256 at 6a7cd234), add
+
+```rust
+fork_hooks::interacting(self, op);
+```
+
+The fork side would treat a call outside broker dispatch (`action_broker::current_dispatch_vm()` is `None`,
+so the player's own, not the mod's `talk`, which reaches the same function from `fork_ext/play.rs:1762`)
+with op `0x004C` (merchant) or `0x124D` (bank) as the player asking: it sets the hidden session's
+`player_asked` and drops `relist_owed` and the grace for that target, as loot's `note_loot_request` does.
+
+**Gates.** Focused with the disc (`--only round,wasm,footprint,paths --filter round7 round65 bag_viewer
+bundled`): **268 passed, 0 failed, 1 ignored, 4 SKIP lines** (the deliberate no-adapter test and three bundled
+UI picture comparisons with no reviewed goldens, unchanged). wasm, footprint and paths PASS; no upstream line.
+GitHub CI: CI_C_PLACEHOLDER
+
+**What the owner should retest** (in addition to the list above):
+- Clicking Sell 1 on two items quickly, near a merchant with no window open: the first sells, and the second
+  says "still waiting for the server to open the merchant"; click it again after the first has sold.
