@@ -2320,7 +2320,7 @@ fn round6b_assist_emits_dispatch_and_server_phases_via_play() {
     host.execute(
         r#"
         assert(#results == 1 and results[1].match_req)
-        assert(results[1].phase == "dispatch" and results[1].state == "dispatched" and results[1].ok == true)
+        assert(results[1].phase == "dispatch" and results[1].state == "dispatched" and results[1].ok == nil) -- round 7H: no ok before the outcome
         local st = assert(eqoa.actions.status(req))
         assert(st.request_id == req and st.state == "dispatched")
     "#,
@@ -2587,7 +2587,7 @@ fn round6b_non_item_chat_command_windows_weapon_sets_and_spellbook() {
         local cam = eqoa.capabilities.get("eqoa.actions.camera")
         assert(cam and cam.status == "supported")
         local drop_q = eqoa.capabilities.get("eqoa.actions.drop_quest")
-        assert(drop_q and drop_q.status == "supported")
+        assert(drop_q and drop_q.status == "not_yet") -- round 7H: the game confirms it
         local dest = eqoa.capabilities.get("eqoa.actions.destroy")
         assert(dest and dest.status == "unsupported" and dest.reason == "excluded until after the upstream PR by the mod API plan")
 

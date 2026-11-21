@@ -385,6 +385,33 @@ mod tests {
         });
     }
 
+    /// Round 7H fix 3: `eqoa.textures.formats.png` and `.rgba` are capability flags a mod probes with
+    /// `eqoa.capabilities.has`; there is no `eqoa.textures.formats` table, and the descriptor says so.
+    #[test]
+    fn round7h_fix3_texture_formats_are_described_as_capability_flags() {
+        super::super::big_stack(|| {
+            match with_reference_host(render::wgpu::Instance::default(), |host| {
+                host.execute(
+                    r#"
+                    for _, f in ipairs({'png', 'rgba'}) do
+                        local c = eqoa.capabilities.get('eqoa.textures.formats.' .. f)
+                        assert(c.status == 'supported' and eqoa.capabilities.has(c.path), f)
+                        assert(c.reason and c.reason:find('eqoa.capabilities.has', 1, true), f .. ': reason ' .. tostring(c.reason))
+                    end
+                    assert(eqoa.capabilities.get('eqoa.textures.formats').status == 'unknown', 'no formats table is described')
+                "#,
+                )?;
+                Ok(())
+            }) {
+                Ok(()) => {}
+                Err(error) if error.is::<GraphicsUnavailable>() => {
+                    eprintln!("SKIP round7h_fix3_texture_formats_are_described_as_capability_flags: {error}");
+                }
+                Err(error) => panic!("{error}"),
+            }
+        });
+    }
+
     #[test]
     fn round7c_forge_section_says_presence_is_not_verification() {
         let doc = json!({"metadata": {}, "capabilities": [{

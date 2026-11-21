@@ -889,6 +889,17 @@ pub(crate) fn activate_hidden_for_test(vm: u64, kind: TakeoverKind, target_id: u
         && try_accept_open(kind, Some(target_id), Some(target_id), None)
 }
 
+/// A clock seam: the live hidden session last used `idle` ago (round 7H pins the idle timeout through it).
+#[cfg(test)]
+pub(crate) fn age_hidden_session_for_test(kind: TakeoverKind, idle: Duration) {
+    with_state_mut(|s| {
+        let idx = kind as usize;
+        if s.hidden[idx].active {
+            s.hidden[idx].last_activity = Instant::now() - idle;
+        }
+    });
+}
+
 #[cfg(test)]
 pub(crate) fn expire_hidden_session_for_test(kind: TakeoverKind) {
     with_state_mut(|s| {

@@ -146,37 +146,77 @@ fn row_count(w: &Json) -> i64 {
 /// dialog rows never do. Mods & Addons labels a mod "Can answer NPC dialogs" from this list.
 pub(crate) const ANSWERS_DIALOGS: [&str; 2] = ["eqoa.actions.dialog_answer", "eqoa.actions.activate_row"];
 
+/// The steps the game itself confirms with a Yes/No box: dropping a quest (`questlog.rs`, word 574), buying a
+/// Class Mastery skill (`classmastery.rs`, words 1663/1664) and refunding one (1665/1666). The owner's rule
+/// (2026-11-19/20): an irreversible step keeps its confirmation, which a replacement UI may draw in its own
+/// look and a mod may never skip. Until the confirm contract ties a mod-drawn confirmation to the player's own
+/// answer, these are `not_yet` for native mods; their dispatch (`fork_ext/play.rs`) stays built for that day.
+pub(crate) const CONFIRM_GATED: [&str; 3] = ["drop_quest", "mastery_buy", "mastery_refund"];
+const CONFIRM_CONTRACT: &str = "the game asks the player to confirm this step; a mod cannot take it until the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer";
+
+#[cfg(test)]
+thread_local! {
+    /// Binds the confirm-gated actions as built, so the round 6 tests keep covering the dispatch the confirm
+    /// contract will use. Never set outside tests.
+    pub(crate) static BIND_CONFIRM_GATED_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn confirm_gated_bound() -> bool {
+    #[cfg(test)]
+    {
+        BIND_CONFIRM_GATED_FOR_TEST.with(std::cell::Cell::get)
+    }
+    #[cfg(not(test))]
+    {
+        false
+    }
+}
+
+/// The game's Yes/No prompts (its message box, mode 14) a native mod may accept, by the tags the box answers
+/// with: `(p1, p2)` as upstream `Play::dialog_key` reads them. A group invitation only, for now; the list may
+/// grow (summons and resurrection, `p1` 2, get their own kinds in the dialogs round). Declining or cancelling
+/// any prompt is always allowed. Every mod route to the box's answer is `dialog_answer` (`fork_ext/play.rs`
+/// `dispatch_window_action`: row actions never reach mode 14, text boxes are mode 2, batches have no answer
+/// step), which checks this (owner's rule, round 7H fix 1).
+pub(crate) fn prompt_answerable(p1: i32, p2: i32) -> bool {
+    matches!((p1, p2), (0, 0x0702_0000))
+}
+pub(crate) const PROMPT_CONFIRM_CONTRACT: &str = "accepting this game prompt is the player's choice: a mod may decline it, and may accept it only once the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer";
+
 pub(crate) fn install(lua: &Lua) -> Result<()> {
-    bind(
-        lua,
-        "actions",
-        "drop_quest",
-        lua.create_function(|lua, arg: Value| {
-            enqueue_lua_with(lua, "eqoa.actions.drop_quest", || {
-                let Some(ud) = arg.as_userdata() else {
-                    return Err(("invalid_argument", "expected a QuestRef".into()));
-                };
-                let r = ud
-                    .borrow::<Ref>()
-                    .map_err(|_| ("invalid_argument", "expected a QuestRef".to_string()))?;
-                if r.kind != "quest" {
-                    return Err(("invalid_argument", format!("expected a QuestRef, got {}", r.kind)));
-                }
-                let q = CORE
-                    .with(|c| {
-                        let c = c.borrow();
-                        resolve_in(&arg, &c.view.quests, c.generation, "quest")
+    let gated = confirm_gated_bound();
+    if gated {
+        bind(
+            lua,
+            "actions",
+            "drop_quest",
+            lua.create_function(|lua, arg: Value| {
+                enqueue_lua_with(lua, "eqoa.actions.drop_quest", || {
+                    let Some(ud) = arg.as_userdata() else {
+                        return Err(("invalid_argument", "expected a QuestRef".into()));
+                    };
+                    let r = ud
+                        .borrow::<Ref>()
+                        .map_err(|_| ("invalid_argument", "expected a QuestRef".to_string()))?;
+                    if r.kind != "quest" {
+                        return Err(("invalid_argument", format!("expected a QuestRef, got {}", r.kind)));
+                    }
+                    let q = CORE
+                        .with(|c| {
+                            let c = c.borrow();
+                            resolve_in(&arg, &c.view.quests, c.generation, "quest")
+                        })
+                        .ok_or(("stale_handle", "quest handle is stale or invalid".to_string()))?;
+                    Ok(ActionKind::DropQuest {
+                        index: q["index"].as_u64().unwrap_or(0) as usize,
+                        title: q["title"].as_str().unwrap_or("").to_string(),
+                        revision: r.incarnation,
+                        stamp: CORE.with(|c| c.borrow().quest_stamp),
                     })
-                    .ok_or(("stale_handle", "quest handle is stale or invalid".to_string()))?;
-                Ok(ActionKind::DropQuest {
-                    index: q["index"].as_u64().unwrap_or(0) as usize,
-                    title: q["title"].as_str().unwrap_or("").to_string(),
-                    revision: r.incarnation,
-                    stamp: CORE.with(|c| c.borrow().quest_stamp),
                 })
-            })
-        })?,
-    )?;
+            })?,
+        )?;
+    }
     bind(
         lua,
         "actions",
@@ -200,6 +240,9 @@ pub(crate) fn install(lua: &Lua) -> Result<()> {
         })?,
     )?;
     for (name, which) in [("mastery_browse", 0u8), ("mastery_buy", 1), ("mastery_refund", 2)] {
+        if which != 0 && !gated {
+            continue;
+        }
         bind(
             lua,
             "actions",
@@ -215,6 +258,11 @@ pub(crate) fn install(lua: &Lua) -> Result<()> {
                 })
             })?,
         )?;
+    }
+    if !gated {
+        for name in CONFIRM_GATED {
+            super::native::refuse_native(lua, "actions", name, "not_yet", Some(6), CONFIRM_CONTRACT)?;
+        }
     }
     bind(
         lua,

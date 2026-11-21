@@ -48,6 +48,8 @@ pub(crate) mod chat;
 pub(crate) mod chat_history;
 #[cfg(test)]
 mod chat_history_tests;
+#[cfg(test)]
+mod docs_tests;
 pub(crate) mod combat;
 pub(crate) mod discovery;
 pub(crate) mod effects;
@@ -123,6 +125,8 @@ pub(crate) mod quest_log;
 mod round_3_picture_tests;
 #[cfg(test)]
 mod round7c_fix_tests;
+#[cfg(test)]
+mod round7h_tests;
 mod sandbox;
 mod spike;
 pub(crate) mod storage;

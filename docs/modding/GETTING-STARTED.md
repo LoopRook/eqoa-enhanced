@@ -1,10 +1,26 @@
 # Writing an EQOA Enhanced mod
 
-The native API is `eqoa`. Round 2 is under implementation and review; `eqoa/1`
-becomes a stability promise after the Round 5 audit and approved release.
-See [the specification](EQOA-API-SPEC.md) for the exact contracts.
+A mod is a folder with a small manifest and Lua code. It runs inside the game through the `eqoa` API
+(`eqoa/1`). This page takes you from nothing to a working mod. The exact contracts are in
+[the reference](EQOA-API-SPEC.md); every example on this page is run by the client's own tests.
 
-Create a folder under the active `mods` directory with `mod.json` and `main.lua`:
+## 1. Where mods live
+
+The client has a `mods` folder beside its program (in the game: **Options → Extended → UI → Enhanced →
+Open Mods Folder**). Each mod is one folder inside it:
+
+```
+mods/
+  my_health/
+    mod.json
+    main.lua
+```
+
+The quickest start is to copy [`template/`](template/) into `mods`, rename the folder and change the `id`.
+
+## 2. The manifest
+
+`mod.json` tells the client what the mod is:
 
 ```json
 {
@@ -18,180 +34,249 @@ Create a folder under the active `mods` directory with `mod.json` and `main.lua`
 }
 ```
 
+- `id` is the mod's identity (letters, digits, `_`, `.`, `-`). Make it unique and never change it: saved
+  settings and private files are kept under it.
+- `entryMode: "once"` means `main.lua` runs once when the mod is enabled and registers handlers. Use it.
+  (Without it the file runs every frame, a mode kept for older Forge-style code.)
+- Other fields (`capabilities`, `replaces`, `shares`, `commands`, `permissions`, `enabled`) are in
+  [the reference, section 2](EQOA-API-SPEC.md#2-packages-versions-capabilities-and-diagnostics).
+
+## 3. The first mod
+
+`main.lua`:
+
 ```lua
 eqoa.events.on("render", function()
-    local player, err = eqoa.player.get()
-    if not player or not player.hp then return end
+    local player = eqoa.player.get()
+    if not player or not player.hp then return end   -- not in the world yet, or no data yet
     local ui = eqoa.imgui
     if ui.Begin("My Health") then
         ui.Text(tostring(player.hp.current) .. " / " .. tostring(player.hp.maximum))
     end
-    ui.End()
+    ui.End()                                         -- always pair End with Begin
 end)
 ```
 
-Rescan in the Addon Manager, then enable your mod. Errors and unsupported calls
-appear there and in `mods/addons_error.log`, including errors caught by `pcall`.
-Reload creates a fresh VM. Disable releases the mod's HUD and input claims and
-stops its sound. Ordinary re-enable retains globals and executes the entry again.
+Draw only inside a `render` handler. Drawing is done with ImGui (`eqoa.imgui` is the same object as the
+global `ImGui`).
 
-Use `entryMode: "once"` for event-based mods. Without it the entry is the render
-callback and runs every presentation frame; subscribing to `render` in that mode
-fails visibly. State events work in both modes. Register handlers once per enable
-and initialize retained globals deliberately. Draw only in the entry in frame
-mode, or in `render`/`settings.render` callbacks.
+## 4. Turning it on, reloading, finding errors
 
-Queries normally return `value, nil`, or `nil, Error`. A missing optional field
-is nil. Zero HP is real data; absent HP is not zero HP. References are opaque and
-expire across worlds or record replacement. Reacquire them after `state.reset`.
-Native arrays and positional indexes start at 1, times are seconds, headings are
-radians, and positions are native game units. Forge compatibility keeps its own
-older naming, units and index conventions.
+1. Start the game and enter the world. Press **F10** to open **Mods & Addons** (the key is the
+   **Mods & Addons** row on the Controls page and can be changed; the window is also reached through
+   Options → Extended → UI → Enhanced → Addon Manager).
+2. Click **Rescan folder** if the mod was added while the game was running. New mods start disabled.
+3. The entry for your mod shows what it declares. Click **Enable**.
+4. After changing the code, click **Reload** on the mod: it starts again in a fresh Lua state.
 
-Probe features without side effects:
+When something is wrong:
+
+- The mod's entry shows `[Warnings: N]` and the messages are listed at the bottom of the window. A mod
+  whose code raised an error shows **Failed — reload to retry**.
+- The same messages are written to `addons_error.log` in the `mods` folder.
+- A manifest the client cannot accept (a missing field, a bad `id`) is reported there too, and the mod
+  does not appear in the list.
+- Misspelt API names are reported, not ignored: reading a name the API does not have (say `gett`
+  where `get` was meant) gives nil and a diagnostic with the code `unknown_symbol`. A clean mod has no
+  warnings.
+- Your own messages go to the game's log, `eqoa.log`:
+
+```lua
+eqoa.log.write("info", "my_health started")      -- "warn" and "error" also show in Mods & Addons
+```
+
+## 5. The rules that prevent most bugs
+
+- **Two results.** A query returns `value, nil` or `nil, Error`. "Nothing there" (no target, a closed
+  window) is `nil, nil`, which is not an error. An `Error` is `{code, message, capability}`.
+- **Absent is not zero.** A value the client does not know is nil. Zero health is real; unknown health
+  is nil.
+- **Counting starts at 1.** Times are seconds, headings radians, positions game units.
+- **Handles expire.** An `item.ref` or `entity.ref` names one thing in one world. After zoning, fetch
+  again; an expired handle answers `stale_handle`.
+- **Use events for changes**, not a comparison every frame.
+- **Globals survive a disable.** When the player disables and enables the mod, `main.lua` runs again
+  with its old globals and no handlers. Initialise on purpose.
+
+```lua
+my_health_state = my_health_state or { shown = 0 }   -- kept across disable/enable, not across Reload
+local state = my_health_state
+
+eqoa.events.on("world.entered", function(e)
+    eqoa.log.write("info", "entered world " .. tostring(e.data.world_id))
+end)
+
+eqoa.events.on("state.reset", function()
+    state.target = nil            -- everything read earlier is out of date: drop handles, read again
+end)
+
+eqoa.events.on("target.changed", function(e)
+    state.target = e.data.after   -- an EntityRef, or nil
+end)
+
+eqoa.events.on("disabling", function()
+    eqoa.log.write("info", "my_health disabling")
+end)
+```
+
+## 6. Asking what the client supports
+
+The running client answers for itself, with no side effects:
 
 ```lua
 if eqoa.capabilities.has("eqoa.effects.list") then
     local effects, err = eqoa.effects.list()
-    -- nil/unavailable means the server has not sent effect state yet.
+    -- nil with err.code == "unavailable" means the server has not sent the effects yet
 end
+
+local c = eqoa.capabilities.get("eqoa.actions.move")
+-- c.status is "supported", "partial", "not_yet", "unsupported" or "unknown"; c.reason says why
 ```
 
-`not_yet` means a scheduled feature has not landed; `unsupported` means an
-excluded feature or unavailable platform backend. Capability support does not
-mean a player, asset or window is currently available. Items (reading the pack,
-bank, corpse and merchant) are in; buying, selling, looting and moving items are
-actions, which come with the rest of them. Use the running client's capability
-list as the implementation inventory.
+`supported` means the function works, not that there is data right now. `eqoa.revision` (1 today) rises
+when something is added. The full list of names with their status is the generated
+[support table](SUPPORT-TABLE.md).
 
-## Items
+## 7. Settings
 
-`eqoa.inventory.get()`, `eqoa.bank.get()`, `eqoa.loot.get()` and
-`eqoa.merchant.get()` each return a container: `{kind, revision, open, items,
-capacity, used, remaining, full, money, merchant}`. The pack and the bank are
-always there once you are in a world (the bank's contents arrive with the world,
-not at the banker; `open` says whether its window is up). `loot.get()` and
-`merchant.get()` return `nil, nil` while their window is closed, never a corpse
-or a shop from before. Positions (`item.index`) start at 1 and change as the
-list compacts; keep an `item.ref` to follow a stack: it names the same stack
-after others are taken, and `eqoa.items.get(ref)` answers `stale_handle` once it
-is gone. References are not saved and do not survive zoning.
+Plain values only: numbers, strings, booleans and tables of them.
 
 ```lua
-local function show(c)
-    if not c then return end
-    for _, item in ipairs(c.items) do
-        local ok = eqoa.items.can_use(item.ref)  -- class, race, level
-        local label = item.name .. (item.quantity > 1 and (" x" .. item.quantity) or "")
-        if ok and not ok.allowed then label = label .. "  (" .. table.concat(ok.reasons, ", ") .. ")" end
-        eqoa.imgui.Text(label)
+local settings = { x = 100, y = 100 }
+
+eqoa.settings.on_save(function() return settings end)
+eqoa.settings.on_load(function(saved)
+    if type(saved) == "table" then
+        settings.x = tonumber(saved.x) or settings.x
+        settings.y = tonumber(saved.y) or settings.y
     end
-    eqoa.imgui.Text(tostring(c.used) .. " used, " .. tostring(c.money or 0) .. " tunar")
+end)
+```
+
+The client calls `on_load` when the mod is first enabled and `on_save` when it is disabled (and for the
+Save and Load buttons in Mods & Addons). Settings are kept per player profile. For your own files use
+`eqoa.files`: a small private area that belongs to the mod.
+
+```lua
+local ok, err = eqoa.files.write("notes.txt", "hello")
+local text = eqoa.files.read("notes.txt")            -- "hello"
+```
+
+## 8. Reading the game
+
+```lua
+local function describe(container)
+    if not container then return end
+    for _, item in ipairs(container.items) do
+        local line = item.name
+        if item.quantity > 1 then line = line .. " x" .. item.quantity end
+        local can = eqoa.items.can_use(item.ref)      -- class, race, level
+        if can and not can.allowed then
+            line = line .. " (" .. table.concat(can.reasons, ", ") .. ")"
+        end
+        eqoa.log.write("debug", line)
+    end
 end
+
+describe(eqoa.inventory.get())      -- the pack: always there in the world
+describe(eqoa.loot.get())           -- nil, nil unless a corpse is open
 
 eqoa.events.on("loot.changed", function(e)
-    -- e.data.cause is "open", "close", "reset" (zoning) or the game's own event
-    -- ("loot_one", "loot_all"); before/after are containers, either may be nil
-    if e.data.cause == "open" then eqoa.log.write("info", "a corpse with " .. e.data.after.used .. " items") end
+    -- e.data.cause: "open", "close", "reset" (zoning) or the game's own event ("loot_one", ...)
+    if e.data.cause == "open" and e.data.after then
+        eqoa.log.write("info", "a corpse with " .. e.data.after.used .. " items")
+    end
+end)
+
+local windows = eqoa.windows.get()  -- always answers; mode is "none" outside the world
+if windows.busy then
+    eqoa.log.write("debug", "a game window has the controls: " .. windows.mode)
+end
+```
+
+The reference lists everything that can be read: the player, entities, the target, the group,
+abilities and hotbars, cooldowns, effects, chat, combat, items, quests, Class Mastery, the camera, the
+game's windows and the map.
+
+## 9. Keys
+
+Give the mod a key the player can change on the game's Controls page:
+
+```lua
+local shown = true
+eqoa.input.bind({ id = "toggle", label = "Show My Health", default_key = "u" }, function()
+    shown = not shown
 end)
 ```
 
-`inventory.changed`, `bank.changed`, `loot.changed` and `merchant.changed` fire
-once per change with `{before, after, changed, cause}`. Prices come from the
-game's own rounding: `eqoa.merchant.price(ref, "buy" or "sell", quantity)`.
-`eqoa.items.slots`, `.stats` and `.attack_types` are the item enums by name, and
-`eqoa.gems.get/is_gem/format` look up the crafting gems.
+A key is its full name: `u`, `ctrl+u` and `shift+u` are three keys. If the default is already used by a
+game control the row starts empty and says so, and the player picks another. A mod key works in plain
+play, not while the player types or a game window is up. The rules are in
+[the reference, section 10](EQOA-API-SPEC.md#10-keys).
 
-The items example is [the bag viewer](../../bundled-mods/eqoa_bag_viewer/main.lua): a read-only Bags window
-that reads `eqoa.inventory` and `eqoa.bank`, takes its loot log from `loot.changed`, and listens to nothing
-else while it is closed. It is off by default.
+## 10. Doing things: actions
 
-While the start menu's item page is up the pack's `view` gives its tab, the stacks under it and the lit row; while a merchant window is up `MerchantState` gives its mode (menu, sell, buy), the option lit in the menu, `button_hint` (when words are loaded), and its `view` the rows and the lit one. FrontiersForge's `inventory`, `item`,
-`bank`, `loot`, `merchant` and `gems` modules read the same data with their own
-shapes (tab enum 0..3, `bank.GetItems` as `{idx, slot, level, name, amount}`).
+A mod may act in the game (target, cast, loot, sell, chat and more) on its own, without a click. Two
+things are needed:
 
-## Quests, camera and windows
+**Declare it.** List each action in `mod.json`. The player sees this list before enabling the mod.
 
-Read journal titles, camera orientation and active UI mode from native state:
-
-```lua
-local quests = eqoa.quests.list()
-if quests then
-    for _, q in ipairs(quests) do
-        eqoa.log.write("info", string.format("%d: %s", q.index, q.title))
-    end
-end
-
-local w = eqoa.windows.get() -- always safe; returns mode="none" outside world
-if w.busy then
-    for _, h in ipairs(eqoa.windows.parse_hint("|tExit")) do
-        eqoa.log.write("debug", h.button .. " -> " .. h.label)
-    end
-end
-
-eqoa.events.on("quests.changed", function(e)
-    eqoa.log.write("info", "journal count is now " .. #e.data.after)
-end)
-
-eqoa.events.on("windows.changed", function(e)
-    eqoa.log.write("info", "window mode: " .. e.data.after.mode)
-end)
+```json
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "my_helper",
+  "name": "My Helper",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "capabilities": ["eqoa.actions.use_item", "eqoa.actions.chat"]
+}
 ```
 
-`eqoa.camera.get()` / `eqoa.camera.compass()` return camera eye position, orbit angles and final eye compass heading (`camera.changed` coalesces on the 30 Hz game clock). `eqoa.mastery.get()`, `skills()` and `selected()` expose Class Mastery state without opening raw memory (`Player.mastery` mirrors `eqoa.mastery.get()`).
+`eqoa.actions.*` declares them all. Without a `capabilities` list an action returns the error
+`not_declared`; with a list that lacks it, `permission_denied`. A chat line that starts with `/` needs
+`eqoa.actions.command`; any other line needs `eqoa.actions.chat`.
 
-Save plain settings through `eqoa.settings.on_save`/`on_load`, or explicit
-`save`/`load`. They use the manager's active addon/profile slot. Settings contain
-only finite numbers, strings, booleans, nil and plain acyclic tables with string
-keys or dense array indexes. Handles and functions cannot be saved.
-
-`eqoa.files` paths are relative to private data. `resources/` selects this mod's
-overlay over read-only shared bundled resources; `package_resources/` selects
-its own package resources and overlay. Writes never alter either backing tree.
-Removing a fallback creates a private tombstone that survives restart. Other
-mods retain their own fallback. Bare media names search package then shared
-resources through the same overlays. Absolute host paths, traversal, other mods,
-links/junctions, networking, raw memory and process launching are excluded.
-
-Start with [the bundled hearts example](../../bundled-mods/eqoa_example_hearts/main.lua).
-Its ten hearts use ImGui draw lists, real player health, lifecycle cleanup and
-profile settings, with no Forge dependency. Live-game testing is still required.
-
-`eqoa.player.experience_for_level(level)` returns the native experience threshold for the requested level (1?59), including the native formula change at level 51. It does not add one to the argument. To query the next level's threshold, pass `player.level + 1`; arguments outside 1?59 return `nil, nil`. Forge keeps its pinned experience formula.
-
-## Actions
-
-Game actions under `eqoa.actions.*` go through the client's action broker and may be called autonomously from any event, timer, or render callback once the mod explicitly declares `eqoa.actions.*` (or the specific `eqoa.actions.<name>` capability) in `mod.json`'s `capabilities` list (similarly `eqoa.windows.takeover` for window takeover). A mod without a `capabilities` list in `mod.json` receives `nil, {code = "not_declared", ...}` with a diagnostic in Mods & Addons; a mod with a `capabilities` list missing that capability receives `nil, {code = "permission_denied", ...}`.
+**Wait for the result.** An action returns a request, not an outcome. The outcome arrives as an
+`action.result` event.
 
 ```lua
-local last_req
+local last
 
 eqoa.events.on("action.result", function(e)
-    local d = e.data
-    if last_req and d.request_id == last_req then
-        -- d.state: "queued" -> "dispatched" -> "completed" | "refused" | "cancelled" | "unknown"
-        if d.ok == false then
-            eqoa.log.write("warn", d.kind .. ": " .. (d.reason or d.code))
-        end
+    local r = e.data
+    if r.request_id ~= last then return end
+    -- r.state: "dispatched" (sent, waiting for the server), then "completed", "refused",
+    -- "cancelled" or "unknown" (the server never answered: do not assume either way)
+    if r.state == "refused" then
+        eqoa.log.write("warn", r.kind .. ": " .. tostring(r.reason or r.code))
     end
 end)
 
-eqoa.input.bind({id = "use_pot", label = "Use top item", default_key = ""}, function()
-    local inv = eqoa.inventory.get()
-    if inv and inv.items[1] then
-        local req, err = eqoa.actions.use_item(inv.items[1].ref)
-        if req then last_req = req else eqoa.log.write("warn", err.message) end
-    end
+eqoa.input.bind({ id = "use_first", label = "Use first item", default_key = "y" }, function()
+    local pack = eqoa.inventory.get()
+    local item = pack and pack.items[1]
+    if not item then return end
+    local request, err = eqoa.actions.use_item(item.ref)
+    if request then last = request else eqoa.log.write("warn", err.code .. ": " .. err.message) end
 end)
 ```
 
-- Poll `eqoa.actions.status(req)` for the retained `ActionResult` record or `eqoa.actions.cancel(req)` while a request is still `queued`.
-- `eqoa.actions.destroy` is `unsupported`; continuous controls (`move`, `look`, `buttons`) remain `not_yet`; query them with `eqoa.capabilities.get(...)`.
-- Window and quest actions (`drop_quest`, `mastery_share`, `mastery_browse`, `mastery_buy`, `mastery_refund`, `close_window`, `select_row`, `activate_row`, `dialog_answer`, `input_text`, `menu_command`) take a `QuestRef` or `WindowRef` read from `eqoa.quests` / `eqoa.windows`, count rows and options from 1 as listed, and go through the game's own keys, editor and request paths. A page change, a closed window or a changed journal makes the handle `stale_handle` at dispatch. Rows and dialog answers are delivered as key presses over the next frames, so `applied` means the keys were handed to the window. Password fields and the support/report window, editor and confirmation never take synthetic input (`permission_denied`). `menu_command` runs only an enabled row's `command` from `Window.rows`; any other string is `unsupported`.
+Things to know:
 
-```lua
-local w = eqoa.windows.find("quest_log")
-if w then eqoa.actions.activate_row(w.ref, 1) end
-```
-- See [the bag viewer](../../bundled-mods/eqoa_bag_viewer/main.lua) for click-menu actions (`use_item`, `equip`, `quick_slot`, `sell`, `bank_move`, `loot`, `loot_all`) and `action.result` feedback.
+- Actions work only in the game world, and most need the character alive with no game window up.
+- `eqoa.actions.destroy` does not exist for mods (`unsupported`); held movement and camera controls
+  (`move`, `look`, `buttons`) are not built yet (`not_yet`).
+- A mod can never send a bug report or type a password.
+- To work at a merchant, banker or corpse without the game's window appearing, see "Taking over a
+  window" in [the reference, section 7](EQOA-API-SPEC.md#7-quests-class-mastery-camera-windows-and-the-map-rounds-4-and-6);
+  [the bag viewer](../../bundled-mods/eqoa_bag_viewer/main.lua) does it.
 
+## 11. Where to go next
+
+- [EXAMPLES.md](EXAMPLES.md): what each bundled mod shows. Start with
+  [the hearts example](../../bundled-mods/eqoa_example_hearts/main.lua).
+- [EQOA-API-SPEC.md](EQOA-API-SPEC.md): the reference.
+- [VERSIONING.md](VERSIONING.md): what will never change under `eqoa/1`.
+- Test in the live game. A mod that loads without warnings is a good start, not proof that it works.

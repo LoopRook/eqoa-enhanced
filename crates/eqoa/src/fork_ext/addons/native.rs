@@ -812,8 +812,8 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
                     | "eqoa.abilities.list"
                     | "eqoa.hotbar.list"
                     | "eqoa.effects.list"
-                    | "eqoa.chat.channel"
-                    | "eqoa.combat.counters"
+                    | "eqoa.chat.get_channel"
+                    | "eqoa.combat.get_counters"
                     | "eqoa.input.get"
                     | "eqoa.fonts.default"
                     | "eqoa.settings.load"
@@ -1001,7 +1001,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         "eqoa.textures.formats.jpeg",
         "unsupported",
         None,
-        "the client decodes PNG only; convert JPEG to PNG or pass RGBA pixels",
+        "the client decodes PNG only; convert JPEG to PNG or pass RGBA pixels (a capability flag, probed with eqoa.capabilities.has; there is no eqoa.textures.formats table)",
     );
     bind(
         lua,
@@ -1123,6 +1123,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     modules
         .get::<Table>("abilities")?
         .set("scope", guard(lua, scope, "eqoa.abilities.scope", None)?)?;
+    // the table itself, as `eqoa.items.slots` is (round 7H)
+    describe(lua, "eqoa.abilities.scope", "supported", Some(2), "");
     let status = lua.create_table()?;
     for (name, id) in [("nameplate_hidden", 1), ("poisoned", 4), ("diseased", 8)] {
         status.set(name, id)?;
@@ -1137,6 +1139,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     modules
         .get::<Table>("entities")?
         .set("status", guard(lua, status, "eqoa.entities.status", None)?)?;
+    describe(lua, "eqoa.entities.status", "supported", Some(2), "");
     super::file_io::install_native(host)?;
     super::async_json::install(host)?;
     super::json_save::install(host)?;
@@ -1252,6 +1255,8 @@ fn install_fields(lua: &Lua) {
         ("eqoa.map.Bounds", "x_min z_min x_max z_max"),
         ("eqoa.map.Waypoint", "world_id x z label owner"),
         ("eqoa.input.Pointer", "x y inside_window"),
+        // what `eqoa.options.button` returns (round 4; described in round 7H)
+        ("eqoa.options.Button", "id label item_id"),
         ("eqoa.Vec2", "x y"),
         ("eqoa.Vec3", "x y z"),
         ("eqoa.Color", "r g b a"),
@@ -1358,7 +1363,7 @@ fn install_fields(lua: &Lua) {
         ("eqoa.hud.SinglePanelLayout", "panel"),
         ("eqoa.options.Toggle", "id label default value item_id"),
     ] {
-        let round = if path.starts_with("eqoa.map.") || path == "eqoa.input.Pointer" {
+        let round = if path.starts_with("eqoa.map.") || matches!(path, "eqoa.input.Pointer" | "eqoa.options.Button") {
             Some(4)
         } else if path.starts_with("eqoa.hud.")
             || path.starts_with("eqoa.options.")

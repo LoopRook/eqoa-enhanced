@@ -1,5 +1,5 @@
 // Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
-//! Action broker: gesture-gated queue, 30 Hz rate limiting, round-robin
+//! Action broker: the per-mod action queue, 30 Hz rate limiting, round-robin
 //! fairness, per-subsystem locks, `action.result` lifecycle, and server reply
 //! correlation.
 
@@ -974,10 +974,13 @@ impl BrokerState {
         Ok(vm_state.retained.iter().rev().find(|r| r.id == req.id).cloned())
     }
 
-    fn cancel(&mut self, req: RequestId) -> std::result::Result<bool, (&'static str, String)> {
+    /// `Some(true)`: cancelled (it was never sent). `Some(false)`: already sent to the server, which cannot be
+    /// undone: nothing is cancelled, the request keeps waiting and its real result is delivered (round 7H,
+    /// as a stopped batch's sent step is). `None`: not pending.
+    fn cancel(&mut self, req: RequestId) -> std::result::Result<Option<bool>, (&'static str, String)> {
         let now_tick = self.tick;
         let Some(vm_state) = self.vms.get_mut(&req.vm) else {
-            return Ok(false);
+            return Ok(None);
         };
         if let Some(pos) = vm_state.queued.iter().position(|q| q.id == req.id) {
             let item = vm_state.queued.remove(pos).expect("queued item");
@@ -997,38 +1000,34 @@ impl BrokerState {
             };
             vm_state.upsert_retained(rec.clone());
             vm_state.pending_events.push_back(rec);
-            return Ok(true);
+            return Ok(Some(true));
+        }
+        if vm_state.in_flight.get(&req.id).is_some_and(|f| f.native_sent) {
+            return Ok(Some(false));
         }
         if let Some(inflight) = vm_state.in_flight.remove(&req.id) {
-            let native_sent = inflight.native_sent;
-            if !native_sent {
-                self.expired_staged_kinds.push(inflight.kind);
-            }
+            // staged, not yet sent: the client still holds it, so it is cancelled
+            self.expired_staged_kinds.push(inflight.kind);
             let rec = ActionResultRecord {
                 id: inflight.id,
                 vm: inflight.vm,
                 kind: inflight.kind,
                 state: "cancelled",
-                phase: if native_sent { "server" } else { "dispatch" },
+                phase: "dispatch",
                 ok: Some(false),
                 code: Some("cancelled".into()),
-                reason: Some(if native_sent {
-                    "cancelled while awaiting server reply"
-                } else {
-                    "cancelled before dispatch"
-                }
-                .into()),
+                reason: Some("cancelled before dispatch".into()),
                 queued_tick: inflight.queued_tick,
-                dispatched_tick: native_sent.then_some(inflight.dispatched_tick),
+                dispatched_tick: None,
                 completed_tick: Some(now_tick),
                 detail: inflight.detail,
             };
             let vm_state = self.vms.get_mut(&req.vm).expect("vm exists");
             vm_state.upsert_retained(rec.clone());
             vm_state.pending_events.push_back(rec);
-            return Ok(true);
+            return Ok(Some(true));
         }
-        Ok(false)
+        Ok(None)
     }
 
     fn clear_vm(&mut self, vm: u64, reason: &str) {
@@ -1586,7 +1585,7 @@ impl BrokerState {
                                     kind: popped.kind.name(),
                                     state: "dispatched",
                                     phase: "dispatch",
-                                    ok: Some(true),
+                                    ok: None,
                                     code: None,
                                     reason: None,
                                     queued_tick: popped.queued_tick,
@@ -1781,7 +1780,7 @@ impl BrokerState {
                                     kind: step_kind.name(),
                                     state: "dispatched",
                                     phase: "dispatch",
-                                    ok: Some(true),
+                                    ok: None,
                                     code: None,
                                     reason: None,
                                     queued_tick: now_tick,
@@ -1909,7 +1908,7 @@ impl BrokerState {
                     kind: inflight.kind,
                     state: "dispatched",
                     phase: "dispatch",
-                    ok: Some(true),
+                    ok: None,
                     code: None,
                     reason: None,
                     queued_tick: inflight.queued_tick,
@@ -3903,8 +3902,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 );
             }
             match BROKER.with(|b| b.borrow_mut().cancel(req)) {
-                Ok(true) => lua.pack_multi((true, Value::Nil)),
-                Ok(false) => error(
+                Ok(Some(cancelled)) => lua.pack_multi((cancelled, Value::Nil)),
+                Ok(None) => error(
                     lua,
                     "eqoa.actions.cancel",
                     "not_found",
@@ -4415,7 +4414,15 @@ fn install_non_item_actions(lua: &Lua) -> Result<()> {
                 let (group, norm) = match filter.as_deref().map(str::trim) {
                     None | Some("") | Some("any") | Some("nearby") => (false, None),
                     Some("group") => (true, Some("group".to_string())),
-                    Some(k @ ("hostile" | "friendly" | "corpse")) => (false, Some(k.to_string())),
+                    Some("corpse") => (false, Some("corpse".to_string())),
+                    // The game's next-target key has no hostile or friendly form (upstream
+                    // `Play::cycle_target` takes only "group or not"): refused, never cycled unfiltered.
+                    Some(k @ ("hostile" | "friendly")) => {
+                        return Err((
+                            "unsupported",
+                            format!("the game has no '{k}' target cycling; use 'group', 'corpse' or no filter"),
+                        ));
+                    }
                     Some(other) => {
                         return Err((
                             "invalid_argument",
@@ -5152,7 +5159,7 @@ mod tests {
             assert_eq!(overflow.0, "busy");
         }
         // Cancel #32 before dispatch
-        assert!(BROKER.with(|b| b.borrow_mut().cancel(ids[31])).unwrap());
+        assert_eq!(BROKER.with(|b| b.borrow_mut().cancel(ids[31])).unwrap(), Some(true));
         assert_eq!(
             BROKER.with(|b| b.borrow().status(ids[31]).unwrap()).unwrap().state,
             "cancelled"

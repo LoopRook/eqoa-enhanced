@@ -804,7 +804,7 @@ fn install_math(lua: &Lua) -> Result<()> {
                     lua,
                     "eqoa.windows.open",
                     "busy",
-                    "summary open already queued this tick",
+                    "16 client window requests are already waiting",
                 );
             }
             lua.pack_multi((true, Value::Nil))
@@ -1341,6 +1341,22 @@ fn install_math(lua: &Lua) -> Result<()> {
             };
             let addon = super::native::session(lua).borrow().addon.clone();
             let ok = crate::fork_ext::bindpage::register(&addon, &id, &default_key, &label);
+            // A second bind of the same id replaces the first: one callback per press (round 7H).
+            let binds: mlua::Table = match lua.named_registry_value::<Value>("eqoa_input_binds")? {
+                Value::Table(t) => t,
+                _ => {
+                    let t = lua.create_table()?;
+                    lua.set_named_registry_value("eqoa_input_binds", t.clone())?;
+                    t
+                }
+            };
+            let events_tbl: mlua::Table = lua.globals().get::<mlua::Table>("eqoa")?.get("events")?;
+            let previous: Value = binds.raw_get(id.as_str())?;
+            if !previous.is_nil() {
+                let off_fn: mlua::Function = events_tbl.get("off")?;
+                let _ = off_fn.call::<mlua::MultiValue>(previous)?;
+                binds.raw_set(id.as_str(), Value::Nil)?;
+            }
             if let Some(cb) = cb_fn {
                 let id_for_cb = id.clone();
                 let addon_for_cb = addon.clone();
@@ -1377,10 +1393,11 @@ fn install_math(lua: &Lua) -> Result<()> {
                     }
                     Ok(())
                 })?;
-                let eqoa_tbl: mlua::Table = lua.globals().get("eqoa")?;
-                let events_tbl: mlua::Table = eqoa_tbl.get("events")?;
                 let on_fn: mlua::Function = events_tbl.get("on")?;
-                let _ = on_fn.call::<mlua::MultiValue>(("input.key", wrapper))?;
+                let subscription = on_fn.call::<mlua::MultiValue>(("input.key", wrapper))?;
+                if let Some(sub) = subscription.into_iter().next() {
+                    binds.raw_set(id.as_str(), sub)?;
+                }
             }
             lua.pack_multi((ok, Value::Nil))
         })?,

@@ -29,6 +29,16 @@ fn rig() -> (Play, Host) {
     rig_with_capabilities(&["eqoa.actions.*"])
 }
 
+/// `rig` with `drop_quest`, `mastery_buy` and `mastery_refund` bound as built (round 7H made them `not_yet` for
+/// mods until the confirm contract; their dispatch stays covered here for that day).
+fn rig_confirm_gated() -> (Play, Host) {
+    use crate::fork_ext::addons::window_actions::BIND_CONFIRM_GATED_FOR_TEST;
+    BIND_CONFIRM_GATED_FOR_TEST.with(|b| b.set(true));
+    let rig = rig();
+    BIND_CONFIRM_GATED_FOR_TEST.with(|b| b.set(false));
+    rig
+}
+
 fn rig_with_capabilities(caps: &[&str]) -> (Play, Host) {
     let p = ready();
     let host = Host::with_test_capabilities(caps).unwrap();
@@ -95,7 +105,7 @@ fn quests(p: &mut Play, titles: &[&str]) {
 
 #[test]
 fn round6d_drop_quest_sends_native_remove_and_refuses_stale_or_ungestured() {
-    let (mut p, host) = rig();
+    let (mut p, host) = rig_confirm_gated();
     quests(&mut p, &["Bat Eyes", "The Militia"]);
     p.mode = 22;
     let sent = p.session.sends_lost;
@@ -128,7 +138,7 @@ fn round6d_drop_quest_sends_native_remove_and_refuses_stale_or_ungestured() {
 
 #[test]
 fn round6d_mastery_actions_use_native_requests_and_gates() {
-    let (mut p, host) = rig();
+    let (mut p, host) = rig_confirm_gated();
     p.cm.m.x08 = 50;
     p.cm.skills = vec![crate::classmastery::Skill { id: 100, x00: 1, known: 1, ..Default::default() }];
     r6a::refresh(&p, None);
@@ -310,7 +320,7 @@ fn round6d_review_d_trainer_select_is_exact_or_refused() {
 
 #[test]
 fn round6d_review_d_mastery_buy_refund_use_the_live_skill_list() {
-    let (mut p, host) = rig();
+    let (mut p, host) = rig_confirm_gated();
     p.cm.m.x08 = 50;
     p.cm.skills = vec![crate::classmastery::Skill { id: 100, x00: 1, known: 1, on: true, ..Default::default() }];
     p.mode = 40;
@@ -327,7 +337,7 @@ fn round6d_review_d_mastery_buy_refund_use_the_live_skill_list() {
 
 #[test]
 fn round6d_review_d_edit_box_replaced_and_quest_stamp_changed_are_stale() {
-    let (mut p, host) = rig();
+    let (mut p, host) = rig_confirm_gated();
     p.open_edit(0x0B0F_0000, 128, -1, false);
     gesture_then(
         &mut p,
@@ -371,7 +381,8 @@ fn round6d_review_d_text_dialog_done_and_report_confirm_refused_at_queue_time() 
 fn round6d_dialog_answer_walks_the_confirm_and_the_report_guard_holds() {
     let (mut p, host) = rig();
     p.mode = 14;
-    p.mbox.prompt(&crate::ui::wide("Sure?"), 1, 0, 0, 0);
+    // a group invitation: the prompt a mod may accept (round 7H fix 1 refuses the others)
+    p.mbox.prompt(&crate::ui::wide("Join the group?"), 1, 0, 0x0702_0000, 0);
     gesture(&mut p, &host, "local w = eqoa.windows.find('confirm'); sel = w.dialog.selection; return eqoa.actions.dialog_answer(w.ref, 1)");
     assert!(last_ok(&host));
     host.execute("assert(sel == 2, 'a yes/no box starts on No')").unwrap();
@@ -448,9 +459,14 @@ fn round6d_capabilities_are_supported_for_what_is_wired() {
     let (_p, host) = rig();
     host.execute(
         r#"
-        for _, n in ipairs({"drop_quest","mastery_share","mastery_browse","mastery_buy","mastery_refund","close_window","select_row","activate_row","dialog_answer","input_text","menu_command"}) do
+        for _, n in ipairs({"mastery_share","mastery_browse","close_window","select_row","activate_row","dialog_answer","input_text","menu_command"}) do
             local c = eqoa.capabilities.get("eqoa.actions." .. n)
             assert(c and c.status == "supported", n)
+        end
+        -- round 7H: the steps the game confirms wait for the confirm contract
+        for _, n in ipairs({"drop_quest","mastery_buy","mastery_refund"}) do
+            local c = eqoa.capabilities.get("eqoa.actions." .. n)
+            assert(c and c.status == "not_yet", n)
         end
         local b = eqoa.capabilities.get("eqoa.actions.buttons")
         assert(b and b.status ~= "supported")
