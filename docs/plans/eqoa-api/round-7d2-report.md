@@ -82,7 +82,7 @@ Each was read in the code unless marked "(reported by a checking pass, not re-re
 - **`docs/modding/GETTING-STARTED.md`**: rewritten: where mods live, the manifest, a first mod, Mods & Addons
   and its F10 key, Rescan/Enable/Reload, where errors show, the rules that prevent bugs, capability probes,
   settings and files, reading the game, keys, actions as built (declaration, `not_declared` /
-  `permission_denied`, chat against command, `action.result` states). Eight Lua examples and two manifests,
+  `permission_denied`, chat against command, `action.result` states). Nine Lua examples and two manifests,
   all run by the test.
 - **D1 pages (reviewed and corrected):**
   - `README.md`: the "still being brought up to date" status removed; the support table added to the index;
@@ -194,9 +194,39 @@ runs.
   and fields by name).
 - `docs_readers_find_names_and_blocks`: the test's own readers.
 
-Results: see "Gates" below.
+### Results
 
-TEST_RESULTS_PLACEHOLDER
+- Local, with the disc linked (`run/eqoa.iso`, `EQOA_ISO`), through the shared build lock:
+  `python tools/run_gates.py --only round,wasm,footprint,paths --filter docs_`:
+  **round 5 passed, 0 failed, 0 ignored, 0 SKIP lines**; wasm PASS; footprint PASS (no upstream file
+  touched, no budget change); paths PASS. Ten examples ran (the nine Lua blocks of the guide and the template; the
+  guide's two manifests were checked by discovery).
+- The first run of the tests, against the pages as they stood before the rewrite, failed as it should:
+  `AGENT-GUIDE.md:11: eqoa.x.y`, `EQOA-API-SPEC.md: eqoa.entities.status` and `eqoa.abilities.scope`
+  (defect 8), and a guide example that called a name the client only refuses.
+
+### Negative control (executed)
+
+Two names misspelt in the pages (no rebuild needed: the pages are read at run time), the same command, then
+`git checkout -- docs/modding/EQOA-API-SPEC.md docs/modding/GETTING-STARTED.md` (status clean afterwards):
+
+- spec: the one mention of `eqoa.player.experience_for_level` changed to `...experience_for_levl`;
+- guide: `eqoa.player.get()` in the first example changed to `eqoa.player.gett()`.
+
+Result: **2 passed, 3 failed**, each for its reason:
+
+- `docs_every_eqoa_name_in_the_pages_exists_in_the_surface_file` (`docs_tests.rs:379`):
+  `EQOA-API-SPEC.md:237: eqoa.player.experience_for_levl` and `GETTING-STARTED.md:50: eqoa.player.gett`;
+- `docs_spec_names_everything_the_surface_file_calls_supported` (`docs_tests.rs:471`):
+  `1 supported name(s) the spec does not name: eqoa.player.experience_for_level`;
+- `docs_getting_started_and_template_lua_runs_clean` (`docs_tests.rs:329`), `3 problem(s) in 10 example(s)`:
+  `GETTING-STARTED.md:49: eqoa.player.gett is not in the surface file`; the client's own diagnostic
+  `"code":"unknown_symbol" ... "symbol":"eqoa.player.gett"`; and the Lua error
+  `attempt to call field 'gett' (a nil value)`.
+
+### CI
+
+CI_PLACEHOLDER
 
 ## 6. Not done, not verified
 
