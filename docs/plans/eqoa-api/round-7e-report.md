@@ -670,3 +670,39 @@ exact key): 21 tests fail; n=4 (bare keys consumed): `a_bare_mod_key_is_never_co
   success. `ci_gates.py cleanup` run.
 - Not verified: the live client (the real window key path, `Runtime::draw` opening the ImGui window, F10 as a Windows system key
   and whether it leaves the next key alone), real German/UK keyboards.
+
+## Recheck of b5e7e85a: two findings on the Mods & Addons key, and one note
+
+Commits: `test(input): manager key owns its press with no mod and is blocked where the window is not usable, on the old behaviour`
+(the 4 new tests, run on the old code: **all 4 failed for the intended reasons**), then `fix(input): the manager row owns its
+combination press with no mod enabled; its key does nothing where the window is not usable`. No upstream line.
+
+**1. A combination on the row with zero mods.** Cause: `Runtime::route_key` returned early when nothing runs, before
+`mod_owns_press` and `capture.press`, so the toggle was queued and the game also saw the press. Fix: the early return also requires that no
+enabled binding is on a modifier combination (`bindpage::any_combo_bound`, an atomic updated by `resolve`); `mod_owns_press` asks the
+same atomic first. So with the default F10 or no key, nothing changes (no allocation, no lock: the existing 0-allocation tests pass);
+with a combination on the row the press is consumed, **and so are its repeats and its release** (a press that was consumed keeps its owner
+in `Capture`, so a release after Shift was let go first is still the row's). Tests: `round7e_mgr2_a_combo_on_the_manager_row_owns_its_press_
+with_no_mod_enabled` (press and release, zero hosts), and a `route_key` unit test in `runtime.rs` (`round7e_mgr2_a_manager_combo_is_consumed_on_
+press_repeat_and_release_with_no_mod`: press, repeat, release with Shift let go first, then a plain Space is the game's). Control `R7E_BREAK=21`
+(the old early return): 3 tests fail (`round7e_key_tests.rs:1607`, `:1629`, `runtime.rs:1662`).
+
+**2. Where the window is not usable.** `Play::manager_key_blocked()` (fork_ext/play.rs): the loading screen (`loading.up()`), the full map
+(`map.open`) and a world change in progress. At character select there is no play (`is_plain_play` is already false) and a game window,
+typing, death or search are already outside `addon_input_available`. `report_viewer::addon_event` tells `bindpage::set_manager_blocked`
+before each key; the manager row then does nothing and is not consumed (a bare key never is; a combination is not either while blocked).
+**I did NOT change `addon_input_available()`**, so ordinary mod keys fire exactly when they did: in particular they still fire on the
+loading screen and with the full map up (the test asserts this, so the difference is visible). Mod keys during loading are probably also
+wrong, as you say; I did not widen the change. Tests: `round7e_mgr2_the_manager_key_is_blocked_while_loading_and_while_the_map_is_up`
+(a real `Play`: fresh = loading = blocked, after loading in the world = usable, `map.show()` = blocked, and `addon_input_available`
+unchanged: true with the map up, false in a game window), `round7e_mgr2_the_manager_key_does_nothing_where_the_window_would_not_be_usable`
+(F10 does nothing and a combination is not consumed while blocked; the same press works when unblocked). Controls: `R7E_BREAK=22` (blocked ignored):
+the second test fails at `:1622`; `R7E_BREAK=23` (the predicate always false): the Play test fails at `play.rs:5392`. **Not covered:** the wiring in
+`report_viewer::addon_event` (needs a `Window` and the App).
+
+**3. Known consequence, in the player note:** on a German keyboard a mod on Shift+7 owns that press, so the command line no longer opens from
+Shift+7 there; the player chose the binding and can rebind either side. The note also says the key does nothing on the loading screen, with
+the full map up, or while the world changes.
+
+### Gates (recheck round)
+(filled in below)
