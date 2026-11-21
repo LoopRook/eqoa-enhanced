@@ -67,6 +67,23 @@ pub(super) fn install(lua: &mlua::Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>
             })?,
         )?;
     }
+    // Each method a draw list has is in the registry as `ImDrawList.<Name>`, read from the type's own
+    // registration (`methods` below), so the registry follows what is built (round 7H). The probe is
+    // never drawn with.
+    let probe = lua.create_userdata(DrawList {
+        frame: frame.clone(),
+        epoch: frame.borrow().epoch,
+        context: 0,
+        target: Target::Background,
+    })?;
+    if let mlua::Value::Table(index) = probe.metatable()?.get::<mlua::Value>("__index")? {
+        for pair in index.pairs::<String, mlua::Value>() {
+            let (name, value) = pair?;
+            if value.is_function() {
+                super::super::native::describe(lua, &format!("ImDrawList.{name}"), "supported", Some(2), "");
+            }
+        }
+    }
     Ok(())
 }
 
