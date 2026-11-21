@@ -6,7 +6,7 @@ This is the reference for the native Lua mod API of EQOA Enhanced, **as built**:
 - **Frozen.** `eqoa/1` is frozen with the Stable release that first carries rounds 4 to 7 of the API. From that release on it only grows: nothing described here is renamed, removed or changed in meaning. [VERSIONING.md](VERSIONING.md) says exactly what that covers.
 - **The client is the authority.** [SUPPORT-TABLE.md](SUPPORT-TABLE.md) lists every name with its status. It is printed by the client itself (`eqoa mod-api`) and checked against the client by a test, so it cannot drift; a second test checks this page against it. Where this page and the table ever disagree, the table is right.
 - **Feature-test, do not assume.** `eqoa.revision` rises when something is added. `eqoa.capabilities.has("eqoa.map.set_waypoint")` asks about one name (§2).
-- A few numbers below are marked **design intent, not part of the promise**: they describe how the client is tuned today and may change. Everything else is the contract.
+- A few numbers below are marked **design intent, not part of the promise**: they describe how the client is tuned today and may change. Section 8 has a short list marked **under review**. Everything else is the contract.
 
 ## 1. Conventions
 
@@ -707,7 +707,7 @@ A mod can keep the game's corpse, merchant or bank window from appearing while i
 |---|---|
 | The mod declares `eqoa.windows.takeover` | `not_declared` (no `capabilities` list) or `permission_denied` (not in the list) |
 | `kind` names one of the game's windows (a `Window.kind` from the table above, or an overlay) and `scope` is `"own"` or `"all"` | `invalid_argument` |
-| A window that only exists in the client (`inventory`, `spellbook`, `quest_log`, `trainer`, `mastery`, `recipe_book`, `experiment`, `start_menu`, `map`) is asked for with scope `"all"` | `invalid_argument` with scope `"own"` |
+| Scope `"own"` is not asked for a window that exists only in the client (`inventory`, `spellbook`, `quest_log`, `trainer`, `mastery`, `recipe_book`, `experiment`, `start_menu`, `map`): there is no session to start, so such a window can only be replaced whole | `invalid_argument` |
 | This build can replace that window: `loot`, `merchant` or `bank` | `unsupported` for every other window |
 | For scope `"all"`: the manifest's `replaces` list names that window | `not_declared` |
 | For scope `"all"`: the player's **Use the game's windows** switch is off | `unavailable` |
@@ -721,7 +721,7 @@ So `not_declared` has two meanings for takeover: no `capabilities` list at all, 
 
 - `Replaces game windows: Loot, Merchant, Bank` for the windows in `replaces` this build can replace (only when the mod also declares `eqoa.windows.takeover`);
 - `Not replaceable in this version: ...` for the other windows in `replaces`, by the game's own titles;
-- `Replaces HUD: ...` for `hud.<piece>` entries.
+- `Replaces HUD: ...` for `hud.<piece>` entries, by token (`hud.target` reads `Target frame`). For a mod that also declares `eqoa.windows.takeover` these are listed in the `Replaces game windows` line instead.
 
 **The player's switch.** Mods & Addons has a checkbox, **Use the game's windows**. It is an emergency override for full replacements only, and it is remembered across restarts. Turning it on releases every scope `"all"` claim at once (the game's windows come back) and stops batches that held or used one; while it is on, `takeover(kind, {scope="all"})` is refused with `unavailable`. Scope `"own"` claims are not affected: helpers keep working.
 
