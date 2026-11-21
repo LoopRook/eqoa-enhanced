@@ -720,6 +720,12 @@ function M.open_loot_corpse(after_kind, corpse_id)
 end
 
 function M.open_talk_npc(talk_kind, verb, after_fn)
+    -- one open at a time, as for corpses: a second talk while the first is unanswered would take over the
+    -- first's answer (its item unsold, the second sold in its place)
+    if M.pending_open then
+        local what = M.pending_open.kind == "loot" and "a corpse" or ("the " .. M.pending_open.kind)
+        return nil, {code = "busy", message = "still waiting for the server to open " .. what}
+    end
     local dist = M.npc_distance(talk_kind, true)
     if M.far_gate(talk_kind, verb) then return nil, {message = TOO_FAR[talk_kind]} end
     if not M.ensure_takeover(talk_kind) then return nil, {message = "window busy"} end
