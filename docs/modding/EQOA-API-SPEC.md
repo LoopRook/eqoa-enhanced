@@ -216,7 +216,7 @@ Every event is an `Event = {name:string, seq:uint, time:number, tick:uint, frame
 | `quests.changed`, `mastery.changed`, `camera.changed`, `windows.changed`, `map.changed` | `{before, after, changed}` | §7 |
 | `guide.lost` | §7 | A map guide ended by itself. |
 | `action.result`, `batch.progress`, `batch.result` | an `ActionResult` / `BatchResult` | §8 |
-| `resource.ready`, `resource.failed` | `{kind:string, request?, handle?, value?, path?, error?}` | Something loaded or saved in the background finished. `kind` is `"texture"`, `"font"`, `"sound"`, `"json"`, `"json_saved"`, `"import"` or `"export"` (§5). `resource.ready` may carry `handle`, `value` or `path`; `resource.failed` carries `error`. More kinds may be added. |
+| `resource.ready`, `resource.failed` | `{kind:string, request?, handle?, value?, path?, error?}` | Something loaded or saved in the background finished. `kind` is `"texture"`, `"font"`, `"sound"`, `"json"`, `"json_saved"`, `"import"` or `"export"` (§5). `resource.ready` carries `handle` for a texture, font or sound (and the decoded value for `json`), `request` for the file kinds (`json`, `json_saved`, `import`, `export`), `value` only for `json` and `path` only for `import` and `export`. `resource.failed` carries `error`, whose `capability` is the function that made the request (`eqoa.textures.load`, `eqoa.textures.rgba`, `eqoa.fonts.load`, `eqoa.sound.load`, `eqoa.files.load_json`, ...). More kinds may be added. |
 | `shared.changed` | `{mod:string, path:string}` | A file another mod shares was saved or removed (§5). |
 | `mod.command` | `{from:string, command:string, args}` | Another mod sent a command (§5). |
 

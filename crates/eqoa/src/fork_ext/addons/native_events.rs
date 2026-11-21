@@ -827,9 +827,27 @@ pub(crate) fn clear(host: &Host) {
         super::native_core::invalidate_capture();
     }
 }
+/// A texture, font or sound load finished: `resource.ready`, or `resource.failed` whose error names the
+/// `eqoa/1` function that loads that kind (`eqoa.textures.load`, `eqoa.fonts.load`, `eqoa.sound.load`).
 pub(crate) fn resource(
     lua: &mlua::Lua,
     kind: &str,
+    handle: Value,
+    failure: Option<&str>,
+) -> Result<()> {
+    let capability = match kind {
+        "texture" => "eqoa.textures.load",
+        "font" => "eqoa.fonts.load",
+        _ => "eqoa.sound.load",
+    };
+    resource_from(lua, kind, capability, handle, failure)
+}
+
+/// `resource` for a load another function made (a texture from memory: `eqoa.textures.rgba`).
+pub(crate) fn resource_from(
+    lua: &mlua::Lua,
+    kind: &str,
+    capability: &str,
     handle: Value,
     failure: Option<&str>,
 ) -> Result<()> {
@@ -849,7 +867,7 @@ pub(crate) fn resource(
             record(
                 lua,
                 "eqoa.Error",
-                &json!({"code":"failed","message":message,"capability":format!("eqoa.{kind}.load")}),
+                &json!({"code":"failed","message":message,"capability":capability}),
             )?,
         )?;
     }

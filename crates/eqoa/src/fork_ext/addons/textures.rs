@@ -308,18 +308,20 @@ impl Textures {
                         &bytes.as_bytes(),
                     ) {
                         Ok(ud) => {
-                            super::native_events::resource(
+                            super::native_events::resource_from(
                                 lua,
                                 "texture",
+                                "eqoa.textures.rgba",
                                 Value::UserData(ud.clone()),
                                 None,
                             )?;
                             Ok(ud)
                         }
                         Err(e) => {
-                            super::native_events::resource(
+                            super::native_events::resource_from(
                                 lua,
                                 "texture",
+                                "eqoa.textures.rgba",
                                 Value::Nil,
                                 Some(&e.to_string()),
                             )?;

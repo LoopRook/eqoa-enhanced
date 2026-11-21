@@ -124,7 +124,8 @@ EVENT_OPTIONAL = {
     ['batch.result'] = 'code reason failed_step',
     -- text: only a key that types a character
     ['input.key'] = 'text',
-    -- handle: a texture, font or sound (or a decoded JSON value); request/value/path: a file or JSON request
+    -- handle: a texture, font or sound (or a decoded JSON value); request: a file or JSON request; value: only
+    -- json; path: only import and export (round 7H: declared, and filled only there)
     ['resource.ready'] = 'handle request value path',
     -- handle: only a font that fell back to the default; request: only a file or JSON request
     ['resource.failed'] = 'handle request',

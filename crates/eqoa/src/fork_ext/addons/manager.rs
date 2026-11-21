@@ -3224,6 +3224,8 @@ mod tests {
                 assert(seen['shared.changed'].data.path == 'data/journal.json', seen['shared.changed'].data.path)
                 assert(seen['resource.ready'].data.kind == 'texture')
                 assert(seen['resource.failed'].data.kind == 'texture')
+                -- round 7H: the function that made the texture, a name the registry has
+                assert(seen['resource.failed'].data.error.capability == 'eqoa.textures.rgba', seen['resource.failed'].data.error.capability)
                 event_fields(seen, manager_events)
             "#,
             )
