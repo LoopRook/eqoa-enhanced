@@ -4746,3 +4746,62 @@ fn round7c_bag_viewer_sells_single_items_near_a_merchant_body() {
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
 }
+
+/// Recheck LOW 1: a second Sell 1 clicked before the merchant answers the first's talk is refused with the
+/// busy reason (as a second corpse open is), and the first item is the one sold.
+#[test]
+fn round7c_bag_viewer_second_sell_before_the_merchant_answers_is_refused() {
+    big_stack(round7c_bag_viewer_second_sell_before_the_merchant_answers_is_refused_body)
+}
+fn round7c_bag_viewer_second_sell_before_the_merchant_answers_is_refused_body() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else {
+        eprintln!("SKIP round7c second sell before the answer: no GPU adapter");
+        return;
+    };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [6.0, 0.0, 0.0]);
+    bv.open();
+    bv.frames(2);
+    let click_sell = |bv: &mut Bv, slot: usize| {
+        bv.click(bv.slot(slot));
+        bv.frames(2);
+        let (x, y, enabled, _, _) = bv.menu_row("Sell 1").expect("Sell 1 is offered");
+        assert!(enabled);
+        bv.click((x, y));
+        bv.frames(1);
+    };
+    // Sell 1 of the potions: its talk goes out, no answer yet
+    click_sell(&mut bv, 2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.target, 9002);
+    // Sell 1 of the pelts before the merchant answers
+    click_sell(&mut bv, 7);
+    let (text, ok) = bv.result_text().expect("a result line");
+    assert_eq!(ok, Some(false), "{text}");
+    assert_eq!(text, "Sell 1: still waiting for the server to open the merchant");
+    // the merchant answers: the potion is the one sold
+    bv.play.bags_merchant_packet(9002);
+    assert_eq!(bv.play.mode, 0);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_shop_pending(), "the first item's sale went out");
+    bv.play.bags_sell_confirm(1, 1);
+    bv.play.bags_merchant_packet(9002);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let (text, ok) = bv.result_text().expect("a result line");
+    assert_eq!(ok, Some(true), "{text}");
+    assert!(text.starts_with("Sell 1"), "{text}");
+    assert_eq!(bv.eval::<i64>("eqoa.inventory.get().items[2].quantity"), 4, "one potion sold");
+    assert_eq!(bv.eval::<i64>("eqoa.inventory.get().items[7].quantity"), 3, "the pelts were not sold");
+    assert_eq!(bv.play.mode, 0);
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}

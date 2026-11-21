@@ -4665,3 +4665,36 @@ fn round7c_switch_on_mid_batch_leaves_a_helper_claim_batch_running() {
     .unwrap();
     window_takeover::reset_all_for_test();
 }
+
+/// Recheck LOW 2: zoning ends the loot and merchant list graces with every claim, so a new zone's entity that
+/// reuses the id within 3 s is not taken hidden.
+#[test]
+fn round7c_zoning_ends_the_list_graces() {
+    use crate::fork_ext::addons::window_takeover::{
+        self, TakeoverKind, TakeoverScope, arm_pending_open, end_session_for_vm, release_all, takeover, try_accept_open,
+    };
+    for kind in [TakeoverKind::Loot, TakeoverKind::Merchant] {
+        window_takeover::reset_all_for_test();
+        assert!(takeover(1, "r7c_mod", kind, TakeoverScope::Own).is_ok());
+        assert!(arm_pending_open(kind, 1, 77));
+        assert!(try_accept_open(kind, Some(77), Some(77), None), "{kind:?}: the mod's own open is hidden");
+        if kind == TakeoverKind::Merchant {
+            window_takeover::note_merchant_transaction_sent();
+        }
+        end_session_for_vm(1, kind);
+        // control: before zoning, the grace holds the list after the session's end hidden
+        let snapshot_grace = try_accept_open(kind, Some(77), Some(77), None);
+        assert!(snapshot_grace, "{kind:?}: the grace holds the list after the session's end");
+        window_takeover::reset_all_for_test();
+        assert!(takeover(1, "r7c_mod", kind, TakeoverScope::Own).is_ok());
+        assert!(arm_pending_open(kind, 1, 77));
+        assert!(try_accept_open(kind, Some(77), Some(77), None));
+        if kind == TakeoverKind::Merchant {
+            window_takeover::note_merchant_transaction_sent();
+        }
+        end_session_for_vm(1, kind);
+        release_all();
+        assert!(!try_accept_open(kind, Some(77), Some(77), None), "{kind:?}: after zoning, the same id shows its window");
+    }
+    window_takeover::reset_all_for_test();
+}
