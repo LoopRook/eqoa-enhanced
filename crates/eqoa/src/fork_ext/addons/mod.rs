@@ -125,6 +125,8 @@ pub(crate) mod quest_log;
 mod round_3_picture_tests;
 #[cfg(test)]
 mod round7c_fix_tests;
+#[cfg(test)]
+mod round7h_tests;
 mod sandbox;
 mod spike;
 pub(crate) mod storage;
