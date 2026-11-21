@@ -219,7 +219,7 @@ play, not while the player types or a game window is up. The rules are in
 A mod may act in the game (target, cast, loot, sell, chat and more) on its own, without a click. Two
 things are needed:
 
-1. **Declare it.** List each action in `mod.json`. The player sees this list before enabling the mod.
+**Declare it.** List each action in `mod.json`. The player sees this list before enabling the mod.
 
 ```json
 {
@@ -234,12 +234,12 @@ things are needed:
 }
 ```
 
-   `eqoa.actions.*` declares them all. Without a `capabilities` list an action returns the error
-   `not_declared`; with a list that lacks it, `permission_denied`. A chat line that starts with `/` needs
-   `eqoa.actions.command`; any other line needs `eqoa.actions.chat`.
+`eqoa.actions.*` declares them all. Without a `capabilities` list an action returns the error
+`not_declared`; with a list that lacks it, `permission_denied`. A chat line that starts with `/` needs
+`eqoa.actions.command`; any other line needs `eqoa.actions.chat`.
 
-2. **Wait for the result.** An action returns a request, not an outcome. The outcome arrives as an
-   `action.result` event.
+**Wait for the result.** An action returns a request, not an outcome. The outcome arrives as an
+`action.result` event.
 
 ```lua
 local last

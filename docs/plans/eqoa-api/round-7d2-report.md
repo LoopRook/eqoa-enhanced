@@ -226,7 +226,14 @@ Result: **2 passed, 3 failed**, each for its reason:
 
 ### CI
 
-CI_PLACEHOLDER
+GitHub run **44873198507 at 2a2d056f: success** (`python tools/ci_gates.py push|status|cleanup`; `cleanup`
+run). addons 680 passed / 0 failed / 25 ignored / 17 SKIP; full 3323 passed / 0 failed / 37 ignored /
+378 SKIP; wasm, footprint, paths success; player-release 20 passed; tools 201 passed / 1 SKIP. CI has no
+disc and no GPU: its SKIPs are those tests. The five `docs_` tests need neither and ran there.
+
+Commits after that run change no code and no Lua example: the guide's actions section lost its numbered
+list (prose only) and this report got its results. The docs tests were run again locally on the final
+pages: `--only round,paths --filter docs_`: 5 passed, 0 failed, 0 SKIP lines; paths PASS.
 
 ## 6. Not done, not verified
 
