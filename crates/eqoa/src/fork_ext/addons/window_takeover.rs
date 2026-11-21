@@ -130,6 +130,10 @@ pub(crate) struct HiddenSession {
     /// The player asked for a corpse themselves (a loot request no claim of the holder stood behind) while
     /// this session was up: the next list is theirs, not the session's continuing.
     pub player_asked: bool,
+    /// Merchant: a sale or buy the holder sent in this session waits for its answer, and the server answers
+    /// one with the merchant's list again (owner test fix 1). That list is the session going on; a list with
+    /// no such answer owed (the player talking to the merchant themselves) is the player's window.
+    pub relist_owed: bool,
 }
 
 impl Default for HiddenSession {
@@ -142,6 +146,7 @@ impl Default for HiddenSession {
             opened_at_pos: None,
             last_activity: Instant::now(),
             player_asked: false,
+            relist_owed: false,
         }
     }
 }
@@ -174,6 +179,9 @@ struct ListGrace {
 #[derive(Default)]
 struct TakeoverState {
     grace_loot: Option<ListGrace>,
+    /// The merchant's list still owed for the mod's last sale or buy when its hidden session ended (the
+    /// sale's answer can follow the action's end): held hidden for `LIST_GRACE`, then closed again quietly.
+    grace_merchant: Option<ListGrace>,
     holders: [Option<Holder>; 3],
     pending_opens: [Option<PendingOpen>; 3],
     /// Why a kind's hidden session is to end (set by release, the mod finishing, the holder going).
@@ -189,6 +197,7 @@ struct TakeoverState {
 impl TakeoverState {
     fn has_activity(&self) -> bool {
         self.grace_loot.is_some()
+            || self.grace_merchant.is_some()
             || self.holders.iter().any(Option::is_some)
             || self.pending_opens.iter().any(Option::is_some)
             || self.pending_close.iter().any(Option::is_some)
@@ -278,13 +287,16 @@ pub(crate) fn forget_switch_for_test() {
     USE_GAME_WINDOWS.with(|value| value.set(None));
 }
 
-/// The player's "Use the game's windows" switch: saved with the fork's settings. Turning it on releases every
-/// claim and stops each running batch that worked through a released claim, as its Stop button would.
+/// The player's "Use the game's windows" switch, an emergency override for full replacements: saved with the
+/// fork's settings. It governs only `scope = "all"` claims (owner, 2026-11-20, option a): turning it on releases
+/// every `all` claim and stops each running batch that worked through one, as its Stop button would, and while
+/// it is on an `all` claim is refused `unavailable`. Helper claims (`own`, hiding only the sessions the mod
+/// itself opened) are untouched.
 pub(crate) fn set_use_game_windows(on: bool) {
     USE_GAME_WINDOWS.with(|value| value.set(Some(on)));
     save_switch(on);
     if on && has_activity() {
-        let released = release_claims("released by the player", true);
+        let released = release_claims_where("released by the player", |scope| scope == TakeoverScope::All);
         super::action_broker::stop_batches_of_released_claims(&released);
     }
 }
@@ -295,10 +307,10 @@ pub(crate) fn takeover(
     kind: TakeoverKind,
     scope: TakeoverScope,
 ) -> std::result::Result<(), (&'static str, String)> {
-    if use_game_windows() {
+    if scope == TakeoverScope::All && use_game_windows() {
         return Err((
             "unavailable",
-            "the player is using the game's windows".into(),
+            "the player is using the game's windows: no mod replaces them".into(),
         ));
     }
     with_state_mut(|s| {
@@ -365,19 +377,23 @@ pub(crate) fn release_vm(vm: u64) {
 }
 
 pub(crate) fn release_all() {
-    let _ = release_claims("zoning", false);
+    let _ = release_claims_where("zoning", |_| true);
+    // a list after the mod's last take or sale belongs to the zone left: a new zone may reuse its entity id
+    with_state_mut(|s| {
+        s.grace_loot = None;
+        s.grace_merchant = None;
+    });
 }
 
-/// Releases every claim; returns who held what.
-fn release_claims(reason: &'static str, clear_grace: bool) -> Vec<(u64, TakeoverKind)> {
+/// Releases every claim whose scope `which` selects; returns who held what.
+fn release_claims_where(reason: &'static str, which: impl Fn(TakeoverScope) -> bool) -> Vec<(u64, TakeoverKind)> {
     with_state_mut(|s| {
-        if clear_grace {
-            s.grace_loot = None;
-        }
         let mut released = Vec::new();
         for kind in TakeoverKind::ALL {
             let idx = kind as usize;
-            if let Some(holder) = s.holders[idx].take() {
+            if s.holders[idx].as_ref().is_some_and(|h| which(h.scope))
+                && let Some(holder) = s.holders[idx].take()
+            {
                 s.pending_opens[idx] = None;
                 s.pending_close[idx] = Some(reason);
                 released.push((holder.vm, kind));
@@ -424,6 +440,9 @@ pub(crate) fn arm_pending_open(kind: TakeoverKind, vm: u64, target_id: u32) -> b
         if kind == TakeoverKind::Loot {
             s.grace_loot = None;
         }
+        if kind == TakeoverKind::Merchant {
+            s.grace_merchant = None;
+        }
         s.pending_opens[idx] = Some(PendingOpen {
             vm,
             target_id,
@@ -441,6 +460,20 @@ pub(crate) fn clear_pending_open(kind: TakeoverKind) {
     }
     with_state_mut(|s| {
         s.pending_opens[kind as usize] = None;
+    });
+}
+
+/// The holder's sale or buy just went to the server in its hidden merchant session: the merchant's list the
+/// server answers it with is owed to the session (`decide_open`).
+pub(crate) fn note_merchant_transaction_sent() {
+    if !has_activity() {
+        return;
+    }
+    with_state_mut(|s| {
+        let h = &mut s.hidden[TakeoverKind::Merchant as usize];
+        if h.active {
+            h.relist_owed = true;
+        }
     });
 }
 
@@ -548,6 +581,27 @@ pub(crate) fn decide_open(
                 }
             }
         }
+        // The answer to the mod's last sale or buy, after its hidden session ended (and the claim may be
+        // released): the session's, closed again at once, quietly.
+        if kind == TakeoverKind::Merchant
+            && let Some(g) = s.grace_merchant
+        {
+            if g.until <= now {
+                s.grace_merchant = None;
+            } else if s.pending_opens[idx].is_none()
+                && !s.hidden[idx].active
+                && observed_target == Some(g.target_id)
+            {
+                s.grace_merchant = None;
+                s.close_owed[idx] = Some(OwedClose {
+                    reason: "the server listed the merchant again after the mod's last sale or buy",
+                    had_session: true,
+                });
+                return OpenDecision::Accepted(
+                    "the server lists the merchant again after the mod's last sale or buy",
+                );
+            }
+        }
         let Some((holder_vm, holder_scope)) = s.holders[idx].as_ref().map(|h| (h.vm, h.scope))
         else {
             s.pending_opens[idx] = None;
@@ -583,6 +637,7 @@ pub(crate) fn decide_open(
                         opened_at_pos: self_pos.map(|p| p.map(f32::to_bits)),
                         last_activity: now,
                         player_asked: false,
+                        relist_owed: false,
                     };
                     return OpenDecision::Accepted("answers the holder's own request");
                 }
@@ -610,6 +665,22 @@ pub(crate) fn decide_open(
                 }
             }
         }
+        // The server answers a sale or buy with the merchant's list again (owner test 2026-11-20: three
+        // 0x00B7 for one talk, one per sale): while the holder's own sale waits for it, that list is the
+        // hidden merchant session going on. Without one owed, it is the player's own talk to that merchant.
+        if kind == TakeoverKind::Merchant && holder_scope == TakeoverScope::Own {
+            let h = &mut s.hidden[idx];
+            if h.active && h.vm == holder_vm && observed_target == Some(h.target_id) {
+                if h.relist_owed {
+                    h.relist_owed = false;
+                    h.last_activity = now;
+                    return OpenDecision::Accepted(
+                        "the server lists the holder's hidden merchant again after its sale or buy",
+                    );
+                }
+                why = "no sale or buy of the holder's waits for this list (the player's own talk)";
+            }
+        }
         if holder_scope == TakeoverScope::All {
             s.pending_close[idx] = None;
             s.hidden[idx] = HiddenSession {
@@ -620,6 +691,7 @@ pub(crate) fn decide_open(
                 opened_at_pos: self_pos.map(|p| p.map(f32::to_bits)),
                 last_activity: now,
                 player_asked: false,
+                relist_owed: false,
             };
             return OpenDecision::Accepted(
                 "holder takes over every window of this kind (scope all)",
@@ -661,8 +733,15 @@ pub(crate) fn end_session_for_vm(vm: u64, kind: TakeoverKind) {
             && s.hidden[idx].vm == vm
             && s.hidden[idx].scope == TakeoverScope::Own
         {
-            if kind == TakeoverKind::Loot && !use_game_windows() {
+            if kind == TakeoverKind::Loot {
                 s.grace_loot = Some(ListGrace {
+                    target_id: s.hidden[idx].target_id,
+                    until: Instant::now() + LIST_GRACE,
+                    player_asked: false,
+                });
+            }
+            if kind == TakeoverKind::Merchant && s.hidden[idx].relist_owed {
+                s.grace_merchant = Some(ListGrace {
                     target_id: s.hidden[idx].target_id,
                     until: Instant::now() + LIST_GRACE,
                     player_asked: false,
@@ -693,6 +772,9 @@ where
     with_state_mut(|s| {
         if s.grace_loot.is_some_and(|g| g.until <= now) {
             s.grace_loot = None;
+        }
+        if s.grace_merchant.is_some_and(|g| g.until <= now) {
+            s.grace_merchant = None;
         }
         let closed = std::mem::take(&mut s.pending_close);
         for kind in TakeoverKind::ALL {

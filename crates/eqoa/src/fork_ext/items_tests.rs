@@ -4265,12 +4265,13 @@ fn round7c_game_windows_switch_is_saved_and_stops_a_claimed_batch() {
     p.dump.inventory = list(&[a, b]);
     p.bags_open_merchant(88);
     p.forge_snapshot(None);
-    let host = Host::with_test_capabilities(&["eqoa.actions.*", "eqoa.windows.takeover"]).unwrap();
+    // the switch governs full replacements (owner test fix 1, option a): the claim is `all`
+    let host = round7c_all_host(&["eqoa.actions.*", "eqoa.windows.takeover"]);
     host.execute(
         r#"
         bres = {}
         eqoa.events.on('batch.result', function(e) bres[#bres + 1] = e.data end)
-        assert(eqoa.windows.takeover('merchant'))
+        assert(eqoa.windows.takeover('merchant', {scope = 'all'}))
         local inv = assert(eqoa.inventory.get())
         assert(eqoa.actions.batch({ steps = {
             { kind = 'sell', item = inv.items[1].ref, count = 1 },
@@ -4317,11 +4318,11 @@ fn round7c_switch_stops_batch_that_reaches_a_claim_by_talking() {
     for (claim, npc) in [("merchant", 9002), ("bank", 9003)] {
         action_broker::reset_all_for_test();
         window_takeover::reset_all_for_test();
-        let host = r65fix_host(&["eqoa.actions.*", "eqoa.windows.takeover"]);
+        let host = round7c_all_host(&["eqoa.actions.*", "eqoa.windows.takeover"]);
         let mut p = r65fix_world();
         p.forge_snapshot(None);
         host.execute(&format!(r#"
-            assert(eqoa.windows.takeover('{claim}'))
+            assert(eqoa.windows.takeover('{claim}', {{scope = 'all'}}))
             batch = assert(eqoa.actions.batch({{
                 {{kind='talk', entity_id={npc}}}, {{kind='chat', text='after'}}
             }}))
@@ -4347,6 +4348,11 @@ fn round7c_switch_stops_batch_that_reaches_a_claim_by_talking() {
 }
 
 fn round7c_sale_batch_for_switch() -> (Play, Host) {
+    round7c_sale_batch("all")
+}
+
+/// Two sales in a merchant window, as a batch, by a mod holding a `scope` claim on the merchant.
+fn round7c_sale_batch(scope: &str) -> (Play, Host) {
     use crate::fork_ext::addons::{action_broker, window_takeover};
     action_broker::reset_all_for_test();
     window_takeover::reset_all_for_test();
@@ -4361,12 +4367,13 @@ fn round7c_sale_batch_for_switch() -> (Play, Host) {
     p.dump.inventory = list(&[a, b]);
     p.bags_open_merchant(88);
     p.forge_snapshot(None);
-    let host = Host::with_test_capabilities(&["eqoa.actions.*", "eqoa.windows.takeover"]).unwrap();
+    let host = round7c_all_host(&["eqoa.actions.*", "eqoa.windows.takeover"]);
+    host.lua.globals().set("claim_scope", scope).unwrap();
     host.execute(
         r#"
         results = {}
         eqoa.events.on('batch.result', function(e) results[#results + 1] = e.data end)
-        assert(eqoa.windows.takeover('merchant'))
+        assert(eqoa.windows.takeover('merchant', {scope = claim_scope}))
         local inv = assert(eqoa.inventory.get())
         batch = assert(eqoa.actions.batch({ steps = {
             { kind = 'sell', item = inv.items[1].ref, count = 1 },
@@ -4455,4 +4462,239 @@ fn round7c_game_windows_switch_round_trips_through_the_settings_store() {
     assert!(read_on, "the switch reads back on after a restart");
     assert_eq!(after_off, format!("{seed}use_game_windows=off\n"), "one switch line, the others kept");
     assert!(!read_off, "the switch reads back off after a restart");
+}
+
+/// Owner test fix 1 (finding 14): the server answers each sale in the mod's hidden merchant session with the
+/// merchant's list again (the owner's log: three 0x00B7 for one talk). As Bag Viewer's Sell junk does: a
+/// talk answered hidden, then a batch of two sales. The list answering the first sale arrives while the batch
+/// runs; the one answering the last arrives after the batch ended the hidden session. Both stay hidden. A
+/// list no sale of the mod's waits for (the player talking to that merchant themselves) shows the window.
+#[test]
+fn round7c_merchant_list_after_a_hidden_sale_stays_hidden() {
+    use crate::fork_ext::addons::{action_broker, native_events, window_takeover::{self, TakeoverKind}};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    let host = r65fix_host(&["eqoa.actions.*", "eqoa.windows.takeover", "eqoa.inventory.get"]);
+    let mut p = r65fix_world();
+    let mut a = potion();
+    a.key = 101;
+    a.equip_slot = -1;
+    let mut b = gem();
+    b.key = 102;
+    b.equip_slot = -1;
+    p.dump.inventory = list(&[a, b]);
+    p.forge_snapshot(None);
+    host.execute("assert(eqoa.windows.takeover('merchant')); assert(eqoa.actions.talk(9002, {kind = 'merchant'}))").unwrap();
+    p.bags_broker_tick();
+    let relist = |p: &mut Play| apply(p, opcode(0x00B7, shop_bytes(9002, 90, 110, &[sword()], "Hello")));
+    relist(&mut p);
+    assert_eq!(p.mode, 0, "the mod's own talk is answered hidden");
+    native_events::dispatch(&host).unwrap();
+    p.forge_snapshot(None);
+    host.execute(
+        r#"
+        local inv = assert(eqoa.inventory.get())
+        batch = assert(eqoa.actions.batch({ steps = {
+            { kind = 'sell', item = inv.items[1].ref, count = 1 },
+            { kind = 'sell', item = inv.items[2].ref, count = 1 },
+        }, require_window = 'merchant' }))
+        "#,
+    )
+    .unwrap();
+    // sale 1: its list arrives while the batch (and its hidden session) runs
+    p.bags_broker_tick();
+    assert!(p.npcw.shop.pending, "sale 1 went out");
+    p.bags_sell_confirm(0, 1);
+    relist(&mut p);
+    assert_eq!(p.mode, 0, "the list answering sale 1 stays hidden (mode 10 is the merchant window, its Buy/Sell/Leave menu)");
+    assert!(window_takeover::is_hidden_active(TakeoverKind::Merchant), "the batch's hidden session goes on");
+    native_events::dispatch(&host).unwrap();
+    // sale 2, the last: the batch ends (and with it the hidden session) before its list arrives
+    p.bags_broker_tick();
+    assert!(p.npcw.shop.pending, "sale 2 went out");
+    let gem_slot = p.dump.inventory.items.iter().position(|it| it.inv_index == 102).expect("the gem is still held");
+    p.bags_sell_confirm(gem_slot, 1);
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    host.execute("local r = eqoa.actions.status(batch); assert(r.state == 'completed' and r.completed == 2, r.state)").unwrap();
+    assert!(!window_takeover::is_hidden_active(TakeoverKind::Merchant), "the batch's end closed the session");
+    relist(&mut p);
+    assert_eq!(p.mode, 0, "the list answering the last sale stays hidden after the session ended");
+    p.bags_broker_tick();
+    // control: no sale of the mod's waits; the player talks to the merchant themselves
+    relist(&mut p);
+    assert_eq!(p.mode, 10, "the player's own talk shows the game's window");
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+}
+
+/// Owner test fix 1 (finding 14), the guard: while the mod's hidden merchant session is up and no sale or buy
+/// of the mod's waits for an answer, a list for that merchant is the player's own talk: it shows the window.
+#[test]
+fn round7c_player_talk_to_the_mods_hidden_merchant_shows_the_window() {
+    use crate::fork_ext::addons::{action_broker, window_takeover::{self, TakeoverKind}};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    let host = r65fix_host(&["eqoa.actions.*", "eqoa.windows.takeover"]);
+    let mut p = r65fix_world();
+    p.forge_snapshot(None);
+    host.execute("assert(eqoa.windows.takeover('merchant')); assert(eqoa.actions.talk(9002, {kind = 'merchant'}))").unwrap();
+    p.bags_broker_tick();
+    apply(&mut p, opcode(0x00B7, shop_bytes(9002, 90, 110, &[sword()], "Hello")));
+    assert_eq!(p.mode, 0, "the mod's own talk is answered hidden");
+    assert!(window_takeover::is_hidden_active(TakeoverKind::Merchant));
+    apply(&mut p, opcode(0x00B7, shop_bytes(9002, 90, 110, &[sword()], "Hello")));
+    assert_eq!(p.mode, 10, "the player's own talk to that merchant shows the game's window");
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+}
+
+/// A mod that declares full replacements of the corpse, merchant and bank windows (`replaces`), so it may
+/// claim them with `scope = "all"`.
+fn round7c_all_host(caps: &[&str]) -> Host {
+    use crate::fork_ext::addons::discovery::{DiscoveredAddon, EntryMode, Extensions};
+    let root = std::env::temp_dir();
+    Host::for_addon(&DiscoveredAddon {
+        id: "r65fix_mod".into(),
+        name: "r65fix_mod".into(),
+        entry: root.join("main.lua"),
+        script_root: root.clone(),
+        package_root: root.clone(),
+        module_dirs: vec![root.clone()],
+        resource_dirs: vec![root.clone()],
+        api: Some("eqoa/1".into()),
+        entry_mode: EntryMode::Once,
+        capabilities_declared: true,
+        requested_capabilities: caps.iter().map(|s| (*s).to_string()).collect(),
+        extensions: Extensions {
+            replaces: vec!["loot".into(), "merchant".into(), "bank".into()],
+            ..Default::default()
+        },
+        initially_enabled: true,
+        mods_root: None,
+    })
+    .unwrap()
+}
+
+/// Owner test fix 1 (the switch, option a): with "Use the game's windows" on, a helper claim (`own`) still
+/// works: Bag Viewer's Sell junk shape (a talk answered hidden, then a two-sale batch) runs to the end and the
+/// game's merchant window never shows. A full replacement (`all`) is refused `unavailable` meanwhile.
+#[test]
+fn round7c_switch_on_leaves_helper_claims_working() {
+    use crate::fork_ext::addons::{action_broker, native_events, window_takeover};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    window_takeover::set_use_game_windows(true);
+    let host = round7c_all_host(&["eqoa.actions.*", "eqoa.windows.takeover", "eqoa.inventory.get"]);
+    let mut p = r65fix_world();
+    let mut a = potion();
+    a.key = 101;
+    a.equip_slot = -1;
+    let mut b = gem();
+    b.key = 102;
+    b.equip_slot = -1;
+    p.dump.inventory = list(&[a, b]);
+    p.forge_snapshot(None);
+    host.execute(
+        r#"
+        local ok, err = eqoa.windows.takeover('bank', {scope = 'all'})
+        assert(ok == nil and err.code == 'unavailable', 'a full replacement is refused')
+        assert(eqoa.windows.takeover('merchant'), 'a helper claim is not')
+        assert(eqoa.actions.talk(9002, {kind = 'merchant'}))
+        "#,
+    )
+    .unwrap();
+    p.bags_broker_tick();
+    apply(&mut p, opcode(0x00B7, shop_bytes(9002, 90, 110, &[sword()], "Hello")));
+    assert_eq!(p.mode, 0, "the mod's talk is answered hidden with the switch on");
+    native_events::dispatch(&host).unwrap();
+    p.forge_snapshot(None);
+    host.execute(
+        r#"
+        local inv = assert(eqoa.inventory.get())
+        batch = assert(eqoa.actions.batch({ steps = {
+            { kind = 'sell', item = inv.items[1].ref, count = 1 },
+            { kind = 'sell', item = inv.items[2].ref, count = 1 },
+        }, require_window = 'merchant' }))
+        "#,
+    )
+    .unwrap();
+    for key in [101, 102] {
+        p.bags_broker_tick();
+        assert!(p.npcw.shop.pending, "the sale of {key} went out");
+        let slot = p.dump.inventory.items.iter().position(|it| it.inv_index == key).unwrap();
+        p.bags_sell_confirm(slot, 1);
+        apply(&mut p, opcode(0x00B7, shop_bytes(9002, 90, 110, &[sword()], "Hello")));
+        assert_eq!(p.mode, 0, "the list answering the sale of {key} stays hidden");
+        native_events::dispatch(&host).unwrap();
+    }
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    host.execute("local r = eqoa.actions.status(batch); assert(r.state == 'completed' and r.completed == 2, r.state .. ' ' .. r.completed)").unwrap();
+    window_takeover::reset_all_for_test();
+    action_broker::reset_all_for_test();
+}
+
+/// Owner test fix 1 (the switch, option a): turning "Use the game's windows" on in the middle of a batch that
+/// works through a helper claim (`own`) neither releases the claim nor stops the batch.
+#[test]
+fn round7c_switch_on_mid_batch_leaves_a_helper_claim_batch_running() {
+    use crate::fork_ext::addons::{native_events, window_takeover::{self, TakeoverKind}};
+    let (mut p, host) = round7c_sale_batch("own");
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    assert!(p.npcw.shop.pending, "the first sale went out");
+    window_takeover::set_use_game_windows(true);
+    assert!(window_takeover::is_taken(TakeoverKind::Merchant), "the helper claim is kept");
+    p.bags_sell_confirm(0, 1);
+    for _ in 0..3 {
+        p.bags_broker_tick();
+        native_events::dispatch(&host).unwrap();
+    }
+    let slot = p.dump.inventory.items.iter().position(|it| it.inv_index == 102).unwrap();
+    p.bags_sell_confirm(slot, 1);
+    p.bags_broker_tick();
+    native_events::dispatch(&host).unwrap();
+    host.execute(
+        r#"
+        local r = eqoa.actions.status(batch)
+        assert(r.state == 'completed' and r.completed == 2, r.state .. ' ' .. r.completed)
+        assert(#results == 1 and results[1].state == 'completed', 'one completed result')
+        "#,
+    )
+    .unwrap();
+    window_takeover::reset_all_for_test();
+}
+
+/// Recheck LOW 2: zoning ends the loot and merchant list graces with every claim, so a new zone's entity that
+/// reuses the id within 3 s is not taken hidden.
+#[test]
+fn round7c_zoning_ends_the_list_graces() {
+    use crate::fork_ext::addons::window_takeover::{
+        self, TakeoverKind, TakeoverScope, arm_pending_open, end_session_for_vm, release_all, takeover, try_accept_open,
+    };
+    for kind in [TakeoverKind::Loot, TakeoverKind::Merchant] {
+        window_takeover::reset_all_for_test();
+        assert!(takeover(1, "r7c_mod", kind, TakeoverScope::Own).is_ok());
+        assert!(arm_pending_open(kind, 1, 77));
+        assert!(try_accept_open(kind, Some(77), Some(77), None), "{kind:?}: the mod's own open is hidden");
+        if kind == TakeoverKind::Merchant {
+            window_takeover::note_merchant_transaction_sent();
+        }
+        end_session_for_vm(1, kind);
+        // control: before zoning, the grace holds the list after the session's end hidden
+        let snapshot_grace = try_accept_open(kind, Some(77), Some(77), None);
+        assert!(snapshot_grace, "{kind:?}: the grace holds the list after the session's end");
+        window_takeover::reset_all_for_test();
+        assert!(takeover(1, "r7c_mod", kind, TakeoverScope::Own).is_ok());
+        assert!(arm_pending_open(kind, 1, 77));
+        assert!(try_accept_open(kind, Some(77), Some(77), None));
+        if kind == TakeoverKind::Merchant {
+            window_takeover::note_merchant_transaction_sent();
+        }
+        end_session_for_vm(1, kind);
+        release_all();
+        assert!(!try_accept_open(kind, Some(77), Some(77), None), "{kind:?}: after zoning, the same id shows its window");
+    }
+    window_takeover::reset_all_for_test();
 }

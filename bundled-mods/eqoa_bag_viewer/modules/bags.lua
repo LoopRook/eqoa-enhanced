@@ -720,6 +720,12 @@ function M.open_loot_corpse(after_kind, corpse_id)
 end
 
 function M.open_talk_npc(talk_kind, verb, after_fn)
+    -- one open at a time, as for corpses: a second talk while the first is unanswered would take over the
+    -- first's answer (its item unsold, the second sold in its place)
+    if M.pending_open then
+        local what = M.pending_open.kind == "loot" and "a corpse" or ("the " .. M.pending_open.kind)
+        return nil, {code = "busy", message = "still waiting for the server to open " .. what}
+    end
     local dist = M.npc_distance(talk_kind, true)
     if M.far_gate(talk_kind, verb) then return nil, {message = TOO_FAR[talk_kind]} end
     if not M.ensure_takeover(talk_kind) then return nil, {message = "window busy"} end
@@ -979,18 +985,30 @@ function M.build_menu(it, fx, fy)
             end
         end
 
-        if merch_open then
-            local sell_deny = it.equipped and "cannot sell an equipped item" or nil
-            local p1 = eqoa.merchant.price(it.ref, "sell", 1)
-            local lbl1 = "Sell 1" .. (p1 and (" (" .. M.tunar(p1) .. "t)") or "")
-            add(lbl1, sell_deny == nil, sell_deny,
-                function() return eqoa.actions.sell(it.ref, 1) end)
-            if (it.quantity or 1) > 1 then
-                local ps = eqoa.merchant.price(it.ref, "sell", it.quantity)
-                local lbls = "Sell stack (" .. it.quantity .. (ps and (", " .. M.tunar(ps) .. "t)") or ")")
-                add(lbls, sell_deny == nil, sell_deny,
-                    function() return eqoa.actions.sell(it.ref, it.quantity) end)
+        -- Sell 1 / Sell stack: through the merchant window when one is open (the game's, or the mod's hidden
+        -- one); otherwise by talking to the nearest merchant first, as Sell junk does; greyed with the reason
+        -- when no merchant is near.
+        local near_merch = M.nearby_npc("merchant") ~= nil
+        local sell_far = not merch_open and near_merch and M.too_far("merchant") or nil
+        local sell_deny = (it.equipped and "cannot sell an equipped item")
+            or ((not merch_open and not near_merch) and "no merchant nearby")
+            or sell_far or nil
+        local sell_far_kind = (not it.equipped and sell_far) and "merchant" or nil
+        local function sell_or_talk(label, qty)
+            if eqoa.merchant.get() then
+                return eqoa.actions.sell(it.ref, qty)
             end
+            return M.open_talk_npc("merchant", label, function()
+                M.run_single(label, function() return eqoa.actions.sell(it.ref, qty) end)
+            end)
+        end
+        local p1 = merch_open and eqoa.merchant.price(it.ref, "sell", 1) or nil
+        add("Sell 1" .. (p1 and (" (" .. M.tunar(p1) .. "t)") or ""), sell_deny == nil, sell_deny,
+            function() return sell_or_talk("Sell 1", 1) end, nil, sell_far_kind)
+        if (it.quantity or 1) > 1 then
+            local ps = merch_open and eqoa.merchant.price(it.ref, "sell", it.quantity) or nil
+            add("Sell stack (" .. it.quantity .. (ps and (", " .. M.tunar(ps) .. "t)") or ")"), sell_deny == nil,
+                sell_deny, function() return sell_or_talk("Sell stack", it.quantity) end, nil, sell_far_kind)
         end
 
         local near_bank = M.nearby_npc("bank") ~= nil

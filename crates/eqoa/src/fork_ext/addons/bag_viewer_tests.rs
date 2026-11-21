@@ -4644,3 +4644,164 @@ fn round65_fix6_item2_auto_loot_on_in_a_crowd_is_cheap_body() {
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
 }
+
+/// Owner test fix 1 (owner, 2026-11-20: "single item selling should work"): Sell 1 and Sell stack are offered
+/// whenever a merchant is within reach. With no merchant window open, Bag Viewer talks to the nearest merchant
+/// itself through the hidden session (as Sell junk does), sells, and the game's merchant window (mode 10)
+/// never shows, nor when the server answers the sale with the merchant's list again. With the game's merchant
+/// window open it sells through it as before; with no merchant near, both entries are greyed with the reason.
+#[test]
+fn round7c_bag_viewer_sells_single_items_near_a_merchant() {
+    big_stack(round7c_bag_viewer_sells_single_items_near_a_merchant_body)
+}
+fn round7c_bag_viewer_sells_single_items_near_a_merchant_body() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else {
+        eprintln!("SKIP round7c single-item sell: no GPU adapter");
+        return;
+    };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    // no merchant in the zone: both entries greyed with the reason
+    bv.click(bv.slot(7));
+    bv.frames(2);
+    for row in ["Sell 1", "Sell stack"] {
+        let (_, _, enabled, reason, _) = bv.menu_row(row).unwrap_or_else(|| panic!("{row} is listed"));
+        assert!(!enabled, "{row} with no merchant near");
+        assert_eq!(reason.as_deref(), Some("no merchant nearby"), "{row}");
+    }
+    bv.click(bv.slot(7));
+    bv.frames(2);
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [6.0, 0.0, 0.0]);
+    bv.lua().load("require('bags').scan_reset()").exec().unwrap();
+    bv.frames(2);
+
+    // Sell 1 of the Healing Potions (slot 2, 5 of them), no merchant window open
+    let sell = |bv: &mut Bv, slot: usize, row: &str, inv_slot: usize, n: i64| {
+        bv.click(bv.slot(slot));
+        bv.frames(2);
+        let (x, y, enabled, reason, label) = bv.menu_row(row).unwrap_or_else(|| panic!("{row} is offered"));
+        assert!(enabled, "{label} offered near a merchant with no window open: {reason:?}");
+        let sends = bv.play.bags_sends_lost();
+        bv.click((x, y));
+        bv.play.bags_broker_tick();
+        assert!(bv.play.bags_sends_lost() > sends, "{row} talks to the merchant first");
+        assert_eq!(bv.play.target, 9002);
+        bv.play.bags_merchant_packet(9002);
+        assert_eq!(bv.play.mode, 0, "the merchant's answer stays hidden (mode 10 is its window)");
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+        assert!(bv.play.bags_shop_pending(), "{row}: the sale went out");
+        bv.play.bags_sell_confirm(inv_slot, n);
+        bv.play.bags_merchant_packet(9002);
+        assert_eq!(bv.play.mode, 0, "the list the server answers the sale with stays hidden");
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+        bv.frames(2);
+        let (text, ok) = bv.result_text().expect("a result line");
+        assert_eq!(ok, Some(true), "{text}");
+        assert!(text.starts_with(row), "{text}");
+        assert!(bv.eval::<bool>("not eqoa.windows.taken('merchant')"), "the hidden session is closed afterwards");
+        assert_eq!(bv.play.mode, 0);
+    };
+    sell(&mut bv, 2, "Sell 1", 1, 1);
+    // Sell stack of the Rat Pelts (slot 7, 3 of them)
+    sell(&mut bv, 7, "Sell stack", 6, 3);
+
+    // the player talked to the merchant: its window is open, and Sell 1 sells through it as before
+    bv.play.bags_merchant_packet(9002);
+    assert_eq!(bv.play.mode, 10, "the player's own talk opens the game's merchant window");
+    bv.frames(2);
+    bv.click(bv.slot(2));
+    bv.frames(2);
+    let (x, y, enabled, _, _) = bv.menu_row("Sell 1").unwrap();
+    assert!(enabled);
+    let sends = bv.play.bags_sends_lost();
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_shop_pending(), "sold through the open window");
+    assert!(bv.play.bags_sends_lost() > sends);
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('merchant')"), "no claim: the player's window");
+    assert_eq!(bv.play.mode, 10, "the player's window stays");
+    bv.play.bags_sell_confirm(1, 1);
+    bv.play.bags_close_merchant();
+    bv.frames(2);
+
+    // walked away, out of the zone scan's radius: greyed with the reason again
+    bv.play.bags_player_at([400.0, 0.0, 400.0]);
+    bv.lua().load("require('bags').scan_reset()").exec().unwrap();
+    bv.frames(2);
+    bv.click(bv.slot(2));
+    bv.frames(2);
+    let (_, _, enabled, reason, _) = bv.menu_row("Sell 1").expect("Sell 1 is still listed");
+    assert!(!enabled);
+    assert_eq!(reason.as_deref(), Some("no merchant nearby"));
+
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Recheck LOW 1: a second Sell 1 clicked before the merchant answers the first's talk is refused with the
+/// busy reason (as a second corpse open is), and the first item is the one sold.
+#[test]
+fn round7c_bag_viewer_second_sell_before_the_merchant_answers_is_refused() {
+    big_stack(round7c_bag_viewer_second_sell_before_the_merchant_answers_is_refused_body)
+}
+fn round7c_bag_viewer_second_sell_before_the_merchant_answers_is_refused_body() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else {
+        eprintln!("SKIP round7c second sell before the answer: no GPU adapter");
+        return;
+    };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [6.0, 0.0, 0.0]);
+    bv.open();
+    bv.frames(2);
+    let click_sell = |bv: &mut Bv, slot: usize| {
+        bv.click(bv.slot(slot));
+        bv.frames(2);
+        let (x, y, enabled, _, _) = bv.menu_row("Sell 1").expect("Sell 1 is offered");
+        assert!(enabled);
+        bv.click((x, y));
+        bv.frames(1);
+    };
+    // Sell 1 of the potions: its talk goes out, no answer yet
+    click_sell(&mut bv, 2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.target, 9002);
+    // Sell 1 of the pelts before the merchant answers
+    click_sell(&mut bv, 7);
+    let (text, ok) = bv.result_text().expect("a result line");
+    assert_eq!(ok, Some(false), "{text}");
+    assert_eq!(text, "Sell 1: still waiting for the server to open the merchant");
+    // the merchant answers: the potion is the one sold
+    bv.play.bags_merchant_packet(9002);
+    assert_eq!(bv.play.mode, 0);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_shop_pending(), "the first item's sale went out");
+    bv.play.bags_sell_confirm(1, 1);
+    bv.play.bags_merchant_packet(9002);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let (text, ok) = bv.result_text().expect("a result line");
+    assert_eq!(ok, Some(true), "{text}");
+    assert!(text.starts_with("Sell 1"), "{text}");
+    assert_eq!(bv.eval::<i64>("eqoa.inventory.get().items[2].quantity"), 4, "one potion sold");
+    assert_eq!(bv.eval::<i64>("eqoa.inventory.get().items[7].quantity"), 3, "the pelts were not sold");
+    assert_eq!(bv.play.mode, 0);
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}

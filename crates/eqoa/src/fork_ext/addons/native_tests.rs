@@ -267,18 +267,45 @@ fn round7c_native_switch_releases_every_holder_and_prevents_reclaims() {
     use super::window_takeover::{
         TakeoverKind, is_taken, reset_all_for_test, set_use_game_windows, try_accept_open,
     };
+    // The switch governs full replacements only (owner test fix 1, option a): the `all` claims go and cannot
+    // be made again while it is on; a helper claim (`own`) stays and can still be made.
+    let replacing = |caps: &[&str]| {
+        use super::discovery::{DiscoveredAddon, EntryMode, Extensions};
+        let root = std::env::temp_dir();
+        Host::for_addon(&DiscoveredAddon {
+            id: "switch_test".into(),
+            name: "switch_test".into(),
+            entry: root.join("main.lua"),
+            script_root: root.clone(),
+            package_root: root.clone(),
+            module_dirs: vec![],
+            resource_dirs: vec![],
+            api: Some("eqoa/1".into()),
+            entry_mode: EntryMode::Once,
+            capabilities_declared: true,
+            requested_capabilities: caps.iter().map(|c| (*c).to_string()).collect(),
+            extensions: Extensions {
+                replaces: vec!["loot".into(), "merchant".into(), "bank".into()],
+                ..Default::default()
+            },
+            initially_enabled: true,
+            mods_root: None,
+        })
+        .unwrap()
+    };
 
     reset_all_for_test();
-    let loot = Host::with_test_capabilities(&["eqoa.windows.takeover"]).unwrap();
-    let other = Host::with_test_capabilities(&["eqoa.windows.takeover"]).unwrap();
-    loot.execute("assert(eqoa.windows.takeover('loot'))")
+    let loot = replacing(&["eqoa.windows.takeover"]);
+    let other = replacing(&["eqoa.windows.takeover"]);
+    loot.execute("assert(eqoa.windows.takeover('loot', {scope = 'all'}))")
         .unwrap();
     other
-        .execute("assert(eqoa.windows.takeover('merchant')); assert(eqoa.windows.takeover('bank'))")
+        .execute("assert(eqoa.windows.takeover('merchant', {scope = 'all'})); assert(eqoa.windows.takeover('bank'))")
         .unwrap();
     assert!(TakeoverKind::ALL.into_iter().all(is_taken));
     set_use_game_windows(true);
-    assert!(!TakeoverKind::ALL.into_iter().any(is_taken));
+    assert!(!is_taken(TakeoverKind::Loot) && !is_taken(TakeoverKind::Merchant), "the full replacements are released");
+    assert!(is_taken(TakeoverKind::Bank), "the helper claim stays");
     assert!(!try_accept_open(
         TakeoverKind::Loot,
         Some(17),
@@ -286,11 +313,13 @@ fn round7c_native_switch_releases_every_holder_and_prevents_reclaims() {
         None
     ));
     loot.execute(
-        "local ok,e=eqoa.windows.takeover('loot'); assert(ok==nil and e.code=='unavailable')",
+        "local ok,e=eqoa.windows.takeover('loot', {scope = 'all'}); assert(ok==nil and e.code=='unavailable')",
     )
     .unwrap();
+    loot.execute("assert(eqoa.windows.takeover('loot'), 'a helper claim while the switch is on')")
+        .unwrap();
     set_use_game_windows(false);
-    loot.execute("assert(eqoa.windows.takeover('loot'))")
+    loot.execute("assert(eqoa.windows.takeover('loot', {scope = 'all'}))")
         .unwrap();
     reset_all_for_test();
 }

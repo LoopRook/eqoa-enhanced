@@ -94,8 +94,9 @@ optional list `"replaces": ["inventory", "spellbook", "hud.target"]`.
   frame**, next to the existing **Actions: can act on its own (...)** line. Both are derived from the
   manifest, never from what the mod says about itself.
 - A helper (scope `own`) declares no `replaces` and gets no replacement label.
-- Mods & Addons, its key and a **Use the game's windows** switch in it are always native. The switch releases
-  every claim at once.
+- Mods & Addons, its key and a **Use the game's windows** switch in it are always native. The switch is an
+  emergency override for full replacements (owner, 2026-11-20): it releases every `scope = "all"` claim at
+  once and refuses new ones while on; helper claims (`own`) are not affected.
 
 **Versioning.** New kinds, the session event, `session`, `pass`, `focus` and `replaces` are additions and can
 land after the freeze. Each kind is a capability path (`eqoa.windows.takeover.inventory`), so a mod asks

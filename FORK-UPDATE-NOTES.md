@@ -4,12 +4,13 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- **Bag Viewer sells single items near a merchant.** Sell 1 and Sell stack work whenever a merchant is in reach: with no merchant window open, Bag Viewer talks to the merchant for you and sells without opening the game's window. After a sale the game's merchant window no longer pops up.
 - Mods need the map waypoint permission to place or clear a personal pin. New pins must be on the loaded map's ground.
 - Disabling a mod removes only the map pins it placed and still owns, in every world. A pin you clear and place again, even at the same spot, stays yours.
-- When a mod's selling or banking run stops (its Stop, or **Use the game's windows**), a sale already sent still counts once the server answers, and a step that was only queued is never sent. Runs that reached a merchant or bank by talking to them stop too.
+- When a mod's selling or banking run stops (its Stop, or **Use the game's windows** for a mod that replaces the window), a sale already sent still counts once the server answers, and a step that was only queued is never sent. Runs that reached a merchant or bank by talking to them stop too.
 - An enabled addon that changes package type or adds permissions stays disabled until you approve it again in Mods & Addons.
 - Mods with chat permission can send ordinary chat. Lines starting with a slash require the command permission, including chat submitted through the game's editor.
-- Mods & Addons shows **Replaces game windows** and **Can answer NPC dialogs** when a mod declares those abilities. Turn on **Use the game's windows** to release all mod window claims and keep new openings native.
+- Mods & Addons shows **Replaces game windows** and **Can answer NPC dialogs** when a mod declares those abilities. **Use the game's windows** is an emergency override: it turns off every mod that replaces a whole game window, and the game's own windows come back. Mods that only help (Bag Viewer's selling, Take all, Auto-loot) keep working.
 - Map Search waits for the Creature Journal to start before reading its shared data.
 - Mods opening Mail, Auction, or Who now open the right window.
 - **A key for the Mods & Addons window.** Controls has a new row, **Mods & Addons**, beside the mod keys; it starts on **F10** (unless something already uses F10: then it starts empty and says what has it). Pressed in the world it opens the Mods & Addons window, pressed again it closes it; it works with no mod enabled, follows the same rules as a mod key (swaps, the client's own keys, cancel, restart) and is not fired while you type or a menu has the keyboard. On Windows F10 is also the system menu key; if it ever sticks or eats the next key, rebind the row and tell us. The key does nothing on the loading screen, with the full map up, or while the world changes (where the window would not be seen or usable), and a combination you give it (say Shift+Space) is the row's alone even with no mod enabled.

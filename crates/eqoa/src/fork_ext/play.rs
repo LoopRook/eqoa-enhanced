@@ -1074,6 +1074,7 @@ pub(crate) fn npcw_requests(
                 {
                     _merch_out.push(crate::merchant::MerchantOut::Buy(pos as i32, count));
                     mark_deferred_sent("buy");
+                    crate::fork_ext::addons::window_takeover::note_merchant_transaction_sent();
                 } else {
                     resolve_staged_refusal(
                         "buy",
@@ -1102,6 +1103,7 @@ pub(crate) fn npcw_requests(
                     // the native loop (`npcw.rs`) sends only while the stack still holds `count`
                     _merch_out.push(crate::merchant::MerchantOut::Sell(slot as i32, count));
                     mark_deferred_sent("sell");
+                    crate::fork_ext::addons::window_takeover::note_merchant_transaction_sent();
                 } else {
                     resolve_staged_refusal(
                         "sell",
