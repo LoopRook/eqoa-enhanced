@@ -70,6 +70,9 @@ pub(super) fn install(lua: &mlua::Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>
     // Each method a draw list has is in the registry as `ImDrawList.<Name>`, read from the type's own
     // registration (`methods` below), so the registry follows what is built (round 7H). The probe is
     // never drawn with.
+    if lua.named_registry_value::<Table>("eqoa_root").is_err() {
+        return Ok(());
+    }
     let probe = lua.create_userdata(DrawList {
         frame: frame.clone(),
         epoch: frame.borrow().epoch,
