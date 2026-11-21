@@ -30,6 +30,8 @@
     "tools/gen_map_markers.py",
     "tools/gen_quest_guide.py",
     "tools/parser_launch.py",
+    "tools/eqoa1_freeze.py",
+    "tools/test_eqoa1_freeze.py",
     "tools/test_parser_launch.py",
     "tools/check_fork_footprint.py",
     "tools/test_fork_footprint.py",

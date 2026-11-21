@@ -106,6 +106,24 @@ The cost: the first cargo step after another worktree built recompiles the works
 
 ---
 
+### The frozen `eqoa/1` record (`tools/eqoa1_freeze.py`)
+
+`docs/modding/eqoa-1-frozen.json` lists every `supported` path with its kind (`leaf`, or `group` when it has
+children). It is separate from the regenerated `eqoa-1-surface.json`, so regenerating the reference never
+moves it. Test `eqoa1_frozen_surface_only_grows` (needs a graphics adapter, like
+`round7b_support_table_matches_the_running_client`; it prints a SKIP only where that one does) fails when a
+recorded path is removed, drops below `supported`, or changes kind; additions pass. The failure names the
+path with its before and after status.
+
+When the surface grows, regenerate `eqoa-1-surface.json` (above), then add the new names:
+
+```powershell
+python tools/eqoa1_freeze.py update            # only adds; exit 1 and nothing written if it would remove or lower anything
+python tools/eqoa1_freeze.py update --allow-downgrade   # only with the owner's approval and a player note
+```
+
+Options: `--surface FILE`, `--record FILE`. Tests: `tools/test_eqoa1_freeze.py`.
+
 ## 2. Bundled Mod Manifest Updater (`tools/update_bundled_manifest.py`)
 
 Maintains exact SHA-256 checksums and file lists for bundled mods across three files:
