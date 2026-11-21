@@ -11684,7 +11684,7 @@
     {
       "children": [],
       "path": "eqoa.textures.formats.jpeg",
-      "reason": "the client decodes PNG only; convert JPEG to PNG or pass RGBA pixels",
+      "reason": "the client decodes PNG only; convert JPEG to PNG or pass RGBA pixels (a capability flag, probed with eqoa.capabilities.has; there is no eqoa.textures.formats table)",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -11692,7 +11692,7 @@
     {
       "children": [],
       "path": "eqoa.textures.formats.png",
-      "reason": null,
+      "reason": "PNG files load: a capability flag, probed with eqoa.capabilities.has; there is no eqoa.textures.formats table",
       "revision": 1,
       "round": 2,
       "status": "supported"
@@ -11700,7 +11700,7 @@
     {
       "children": [],
       "path": "eqoa.textures.formats.rgba",
-      "reason": null,
+      "reason": "raw RGBA pixels load: a capability flag, probed with eqoa.capabilities.has; there is no eqoa.textures.formats table",
       "revision": 1,
       "round": 2,
       "status": "supported"

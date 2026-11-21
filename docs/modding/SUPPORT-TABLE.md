@@ -503,9 +503,9 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | Path | Status | Since round | Reason |
 |---|---|---|---|
 | `eqoa.textures` | supported | 2 |  |
-| `eqoa.textures.formats.jpeg` | unsupported |  | the client decodes PNG only; convert JPEG to PNG or pass RGBA pixels |
-| `eqoa.textures.formats.png` | supported | 2 |  |
-| `eqoa.textures.formats.rgba` | supported | 2 |  |
+| `eqoa.textures.formats.jpeg` | unsupported |  | the client decodes PNG only; convert JPEG to PNG or pass RGBA pixels (a capability flag, probed with eqoa.capabilities.has; there is no eqoa.textures.formats table) |
+| `eqoa.textures.formats.png` | supported | 2 | PNG files load: a capability flag, probed with eqoa.capabilities.has; there is no eqoa.textures.formats table |
+| `eqoa.textures.formats.rgba` | supported | 2 | raw RGBA pixels load: a capability flag, probed with eqoa.capabilities.has; there is no eqoa.textures.formats table |
 | `eqoa.textures.load` | supported | 2 |  |
 | `eqoa.textures.release` | supported | 2 |  |
 | `eqoa.textures.rgba` | supported | 2 |  |
