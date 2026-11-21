@@ -513,4 +513,103 @@ mod tests {
             "{REGENERATE}"
         );
     }
+
+    const FROZEN_POLICY: &str = "Policy (docs/modding/VERSIONING.md, the versioning policy): eqoa/1 is additive only. A downgrade or removal of a supported name needs the owner's approval and a player note; a breaking change is eqoa/2. To record an approved addition run: python tools/eqoa1_freeze.py update";
+
+    fn kind_of(row: &Json) -> &'static str {
+        if row["children"].as_array().is_some_and(|c| !c.is_empty()) {
+            "group"
+        } else {
+            "leaf"
+        }
+    }
+
+    /// One line per frozen path that is gone, below `supported`, or of another kind in `current`.
+    fn frozen_violations(frozen: &Json, current: &Json) -> Vec<String> {
+        let rows: std::collections::HashMap<&str, &Json> = current["capabilities"]
+            .as_array()
+            .expect("capabilities")
+            .iter()
+            .map(|row| (row["path"].as_str().expect("path"), row))
+            .collect();
+        let mut out = Vec::new();
+        for (path, kind) in frozen["supported"].as_object().expect("supported") {
+            let kind = kind.as_str().expect("kind");
+            match rows.get(path.as_str()) {
+                None => out.push(format!("{path}: supported -> removed")),
+                Some(row) if row["status"] != "supported" => {
+                    out.push(format!("{path}: supported -> {}", row["status"].as_str().unwrap_or("?")))
+                }
+                Some(row) if kind_of(row) != kind => {
+                    out.push(format!("{path}: kind {kind} -> {}", kind_of(row)))
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    fn frozen_record() -> Json {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/modding/eqoa-1-frozen.json");
+        serde_json::from_slice(&std::fs::read(path).expect("docs/modding/eqoa-1-frozen.json"))
+            .expect("frozen record is JSON")
+    }
+
+    /// The frozen record, turned into a surface that has exactly its names (no GPU needed).
+    fn surface_of_frozen(frozen: &Json) -> Json {
+        let rows: Vec<Json> = frozen["supported"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(path, kind)| {
+                let children = if kind == "group" { json!(["x"]) } else { json!([]) };
+                json!({"path":path,"status":"supported","children":children})
+            })
+            .collect();
+        json!({"capabilities":rows})
+    }
+
+    /// Guard: the executed negative and positive controls of the check itself, on every machine.
+    #[test]
+    fn eqoa1_frozen_surface_controls() {
+        let frozen = frozen_record();
+        let base = surface_of_frozen(&frozen);
+        assert!(frozen_violations(&frozen, &base).is_empty());
+        fn rows(s: &mut Json) -> &mut Vec<Json> {
+            s["capabilities"].as_array_mut().unwrap()
+        }
+        let mut gone = base.clone();
+        let first = rows(&mut gone).remove(0);
+        let found = frozen_violations(&frozen, &gone);
+        assert_eq!(found, vec![format!("{}: supported -> removed", first["path"].as_str().unwrap())]);
+        let mut down = base.clone();
+        rows(&mut down)[0]["status"] = json!("unsupported");
+        assert!(frozen_violations(&frozen, &down)[0].ends_with("supported -> unsupported"));
+        let mut kind = base.clone();
+        let leaf = rows(&mut kind).iter_mut().find(|r| r["children"] == json!([])).unwrap();
+        leaf["children"] = json!(["x"]);
+        assert!(frozen_violations(&frozen, &kind)[0].contains("kind leaf -> group"));
+        let mut grown = base.clone();
+        rows(&mut grown).push(json!({"path":"eqoa.new_name","status":"supported","children":[]}));
+        assert!(frozen_violations(&frozen, &grown).is_empty());
+        // A name that was not supported may become supported: it is not in the record, so it passes.
+        assert!(!frozen["supported"].as_object().unwrap().contains_key("eqoa.new_name"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn eqoa1_frozen_surface_only_grows() {
+        let Some(current) = with_graphics(reference()) else {
+            return;
+        };
+        let bad = frozen_violations(&frozen_record(), &current);
+        assert!(
+            bad.is_empty(),
+            "eqoa/1 frozen surface changed:
+  {}
+{FROZEN_POLICY}",
+            bad.join("\n  ")
+        );
+    }
 }
