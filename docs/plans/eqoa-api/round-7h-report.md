@@ -194,7 +194,7 @@ ids), Wereoxxs/ARPG/Modern UI (Forge only). A mod author notices the changes lis
   refused). It was not changed: the brief's binding decision covers four actions, and gating `sell` would
   change Bag Viewer's Sell 1 / Sell stack and its junk sale (player-marked junk). The spec lists it under
   "Under review, not part of the promise", so it is not frozen as "sells without asking".
-- **`dialog_answer` (and `activate_row` on a dialog) answer the game's own Yes/No for the player.** They need
+- **(Resolved in fix round 1, below.)** **`dialog_answer` (and `activate_row` on a dialog) answer the game's own Yes/No for the player.** They need
   their own grant, shown as "Can answer NPC dialogs". Under the owner's rule the confirm contract should tie a
   mod-drawn confirm to the player's own answer; today the grant is the only tie. Not verified: whether chained
   window actions on the item page can open an item's popup, reach Destroy and answer its box (that would reach
@@ -211,3 +211,103 @@ ids), Wereoxxs/ARPG/Modern UI (Forge only). A mod author notices the changes lis
   `host.rs`.
 - The report itself was committed after the regeneration commit (docs only, no code), so the regeneration is
   the last code-relevant commit, not the last commit.
+
+## Fix round 1 (after the cross-family recheck of 0d092f35)
+
+The recheck confirmed the targeted fixes and rejected on the open question of section 6: a mod could accept a
+game Yes/No box through the window route. Five items; tests first (commit 9802975a, run on 0d092f35), then a
+commit per item.
+
+| Item | Reproduced on 0d092f35 | Fix commit | Test | Negative control |
+|---|---|---|---|---|
+| 1 accepting a guarded game prompt | yes: `quit: completed nil` (the mod's Yes went through) | 866109e2 | `round7h_fix1_a_mod_cannot_accept_a_guarded_game_prompt` | executed: the rule disabled (`if false && accepts ...`), same command fails with `quit: completed nil`; restored, sha1 checked |
+| 2 `cancel` of a sent request | yes: `cancel of a sent request: true nil` | f4a92f54 | `round7h_fix2_cancel_cannot_unsend_a_request_and_its_result_still_arrives` | the base run |
+| 3 `eqoa.textures.formats.*` | yes: `png: reason nil` | e393999c | `round7h_fix3_texture_formats_are_described_as_capability_flags` (GPU; ran here) | the base run |
+| 4 `sell` row | spec only | e9c8d043 | — | — |
+| 5 idle timeout pinned | a pin, not a defect | (seam and test in 9802975a) | **`round7h_fix5_hidden_session_idle_timeout_is_15_seconds`** (`fork_ext/addons/round7h_tests.rs`), for the docs writer to cite | executed: `HIDDEN_SESSION_TIMEOUT` set to 14 s, the test fails with `ended before 15 s without use`; restored, sha1 checked. (Its first run on the base failed on a log assertion of mine that the code never logs; removed before commit.) |
+
+**1. Accepting a game Yes/No.** The only place a mod's answer reaches the game's message box (mode 14) is
+`dialog_answer` in `fork_ext/play.rs` `dispatch_window_action`. `select_row`, `activate_row` and
+`menu_command` are refused on mode 14 by `gate`, `input_text` works only on mode 2, a batch has no answer step,
+and no Forge call injects keys. That is where the check is now. The box answers `Yes(p1, p2)` for its OK button
+and for Yes on a Yes/No box (`dialog.rs` `MBox::key`); that is accepting, and it is refused `not_yet`
+(reason: the mod API plan's confirm contract) unless `window_actions::prompt_answerable(p1, p2)`. Today that
+is only `(0, 0x0702_0000)`, the group invitation. The check reads the box's own `kind` and tags, never its text.
+Declining (No, `close_window`'s Escape, a Cancel box) is untouched. The report prompt is still
+`permission_denied` before this check. NPC dialogs (`response_dialog`, `text_dialog`) are untouched, and the
+"Can answer NPC dialogs" label stays true.
+- Test, all from the game's own code paths: quit through `start_actions`, pet dismiss through `do_action` with
+  a pet, guild disband and leave through `guild_action` as the guild's leader. A mod with `eqoa.actions.*`
+  answers Yes: refused `not_yet`, the box still up, no key pressed, nothing sent, the game not quitting. It
+  answers No: completed, the box closed, nothing sent. Then a group invitation with a pending invite: Yes
+  completes, the game joins the group and sends its answer. Then an NPC response dialog: answered.
+- Reachability confirmed by reading `gate`/`live` in `dispatch_window_action` (no new test per window): the
+  quest journal (mode 22), Class Mastery (40), mail and the item page (`sub:inventory`) take no window
+  action (`unsupported`), so destroy, drop quest, mastery buy/refund and delete mail are not reachable this
+  way; `drop_quest` and the mastery purchases are `not_yet` as direct actions.
+- Forge: no Forge compatibility call answers a game Yes/No. The Forge `input` calls read or suppress keys and
+  never inject them, and no bundled UI (Wereoxxs, ARPG UI, Modern UI, nor any `eqoa_*` mod) calls
+  `dialog_answer`, `activate_row` or `menu_command`. The Forge exemption covers nothing today.
+- Existing assertion changed: `r6d_tests.rs` `round6d_dialog_answer_walks_the_confirm_and_the_report_guard_holds`
+  walked Yes on an untagged "Sure?" box; it now walks Yes on a group-invitation box (same keys, `[136, 134]`).
+- Spec: the "The game's confirmations cannot be skipped" paragraph states the rule and the answerable list
+  (it may grow); the `Dialog.prompt_kind` row says what each kind allows; the `dialog_answer` row points there.
+
+**2. `cancel` after sending.** As built, `cancel` of a sent request reported `cancelled`/`ok = false` and
+dropped the server's later answer; the spec said `ok = nil`. What a mod needs is the truth: a request on the
+wire cannot be unsent. Now `cancel` returns `false` for it, the request keeps waiting, and its real result
+(`completed`, `refused` or `unknown`) is delivered, as round 7C's M2 does for a stopped batch's sent step.
+A queued or staged-but-unsent request is still cancelled (`true`, `cancelled`, `ok = false`). Zoning or logout
+still cancels sent requests with `ok = nil`. The broker's internal `cancel` now returns `Option<bool>`; the one
+unit assertion on it reads `== Some(true)` (same meaning). Bag Viewer: its Stop calls
+`pcall(eqoa.actions.cancel, req)` on a pending corpse or merchant open after it has already cleared its own
+state. With a sent open, the call now returns `false` instead of `true`. The open's later result arrives and
+Bag Viewer ignores it, as before. No diagnostic (`not_found`/`false` are quiet), and nothing the player sees
+changes.
+
+**3. Texture formats.** `eqoa.textures.formats.png`/`.rgba`/`.jpeg` are capability flags, not Lua values. The
+descriptors now say so ("a capability flag, probed with eqoa.capabilities.has; there is no
+eqoa.textures.formats table"), and so does the spec's `textures.load` row. I chose flags over installing a
+table so as not to add a name to the frozen surface.
+
+**4. `sell`.** No code change. The spec's under-review row lists the merchant's four confirmation cases (worn,
+quick-slotted, no-trade, non-misc) and that the action refuses only worn items.
+
+**5. Idle timeout.** A test-only clock seam (`window_takeover::age_hidden_session_for_test`) sets how long ago
+the live hidden session was last used. The test runs the real expiry pass (`sync_sessions_with`): still open
+at 14.9 s, ended at 15 s.
+
+### Results, fix round 1
+
+- Reproduction on 0d092f35 (tests only): 3 of the new tests failed for their reason (above). The 4th failed on
+  my own wrong assertion, which was corrected.
+- After the fixes: `--only round,addons --filter play::fork_hooks round7h_`: round 230 passed / 1 failed (my
+  pet test lacked a pet, then the guild and invite set-ups; fixed in 65037f90 and f78cabbe; rerun 5 of 5).
+  addons 688 passed / 2 failed / 25 ignored: the support table (regenerated in d5dfaf33) and
+  `round_3_all_four_mods_per_frame_performance_benchmark`, a wall-clock limit (< 5 ms): 6.46 ms, rerun 5.12 ms,
+  with the PC at 75 to 90 % CPU from other programs. The same test measured 2.39 ms on this branch at 0d092f35.
+  This round changes nothing on the frame path. Not reproduced on a quiet machine; see CI below.
+- A stray `find /` of mine from early in the session was still running and was stopped.
+- Final focused run with the disc, `--only round,wasm,footprint,paths --filter round7 round6d_ docs_`:
+  **212 passed, 0 failed, 0 ignored, 1 SKIP line** (the mod-api no-adapter test, by design). wasm, footprint
+  and paths PASS.
+- Regenerated from a release build (PASS) in d5dfaf33: only the three `eqoa.textures.formats.*` reasons
+  changed.
+- **CI run 44926257040 at d5dfaf33: success on the rerun of the failed job.** First attempt: every gate but
+  `full` passed (addons 690 passed / 0 failed, including both timing benchmarks); `full` failed one test,
+  `round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame` ("the open window asked for the zone's
+  creature list 12 times in 2.66 s"; bound 11.64), on a runner that took 832 s for the `eqoa` binary against
+  295 s the run before. That test's own comment records earlier flakes of the same bound. It passed in the
+  `addons` gate of the same run and in every local run, and this round does not touch Bag Viewer's scanning.
+  Its bound was not changed. Rerun (`gh run rerun --failed`): success; addons 690 passed / 0 failed /
+  25 ignored / 17 SKIP; full 3340 passed / 0 failed / 37 ignored / 378 SKIP; wasm, footprint, paths success;
+  player-release 20 passed; tools 201 passed / 1 SKIP. `ci_gates.py cleanup` run.
+
+What a player or a bundled mod notices from fix round 1: nothing. No bundled mod answers a game prompt, and
+Bag Viewer's Stop is unchanged as seen (section above). A mod author notices: accepting a guarded game prompt
+is `not_yet`; `cancel` of a sent request returns `false` and the real result follows; the texture formats are
+flags.
+
+Not verified in fix round 1: nothing was played; the per-window "not reachable" list was read, not tested one
+by one; the round 3 benchmark's local failures (5.1 and 6.5 ms) were not re-measured on a quiet machine
+(they passed on CI).
