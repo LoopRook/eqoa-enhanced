@@ -11,6 +11,8 @@ Two goals shape every change. **Modular**: syncing upstream stays cheap, so fork
 fork-owned files and upstream's files carry only hook calls. **Moddable**: other people build mods
 on this client, so the addon API is a stable, documented contract (its capabilities, its versions,
 and visible diagnostics for what is unsupported) rather than an accident of the implementation.
+`eqoa/1` is additive only: a supported name, field or meaning never changes or disappears; a breaking change
+is `eqoa/2`. The frozen record is `docs/modding/eqoa-1-frozen.json`; `eqoa1_frozen_surface_only_grows` checks names and status.
 
 The owner does not write code. Agents implement; the owner plays the build and decides acceptance.
 Report results in a player's terms, with what was tested and what was not.
