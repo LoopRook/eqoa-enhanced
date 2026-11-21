@@ -897,7 +897,7 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 
 **Under review, not part of the promise.** This behaves as described today and may be corrected before or after the freeze; do not build on it:
 
-- `sell` takes no confirmation. The game's own merchant asks Yes or No before selling a quick-slotted, no-trade or non-misc item (a worn one is refused with `not_ready` by this call); `eqoa.actions.sell` sells it at once.
+- `sell` takes no confirmation. The game's own merchant window asks Yes or No before selling an item in any of four cases: it is worn, it is quick-slotted, it is no-trade, or it is not a misc item. `eqoa.actions.sell` refuses only the first (a worn item, `not_ready`) and sells the other three at once, with no question. A misc item that is none of these sells at once in the game too.
 
 ### Windows the game can be asked to open
 
