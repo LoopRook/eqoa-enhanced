@@ -4415,7 +4415,15 @@ fn install_non_item_actions(lua: &Lua) -> Result<()> {
                 let (group, norm) = match filter.as_deref().map(str::trim) {
                     None | Some("") | Some("any") | Some("nearby") => (false, None),
                     Some("group") => (true, Some("group".to_string())),
-                    Some(k @ ("hostile" | "friendly" | "corpse")) => (false, Some(k.to_string())),
+                    Some("corpse") => (false, Some("corpse".to_string())),
+                    // The game's next-target key has no hostile or friendly form (upstream
+                    // `Play::cycle_target` takes only "group or not"): refused, never cycled unfiltered.
+                    Some(k @ ("hostile" | "friendly")) => {
+                        return Err((
+                            "unsupported",
+                            format!("the game has no '{k}' target cycling; use 'group', 'corpse' or no filter"),
+                        ));
+                    }
                     Some(other) => {
                         return Err((
                             "invalid_argument",
