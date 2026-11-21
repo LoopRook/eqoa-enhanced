@@ -5,9 +5,9 @@
                                       [--record docs/modding/eqoa-1-frozen.json]
                                       [--allow-downgrade]
 
-The record lists every `supported` path with its kind: "leaf" (no children) or "group" (has children).
-`update` only ever adds paths. It refuses (exit 1, nothing written) when the surface would remove a
-recorded path, lower its status below `supported`, or change its kind, unless --allow-downgrade is given;
+The record lists every `supported` path (names only). `update` only ever adds paths and does not touch
+the file when nothing is added. It refuses (exit 1, nothing written) when the surface would remove a
+recorded path or lower its status below `supported`, unless --allow-downgrade is given;
 that override needs the owner's approval and a player note (docs/modding/VERSIONING.md).
 """
 import argparse, json, sys
@@ -18,26 +18,20 @@ SURFACE = ROOT / "docs/modding/eqoa-1-surface.json"
 RECORD = ROOT / "docs/modding/eqoa-1-frozen.json"
 
 
-def supported_kinds(surface):
-    return {
-        row["path"]: ("group" if row.get("children") else "leaf")
-        for row in surface["capabilities"]
-        if row["status"] == "supported"
-    }
+def supported_paths(surface):
+    return {row["path"] for row in surface["capabilities"] if row["status"] == "supported"}
 
 
 def violations(frozen, surface):
-    """One line per recorded path that disappeared, dropped below supported, or changed kind."""
+    """One line per recorded path that disappeared or dropped below supported."""
     rows = {row["path"]: row for row in surface["capabilities"]}
     out = []
-    for path, kind in frozen["supported"].items():
+    for path in frozen["supported"]:
         row = rows.get(path)
         if row is None:
             out.append(f"{path}: supported -> removed")
         elif row["status"] != "supported":
             out.append(f"{path}: supported -> {row['status']}")
-        elif ("group" if row.get("children") else "leaf") != kind:
-            out.append(f"{path}: kind {kind} -> {'group' if row.get('children') else 'leaf'}")
     return out
 
 
@@ -51,7 +45,7 @@ def update(surface_path, record_path, allow_downgrade):
     old = (
         json.loads(record_path.read_text(encoding="utf-8"))
         if record_path.exists()
-        else {"schema_version": 1, "api": "eqoa/1", "supported": {}}
+        else {"schema_version": 1, "api": "eqoa/1", "supported": []}
     )
     bad = violations(old, surface)
     if bad and not allow_downgrade:
@@ -62,16 +56,17 @@ def update(surface_path, record_path, allow_downgrade):
               " a breaking change is eqoa/2. Re-run with --allow-downgrade only with that approval.",
               file=sys.stderr)
         return 1
-    new = supported_kinds(surface)
-    merged = dict(old["supported"])
+    merged = set(old["supported"])
     if allow_downgrade:
-        for line in bad:  # the approved change: drop the entry, it re-enters if it is supported again
-            merged.pop(line.split(":")[0], None)
-    added = [p for p in new if p not in merged]
-    merged.update({p: new[p] for p in added})
-    old["supported"] = merged
-    record_path.write_text(render(old), encoding="utf-8", newline="\n")
-    print(f"{len(added)} added, {len(bad)} downgraded, {len(merged)} frozen -> {record_path}")
+        merged -= {line.split(":")[0] for line in bad}  # the approved change
+    added = supported_paths(surface) - merged
+    merged |= added
+    old["supported"] = sorted(merged)
+    if added or bad or not record_path.exists():
+        record_path.write_text(render(old), encoding="utf-8", newline="\n")
+        print(f"{len(added)} added, {len(bad)} downgraded, {len(merged)} frozen -> {record_path.name}")
+    else:
+        print(f"nothing to add; {record_path.name} left untouched")
     return 0
 
 

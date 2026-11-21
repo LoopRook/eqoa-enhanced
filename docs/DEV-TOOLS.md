@@ -108,17 +108,27 @@ The cost: the first cargo step after another worktree built recompiles the works
 
 ### The frozen `eqoa/1` record (`tools/eqoa1_freeze.py`)
 
-`docs/modding/eqoa-1-frozen.json` lists every `supported` path with its kind (`leaf`, or `group` when it has
-children). It is separate from the regenerated `eqoa-1-surface.json`, so regenerating the reference never
+`docs/modding/eqoa-1-frozen.json` lists every `supported` path (names only). It is separate from the regenerated `eqoa-1-surface.json`, so regenerating the reference never
 moves it. Test `eqoa1_frozen_surface_only_grows` (needs a graphics adapter, like
 `round7b_support_table_matches_the_running_client`; it prints a SKIP only where that one does) fails when a
-recorded path is removed, drops below `supported`, or changes kind; additions pass. The failure names the
-path with its before and after status.
+recorded path is removed or drops below `supported`; additions pass (a frozen leaf may gain children). The
+failure names the path with its before and after status.
+
+**What the guard does not cover.** It guards names and their `supported` status only. Not covered: a supported
+function whose body starts refusing while its registration stays; a record field no longer projected; an event
+no longer emitted; a changed argument or return shape; names whose status comes from presence rather than a
+registration (the Forge and UiForge layers, `ImGui.*`/`eqoa.imgui.*`, `bit.*`, and the hand check in
+`annotate_host` in `native.rs`; round 7 H handles status-follows-registration). The freeze rests on three
+things: this guard for names; the round 7C tests for fields and events
+(`round7c_play_records_match_declared_fields`, `round7c_supported_event_inventory_has_fixture_coverage`,
+`round7c_host_service_events_reach_lua_from_their_producers`, `round7c_world_events_come_from_play_changes`,
+`round7c_item_records_and_window_events_use_projected_native_state`); and the spec plus reviews for shapes and
+meanings.
 
 When the surface grows, regenerate `eqoa-1-surface.json` (above), then add the new names:
 
 ```powershell
-python tools/eqoa1_freeze.py update            # only adds; exit 1 and nothing written if it would remove or lower anything
+python tools/eqoa1_freeze.py update            # one command; creates the record if missing; only adds, and leaves the file alone when nothing is new; exit 1 and nothing written if it would remove or lower anything
 python tools/eqoa1_freeze.py update --allow-downgrade   # only with the owner's approval and a player note
 ```
 

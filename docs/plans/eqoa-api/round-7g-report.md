@@ -3,15 +3,14 @@
 Not marked as frozen anywhere player-facing; the owner approves the freeze with the release.
 
 ## Built
-- `docs/modding/eqoa-1-frozen.json`: 1637 `supported` paths, each with a kind (`leaf`, or `group` when the
-  path has children). Separate from the regenerated `eqoa-1-surface.json`. Created from the current surface.
-  (The surface rows carry no kind field, so "kind" is leaf/group; a leaf that gains children or the reverse fails.)
+- `docs/modding/eqoa-1-frozen.json`: 1637 `supported` paths, names only. Separate from the regenerated `eqoa-1-surface.json`. Created from the current surface.
+  Review change: the invented leaf/group "kind" rule was removed (it blocked legitimate additions); a group that
+  loses children is caught because each lost child is itself a removal.
 - `modtools.rs` tests: `eqoa1_frozen_surface_only_grows` (live surface from `reference()`, the same generator and
   `with_graphics` SKIP handling as `round7b_support_table_matches_the_running_client`, windows-only like it) and
-  `eqoa1_frozen_surface_controls` (runs everywhere, no GPU: removal, downgrade, kind change fail; a new supported
-  name passes). The failure names each path with before -> after status and states the policy (VERSIONING.md is
+  `eqoa1_frozen_surface_controls` (runs everywhere, no GPU: removal and downgrade fail; a new supported name passes; a frozen leaf gaining a supported child passes). The failure names each path with before -> after status and states the policy (VERSIONING.md is
   not on this branch, so it says "the versioning policy").
-- `tools/eqoa1_freeze.py update [--allow-downgrade]` (+ `tools/test_eqoa1_freeze.py`, 3 tests): only adds; refuses
+- `tools/eqoa1_freeze.py update [--allow-downgrade]` (+ `tools/test_eqoa1_freeze.py`, 3 tests): only adds, leaves the file untouched on a no-op (tested: bytes and mtime); refuses
   and writes nothing if the surface removes/lowers/changes a recorded path unless `--allow-downgrade`.
   Documented in `docs/DEV-TOOLS.md`. Added both files to `docs/fork-footprint.json` fork-owned list.
 - `CLAUDE.md`: one rule line.
@@ -36,3 +35,21 @@ Footprint: no upstream file touched; no budget change.
 
 ## CI
 CI run 44872812881 (pushed fbaac72a9f, before the report commit): completed, success.
+
+## What the guard does NOT cover
+Names and their `supported` status only. Not covered: a supported function whose body starts refusing while its
+registration stays; a record field no longer projected; an event no longer emitted; a changed argument or return
+shape; names whose status comes from presence rather than a registration (Forge and UiForge layers,
+`ImGui.*`/`eqoa.imgui.*`, `bit.*`, the hand check in `annotate_host`, `native.rs` ~365-412; round 7 H handles it).
+The freeze rests on: this guard (names); the round 7C tests (`round7c_play_records_match_declared_fields`,
+`round7c_supported_event_inventory_has_fixture_coverage`, `round7c_host_service_events_reach_lua_from_their_producers`,
+`round7c_world_events_come_from_play_changes`, `round7c_item_records_and_window_events_use_projected_native_state`)
+for fields and events; the spec and reviews for shapes and meanings.
+After round 7 H merges, recreate the record with one command: `python tools/eqoa1_freeze.py update` (delete the
+record first if the surface legitimately lost names, with the owner's approval).
+
+## Review round (97a7a01a): changes applied
+Kind rule removed; coverage limits stated; no-op leaves the file alone; `CLAUDE.md` line moved next to the
+API-contract paragraph and reworded to "checks names and status". Controls rerun below.
+
+Control rerun after the review change (record now names only): removing `timer` from `EVENTS` fails with `eqoa.events.timer: supported -> removed`; restored, clean. Focused rerun 7 passed, 0 failed, 1 by-design SKIP line.
