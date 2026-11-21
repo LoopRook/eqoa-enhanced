@@ -821,7 +821,7 @@ An action call returns `RequestId, nil` once the request is accepted into the mo
 | `kind` | string | The action's name, for example `"sell"`. |
 | `state` | string | `"queued"`, `"dispatched"`, then one final state: `"completed"`, `"refused"`, `"cancelled"` or `"unknown"`. |
 | `phase` | string | How far it got: `"queued"`, `"dispatch"` (the client acted or refused) or `"server"` (it concerns the server's answer). |
-| `ok` | bool? | true for `completed`, false for `refused` and `cancelled`, nil for `queued` and `unknown`. Do not use it to tell whether a request is finished: read `state`. |
+| `ok` | bool? | nil while the outcome is not known: `queued`, `dispatched` (sent, waiting for the server), `unknown`, and `cancelled` after the request was sent (the server may still act). true for `completed`; false for `refused` and for `cancelled` before anything was sent. Do not use it to tell whether a request is finished: read `state`. |
 | `code`, `reason` | string? | Why, when refused, cancelled or unknown: an error code (§1) and a sentence. |
 | `queued_tick`, `dispatched_tick`, `completed_tick` | uint, uint?, uint? | 30 Hz game steps at each stage. |
 | `detail` | table? | Extra facts for some actions (for example `{typed, submitted}` for `input_text`). |
@@ -898,7 +898,6 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 
 - `stop()` ends auto-attack, auto-run and follow whoever started them, the player included.
 - `equip` toggles; there is no "wear" or "take off" form.
-- A `dispatched` result carries `ok = true` although the outcome is not yet known.
 
 ### Windows the game can be asked to open
 
@@ -958,7 +957,7 @@ A batch is a list of actions the client runs one at a time, each waiting for the
 
 Steps may be: `target`, `assist`, `target_target`, `interact`, `attack`, `autorun`, `stop`, `cast`, `use_item`, `equip`, `quick_slot`, `weapon_set`, `unmemorize_all`, `open_loot`, `talk`, `loot`, `loot_all`, `buy`, `sell`, `bank_move`, `bank_money`, `chat`, `command`. Any other kind is `invalid_argument`.
 
-`BatchResult = {batch_id, state, ok, completed, total, current_step, code, reason, queued_tick, completed_tick, failed_step}`: `state` is `"running"`, then `"completed"`, `"refused"`, `"stopped"`, `"cancelled"` or `"unknown"`; `completed` counts the steps done out of `total`; `current_step` is the 1-based step in hand; `failed_step` the step that ended it. (`detail` is declared and never filled; each step's own facts are in that step's `action.result`.)
+`BatchResult = {batch_id, state, ok, completed, total, current_step, code, reason, queued_tick, completed_tick, failed_step}`: `state` is `"running"`, then `"completed"`, `"refused"`, `"stopped"`, `"cancelled"` or `"unknown"`; `ok` is nil while `running` and for `unknown`, true for `completed`, false for `refused`, `stopped` and `cancelled`; `completed` counts the steps done out of `total`; `current_step` is the 1-based step in hand; `failed_step` the step that ended it. (`detail` is declared and never filled; each step's own facts are in that step's `action.result`.)
 
 - `batch.progress` fires as the batch advances and `batch.result` once when it ends, both with the `BatchResult`. Each step also fires its own `action.result`.
 - `eqoa.actions.batch_status(id:BatchId)` returns the `BatchResult`; `eqoa.actions.status` does too.
