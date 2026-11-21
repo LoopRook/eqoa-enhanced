@@ -2320,7 +2320,7 @@ fn round6b_assist_emits_dispatch_and_server_phases_via_play() {
     host.execute(
         r#"
         assert(#results == 1 and results[1].match_req)
-        assert(results[1].phase == "dispatch" and results[1].state == "dispatched" and results[1].ok == true)
+        assert(results[1].phase == "dispatch" and results[1].state == "dispatched" and results[1].ok == nil) -- round 7H: no ok before the outcome
         local st = assert(eqoa.actions.status(req))
         assert(st.request_id == req and st.state == "dispatched")
     "#,

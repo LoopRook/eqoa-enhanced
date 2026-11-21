@@ -152,7 +152,7 @@ pub(crate) const ANSWERS_DIALOGS: [&str; 2] = ["eqoa.actions.dialog_answer", "eq
 /// look and a mod may never skip. Until the confirm contract ties a mod-drawn confirmation to the player's own
 /// answer, these are `not_yet` for native mods; their dispatch (`fork_ext/play.rs`) stays built for that day.
 pub(crate) const CONFIRM_GATED: [&str; 3] = ["drop_quest", "mastery_buy", "mastery_refund"];
-const CONFIRM_CONTRACT: &str = "the game asks the player to confirm this step; a mod cannot take it until the window-replacement roadmap's confirm contract ties a mod-drawn confirmation to the player's own answer";
+const CONFIRM_CONTRACT: &str = "the game asks the player to confirm this step; a mod cannot take it until the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer";
 
 #[cfg(test)]
 thread_local! {

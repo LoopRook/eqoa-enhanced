@@ -137,7 +137,7 @@ fn round7h_5_cycle_target_refuses_filters_the_game_does_not_have() {
     }
     for filter in ["nil", "'group'", "'corpse'"] {
         gesture(&mut p, &host, &format!("return eqoa.actions.cycle_target({filter})"));
-        host.execute(&format!("assert(last_req ~= nil and last_err == nil, '{filter} was refused')")).unwrap();
+        host.execute(&format!("assert(last_req ~= nil and last_err == nil, [[{filter} was refused]])")).unwrap();
     }
     done(&host);
 }
