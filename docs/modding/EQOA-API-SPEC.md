@@ -863,7 +863,7 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 | `eqoa.actions.weapon_set(set)` | Switches weapon set: 1..5 (5 is bare hands) or `"bare_hands"`. `unsupported` on a server without weapon sets. |
 | `eqoa.actions.prepare_weapon_set(set:uint, name:string)` | Saves the worn weapons as set 1..4 under a name of at most 16 characters. |
 | `eqoa.actions.assign_ability(slot:uint, ability)` | Memorizes an ability into hotbar slot 1..20, as the Abilities window does. |
-| `eqoa.actions.unmemorize_ability(x)`, `eqoa.actions.unmemorize_all()` | Clears one memorized ability (a slot number 1..20, or an ability) or all of them. |
+| `eqoa.actions.unmemorize_ability(x)`, `eqoa.actions.unmemorize_all()` | Clears one memorized ability (a slot number 1..20, or an ability) or all of them. The game itself asks nothing before Unmemorize All, and neither does this. |
 | `eqoa.actions.arrange_ability(from, to)` | Moves an ability in the Abilities window's order. |
 | `eqoa.actions.loot(item:ItemRef, count:uint?)`, `eqoa.actions.loot_all()` | Takes one stack (or `count` of it) or everything from the open corpse. `window_closed` if no corpse is open. |
 | `eqoa.actions.buy(item:ItemRef, count:uint=1)`, `eqoa.actions.sell(item:ItemRef, count:uint=1)` | Buys from the open merchant's wares, sells a pack stack to it. `window_closed` if no merchant is open. |
@@ -876,9 +876,8 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 | `eqoa.actions.autorun(on:bool?)` | Auto-run on or off; toggles with no argument. |
 | `eqoa.actions.follow(entity)` | Follows an entity in view (it is targeted first). `not_ready` if the game will not follow it. `follow(nil)` only stops following: when nothing is being followed it completes and does nothing. |
 | `eqoa.actions.camera({heading?, pitch?, distance?, mode?})` | Sets the camera: radians, game units, `mode` 0..3. At least one field. `busy` when the game has the camera locked. |
-| `eqoa.actions.drop_quest(quest:QuestRef)` | Drops a quest from the journal. No confirmation is asked: the call is the decision. |
 | `eqoa.actions.mastery_share(fraction:number)` | Sets the share of experience going to Class Mastery: 0..1 in steps of 0.01. |
-| `eqoa.actions.mastery_browse(skill_id:int)`, `eqoa.actions.mastery_buy(skill_id:int)`, `eqoa.actions.mastery_refund(skill_id:int)` | Inspects, buys or refunds a mastery skill. They need the Class Mastery window open with its list loaded, and `buy` and `refund` need the same skill browsed first (`not_ready` otherwise). The game's own purchase rules apply. |
+| `eqoa.actions.mastery_browse(skill_id:int)` | Inspects a mastery skill, as the Class Mastery window's list does. It needs that window open with its list loaded (`not_ready` otherwise); `not_found` for a skill not in the list. Buying and refunding are not available (below). |
 | `eqoa.actions.open_window(kind:string, arg:int=0)` | Opens one of the game's windows; see the list below. |
 | `eqoa.actions.close_window(window:WindowRef)` | Closes that window, as the back button does. |
 | `eqoa.actions.select_row(window, row:uint)`, `eqoa.actions.activate_row(window, row:uint)` | Moves the lit row to `row`; `activate_row` then confirms it. Rows are the 1-based `Window.rows`. `out_of_range` for a row that does not exist, `not_ready` for a row that is not enabled. |
@@ -891,8 +890,9 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 - `eqoa.actions.destroy` is `unsupported`. A mod cannot destroy items.
 - `eqoa.actions.move`, `eqoa.actions.look` and `eqoa.actions.buttons` (held movement, camera stick and controller buttons) are `not_yet`: they wait for a change in the upstream client. Calling one returns `nil, Error{code="not_yet"}`.
 - `eqoa.actions.toggle_stats_box` belongs to the bundled Stats Box mod; any other mod gets `permission_denied`.
+- `eqoa.actions.drop_quest`, `eqoa.actions.mastery_buy` and `eqoa.actions.mastery_refund` are `not_yet`. The game asks the player Yes or No before dropping a quest and before buying or refunding a Class Mastery skill, and these calls would take the step without that answer. They come back with the confirm contract of the window-replacement roadmap, which lets a mod draw the confirmation its own way while the step still waits for the player's own choice. Calling one returns `nil, Error{code="not_yet"}` and sends nothing. A mod can still lead the player there: `open_window("quests")` or `open_window("mastery")`, and the game's own window asks.
 
-**The game's confirmations cannot be skipped.** Where the game asks the player to confirm a step that cannot be undone (its Yes/No box: quitting, dismissing a pet, leaving a guild and the like), the box is still raised when a mod leads the game there, and the step does not happen until it is answered. A mod that replaces a window may read the box (`Dialog`, §7) and draw it its own way; it answers with `eqoa.actions.dialog_answer`, which needs its own capability and is shown to the player as "Can answer NPC dialogs". The API has no way to make the game leave the box out.
+**The game's confirmations cannot be skipped.** Where the game asks the player to confirm a step that cannot be undone (its Yes/No box: quitting, dismissing a pet, leaving a guild and the like), the box is still raised when a mod leads the game there, and the step does not happen until it is answered. A mod that replaces a window may read the box (`Dialog`, §7) and draw it its own way; it answers with `eqoa.actions.dialog_answer`, which needs its own capability and is shown to the player as "Can answer NPC dialogs". The API has no way to make the game leave the box out, and no action takes a step the game would have asked about (see `drop_quest` and the mastery purchases above).
 
 **Under review, not part of the promise.** These behave as described today, and may be corrected before or after the freeze; do not build on them:
 
