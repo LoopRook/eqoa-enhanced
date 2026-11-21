@@ -911,16 +911,13 @@ pub(crate) fn defer(bytes: usize, apply: impl FnOnce(&mut Core) + 'static) {
     }
 }
 
+/// Pending deltas discarded inside the core never became events, so they have no event numbers:
+/// `events.dropped` gives the count and the stream, and no `first_seq`/`last_seq` (round 7H).
 fn source_loss(c: &mut Core, count: u64, stream: &str) {
     if count == 0 {
         return;
     }
-    let first = c.seq + 1;
-    let last = c.seq + count;
-    c.emit(
-        "events.dropped",
-        json!({"count":count,"streams":[stream],"first_seq":first,"last_seq":last}),
-    );
+    c.emit("events.dropped", json!({"count":count,"streams":[stream]}));
 }
 fn generation_loss(c: &mut Core, count: u64) {
     if count != 0 {

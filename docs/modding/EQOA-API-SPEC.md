@@ -199,7 +199,7 @@ Every event is an `Event = {name:string, seq:uint, time:number, tick:uint, frame
 | `world.leaving` | `{reason:string, world_id:int?}` | The world is being left; `reason` is `"zone"`, `"respawn"` or `"disconnect"`. |
 | `world.entered` | `{world_id:int, initial:bool}` | The character is in a world and its state is loaded. |
 | `state.reset` | `{in_world:bool, initial:bool}` | Everything the mod read before is out of date: fetch it again (or, with `in_world = false`, there is no world state). Fired after entering and leaving a world, and after `events.dropped`. |
-| `events.dropped` | `{first_seq:uint, last_seq:uint, count:uint, streams:string[]}` | The mod fell behind and some events were discarded; `streams` names what was lost. Chat and combat lines that were dropped are gone; state can be read again. |
+| `events.dropped` | `{first_seq:uint?, last_seq:uint?, count:uint, streams:string[]}` | Some events were discarded; `streams` names what was lost and `count` how many. When the mod fell behind, `first_seq` and `last_seq` are the numbers of the first and last discarded event. When the client discarded changes before they became events (`streams` is `source.capture` or `source.generation`), they had no numbers and both are nil. Chat and combat lines that were dropped are gone; state can be read again. |
 | `player.changed` | `{before:Player?, after:Player?, changed:string[]}` | Anything in the `Player` record changed. Movement is reported at most once per game step. |
 | `player.stats_changed` | `{}` | The Character Summary numbers changed (§4). |
 | `target.changed` | `{before:EntityRef?, after:EntityRef?}` | The player's target changed. |
