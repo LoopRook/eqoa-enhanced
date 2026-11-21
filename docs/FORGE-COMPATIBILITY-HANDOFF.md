@@ -137,15 +137,23 @@ run at 1280x720 and cover every element in the table (`cargo test --locked -p eq
   drawn badge). The miss is correct, but it is shown to the player as an error; make an optional
   probe's miss quiet (log only) if Forge treats it so.
 
-## Next, in order
+## Next
 
-1. Confirm the remaining gate items above with the owner; fix what fails.
-2. Fix `options::tests::the_extended_pages`.
-3. Decide with the owner how the first public dev build is published (a versioned pre-release on
-   looprook, or a separate channel). The updater must never move stable players onto it without consent.
-4. Then `avoids_modern_ui` and `arpg_ui`, and the author API support table (docs: Forge's API is the
-   primary modding API; native-only extras under an `eqoa` namespace).
-   - API note: Deliberate divergence: `Util.IsStartMenuOpen` / `Window.IsStartMenuOpen` return true for ANY game window (shops, bank, trade, loot, mail, spellbook…), not only the pause menu's pages, because shipped packages use it to hide over game windows.
+The list that stood here (2026-10-31) is done or replaced. What comes next is no longer decided in
+this file:
+
+- **Order of work:** `docs/plans/EQOA-MOD-API-PLAN.md` (the mod API plan). Round 7 freezes the native
+  API `eqoa/1`; later rounds are listed there.
+- **Author documentation:** `docs/modding/` ([index](modding/README.md)). The native `eqoa` API is the
+  modding API for new work. Forge packages keep running through the compatibility layer described in
+  this file, and every Forge name the client answers is listed, with its status, in the generated
+  `docs/modding/SUPPORT-TABLE.md`. Forge compatibility is kept up but is not part of the `eqoa/1`
+  promise (`docs/modding/VERSIONING.md`).
+- **Deferred requests:** `docs/backlog.md`.
+
+One compatibility note kept from the old list, because shipped packages rely on it:
+`Util.IsStartMenuOpen` / `Window.IsStartMenuOpen` return true for ANY game window (shops, bank, trade,
+loot, mail, spellbook…), not only the pause menu's pages.
 
 The sections below record how the hide fix was built (2026-10-30), kept for reference.
 

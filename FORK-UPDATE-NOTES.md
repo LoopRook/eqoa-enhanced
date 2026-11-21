@@ -4,6 +4,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- **Documentation for mod authors.** `docs/modding/` now describes the mod API (`eqoa/1`) as it is built: a getting-started guide, a starter mod to copy, the full reference, what each bundled mod shows, and what will never change once the API is frozen with the next Stable release.
 - **Bag Viewer sells single items near a merchant.** Sell 1 and Sell stack work whenever a merchant is in reach: with no merchant window open, Bag Viewer talks to the merchant for you and sells without opening the game's window. After a sale the game's merchant window no longer pops up.
 - Mods need the map waypoint permission to place or clear a personal pin. New pins must be on the loaded map's ground.
 - Disabling a mod removes only the map pins it placed and still owns, in every world. A pin you clear and place again, even at the same spot, stays yours.
