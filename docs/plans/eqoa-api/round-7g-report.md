@@ -53,3 +53,4 @@ Kind rule removed; coverage limits stated; no-op leaves the file alone; `CLAUDE.
 API-contract paragraph and reworded to "checks names and status". Controls rerun below.
 
 Control rerun after the review change (record now names only): removing `timer` from `EVENTS` fails with `eqoa.events.timer: supported -> removed`; restored, clean. Focused rerun 7 passed, 0 failed, 1 by-design SKIP line.
+CI run 44896775447 (pushed edf2716282, review changes): completed, success.
