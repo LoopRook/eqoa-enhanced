@@ -366,7 +366,7 @@ fn docs_every_eqoa_name_in_the_pages_exists_in_the_surface_file() {
         let text = page(name);
         for (index, line) in text.lines().enumerate() {
             for path in eqoa_paths(line) {
-                // a name the client has, or the table above names it has (`eqoa.entities.status`)
+                // a name the client has, or a prefix of names it has
                 let below = format!("{path}.");
                 let known = surface.contains_key(&path)
                     || surface.range(below.clone()..).next().is_some_and(|(next, _)| next.starts_with(&below));

@@ -1123,6 +1123,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     modules
         .get::<Table>("abilities")?
         .set("scope", guard(lua, scope, "eqoa.abilities.scope", None)?)?;
+    // the table itself, as `eqoa.items.slots` is (round 7H)
+    describe(lua, "eqoa.abilities.scope", "supported", Some(2), "");
     let status = lua.create_table()?;
     for (name, id) in [("nameplate_hidden", 1), ("poisoned", 4), ("diseased", 8)] {
         status.set(name, id)?;
@@ -1137,6 +1139,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     modules
         .get::<Table>("entities")?
         .set("status", guard(lua, status, "eqoa.entities.status", None)?)?;
+    describe(lua, "eqoa.entities.status", "supported", Some(2), "");
     super::file_io::install_native(host)?;
     super::async_json::install(host)?;
     super::json_save::install(host)?;
