@@ -205,3 +205,107 @@ fn round7h_7_steps_the_game_confirms_are_not_yet_for_mods() {
     host.execute("assert(eqoa.capabilities.get('eqoa.actions.unmemorize_all').status == 'supported')").unwrap();
     done(&host);
 }
+
+// ---- Fix round 1 ----
+
+const BOX: &str = "local w = eqoa.windows.find('confirm'); ";
+
+/// Fix 1: a game Yes/No box that guards a step (quit, dismiss the pet, disband or leave the guild) cannot be
+/// accepted by a mod: `dialog_answer` Yes is refused `not_yet`, the box stays up, nothing is sent. Declining
+/// works. A group invitation can be accepted; an NPC response dialog still answers.
+#[test]
+fn round7h_fix1_a_mod_cannot_accept_a_guarded_game_prompt() {
+    let routes: [(&str, fn(&mut Play), i32); 4] = [
+        ("quit", |p| p.start_actions(vec![(0x0A01_0000, 0)]), 0x0A01_0000),
+        ("pet_dismiss", |p| p.pet_command(0x050E_0000), 0x050E_0000),
+        ("guild disband", |p| p.guild_action(0x0B05_1007, 0), 0x0B05_1007),
+        ("guild leave", |p| p.guild_action(0x0B05_1008, 0), 0x0B05_1008),
+    ];
+    for (name, open, tag) in routes {
+        let (mut p, host) = rig();
+        open(&mut p);
+        assert!(p.mode == 14 && p.mbox.p2 == tag, "{name}: the game's own box is up");
+        let sent = p.session.sends_lost;
+        gesture(&mut p, &host, &format!("{BOX} return eqoa.actions.dialog_answer(w.ref, 1)"));
+        host.execute(&format!(
+            "assert(results[1] and results[1].state == 'refused' and results[1].code == 'not_yet', [[{name}: ]] .. tostring(last_err and last_err.code or results[1] and results[1].state .. ' ' .. tostring(results[1].code)))"
+        ))
+        .unwrap();
+        assert!(p.mode == 14 && p.mbox.p2 == tag, "{name}: the box is still up");
+        assert!(p.held.is_none() && p.key_queue.is_empty(), "{name}: no key pressed");
+        assert_eq!(p.session.sends_lost, sent, "{name}: nothing sent");
+        assert!(!p.quit, "{name}: the game did not quit");
+
+        // declining is always allowed and changes nothing
+        gesture(&mut p, &host, &format!("{BOX} return eqoa.actions.dialog_answer(w.ref, 2)"));
+        host.execute(&format!("assert(results[1] and results[1].state == 'completed', [[{name} decline]])")).unwrap();
+        p.pump_keys();
+        p.pump_keys();
+        assert_eq!(p.mode, 0, "{name}: No closed the box");
+        assert_eq!(p.session.sends_lost, sent, "{name}: declining sent nothing");
+        assert!(!p.quit);
+        done(&host);
+    }
+
+    // a group invitation is answerable: Yes goes through the game's own box
+    let (mut p, host) = rig();
+    p.show_invite("Ally");
+    let sent = p.session.sends_lost;
+    gesture(&mut p, &host, &format!("{BOX} return eqoa.actions.dialog_answer(w.ref, 1)"));
+    host.execute("assert(results[1] and results[1].state == 'completed', tostring(results[1] and results[1].code))").unwrap();
+    for _ in 0..3 {
+        p.pump_keys();
+    }
+    assert_eq!(p.mode, 0, "the invitation was answered");
+    assert!(p.session.sends_lost > sent, "accepting the invitation went to the server");
+    done(&host);
+
+    // an NPC response dialog (not a Yes/No box) still answers
+    let (mut p, host) = rig();
+    let vui = crate::ui::Vui::new(Default::default(), Default::default(), vec![]);
+    p.mode = 7;
+    p.response.set_dialog(
+        &vui,
+        crate::dialog::DialogBox {
+            id: 42,
+            text: crate::ui::wide("Choose:"),
+            options: (1..=3).map(|i| crate::ui::wide(&format!("Option {i}"))).collect(),
+        },
+    );
+    gesture(&mut p, &host, "local w = eqoa.windows.find('response_dialog'); return eqoa.actions.dialog_answer(w.ref, 2)");
+    host.execute("assert(results[1] and results[1].state == 'completed', tostring(results[1] and results[1].code))").unwrap();
+    done(&host);
+}
+
+/// Fix 2: a request already sent to the server cannot be cancelled: `cancel` returns false, the request
+/// keeps waiting, and the server's answer is delivered as its result.
+#[test]
+fn round7h_fix2_cancel_cannot_unsend_a_request_and_its_result_still_arrives() {
+    let (mut p, host) = rig();
+    p.abilities.insert(
+        601,
+        net::dump::Ability { id: 601, display_index: 3, valid: 1, slot: -1, name: "Heal".into(), ..Default::default() },
+    );
+    gesture(&mut p, &host, "return eqoa.actions.assign_ability(1, 601)");
+    host.execute(
+        r#"
+        assert(results[#results].state == 'dispatched')
+        local v, err = eqoa.actions.cancel(last_req)
+        assert(v == false and err == nil, 'cancel of a sent request: ' .. tostring(v) .. ' ' .. tostring(err and err.code))
+        assert(eqoa.actions.status(last_req).state == 'dispatched')
+    "#,
+    )
+    .unwrap();
+    let ev = net::session::Event::AbilitySlot { token: 1, index: 3, slot: 0 };
+    let cap = super::super::begin_game_event(&p, &ev);
+    super::super::end_game_event(&p, cap);
+    native_events::dispatch(&host).unwrap();
+    host.execute(
+        "local r = results[#results]; assert(r.state == 'completed' and r.ok == true, 'the server answer was not delivered: ' .. r.state)",
+    )
+    .unwrap();
+    // a queued request is still cancelled
+    host.execute("q = eqoa.actions.assign_ability(2, 601); local v, err = eqoa.actions.cancel(q); assert(v == true and err == nil)")
+        .unwrap();
+    done(&host);
+}

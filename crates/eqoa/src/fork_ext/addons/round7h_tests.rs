@@ -214,3 +214,22 @@ fn round7h_low_legacy_alias_status_follows_its_binding() {
         );
     }
 }
+
+/// Fix round 1, item 5: the hidden session's idle timeout the spec quotes, 15 seconds (scope `own`), pinned
+/// through a clock seam: still open after 14.9 s without use, ended at 15 s.
+#[test]
+fn round7h_fix5_hidden_session_idle_timeout_is_15_seconds() {
+    use super::window_takeover::{self as wt, TakeoverKind, TakeoverScope};
+    use std::time::Duration;
+    wt::reset_all_for_test();
+    wt::takeover(1, "idle_pin", TakeoverKind::Loot, TakeoverScope::Own).unwrap();
+    assert!(wt::activate_hidden_for_test(1, TakeoverKind::Loot, 9001));
+    assert!(wt::is_hidden_active(TakeoverKind::Loot));
+    wt::age_hidden_session_for_test(TakeoverKind::Loot, Duration::from_millis(14_900));
+    wt::sync_sessions_with(|_, _, _| Ok(()), |_, _| true);
+    assert!(wt::is_hidden_active(TakeoverKind::Loot), "ended before 15 s without use");
+    wt::age_hidden_session_for_test(TakeoverKind::Loot, Duration::from_secs(15));
+    wt::sync_sessions_with(|_, _, _| Ok(()), |_, _| true);
+    assert!(!wt::is_hidden_active(TakeoverKind::Loot), "still open after 15 s without use");
+    wt::reset_all_for_test();
+}
