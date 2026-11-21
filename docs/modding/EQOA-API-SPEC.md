@@ -6,7 +6,7 @@ This is the reference for the native Lua mod API of EQOA Enhanced, **as built**:
 - **Frozen.** `eqoa/1` is frozen with the Stable release that first carries rounds 4 to 7 of the API. From that release on it only grows: nothing described here is renamed, removed or changed in meaning. [VERSIONING.md](VERSIONING.md) says exactly what that covers.
 - **The client is the authority.** [SUPPORT-TABLE.md](SUPPORT-TABLE.md) lists every name with its status. It is printed by the client itself (`eqoa mod-api`) and checked against the client by a test, so it cannot drift; a second test checks this page against it. Where this page and the table ever disagree, the table is right.
 - **Feature-test, do not assume.** `eqoa.revision` rises when something is added. `eqoa.capabilities.has("eqoa.map.set_waypoint")` asks about one name (§2).
-- A few numbers below are marked **design intent, not part of the promise**: they describe how the client is tuned today and may change. Section 8 has a short list marked **under review**. Everything else is the contract.
+- A few numbers below are marked **design intent, not part of the promise**: they describe how the client is tuned today and may change. Section 8 has a short list marked **under review** (one item). Everything else is the contract.
 
 ## 1. Conventions
 
@@ -179,7 +179,7 @@ A mod that raises an error in its entry, runs out of memory or exceeds its instr
 | `eqoa.events.on(name:string, callback:function)` | A `Token`. `callback(event)` runs for each such event. An unknown event name is refused (`unknown_symbol`). |
 | `eqoa.events.once(name:string, callback:function)` | The same, for one event only. |
 | `eqoa.events.off(token:Token)` | `true` if removed, `false` if it was already gone; `stale_handle` for anything that is not this mod's token. |
-| `eqoa.events.after(seconds:number, callback:function)` | A `Token` for a one-shot timer. The callback gets a `timer` event at the first delivery after the time has passed. `off` cancels it. |
+| `eqoa.events.after(seconds:number, callback:function)` | A `Token` for a one-shot timer. The callback gets a `timer` event at the first delivery after the time has passed. `off` cancels it. A negative or non-finite delay is `invalid_argument`; a delay too large for the clock is refused with `failed`. |
 
 A mod may hold 128 subscriptions and timers at a time (`quota`; design intent, not part of the promise). Handlers for one event run in the order they were registered. Removing a subscription inside a handler takes effect at once; one added inside a handler starts with the next event.
 
@@ -255,7 +255,7 @@ These functions read the client's own state. They need no capability. Unless a r
 | `class_id:int`, `class_name:string?`, `race_id:int`, `race_name:string?` | The game's class and race IDs and their names (nil for an ID the client does not know). |
 | `experience:uint`, `experience_debt:uint` | Raw counters, not percentages. |
 | `hp:Vital?`, `power:Vital?` | `Vital = {current:int, maximum:int, base:int}`. nil until the server has sent the character's stats. |
-| `hp_fraction:number?` | The health bar's own value, 0..1 (nil without an entity record). |
+| `hp_fraction:number?` | The health bar's own value, 0..1 (nil without an entity record). It can read 0 where `Entity.hp_fraction` of the same character is nil: this one is the bar, that one only a measured value. |
 | `attributes:Attributes?` | `{base:SevenStats, total:SevenStats}`, where `SevenStats = {strength, stamina, agility, dexterity, wisdom, intelligence, charisma}` (ints). |
 | `armor:int?`, `resists:Resists?` | Armor, and `Resists = {base, poison, disease, fire, cold, lightning, arcane}`: `base` is the base resistance, the others the bonuses on top of it. |
 | `position:Vec3?`, `velocity:Vec3?`, `speed:number?`, `horizontal_speed:number?`, `heading:number?` | Where the character is and how it moves: game units, units per second, radians. nil until the character exists in the world. |
@@ -288,9 +288,9 @@ These functions read the client's own state. They need no capability. Unless a r
 
 ### Group
 
-`eqoa.group.get()` returns `Group = {in_group:bool, self_leader:bool?, members:Member[], raid:RaidMember[], invites:Invite[]}`. Outside a group it is still a record, with `in_group = false`, no members and `self_leader` nil. `members` never includes the player.
+`eqoa.group.get()` returns `Group = {in_group:bool, self_leader:bool?, members:Member[], raid:RaidMember[], invites:Invite[]}`. Outside a group it is still a record, with `in_group = false`, no members and `self_leader` nil. `members` never includes the player. `raid` is filled from the server's raid list whether or not `in_group` is true.
 
-- `Member = {entity:EntityRef?, id:uint, name:string, active:bool, hp_fraction:number?, power:number?, position:Vec3?, world_id:int?}`. A member the client does not see keeps its place in the list with `active = false`; its position and world are nil unless the server reports them. A member can be in another world: compare `world_id` before measuring a distance.
+- `Member = {entity:EntityRef?, id:uint, name:string, active:bool, hp_fraction:number?, power:number?, position:Vec3?, world_id:int?}`. A member the client does not see keeps its place in the list with `active = false`; its position and world are nil unless the server reports them. A member can be in another world: compare `world_id` before measuring a distance. For a member the client does not see, `world_id` is the server's byte read as signed (-128..127).
 - `RaidMember = {id:uint, name:string, hp_fraction:number, power_fraction:number}`; `Invite = {id:uint, name:string}`.
 
 ### Abilities, hotbars, cooldowns and effects
@@ -300,7 +300,7 @@ These functions read the client's own state. They need no capability. Unless a r
 | `eqoa.abilities.list()` | `Ability[]`, every ability the character knows, ordered by id. |
 | `eqoa.abilities.get(ref:AbilityRef)` | That `Ability`, or `stale_handle`. |
 | `eqoa.abilities.find(id:Id)` | The `Ability` with that id (a decimal string, as in `Ability.id`), or `nil, nil`. |
-| `eqoa.abilities.in_range(ref, from:Vec3, to:Vec3)` | `RangeResult = {in_range:bool, distance:number}`: distance against the ability's range (always in range for a self ability or one with no range). Geometry only: not line of sight, not a promise the cast works. |
+| `eqoa.abilities.in_range(ref, from:Vec3, to:Vec3)` | `RangeResult = {in_range:bool, distance:number}`: distance against the ability's range (always in range for a self ability or one with no range). Geometry only: not line of sight, not a promise the cast works. Outside the world every ability handle is stale: `stale_handle`. |
 | `eqoa.hotbar.list()` | `Hotbar[]`: the bars the player has turned on, in the game's order. |
 | `eqoa.cooldowns.get(ref:AbilityRef)` | `Cooldown = {active:bool, lockout:number, started_at:number?, estimated_remaining:number?}`. `lockout` is the server's lockout in seconds; `active` is `lockout > 0`. The last two are the client's own estimate from when it saw the lockout start, nil when it did not see that. |
 | `eqoa.effects.list()` | `Effect[]`, at most eight. `unavailable` until the server has sent the effect list for this world; an empty list after that means no effects. |
@@ -320,7 +320,7 @@ These functions read the client's own state. They need no capability. Unless a r
 | `eqoa.chat.channel_name(channel:string)` | A display label: Say, Party, Guild, Shout, Tell, System; "Unknown Message Type" for anything else. Works outside the world. |
 | `eqoa.combat.get_counters()` | `Counters = {received:uint, dropped:uint}`: combat events delivered to this mod and lost to a full queue, since it was enabled. Works outside the world. |
 
-`ChatMessage = {seq:uint, time:number, text:string, color:Color, channel:string}`. `text` is the whole logical line, not wrapped. `channel` is `"group"`, `"system"` or `"unknown"` in this client (`unknown` covers say, shout, guild and tells, which the client's chat observer does not tell apart); more values may be added. (`channel_code`, `sender` and `outgoing` are declared `unsupported` and read as nil.) The `chat.message` event carries one `ChatMessage` per line as it arrives; a mod enabled later can read the retained history but gets events only for new lines.
+`ChatMessage = {seq:uint, time:number, text:string, color:Color, channel:string}`. `text` is the whole logical line, not wrapped. `channel` is `"group"`, `"system"` or `"unknown"` in this client (`unknown` covers say, shout, guild and tells, which the client's chat observer does not tell apart). **More values may be added**: a line that reads `unknown` today may get its own channel later, so treat any value you do not know as `unknown`. (`channel_code`, `sender` and `outgoing` are declared `unsupported` and read as nil.) The `chat.message` event carries one `ChatMessage` per line as it arrives; a mod enabled later can read the retained history but gets events only for new lines.
 
 `CombatHit = {attacker_id:uint, defender_id:uint, amount:uint, kind:"damage"|"heal", color, outgoing:bool, incoming:bool, from_pet:bool, to_pet:bool}`, carried by `combat.hit` for every hit the client is told about, including other people's. `amount` is the size; `kind` says which way. `color` is `{r, g, b}` as three integers 0..255 at positions 1..3 when the server sends a colour, else nil (black is a colour, not nil). The four flags compare the two ids with the player and the pet.
 
@@ -418,7 +418,7 @@ Every `Begin...` needs its `End...`. An error inside a frame unwinds the open sc
 | `eqoa.icons.info(hash:uint)` | `SurfaceInfo = {width:uint, height:uint}` of an icon (`source_format` is declared `unsupported`). |
 | `eqoa.icons.class(class_id:int)` | The class's icon as a `TextureInfo` (`class_id` 0..14). |
 | `eqoa.icons.disposition(value:uint)` | The icon the game uses for that `Entity.disposition`. |
-| `eqoa.text.localized(id:int)` | A string from the game's text table; `nil, nil` for an id with no text; `unavailable` before the table is loaded. |
+| `eqoa.text.localized(id:int)` | A string from the game's text table, always from its first language column (column 0), whatever language the client is set to; `nil, nil` for an id with no text; `unavailable` before the table is loaded. |
 | `eqoa.math.bearing(from:Vec3, to:Vec3)` | The compass direction from one point to another, radians in [0, 2π), north 0, increasing toward west. |
 | `eqoa.math.degrees(radians)`, `eqoa.math.radians(degrees)` | Conversions. |
 | `eqoa.math.normalize(angle)`, `eqoa.math.signed_angle(a, b)` | An angle brought into [0, 2π); the shortest turn from `a` to `b`, in [-π, π). |
@@ -480,7 +480,7 @@ For data too big to handle in one frame, the client reads, parses and writes JSO
 | `eqoa.files.save_json_async(path:string, value)` | A request number. The value is copied at the call and written later; the result is `resource.ready {kind="json_saved", request}` or `resource.failed`. A private path only. Saves to one path are merged: if you save again before the last one was written, only the newest is written and reported, so track the latest request. Saving to a second path while one is in flight is `quota`. |
 | `eqoa.files.null` | The value that stands for JSON `null` in loaded data and in values to save. |
 
-A loaded value is an ordinary, changeable Lua table; arrays (also empty ones) remember that they are arrays and are saved as arrays. A value to save follows the settings rules above, plus `eqoa.files.null`. A file may be up to 16 MiB, 32 levels deep and two million values to load, and 14 MiB to save (tested). A large value is handed to Lua over several frames; how it is sliced is design intent, not part of the promise.
+A loaded value is an ordinary, changeable Lua table; arrays (also empty ones) remember that they are arrays and are saved as arrays. A value to save follows the settings rules above, plus `eqoa.files.null`. A file may be up to 16 MiB, the top value and up to 32 levels of nesting below it, and two million values to load, and 14 MiB to save (tested). A large value is handed to Lua over several frames; how it is sliced is design intent, not part of the promise.
 
 An ordinary mod has 8 MiB of Lua memory. A mod that lists `"large_data"` in its `capabilities` gets 128 MiB (tested); without it a large load fails with `resource.failed` and a message that says so. The mod is not disabled.
 
@@ -495,11 +495,11 @@ A mod may let others read some of its private files. In `mod.json`, `"shares": [
 
 #### Messages between mods
 
-A mod lists the commands it accepts in `mod.json`: `"commands": ["import_journal"]`. `eqoa.mods.send(mod_id:string, command:string, args?)` queues one; the receiver gets `mod.command {from, command, args}` at its next event delivery. `args` is plain JSON-like data, small (about 4 KiB, 8 levels, 256 values; `quota` beyond). `unavailable` if the target is missing or disabled; `invalid_argument` if it does not declare that command. Each sender may have 4 commands waiting per receiver (tested).
+A mod lists the commands it accepts in `mod.json`: `"commands": ["import_journal"]`. `eqoa.mods.send(mod_id:string, command:string, args?)` queues one; the receiver gets `mod.command {from, command, args}` at its next event delivery. `args` is plain JSON-like data, small (about 4 KiB; the top value and up to 8 levels of nesting below it; 256 values; `quota` beyond). `unavailable` if the target is missing or disabled; `invalid_argument` if it does not declare that command. Each sender may have 4 commands waiting per receiver (tested).
 
 #### Files the player chooses
 
-With `"permissions": ["import"]` or `["export"]` in `mod.json` a mod may ask the player for a file or put one on the player's Desktop. These two calls are the only ones that need **the player's own act**: they work only inside the handler of a key press, a pointer press, or an `eqoa.options.button` row (`requires_player` otherwise), and each such act allows one import or export. A handler may pass the act on once with `eqoa.mods.send`, so one mod's button can start another mod's import; it cannot be passed further, and timers and `render` never have it.
+With `"permissions": ["import"]` or `["export"]` in `mod.json` a mod may ask the player for a file or put one on the player's Desktop. These two calls are the only ones that need **the player's own act**: they work only inside the handler of a key press, a pointer press, or an `eqoa.options.button` row (`requires_player` otherwise), and each such act allows one import or export. They check the permission and the player's act before their arguments. A handler may pass the act on once with `eqoa.mods.send`, so one mod's button can start another mod's import; it cannot be passed further, and timers and `render` never have it.
 
 | Function | Returns |
 |---|---|
@@ -596,7 +596,7 @@ More `cause` values may be added; treat one you do not know as a plain change.
 
 | Function | Returns |
 |---|---|
-| `eqoa.quests.list()` | `Quest[]`: the journal's titles in the game's order, at most eight. `Quest = {ref:QuestRef, index:uint, title:string}`. |
+| `eqoa.quests.list()` | `Quest[]`: the journal's titles in the game's order, at most eight (the game's journal holds eight; were the client ever to hold more, the list stops at eight and the Forge quest log reports itself unavailable). `Quest = {ref:QuestRef, index:uint, title:string}`. |
 | `eqoa.quests.get(ref:QuestRef)` | That `Quest`, or `stale_handle`. |
 
 The server sends titles only: there are no objective or progress fields. Every `QuestRef` goes stale when the journal changes. `quests.changed` carries `{before:Quest[]?, after:Quest[]?, changed:{"records"}}`.
@@ -693,7 +693,7 @@ A mod can keep the game's corpse, merchant or bank window from appearing while i
 
 | Function | Returns |
 |---|---|
-| `eqoa.windows.takeover(kind:string, {scope="own"\|"all"}?)` | `true` when the mod holds the claim. `kind` is `"loot"`, `"merchant"` or `"bank"`. Calling it again while holding the claim keeps it and renews a running hidden session's idle time. |
+| `eqoa.windows.takeover(kind:string, {scope="own"\|"all"}?)` | `true` when the mod holds the claim. `kind` is `"loot"`, `"merchant"` or `"bank"`. Calling it again while holding the claim keeps it and renews a running hidden session's idle time. Calling it again with the other scope changes the claim's scope for sessions that start later; a hidden session already running keeps the scope it started with. |
 | `eqoa.windows.release(kind:string?)` | `true` if the mod held it. With no argument, releases every kind the mod holds. |
 | `eqoa.windows.taken(kind:string?)` | Whether any mod holds a claim on `kind`. With no argument: `{loot:bool, merchant:bool, bank:bool, holders:table}`, where `holders` maps each held kind to the holding mod's id. |
 
@@ -838,7 +838,7 @@ The `action.result` event carries the `ActionResult` and fires when a request is
 |---|---|
 | `eqoa.actions.status(id:RequestId\|BatchId)` | The latest `ActionResult` (or `BatchResult`). `not_found` once the record has been dropped: the client keeps the latest 256 results per mod (tested). |
 | `eqoa.actions.cancel(id:RequestId\|BatchId)` | `true` if it cancelled something. A queued request is never sent. A request already sent stops being waited for (its result becomes `cancelled`); the server may still carry it out. `not_found` if the request is no longer pending. With a `BatchId` it is `eqoa.actions.stop_batch`. |
-| `eqoa.actions.stop()` | Queues a stop: ends auto-attack, auto-run, follow and the pending cast. See the note below. |
+| `eqoa.actions.stop()` | Queues the game's stop: ends auto-attack, auto-run, follow and the pending cast, whoever started them (the player's own included). |
 
 Limits, as built and tested: 32 requests may wait per mod (one more is refused with `busy`); at most 8 are dispatched per mod per game step, refilling at one per step (30 a second), and 64 per step for all mods together, shared fairly; a request that waits more than 1 second for its turn is refused with `rate_limited`. Only one transaction at a time runs against each of the pack, a corpse, a merchant and the bank, for all mods together: a second one is refused with `busy`.
 
@@ -858,7 +858,7 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 | `eqoa.actions.cast(ability)` | Casts an ability on the current target (`AbilityRef`, ability id or name). It must be memorized and usable. `not_ready` for no power, no valid target or out of range; `busy` while casting or while the ability is on its lockout; `not_found` if you do not have it. `completed` means the request was sent, not that the cast landed. |
 | `eqoa.actions.use_hotbar(slot)` or `(bar, slot)` | Uses a hotbar slot as its key does: `slot` 1..20 across the ability bars, or `bar` 1..4 and `slot` 1..5. `not_found` for an empty slot. |
 | `eqoa.actions.use_item(item:ItemRef)` | Uses one item from the pack. |
-| `eqoa.actions.equip(item:ItemRef)` | The item page's equip command for a pack item: wears it if it is not worn, takes it off if it is. See the note below. |
+| `eqoa.actions.equip(item:ItemRef)` | The item page's equip command for a pack item, which is the game's toggle: wears it if it is not worn, takes it off if it is. Separate "wear" and "take off" forms may be added later under new names; this one keeps its meaning. |
 | `eqoa.actions.swap_items(a:ItemRef, b:ItemRef)` | Swaps two pack stacks. |
 | `eqoa.actions.quick_slot(item:ItemRef, slot:uint)` | Puts a pack item in quick slot 1..4. |
 | `eqoa.actions.weapon_set(set)` | Switches weapon set: 1..5 (5 is bare hands) or `"bare_hands"`. `unsupported` on a server without weapon sets. |
@@ -872,7 +872,7 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 | `eqoa.actions.bank_money(direction:"deposit"\|"withdraw", amount:uint)` | Moves tunar. |
 | `eqoa.actions.open_loot(entity?)` | Asks the server to open a corpse: the given one (`EntityRef` or id) or the nearest. Refuses anything that is not a corpse (`invalid_argument`); `not_found` if there is none. The result is `completed` when the corpse opens, `refused` with the server's reason (for example `out_of_range`), or `unknown`. The client targets the corpse for this and puts your previous target back when the mod is done, unless you chose another meanwhile. |
 | `eqoa.actions.talk(entity?, {kind="merchant"\|"bank"}?)` | Talks to an NPC: the given one or the nearest of that kind (any friendly NPC when `kind` is omitted). Refuses corpses and NPCs that are not of the kind asked for. `completed` when the merchant or bank opens. The target is put back as for `open_loot`. |
-| `eqoa.actions.chat(text:string)` | Sends a line as if typed into chat, in the current channel. The line must be shorter than 128 UTF-16 units and contain no line break (`invalid_argument`). A second argument is refused with `unsupported`: to speak in a particular channel use `command` with that channel's slash command. Grants: rule 4 above. |
+| `eqoa.actions.chat(text:string)` | Sends a line as if typed into chat, in the current channel. The line must be shorter than 128 UTF-16 units and contain no line break (`invalid_argument`). A second argument is refused with `unsupported`: to speak in a particular channel use `command` with that channel's slash command. Grants: rule 4 above. `chat` and `command` check the text before the grant (a bad line is `invalid_argument` even without the grant); every other action checks its capability first. |
 | `eqoa.actions.command(text:string)` | The same, for a command: a leading `/` is added if the text has none (and does not start with `#`). The game's own rules for each command still apply. |
 | `eqoa.actions.autorun(on:bool?)` | Auto-run on or off; toggles with no argument. |
 | `eqoa.actions.follow(entity)` | Follows an entity in view (it is targeted first). `not_ready` if the game will not follow it. `follow(nil)` only stops following: when nothing is being followed it completes and does nothing. |
@@ -893,12 +893,11 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 - `eqoa.actions.toggle_stats_box` belongs to the bundled Stats Box mod; any other mod gets `permission_denied`.
 - `eqoa.actions.drop_quest`, `eqoa.actions.mastery_buy` and `eqoa.actions.mastery_refund` are `not_yet`. The game asks the player Yes or No before dropping a quest and before buying or refunding a Class Mastery skill, and these calls would take the step without that answer. They come back with the confirm contract of the window-replacement roadmap, which lets a mod draw the confirmation its own way while the step still waits for the player's own choice. Calling one returns `nil, Error{code="not_yet"}` and sends nothing. A mod can still lead the player there: `open_window("quests")` or `open_window("mastery")`, and the game's own window asks.
 
-**The game's confirmations cannot be skipped.** Where the game asks the player to confirm a step that cannot be undone (its Yes/No box: quitting, dismissing a pet, leaving a guild and the like), the box is still raised when a mod leads the game there, and the step does not happen until it is answered. A mod that replaces a window may read the box (`Dialog`, §7) and draw it its own way; it answers with `eqoa.actions.dialog_answer`, which needs its own capability and is shown to the player as "Can answer NPC dialogs". The API has no way to make the game leave the box out, and no action takes a step the game would have asked about (see `drop_quest` and the mastery purchases above).
+**The game's confirmations cannot be skipped.** Where the game asks the player to confirm a step that cannot be undone (its Yes/No box: quitting, dismissing a pet, leaving a guild and the like), the box is still raised when a mod leads the game there, and the step does not happen until it is answered. A mod that replaces a window may read the box (`Dialog`, §7) and draw it its own way; it answers with `eqoa.actions.dialog_answer`, which needs its own capability and is shown to the player as "Can answer NPC dialogs". The API has no way to make the game leave the box out, and the steps the game confirms in its quest journal and Class Mastery window are not offered as actions (`drop_quest` and the mastery purchases above).
 
-**Under review, not part of the promise.** These behave as described today, and may be corrected before or after the freeze; do not build on them:
+**Under review, not part of the promise.** This behaves as described today and may be corrected before or after the freeze; do not build on it:
 
-- `stop()` ends auto-attack, auto-run and follow whoever started them, the player included.
-- `equip` toggles; there is no "wear" or "take off" form.
+- `sell` takes no confirmation. The game's own merchant asks Yes or No before selling a quick-slotted, no-trade or non-misc item (a worn one is refused with `not_ready` by this call); `eqoa.actions.sell` sells it at once.
 
 ### Windows the game can be asked to open
 
@@ -997,7 +996,7 @@ The files in the `mods` folder itself are never changed by a mod: its private da
 | HUD draw calls per mod per frame (`eqoa.hud.text` and the like) | 256 | tested |
 | Queued actions, dispatch rate, retained results | §8 | tested |
 | Undelivered events per mod; events delivered per frame | 1,024 (2 MiB); 256 | tested |
-| JSON load: file size, depth, values, loads at once | 16 MiB, 32, two million, 2 | tested |
+| JSON load: file size, nesting below the top value, values, loads at once | 16 MiB, 32, two million, 2 | tested |
 | Commands waiting per sender (`eqoa.mods.send`) | 4 | tested |
 | Fonts and sounds held | 16 each | tested |
 
