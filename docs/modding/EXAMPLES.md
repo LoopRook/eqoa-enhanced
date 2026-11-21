@@ -9,13 +9,13 @@ API names below are the ones each `main.lua` calls (see the spec for signatures)
 |---|---|---|
 | `eqoa_example_hearts` | The smallest complete mod: ten hearts for health, a settings save, clean release of a claim. Start here. | `player`, `hud.hide`, `events` (`render`, `disabling`, `world.leaving`, `state.reset`), `settings`, `imgui` draw lists |
 | `eqoa_hud_numbers` | Text drawn over the game's own bars, with an on/off option and a movable layout. | `player`, `target`, `hud.text`, `hud.visible`, `hud.layout`, `options.toggle/get` |
-| `eqoa_mana_bars` | A gauge under the target's health bar. | `target`, `group`, `hud.gauge`, `hud.layout`, `options` |
-| `eqoa_target_of_target` | A target-of-target panel you can click to assist (a game action). | `target`, `entities.find`, `hud.image/gauge/text/frame`, `actions.assist`, `imgui` |
+| `eqoa_mana_bars` | A gauge under the target's health bar. | `target`, `hud.gauge`, `hud.layout`, `hud.visible`, `options` |
+| `eqoa_target_of_target` | A target-of-target panel you can click to assist: the smallest example of a game action and its declared capability. | `target`, `entities.find`, `hud.image/gauge/text/frame`, `actions.assist`, `imgui` |
 | `eqoa_stats_box` | A stats panel with a key bind; a click opens the game's Summary window. | `player.stats`, `hud.panel/text`, `input.bind`, `text.localized`, `windows.open`, `actions.toggle_stats_box` (reserved for this mod) |
-| `eqoa_round_minimap` | A round minimap replacing the square one, with hover names and wheel zoom. | `map.view/get/markers`, `hud.hide/image`, `input.pointer`, `input.claim_pointer`, `input.minimap_wheel`, `entities`, `group`, `fonts` |
-| `eqoa_map_search` | Map search with guidance to a creature or place; shares data with another mod. | `map`, `entities`, `input.bind`, `input.capture_text`, `files.load_json`, `mods.send`, `fonts`, `binds.get` |
+| `eqoa_round_minimap` | A round minimap replacing the square one, with hover names and wheel zoom. | `map.view/get/markers`, `hud.hide/image/layout`, `input.pointer`, `input.claim_pointer`, `input.minimap_wheel`, `entities.pick_dot/find`, `group`, `fonts` |
+| `eqoa_map_search` | Map search with a guide line to a creature or place; a text box of its own; reads another mod's shared file. | `map.get/markers/set_guide/clear_guide/open`, `entities.list/named`, `input.bind`, `input.capture_text`, `input.claim_pointer`, `files.load_json` (an `@mod/` path), `mods.send`, `fonts`, `binds.get`; manifest `commands` |
 | `eqoa_creature_journal` | A background data file: records discoveries, imports/exports, shares its file read-only. Declares `large_data`. | `entities.list`, `files.load_json`, `files.save_json_async`, `files.import/export`, `options.button`, `mods.send`, manifest `shares`, `commands`, `permissions` |
-| `eqoa_bag_viewer` | A bags window: icons, tabs, a click menu of item actions, a loot log. Off by default. | `inventory`, `bank`, `loot`, `merchant`, `items.can_use`, `icons`, `actions.*` and `action.result`, `input.bind/claim/claim_pointer`, `hud.frame`, `files` |
+| `eqoa_bag_viewer` | A bags window: icons, tabs, a click menu of item actions, a loot log; selling junk, taking loot and banking without the game's windows. Off by default. | `inventory`, `bank`, `loot`, `merchant`, `items.can_use`, `merchant.price`, `icons`, many `actions` (`use_item`, `equip`, `sell`, `loot`, `bank_move`, `open_loot`, `talk`, `batch`) with `action.result`, `windows.takeover` (scope `own`), `input.bind/claim/claim_pointer`, `hud.frame`, `files` |
 
 ## Forge-style packages (run unchanged on this client)
 
@@ -30,4 +30,5 @@ mod; use the native examples above.
 - Sit beside the game's HUD: `eqoa_mana_bars`, `eqoa_target_of_target`.
 - Your own window with clicks: `eqoa_bag_viewer`.
 - Saved data and sharing between mods: `eqoa_creature_journal`, `eqoa_map_search`.
-- Game actions and their results: `eqoa_bag_viewer` (many), `eqoa_target_of_target` (one).
+- Game actions and their results: `eqoa_target_of_target` (one), `eqoa_bag_viewer` (many, with batches).
+- Working at a merchant, banker or corpse without the game's window: `eqoa_bag_viewer`.

@@ -1,7 +1,8 @@
 -- Starter mod for EQOA Enhanced (api "eqoa/1", entryMode "once").
 -- It shows a small window with your level and health once you are in the world.
 -- Copy this folder into your mods folder, rename the folder and change "id"
--- in mod.json to something unique, then rescan in the Addon Manager.
+-- in mod.json to something unique. In the game, open Mods & Addons (F10),
+-- click "Rescan folder" and enable the mod.
 
 local ui = eqoa.imgui
 

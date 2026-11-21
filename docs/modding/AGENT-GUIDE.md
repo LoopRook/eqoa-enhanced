@@ -8,13 +8,15 @@ One page for an AI agent. The owner describes what they want to see in the game;
    mod adds a window or changes the HUD.
 2. Pick the closest bundled mod from [EXAMPLES.md](EXAMPLES.md) and read its `main.lua`.
 3. List the API areas you need and look each up in [EQOA-API-SPEC.md](EQOA-API-SPEC.md). Then check the
-   running client, not the page: `eqoa.capabilities.get("eqoa.x.y")`. Treat `not_yet` and `unsupported`
-   as "cannot be built"; tell the owner rather than faking it. Never invent function names.
+   generated [SUPPORT-TABLE.md](SUPPORT-TABLE.md) (or ask the running client with
+   `eqoa.capabilities.get(path)`). Treat `not_yet` and `unsupported` as "cannot be built"; tell the owner
+   rather than faking it. Never invent function names.
 
 ## 2. Start from the template
 
 Copy [template/](template/). Change `id` (unique, lowercase), `name`, and the `capabilities` list to the
-features you use. Keep `"api": "eqoa/1"` and `"entryMode": "once"`.
+features you use. Keep `"api": "eqoa/1"` and `"entryMode": "once"`. Every manifest field is in the
+reference, section 2.
 
 ## 3. Rules that prevent most bugs
 
@@ -26,19 +28,24 @@ features you use. Keep `"api": "eqoa/1"` and `"entryMode": "once"`.
 - Pair every `Begin`/`End`. Release every claim (`hud.hide`, input claims) on `disabling`,
   `world.leaving` and `state.reset`.
 - Settings: plain numbers, strings, booleans and tables only, through `eqoa.settings.on_save/on_load`.
-- Game actions (`eqoa.actions.*`) return a request id, not a result. Listen for `action.result`. In
-  round 6.5 an action needs a declared capability in `mod.json` (`eqoa.actions.*` or
-  `eqoa.actions.<name>`; `eqoa.windows.takeover` for window takeover). Round 6.5 is not on every build yet:
-  check `eqoa.capabilities` and the spec on the branch you target.
-- Limits: 8 MiB Lua memory and 200,000 instructions per callback. No `io`, `os` file access, `load`, FFI
-  or network. Do not loop over everything every frame; cache and use events.
+- Game actions (`eqoa.actions.*`) return a request, not a result. Listen for `action.result` and read
+  its `state`. Every action needs its capability in `mod.json` (`eqoa.actions.<name>`, or `eqoa.actions.*`
+  for all); a chat line starting with `/` needs `eqoa.actions.command`, any other `eqoa.actions.chat`;
+  window takeover needs `eqoa.windows.takeover`, the map waypoint `eqoa.map.waypoint`. Declare the fewest
+  you need: the player sees the list before enabling the mod, and widening it later disables the mod until
+  the player accepts again.
+- Keys: a key is its full name (`ctrl+u` is not `u`). Give defaults the game does not use; a default that
+  is taken leaves the row empty. F3, F11, F12, Escape and the clipboard keys can never be mod keys.
+- Limits: 8 MiB of Lua memory and 4 million instructions per frame for all of the mod's handlers. No
+  network, no processes, no `load`, no FFI; files only through `eqoa.files` (or `io.open`) in the mod's
+  private area. Do not loop over everything every frame; cache and use events.
 - Do not use Forge APIs in new work.
 
 ## 4. Check your work
 
-- Load it: copy the folder to the mods folder, rescan in the Addon Manager, enable. Errors and unsupported
-  calls show there and in `mods/addons_error.log`. Zero errors and zero `unknown_symbol` diagnostics is the
-  bar.
+- Load it: copy the folder to the mods folder, open Mods & Addons (F10 in the world), Rescan folder,
+  Enable. Errors and unsupported calls show there (`[Warnings: N]`) and in `mods/addons_error.log`. Zero
+  warnings is the bar; an `unknown_symbol` diagnostic is a misspelt name.
 - Toggle it off and on; zone; log out and in. It must release everything and not crash.
 - You cannot play the game for the owner. Report what you ran and what you could not: "loaded with no
   errors; not seen in the live game" is an honest report.
