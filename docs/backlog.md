@@ -381,3 +381,16 @@ A font restored after going missing is retried after a face or size change or af
   key (F10, which opens the addon manager from round 7 on) could open our own settings hub: the mod list, each mod's
   options, the Enhanced toggles and the mod keys in one window. Easier once `eqoa/1` is frozen; it could largely be a
   mod on top of the API. Decide together with the manager redesign.
+
+## Left from the round 7 owner test (2026-11-20)
+
+- **Mod keys on the loading screen and over the full map.** Ordinary mod keys (Stats Box, Map Search) still fire there,
+  as in 0.6.0; only the Mods & Addons key is blocked in those states. Decide whether `addon_input_available()` should
+  exclude them for every mod key (it changes when all mod keys work).
+- **A player's own talk to a merchant within 3 s of a mod's sale** may not show the window on the first click. The fix
+  is one upstream hook line in `Play::interact_with_target` (quoted in the round 7C report), for the upstream-seam round.
+- **Unreliable test:** `round65_fix4_item1_bags_window_costs_under_a_millisecond_a_frame` counts creature-list scans per
+  second against the design cap of 4.0 and reads 4.1 to 4.2 under load (failed once on CI and once locally on
+  2026-11-20, passes alone). Measure over an exact interval or allow the timer's granularity; do not raise the cap.
+- **Why Shift+Space did not jump in the owner's 15163407 test is unexplained** (by the code it should have; a Forge
+  UI suppressing keys is the builder's guess). The behaviour is explicit and tested from 5d58d9c5 on.
