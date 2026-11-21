@@ -2,9 +2,10 @@
 
 Plain words for mod authors. The reference is [EQOA-API-SPEC.md](EQOA-API-SPEC.md).
 
-**Status:** the promise below takes effect when `eqoa/1` is frozen (planned for the Stable release that
-carries rounds 4 to 7). Until then the API is complete in shape but a rare correction can still happen, and
-every one is listed in the release notes.
+**Status:** from Enhanced 0.7.0 `eqoa/1` is a stable candidate. The guard test described below is on and we
+do not expect breaking changes. The promise takes full effect at the final freeze, which comes when the API
+is offered to the upstream client and upstream has had its say. Until then a rare correction can still
+happen, and every one is listed in the release notes.
 
 ## What never changes under `eqoa/1`
 
@@ -77,7 +78,7 @@ Mods written for FrontiersForge keep loading, and the compatibility is kept up. 
 The support table is generated from the code, but a mistake is possible. If `capabilities.has` says yes and
 the call is really a stub (or the reverse), that is a bug in the client, not in your mod. It is corrected in
 the next release by building the function or by changing the answer to the truth (a stub becomes `not_yet`
-or `unsupported`). Once `eqoa/1` is frozen a test stops any supported name from disappearing or losing its
+or `unsupported`). From 0.7.0 a test stops any supported name from disappearing or losing its
 status, so such a downgrade is a deliberate exception: the project's owner approves it, the frozen surface
 file is changed in the open, and the release notes say so. Report a case with the path and the `Capability`
 record the client gave you.
