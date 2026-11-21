@@ -217,7 +217,10 @@ const BOX: &str = "local w = eqoa.windows.find('confirm'); ";
 fn round7h_fix1_a_mod_cannot_accept_a_guarded_game_prompt() {
     let routes: [(&str, fn(&mut Play), i32); 4] = [
         ("quit", |p| p.start_actions(vec![(0x0A01_0000, 0)]), 0x0A01_0000),
-        ("pet_dismiss", |p| p.pet_command(0x050E_0000), 0x050E_0000),
+        ("pet_dismiss", |p| {
+            p.pet_id = 2002; // the command needs a pet (else word 1021)
+            p.do_action(0x050E_0000, 0)
+        }, 0x050E_0000),
         ("guild disband", |p| p.guild_action(0x0B05_1007, 0), 0x0B05_1007),
         ("guild leave", |p| p.guild_action(0x0B05_1008, 0), 0x0B05_1008),
     ];
