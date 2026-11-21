@@ -45,8 +45,28 @@ pub(crate) const MANAGER_ID: &str = "mods_addons";
 pub(crate) const MANAGER_LABEL: &str = "Mods & Addons";
 pub(crate) const MANAGER_DEFAULT_KEY: &str = "f10";
 
-/// (stub) Where the manager window would not be shown or usable.
-pub(crate) fn set_manager_blocked(_blocked: bool) {}
+/// Whether the client is somewhere the Mods & Addons window would not be shown or usable (the
+/// loading screen, the full map, a world change; at character select and with a game window up
+/// there is no plain play at all). The viewer tells this before each key
+/// (`report_viewer::addon_event`); the manager row then does nothing and takes no press. It
+/// never changes when an ordinary mod key fires.
+static MANAGER_BLOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn set_manager_blocked(blocked: bool) {
+    MANAGER_BLOCKED.store(blocked, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(crate) fn manager_blocked() -> bool {
+    MANAGER_BLOCKED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Whether any enabled binding is on a modifier combination: only then can a press be a
+/// mod's alone (`owns_press`), so with none the key path has nothing to ask.
+static ANY_COMBO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn any_combo_bound() -> bool {
+    ANY_COMBO.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// Puts the row among the mod rows (the runtime does this as it starts).
 pub(crate) fn register_manager_row() {
@@ -153,6 +173,7 @@ pub fn reset_in_memory() {
     let mut binds = MOD_BINDS.lock().unwrap();
     binds.clear();
     set_manager_key(None);
+    ANY_COMBO.store(false, std::sync::atomic::Ordering::Relaxed);
     *SESSION.lock().unwrap() = None;
 }
 
@@ -561,6 +582,15 @@ fn resolve(game: &Binds, binds: &mut [ModBind]) {
         }
     }
     set_manager_key(binds.iter().find(|b| is_manager(b) && b.enabled).map(|b| b.current_key.as_str()));
+    ANY_COMBO.store(
+        binds.iter().any(|b| {
+            b.enabled && {
+                let ((sup, ctrl, alt, shift), _) = parse_key(&b.current_key);
+                sup || ctrl || alt || shift
+            }
+        }),
+        std::sync::atomic::Ordering::Relaxed,
+    );
 }
 
 /// The binding that does something on a key, if any (rules 1 to 3), from what is known
@@ -611,7 +641,8 @@ pub(crate) fn owns_press(combo: &str) -> bool {
     let combo = normalize_key(&combo.to_ascii_lowercase());
     let game = crate::settings::with_binds(Clone::clone);
     let binds = MOD_BINDS.lock().unwrap();
-    firing_press(&game, &binds, &combo).is_some()
+    // the manager row's press is its own only where its window is usable
+    firing_press(&game, &binds, &combo).is_some_and(|i| !(is_manager(&binds[i]) && manager_blocked()))
 }
 
 enum Other {

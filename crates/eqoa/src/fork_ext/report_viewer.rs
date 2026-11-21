@@ -74,6 +74,12 @@ fn addon_event(app: &mut App, event: &WindowEvent, pointer_shut: bool) -> bool {
         return pointer_shut;
     };
     let plain_play = crate::fork_ext::is_plain_play(app.play.as_mut());
+    if matches!(event, WindowEvent::KeyboardInput { .. }) {
+        // where the Mods & Addons window would not be shown or usable, its key does nothing
+        crate::fork_ext::bindpage::set_manager_blocked(
+            app.play.as_mut().is_none_or(|p| p.manager_key_blocked()),
+        );
+    }
     let consumed = g.forge_runtime.event(&g.window, event, plain_play);
     if !consumed || pointer_shut || native_key {
         return pointer_shut;

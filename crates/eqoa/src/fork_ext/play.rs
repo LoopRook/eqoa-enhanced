@@ -5404,9 +5404,12 @@ mod tests {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Play {
-    /// (stub) The Mods & Addons key works only where the window is shown and usable.
+    /// The Mods & Addons key works only where its window would be shown and usable: not on the
+    /// loading screen, not with the full map up (the window would open unseen behind it), not
+    /// while the world changes. (Character select, and a game window or typing, are not plain play
+    /// at all.) This does NOT change `addon_input_available`, which ordinary mod keys use.
     pub(crate) fn manager_key_blocked(&mut self) -> bool {
-        false
+        self.loading.up() || self.map.open || self.world_change.is_some()
     }
     pub(crate) fn addon_input_available(&mut self) -> bool {
         matches!(self.mode, 0 | 38)

@@ -246,6 +246,9 @@ pub(crate) fn manager_key_pressed(
     if !down || repeat || synthetic || !plain_play || keyboard {
         return false;
     }
+    if crate::fork_ext::bindpage::manager_blocked() {
+        return false;
+    }
     let (ctrl, alt, shift) = modifiers();
     let sup = SUPER.with(|m| m.get());
     if !crate::fork_ext::bindpage::manager_key_matches(key, base, (sup, ctrl, alt, shift)) || is_text_capture_active() {
@@ -276,6 +279,10 @@ pub(crate) fn mod_owns_press(
     keyboard: bool,
 ) -> bool {
     if !down || repeat || synthetic || !plain_play || keyboard {
+        return false;
+    }
+    // no binding is on a modifier combination: nothing here can own a press
+    if !crate::fork_ext::bindpage::any_combo_bound() {
         return false;
     }
     let (ctrl, alt, shift) = modifiers();

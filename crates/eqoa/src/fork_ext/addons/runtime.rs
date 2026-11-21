@@ -481,11 +481,13 @@ impl Runtime {
         ) {
             super::request_toggle();
         }
-        // No mod runs, nothing is held by one and no editor has the keyboard: the key is the
-        // game's alone, and nothing here has any work for it.
+        // No mod runs, nothing is held by one, no editor has the keyboard and no binding (the
+        // Mods & Addons row among them) is on a modifier combination that could own a press:
+        // the key is the game's alone, and nothing here has any work for it.
         if self.capture.is_empty()
             && !super::native_events::has_consumers()
             && !super::input::is_text_capture_active()
+            && !crate::fork_ext::bindpage::any_combo_bound()
         {
             return false;
         }
