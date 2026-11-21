@@ -1631,6 +1631,45 @@ mod tests {
     }
 
     #[test]
+    fn round7e_mgr2_a_manager_combo_is_consumed_on_press_repeat_and_release_with_no_mod() {
+        crate::settings::testing::reset(false);
+        crate::fork_ext::bindpage::reset_in_memory();
+        crate::fork_ext::bindpage::register_manager_row();
+        assert!(crate::fork_ext::bindpage::set_key(
+            crate::fork_ext::bindpage::MANAGER_ADDON,
+            crate::fork_ext::bindpage::MANAGER_ID,
+            "shift+space"
+        ));
+        let mut runtime = Runtime::new(Paths::select(PathBuf::new(), None, None, None));
+        let space = Key::Named(NamedKey::Space);
+        super::super::input::set_modifiers((false, false, true));
+        let mut route = |down: bool, repeat: bool| {
+            runtime.route_key(
+                KeyRoute {
+                    button: Button::ScriptedKey(77),
+                    logical: &space,
+                    down,
+                    repeat,
+                    synthetic: false,
+                    base: None,
+                },
+                true,
+                false,
+            )
+        };
+        assert!(route(true, false), "the press");
+        assert!(route(true, true), "its repeats");
+        // Shift is let go first: the release is still the row's, as its press was
+        super::super::input::set_modifiers((false, false, false));
+        assert!(route(false, false), "the release, so the game never sees one without a press");
+        // a plain Space is the game's, press and release
+        assert!(!route(true, false));
+        assert!(!route(false, false));
+        crate::fork_ext::bindpage::reset_in_memory();
+        let _ = super::super::take_toggle_request();
+    }
+
+    #[test]
     fn scripted_input_preserves_addon_key_ownership_until_release() {
         let mut runtime = Runtime::new(Paths::select(PathBuf::new(), None, None, None));
         let key = Key::Character("z".into());

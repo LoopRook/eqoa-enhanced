@@ -45,6 +45,9 @@ pub(crate) const MANAGER_ID: &str = "mods_addons";
 pub(crate) const MANAGER_LABEL: &str = "Mods & Addons";
 pub(crate) const MANAGER_DEFAULT_KEY: &str = "f10";
 
+/// (stub) Where the manager window would not be shown or usable.
+pub(crate) fn set_manager_blocked(_blocked: bool) {}
+
 /// Puts the row among the mod rows (the runtime does this as it starts).
 pub(crate) fn register_manager_row() {
     register(MANAGER_ADDON, MANAGER_ID, MANAGER_DEFAULT_KEY, MANAGER_LABEL);

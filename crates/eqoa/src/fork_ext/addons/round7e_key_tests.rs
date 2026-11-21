@@ -1441,6 +1441,7 @@ fn press_for_manager(rt: &mut Runtime, key: &Key, plain_play: bool) -> bool {
 /// A fresh settings state with no request left over from another test.
 fn mgr_reset() {
     reset();
+    bindpage::set_manager_blocked(false);
     let _ = take_toggle_request();
     let _ = take_open_request();
 }
@@ -1593,4 +1594,38 @@ fn round7e_mgr1_no_key_set_means_no_key_work_and_a_key_survives_a_restart_and_a_
     assert_eq!(mgr_key(), "f10");
     s.cancel();
     assert_eq!(mgr_key(), "f9");
+}
+
+#[test]
+fn round7e_mgr2_a_combo_on_the_manager_row_owns_its_press_with_no_mod_enabled() {
+    mgr_reset();
+    bindpage::register_manager_row();
+    assert!(bindpage::set_key(MGR.0, MGR.1, "shift+space"));
+    let mut rt = runtime(); // no mod, no host: nothing is running
+    let space = Key::Named(NamedKey::Space);
+    // press, and its release, are the row's alone: the game never sees either (taken == released)
+    assert!(press_consumed(&mut rt, SHIFT, &space, None, &[]), "Shift+Space is the manager's: no jump");
+    assert!(take_toggle_request(), "and it asked to open the manager");
+    // Space alone is the game's and asks for nothing
+    assert!(!press_consumed(&mut rt, NONE, &space, None, &[]));
+    assert!(!take_toggle_request());
+}
+
+#[test]
+fn round7e_mgr2_the_manager_key_does_nothing_where_the_window_would_not_be_usable() {
+    mgr_reset();
+    bindpage::register_manager_row();
+    let mut rt = runtime();
+    let space = Key::Named(NamedKey::Space);
+    bindpage::set_manager_blocked(true);
+    // the bare default key: nothing, and nothing consumed
+    assert!(!press_for_manager(&mut rt, &f(10), true), "blocked: F10 does nothing");
+    // a combination: not consumed either, so the game still gets it
+    assert!(bindpage::set_key(MGR.0, MGR.1, "shift+space"));
+    assert!(!press_consumed(&mut rt, SHIFT, &space, None, &[]), "blocked: not consumed");
+    assert!(!take_toggle_request());
+    // control: where it is usable the same press is the row's
+    bindpage::set_manager_blocked(false);
+    assert!(press_consumed(&mut rt, SHIFT, &space, None, &[]));
+    assert!(take_toggle_request());
 }
