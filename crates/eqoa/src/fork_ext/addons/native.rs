@@ -1255,6 +1255,8 @@ fn install_fields(lua: &Lua) {
         ("eqoa.map.Bounds", "x_min z_min x_max z_max"),
         ("eqoa.map.Waypoint", "world_id x z label owner"),
         ("eqoa.input.Pointer", "x y inside_window"),
+        // what `eqoa.options.button` returns (round 4; described in round 7H)
+        ("eqoa.options.Button", "id label item_id"),
         ("eqoa.Vec2", "x y"),
         ("eqoa.Vec3", "x y z"),
         ("eqoa.Color", "r g b a"),
@@ -1361,7 +1363,7 @@ fn install_fields(lua: &Lua) {
         ("eqoa.hud.SinglePanelLayout", "panel"),
         ("eqoa.options.Toggle", "id label default value item_id"),
     ] {
-        let round = if path.starts_with("eqoa.map.") || path == "eqoa.input.Pointer" {
+        let round = if path.starts_with("eqoa.map.") || matches!(path, "eqoa.input.Pointer" | "eqoa.options.Button") {
             Some(4)
         } else if path.starts_with("eqoa.hud.")
             || path.starts_with("eqoa.options.")
