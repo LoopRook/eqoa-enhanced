@@ -351,10 +351,19 @@ asserts the exact number (I did for the ImGui three, the idle timeout, the manif
 - `docs_every_eqoa_name_in_the_pages_exists_in_the_surface_file` now also fails when a page names a path
   that only refuses (`unsupported`, `not_yet`) on a line that does not say so.
 
-Executed negative control (pages read at run time, no rebuild): the spec's memory row changed to
-"8 MiB; 256 MiB", `--filter docs_`: 8 passed, 1 failed:
-`docs_tests.rs:668 ... "Lua memory per mod": the spec says "8 MiB; 256 MiB with ...", the code's number is
-written "128 MiB"`; restored with `git checkout`, status clean.
+Executed negative controls (pages read at run time, no rebuild; each restored with `git checkout`, status
+clean afterwards), `python tools/run_gates.py --only round --filter docs_`:
+
+- the spec's memory row changed to "8 MiB; 256 MiB" (at c46b830f): 8 passed, 1 failed,
+  `docs_every_tested_limit_names_its_constant_and_its_test` (`docs_tests.rs:668`):
+  `"Lua memory per mod": the spec says "8 MiB; 256 MiB with ...", the code's number is written "128 MiB"`;
+- the line "`eqoa.actions.destroy` is `unsupported`" changed to "`eqoa.actions.destroy` destroys an item."
+  (at bd74b1bf): 8 passed, 1 failed, `docs_every_eqoa_name_in_the_pages_exists_in_the_surface_file`
+  (`docs_tests.rs:397`): `EQOA-API-SPEC.md:894: eqoa.actions.destroy only refuses, and the line does not
+  say unsupported or not_yet`.
+
+Found by the first of those restores: `git checkout` wrote the spec back with CRLF line endings and one new
+test assumed LF. The tests now read the pages with either ending (a CI checkout can give CRLF).
 
 ### Still not checked by any test
 
