@@ -378,6 +378,11 @@ pub(crate) fn release_vm(vm: u64) {
 
 pub(crate) fn release_all() {
     let _ = release_claims_where("zoning", |_| true);
+    // a list after the mod's last take or sale belongs to the zone left: a new zone may reuse its entity id
+    with_state_mut(|s| {
+        s.grace_loot = None;
+        s.grace_merchant = None;
+    });
 }
 
 /// Releases every claim whose scope `which` selects; returns who held what.
