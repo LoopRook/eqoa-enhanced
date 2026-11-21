@@ -210,6 +210,16 @@ fn round7h_7_steps_the_game_confirms_are_not_yet_for_mods() {
 
 const BOX: &str = "local w = eqoa.windows.find('confirm'); ";
 
+/// The character in a guild, as its leader (disband needs the leader, leave any member).
+fn in_guild_as_leader(p: &mut Play) {
+    let me = p.dump.player.id as i32;
+    p.guild.in_guild = true;
+    p.guild.members.insert(
+        me,
+        crate::guild::Member { id: me, name: "Me".into(), class: 0, race: 0, level: 1, rank: 3, online: true },
+    );
+}
+
 /// Fix 1: a game Yes/No box that guards a step (quit, dismiss the pet, disband or leave the guild) cannot be
 /// accepted by a mod: `dialog_answer` Yes is refused `not_yet`, the box stays up, nothing is sent. Declining
 /// works. A group invitation can be accepted; an NPC response dialog still answers.
@@ -221,8 +231,14 @@ fn round7h_fix1_a_mod_cannot_accept_a_guarded_game_prompt() {
             p.pet_id = 2002; // the command needs a pet (else word 1021)
             p.do_action(0x050E_0000, 0)
         }, 0x050E_0000),
-        ("guild disband", |p| p.guild_action(0x0B05_1007, 0), 0x0B05_1007),
-        ("guild leave", |p| p.guild_action(0x0B05_1008, 0), 0x0B05_1008),
+        ("guild disband", |p| {
+            in_guild_as_leader(p);
+            p.guild_action(0x0B05_1007, 0)
+        }, 0x0B05_1007),
+        ("guild leave", |p| {
+            in_guild_as_leader(p);
+            p.guild_action(0x0B05_1008, 0)
+        }, 0x0B05_1008),
     ];
     for (name, open, tag) in routes {
         let (mut p, host) = rig();
@@ -252,6 +268,8 @@ fn round7h_fix1_a_mod_cannot_accept_a_guarded_game_prompt() {
 
     // a group invitation is answerable: Yes goes through the game's own box
     let (mut p, host) = rig();
+    // the invitation as the server delivers it: pending, then the box
+    p.group.invites.push(crate::group::Invite { id: 3001, name: "Ally".into() });
     p.show_invite("Ally");
     let sent = p.session.sends_lost;
     gesture(&mut p, &host, &format!("{BOX} return eqoa.actions.dialog_answer(w.ref, 1)"));
@@ -261,6 +279,7 @@ fn round7h_fix1_a_mod_cannot_accept_a_guarded_game_prompt() {
     }
     assert_eq!(p.mode, 0, "the invitation was answered");
     assert!(p.session.sends_lost > sent, "accepting the invitation went to the server");
+    assert!(p.group.in_group, "and the game joined the group");
     done(&host);
 
     // an NPC response dialog (not a Yes/No box) still answers
