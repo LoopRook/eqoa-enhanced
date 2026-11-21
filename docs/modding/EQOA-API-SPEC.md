@@ -479,7 +479,7 @@ For data too big to handle in one frame, the client reads, parses and writes JSO
 | `eqoa.files.save_json_async(path:string, value)` | A request number. The value is copied at the call and written later; the result is `resource.ready {kind="json_saved", request}` or `resource.failed`. A private path only. Saves to one path are merged: if you save again before the last one was written, only the newest is written and reported, so track the latest request. Saving to a second path while one is in flight is `quota`. |
 | `eqoa.files.null` | The value that stands for JSON `null` in loaded data and in values to save. |
 
-A loaded value is an ordinary, changeable Lua table; arrays (also empty ones) remember that they are arrays and are saved as arrays. A value to save follows the settings rules above, plus `eqoa.files.null`. Design intent, not part of the promise: a file may be up to 16 MiB, 32 levels deep and two million values to load (tested), 14 MiB to save; a large value is handed to Lua over several frames.
+A loaded value is an ordinary, changeable Lua table; arrays (also empty ones) remember that they are arrays and are saved as arrays. A value to save follows the settings rules above, plus `eqoa.files.null`. A file may be up to 16 MiB, 32 levels deep and two million values to load, and 14 MiB to save (tested). A large value is handed to Lua over several frames; how it is sliced is design intent, not part of the promise.
 
 An ordinary mod has 8 MiB of Lua memory. A mod that lists `"large_data"` in its `capabilities` gets 128 MiB (tested); without it a large load fails with `resource.failed` and a message that says so. The mod is not disabled.
 
@@ -821,7 +821,7 @@ An action call returns `RequestId, nil` once the request is accepted into the mo
 | `kind` | string | The action's name, for example `"sell"`. |
 | `state` | string | `"queued"`, `"dispatched"`, then one final state: `"completed"`, `"refused"`, `"cancelled"` or `"unknown"`. |
 | `phase` | string | How far it got: `"queued"`, `"dispatch"` (the client acted or refused) or `"server"` (it concerns the server's answer). |
-| `ok` | bool? | true for `completed`, false for `refused` and `cancelled`, nil for `queued` and `unknown`. Read `state` to tell a request still waiting for the server (`dispatched`) from a finished one. |
+| `ok` | bool? | true for `completed`, false for `refused` and `cancelled`, nil for `queued` and `unknown`. Do not use it to tell whether a request is finished: read `state`. |
 | `code`, `reason` | string? | Why, when refused, cancelled or unknown: an error code (§1) and a sentence. |
 | `queued_tick`, `dispatched_tick`, `completed_tick` | uint, uint?, uint? | 30 Hz game steps at each stage. |
 | `detail` | table? | Extra facts for some actions (for example `{typed, submitted}` for `input_text`). |
@@ -901,7 +901,6 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 - `equip` toggles; there is no "wear" or "take off" form.
 - `cycle_target` accepts `"hostile"` and `"friendly"` and treats them as no filter.
 - A `dispatched` result carries `ok = true` although the outcome is not yet known.
-- When a mod is disabled or reloaded its pending requests and batch are cancelled without a final `action.result` or `batch.result`.
 
 ### Windows the game can be asked to open
 
@@ -966,7 +965,7 @@ Steps may be: `target`, `assist`, `target_target`, `interact`, `attack`, `autoru
 - `batch.progress` fires as the batch advances and `batch.result` once when it ends, both with the `BatchResult`. Each step also fires its own `action.result`.
 - `eqoa.actions.batch_status(id:BatchId)` returns the `BatchResult`; `eqoa.actions.status` does too.
 - `eqoa.actions.stop_batch(id:BatchId?)` returns `true` if it stopped the running batch, `false` if none was running. The batch ends `stopped` (code `cancelled`, reason `stopped`). A step not yet sent is never sent. A step already sent finishes: the one `batch.result` waits for the server's answer to it (at most 10 seconds) and counts the step if the server confirmed it.
-- A batch ends at once, and its remaining steps are dropped and never replayed, when: a step is refused; the window it needs closes (`window_closed`, reason `merchant closed`, `bank closed` or `corpse closed`); the server does not answer a step within 10 seconds (`unknown`); it waits more than 1 second for its turn (`rate_limited`); the player zones or logs out (`cancelled`); it is stopped; or the player turns on **Use the game's windows** while the batch holds or used a full replacement of a window (§7).
+- A batch ends at once, and its remaining steps are dropped and never replayed, when: a step is refused; the window it needs closes (`window_closed`, reason `merchant closed`, `bank closed` or `corpse closed`); the server does not answer a step within 10 seconds (`unknown`); it waits more than 1 second for its turn (`rate_limited`); the player zones or logs out (`cancelled`); it is stopped; or the player turns on **Use the game's windows** while the batch holds or used a full replacement of a window (§7). Disabling or reloading the mod cancels its requests and its batch without an event: a disabled mod receives nothing.
 
 ## 9. The sandbox and its limits
 
