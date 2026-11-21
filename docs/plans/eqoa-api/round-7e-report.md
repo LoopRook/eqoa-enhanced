@@ -705,4 +705,9 @@ Shift+7 there; the player chose the binding and can rebind either side. The note
 the full map up, or while the world changes.
 
 ### Gates (recheck round)
-(filled in below)
+- Local with the disc: `--filter round7e_ fork_ext:: options:: settings:: bindpage:: binds:: play::fork_hooks::`: 1131 passed, 0 failed,
+  26 ignored (unrelated SKIPs; 0 SKIP among `round7e_`). wasm, footprint, paths PASS.
+- CI run https://github.com/LoopRook/eqoa-enhanced/actions/runs/44848190242 on d41614f9: success. addons 673 passed / 0 failed / 25 ignored
+  (17 SKIP); full 3311 / 0 failed (378 SKIP: no disc or GPU in CI); wasm, footprint, paths, player-release (20), tools (201) success.
+  `ci_gates.py cleanup` run.
+- Not verified: the live client, and the `report_viewer::addon_event` wiring of the blocked flag.
