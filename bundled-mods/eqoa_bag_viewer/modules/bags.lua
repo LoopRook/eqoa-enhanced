@@ -1307,17 +1307,23 @@ end
 M.PLAYER_CLOSE_SECS = 5.0
 function M.note_loot_closed(d)
     if not (d and d.before and not d.after) then return end
-    if d.closed_by ~= "player" and M.player_closed_recently() then return end -- keep the player's mark
-    M.last_close = {by = d.closed_by or "other", at = os.clock()}
+    local id = d.before.source and d.before.source.entity_id
+    if d.closed_by ~= "player" and M.player_closed_recently(id) then return end -- keep the player's mark
+    M.last_close = {by = d.closed_by or "other", at = os.clock(), id = id}
 end
 
+-- The player closed or stopped the corpse in hand: the one being taken, else the one the window shows (nil when neither
+-- is known: then it counts for any corpse).
 function M.note_player_closed()
-    M.last_close = {by = "player", at = os.clock()}
+    local l = eqoa.loot and eqoa.loot.get and eqoa.loot.get()
+    M.last_close = {by = "player", at = os.clock(), id = M.auto_take or (l and l.source and l.source.entity_id) or nil}
 end
 
-function M.player_closed_recently()
+-- Did the player close or stop corpse `id` (nil: any) in the last PLAYER_CLOSE_SECS?
+function M.player_closed_recently(id)
     local c = M.last_close
-    return c ~= nil and c.by == "player" and os.clock() - c.at <= M.PLAYER_CLOSE_SECS
+    if not (c ~= nil and c.by == "player" and os.clock() - c.at <= M.PLAYER_CLOSE_SECS) then return false end
+    return c.id == nil or id == nil or c.id == id
 end
 
 -- An unfinished corpse is asked again AUTO_MORE_TRIES times at most; only an attempt that really reached the corpse's list
@@ -1360,7 +1366,9 @@ function M.auto_done_line(text, unfinished)
     local id = M.auto_take
     if not id then return end
     M.auto_take = nil
-    if unfinished and not M.player_closed_recently() then
+    -- the game's own window was the player's for this corpse only until the take ended
+    if M.auto_player_open == id then M.auto_player_open = nil end
+    if unfinished and not M.player_closed_recently(id) then
         M.auto_unfinished(id, text, unfinished)
         return
     end
