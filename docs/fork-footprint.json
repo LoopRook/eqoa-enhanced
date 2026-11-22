@@ -32,6 +32,8 @@
     "tools/parser_launch.py",
     "tools/eqoa1_freeze.py",
     "tools/test_eqoa1_freeze.py",
+    "tools/upstream_pr.py",
+    "tools/test_upstream_pr.py",
     "tools/test_parser_launch.py",
     "tools/check_fork_footprint.py",
     "tools/test_fork_footprint.py",
