@@ -83,7 +83,7 @@ pub(crate) fn dispatch(play: &mut Play, action: &A1Action) -> DispatchOutcome {
             }
             let slot = i32::try_from(equip_slot).unwrap_or(-1);
             // the game's own Hide Look / Show Look: only where the server offers it and the slot has a look
-            if !(play.session.hide_look.offered && crate::hidelook::shown(slot)) {
+            if !(play.session.hide_look.offered && net::hidelook::shown(slot)) {
                 return refuse("unsupported", "this server does not offer Hide Look for that item");
             }
             play.session.hide_look(slot, *hide);
