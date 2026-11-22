@@ -1891,8 +1891,8 @@
         "eqoa.actions.pet_back_off",
         "eqoa.actions.prepare_weapon_set",
         "eqoa.actions.quick_slot",
-        "eqoa.actions.remove_effect",
         "eqoa.actions.ready_check_answer",
+        "eqoa.actions.remove_effect",
         "eqoa.actions.select_row",
         "eqoa.actions.sell",
         "eqoa.actions.status",
@@ -2534,18 +2534,18 @@
     },
     {
       "children": [],
-      "path": "eqoa.actions.remove_effect",
-      "reason": null,
-      "revision": 1,
-      "round": 8,
-      "status": "supported"
-    },
-    {
-      "children": [],
       "path": "eqoa.actions.ready_check_answer",
       "reason": null,
       "revision": 1,
       "round": 7,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.remove_effect",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
