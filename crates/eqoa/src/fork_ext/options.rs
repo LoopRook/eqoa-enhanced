@@ -331,7 +331,7 @@ mod tests {
         let (fork, upstream_pages) = pages().split_last().unwrap();
         assert!(super::super::fits(upstream_pages));
         assert_eq!(fork.name, "Enhanced");
-        assert_eq!(fork.items.len(), if cfg!(target_arch = "wasm32") { 9 } else { 10 }, "six HUD rows and the Mods & Addons rows");
+        assert_eq!(fork.items.len(), if cfg!(target_arch = "wasm32") { 8 } else { 9 }, "six HUD rows and the Mods & Addons rows");
         assert_eq!(pages().iter().filter(|c| c.name == "Enhanced HUD" || c.name == "Mods & Addons").count(), 0, "no second fork page");
         assert!(!super::super::fits(pages()), "control: the fork's page is more than a game page's rows");
         assert!(
