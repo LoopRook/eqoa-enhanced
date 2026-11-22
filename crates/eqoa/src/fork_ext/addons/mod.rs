@@ -114,6 +114,8 @@ pub(crate) mod frame_actions;
 pub(crate) mod native_a1;
 #[cfg(test)]
 mod a1_tests;
+#[cfg(test)]
+mod a1_mod_tests;
 pub(crate) mod window_sessions;
 pub(crate) mod confirm;
 #[cfg(test)]

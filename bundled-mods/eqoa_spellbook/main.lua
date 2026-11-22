@@ -21,7 +21,7 @@ end
 
 local function abilities()
     if state.list == nil then
-        local list = eqoa.abilities.list()
+        local list = eqoa.abilities.list() or {}
         table.sort(list, function(a, b)
             if (a.level or 0) ~= (b.level or 0) then return (a.level or 0) < (b.level or 0) end
             return (a.name or "") < (b.name or "")
