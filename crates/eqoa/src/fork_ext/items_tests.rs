@@ -228,8 +228,8 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
         host.execute(
             r#"
             local inv = eqoa.inventory.get()
-            -- merchant: only at a merchant; source: only a corpse's loot
-            fields('items.Container', inv, 'merchant source')
+            -- merchant: only at a merchant; source/master_loot: only a corpse's loot (master_loot while active)
+            fields('items.Container', inv, 'merchant source master_loot')
             -- selected/selected_row: only while a row is selected
             fields('items.ContainerView', inv.view, 'selected selected_row')
             fields('items.Tab', inv.view.tabs[1])
@@ -268,8 +268,8 @@ fn round7c_item_records_and_window_events_use_projected_native_state() {
         host.execute(
             r#"
             local loot = eqoa.loot.get()
-            -- money: only the pack and bank; view: only while its window shows; merchant: only at a merchant
-            fields('items.Container', loot, 'money view merchant')
+            -- money: only the pack and bank; view: only while its window shows; merchant: only at a merchant; master_loot: only under master loot
+            fields('items.Container', loot, 'money view merchant master_loot')
             fields('items.LootSource', loot.source)
             assert(log[#log].name == 'loot.changed', 'no loot event from the native open')
         "#,
