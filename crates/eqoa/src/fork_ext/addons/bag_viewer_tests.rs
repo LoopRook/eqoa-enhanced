@@ -319,11 +319,15 @@ fn round5b_off_by_default_loads_clean_has_an_unbound_controls_row_and_its_key_op
     assert!(!entry.metadata.initially_enabled);
     assert_eq!(crate::fork_ext::bindpage::get_key(BV, "open"), None, "no Controls row while it is off");
     bv.enable();
-    // the row exists, and it is unbound: the game's keys are not changed
-    assert_eq!(crate::fork_ext::bindpage::get_key(BV, "open"), Some(String::new()));
-    assert_eq!(bv.eval::<Option<String>>("eqoa.binds.get('open')"), Some(String::new()));
+    // round A1: the row exists and starts on B (a free key: the game's keys are not changed)
+    assert_eq!(crate::fork_ext::bindpage::get_key(BV, "open"), Some("b".to_string()));
+    assert_eq!(bv.eval::<Option<String>>("eqoa.binds.get('open')"), Some("b".to_string()));
     bv.key(Key::Character("9".into()));
-    assert!(!bv.is_open(), "an unbound row opens nothing");
+    assert!(!bv.is_open(), "a key the row is not on opens nothing");
+    bv.key(Key::Character("b".into()));
+    assert!(bv.is_open(), "B opens the Bags window: {:?}", bv.manager.diagnostics());
+    bv.key(Key::Character("b".into()));
+    assert!(!bv.is_open(), "B again closes it");
     // bound to K: the key opens and closes
     bv.bind_k();
     bv.toggle();
@@ -871,7 +875,9 @@ fn round6b_bag_viewer_bags_menu_actions_greyed_reasons_no_destroy_and_no_unclick
     let labels = bv.menu_labels();
     assert!(labels.iter().any(|l| l == "Use"), "{labels:?}");
     assert!(labels.iter().any(|l| l == "Quick slot 1"), "{labels:?}");
-    assert!(!labels.iter().any(|l| l.to_lowercase().contains("destroy")), "must have no Destroy entry: {labels:?}");
+    // round A1: the only Destroy row only asks ("Destroy..."): the client puts its own question to the player
+    let destroys: Vec<_> = labels.iter().filter(|l| l.to_lowercase().contains("destroy")).collect();
+    assert_eq!(destroys, ["Destroy..."], "{labels:?}");
 
     // Click Use -> 1 action dispatched, result line shows ": ok".
     let (mx, my, enabled, _, _) = bv.menu_row("Use").unwrap();
@@ -970,7 +976,7 @@ fn round6b_bag_viewer_merchant_bank_and_corpse_menus_and_captures_body() {
     let labels = bv.menu_labels();
     assert!(labels.iter().any(|l| l.starts_with("Sell 1")), "{labels:?}");
     assert!(labels.iter().any(|l| l.starts_with("Sell stack (5")), "{labels:?}");
-    assert!(!labels.iter().any(|l| l.to_lowercase().contains("destroy")), "{labels:?}");
+    assert_eq!(labels.iter().filter(|l| l.to_lowercase().contains("destroy")).collect::<Vec<_>>(), ["Destroy..."], "{labels:?}");
 
     let (sx, sy, sen, _, _) = bv.menu_row("Sell stack").unwrap();
     assert!(sen);
@@ -2459,7 +2465,7 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     assert_eq!(
         super::super::runtime::autonomous_action_label(&entry.metadata.requested_capabilities)
             .as_deref(),
-        Some("Actions: can act on its own (open_loot, talk, loot, loot_all, sell, buy, bank_move, use_item, equip, quick_slot, batch)"),
+        Some("Actions: can act on its own (open_loot, talk, loot, loot_all, sell, buy, bank_move, use_item, equip, quick_slot, batch, link_item, hide_look)"),
         "L7: the label names exactly the actions the mod uses, not all of them"
     );
 

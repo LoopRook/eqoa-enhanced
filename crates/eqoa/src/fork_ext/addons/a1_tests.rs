@@ -131,11 +131,11 @@ fn a1_a_closed_session_is_told_to_its_own_mod_only_and_with_the_reason() {
     pump(&b);
     assert_eq!(text(&a, "table.concat(log, ',')"), "opened:quest_log:nil");
     assert_eq!(text(&b, "#log"), "0", "the other mod hears nothing of a window that is not its own");
-    // a world change ends it, and says so
-    window_takeover::release_all();
+    // the character leaving the world ends it, and says so
+    ws::set_env(ws::Env { away: true, ..ws::Env::default() });
     pump(&a);
     pump(&b);
-    assert_eq!(text(&a, "table.concat(log, ',')"), "opened:quest_log:nil,closed:quest_log:zoning");
+    assert_eq!(text(&a, "table.concat(log, ',')"), "opened:quest_log:nil,closed:quest_log:left_world");
     assert_eq!(text(&b, "#log"), "0");
     a.execute("assert(eqoa.windows.session('quest_log') == nil)").unwrap();
 }
@@ -147,7 +147,6 @@ fn a1_zoning_death_leaving_the_world_and_the_players_switch_each_end_open_window
     let h = host(SESSION_CAPS);
     h.execute("log = {}; eqoa.events.on('windows.session', function(e) if e.data.phase == 'closed' then log[#log + 1] = e.data.reason end end)").unwrap();
     for (what, end) in [
-        ("zoning", Box::new(window_takeover::release_all) as Box<dyn Fn()>),
         ("death", Box::new(|| ws::set_env(ws::Env { dead: true, ..ws::Env::default() }))),
         ("left_world", Box::new(|| ws::set_env(ws::Env { away: true, ..ws::Env::default() }))),
         ("game_windows", Box::new(|| window_takeover::set_use_game_windows(true))),
@@ -160,7 +159,16 @@ fn a1_zoning_death_leaving_the_world_and_the_players_switch_each_end_open_window
         h.execute("assert(eqoa.windows.session('spellbook') == nil)").unwrap();
         assert_eq!(text(&h, "log[#log]"), what, "the reason the window ended");
     }
+    // a world change (the core's reset) ends what belongs to the server's windows, not a view the mod opened itself:
+    // that one closes when the character is out of the world (the `left_world` row above)
+    ws::set_env(ws::Env::default());
+    window_takeover::set_use_game_windows(false);
+    h.execute("s = assert(eqoa.windows.open_session('spellbook'))").unwrap();
+    window_takeover::release_all();
+    h.execute("assert(eqoa.windows.session('spellbook') ~= nil)").unwrap();
     // while the switch is on, or dead, or away, no mod window opens (the control: it opened a moment ago)
+    h.execute("eqoa.windows.close_session(s.ref)").unwrap();
+    window_takeover::set_use_game_windows(true);
     h.execute("local s, e = eqoa.windows.open_session('spellbook'); assert(s == nil and e.code == 'unavailable', e and e.code)").unwrap();
     window_takeover::set_use_game_windows(false);
     ws::set_env(ws::Env { dead: true, ..ws::Env::default() });

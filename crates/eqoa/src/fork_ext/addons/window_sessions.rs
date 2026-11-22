@@ -282,7 +282,19 @@ fn end_where(reason: &str, which: impl Fn(&Session) -> bool) -> usize {
     ended.len()
 }
 
-/// Every mod window and every held session ends (zoning, death, leaving the world, the player's switch).
+/// The world changed under the mod (a zone, a new login): a held corpse, merchant or bank, a question and the
+/// controller's focus end. A window the mod opened itself stays until the game says the character is out of the
+/// world (`set_env`: `away`, a world change in progress), which it does for every real zone; a mod window is a view and
+/// refreshes on `state.reset`.
+pub(crate) fn world_changed() {
+    if is_active() {
+        end_where("zoning", |x| x.held.is_some());
+        release_focus_all("zoning");
+    }
+    super::confirm::cancel_all("zoning");
+}
+
+/// Every mod window and every held session ends (death, leaving the world, the player's switch).
 pub(crate) fn end_all(reason: &str) {
     if is_active() {
         end_where(reason, |_| true);

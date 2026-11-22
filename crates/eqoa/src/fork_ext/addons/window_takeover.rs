@@ -412,7 +412,7 @@ pub(crate) fn release_vm(vm: u64) {
 
 pub(crate) fn release_all() {
     // round A1: the mod windows, held sessions, controller focus and any question end with the world
-    super::window_sessions::end_all("zoning");
+    super::window_sessions::world_changed();
     let _ = release_claims_where("zoning", |_| true);
     // a by-id open of the world left that still waits for its answer decides nothing in the next one
     crate::fork_ext::loot_by_id::clear();

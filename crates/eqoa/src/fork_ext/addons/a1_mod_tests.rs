@@ -167,7 +167,7 @@ fn run(id: &str, key: &str, combo: &str, title_kind: &str) {
     assert!(ws::get(vm, title_kind).is_none(), "{id} closes on Escape");
     // the client ends the session (zoning, death, the player's switch): the mod hears and closes
     for end in [
-        Box::new(window_takeover::release_all) as Box<dyn Fn()>,
+        Box::new(|| ws::set_env(ws::Env { away: true, ..ws::Env::default() })) as Box<dyn Fn()>,
         Box::new(|| ws::set_env(ws::Env { dead: true, ..ws::Env::default() })),
     ] {
         ws::set_env(ws::Env::default());
