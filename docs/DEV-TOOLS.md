@@ -321,3 +321,52 @@ in CI and are counted as SKIP), GPU and window tests, anything needing the local
 live play session (`local_scene.py`), the optimized zero-addon allocation gate and the release
 build for owner test packages (`enhanced-dev.yml` still runs both when `develop` is pushed), and
 the oracle tests (not on this machine at all).
+
+---
+
+## 6. Upstream PR tool (`tools/upstream_pr.py`)
+
+Cuts and re-cuts a LOCAL branch `upstream-pr/<name>` from `origin/master` in its own worktree (default:
+`upstream-pr-worktrees/<name>` beside the repository, never inside it or the main checkout). It has no push
+option and refuses any branch not named `upstream-pr/...`. Pushing and opening the PR stay the owner's call.
+
+```bash
+python tools/upstream_pr.py cut   <name> --spec <spec.json> [--worktree DIR] [--base origin/master]
+python tools/upstream_pr.py check <name> [--spec <spec.json>] [--base origin/master]   # changes nothing
+python tools/upstream_pr.py test  <name> [--print-only]
+```
+
+`cut` creates or resets the branch (a re-cut discards the branch's earlier work), applies the spec, stages
+the changed files by name, runs the checks and commits. A refusal prints `file:line: refused, reason`, leaves
+the branch at the base and commits nothing. `check` runs the same checks on `<base>...upstream-pr/<name>`.
+
+**Spec** (JSON; all paths relative to the repository root, `patches` relative to the spec file):
+
+```json
+{
+  "message": "fix: refused login shows its reason",
+  "allowed_files": ["crates/eqoa/src/pregame/station/api.rs", "crates/eqoa/src/pregame/station/"],
+  "checkout": {"ref": "develop", "paths": ["crates/eqoa/src/pregame/station/api.rs"]},
+  "patches": ["station-fix.patch"],
+  "commits": ["<sha>"],
+  "allow_names": []
+}
+```
+
+`message` and `allowed_files` are required. `allowed_files` takes exact paths, globs, or a folder ending in `/`.
+The change set comes from any of `checkout` (files taken whole from a ref), `patches` (`git apply`) and
+`commits` (`cherry-pick -n`), applied in that order. `allow_names` lists fork-name terms (e.g. `lua`, `mlua`)
+a mod-host PR may carry; PRs 0 to 3 leave it empty.
+
+**Refusals:** a file the spec does not name; game data (`run/`, `Testing Resources/`, disc images, keys,
+decrypted modules, `credentials`); formatting-only hunks (whitespace-only, lines reordered, blank lines added);
+and these names in an added line, case-insensitively: `fork_`, `forge_`, `enhanced`, `eqoa_enhanced`,
+`looprook`, `frontiersforge`, `fork_ext`, `mlua`, `lua`.
+
+**`test`** runs `cargo test --locked --workspace -- --test-threads=1` in the branch's worktree while holding
+the shared cargo lock (`run_gates.CargoLock`) with `CARGO_TARGET_DIR` set to the shared folder
+(`~/Paseo/targets/shared` unless the variable is set); it refuses a target folder inside the worktree.
+`--print-only` shows the command without running it. Upstream's guide names no single test command, so this is
+the workspace default; add the oracle and disc environment as a lead needs, and count SKIPs in the report.
+
+Tests: `cd tools && python -m unittest test_upstream_pr` (builds its own temporary git repo; no cargo).
