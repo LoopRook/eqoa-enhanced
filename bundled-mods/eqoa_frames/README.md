@@ -1,0 +1,15 @@
+# EQOA Frames (demo)
+
+A small demonstration of what the client gives a unit-frame mod. It is off until you switch it on in Mods & Addons (F10).
+Three draggable windows:
+
+- **Effects**: your effects with the time left. Click one to take it off, where the game lets you (only effects the server
+  calls removable). Needs a server that offers the buff window and **Buff Window** on in Options; otherwise it lists the
+  game's own effects with no times. Your pet's effects appear below when the server sends them.
+- **Casting**: a bar for your own cast and one for your target's. The client is told when a cast starts and how long it
+  takes; it is not told when one is interrupted or lands, so a bar that fills is a clock, not a result.
+- **Target**: the target's name in its consider colour, its title and guild where the server sends them, and buttons to
+  invite it to your group, send your pet in and call it back off.
+
+It declares only the reads and the four actions it uses (`group_invite`, `pet_attack`, `pet_back_off`, `remove_effect`), so
+Mods & Addons shows them. It is meant to be read and copied: see `docs/modding/EQOA-API-SPEC.md`, section 4 ("Frames").

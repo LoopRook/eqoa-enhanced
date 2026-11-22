@@ -962,6 +962,14 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             "get find get_window format_hint parse_hint takeover release taken",
             6,
         ),
+        // round A3, last so that no older module takes its round from these
+        ("casts", "list get", 8),
+        ("actions", "group_invite pet_attack pet_back_off emote jump remove_effect", 8),
+        ("effects", "buffs pet", 8),
+        ("group", "raid_roles", 8),
+        ("player", "training breath", 8),
+        ("quests", "goals", 8),
+        ("target", "info", 8),
     ] {
         let module_path = format!("eqoa.{module}");
         let backing = match modules.get::<Value>(module)? {
@@ -1102,6 +1110,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::action_broker::install(host)?;
     super::native_items::install(host)?;
     super::native_r6a::install(host)?;
+    super::native_a3::install(host)?;
+    super::frame_actions::install(host)?;
     super::map_views::install(host)?;
     super::guides::install(host)?;
     super::pointer_api::install(host)?;
@@ -1202,6 +1212,9 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.group.Group", "members") => Some("eqoa.group.Member"),
         ("eqoa.group.Group", "raid") => Some("eqoa.group.RaidMember"),
         ("eqoa.group.Group", "invites") => Some("eqoa.group.Invite"),
+        ("eqoa.quests.QuestGoals", "goals") => Some("eqoa.quests.QuestGoal"),
+        ("eqoa.target.TargetInfo", "consider") => Some("eqoa.target.Consider"),
+        ("eqoa.target.Consider", "color") => Some("eqoa.Color"),
         ("eqoa.items.Container", "items") => Some("eqoa.items.Item"),
         ("eqoa.items.Container", "merchant") => Some("eqoa.items.MerchantState"),
         ("eqoa.items.Container", "source") => Some("eqoa.items.LootSource"),

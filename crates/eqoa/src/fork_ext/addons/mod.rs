@@ -107,6 +107,10 @@ pub(crate) mod native_items;
 mod native_media;
 pub(crate) mod native_projection;
 pub(crate) mod native_r6a;
+pub(crate) mod native_a3;
+pub(crate) mod frame_actions;
+#[cfg(test)]
+mod frames_mod_tests;
 pub(crate) mod native_settings;
 mod native_state;
 #[cfg(test)]

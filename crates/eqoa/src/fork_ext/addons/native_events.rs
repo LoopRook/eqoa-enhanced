@@ -114,6 +114,10 @@ const EVENTS: &[&str] = &[
     "cooldown.updated",
     "cooldown.ended",
     "effects.changed",
+    "buffs.changed",
+    "cast.started",
+    "cast.ended",
+    "quests.goals_changed",
     "chat.message",
     "chat.history_scroll",
     "combat.hit",
@@ -156,6 +160,10 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("abilities.changed", "before after changed"),
         ("hotbar.changed", "before after changed"),
         ("effects.changed", "before after changed"),
+        ("buffs.changed", "before after changed"),
+        ("quests.goals_changed", "before after changed"),
+        ("cast.started", "caster_id caster target_id targets effect duration own"),
+        ("cast.ended", "caster_id caster target_id targets effect duration own reason"),
         ("cooldown.started", "ability ability_id display_key lockout"),
         ("cooldown.updated", "ability ability_id display_key lockout"),
         ("cooldown.ended", "ability ability_id display_key lockout"),
@@ -213,6 +221,7 @@ fn event_round(name: &str) -> u8 {
         "inventory.changed" | "bank.changed" | "loot.changed" | "merchant.changed" => 5,
         "action.result" | "batch.progress" | "batch.result" | "quests.changed"
         | "camera.changed" | "windows.changed" | "mastery.changed" => 6,
+        "buffs.changed" | "cast.started" | "cast.ended" | "quests.goals_changed" => 8,
         _ => 2,
     }
 }

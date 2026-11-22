@@ -163,6 +163,8 @@ pub(crate) enum ActionKind {
     SetWaypoint { vm: u64, addon: String, world: i32, x: f32, z: f32, label: Option<String> },
     /// `eqoa.map.clear_waypoint`: VM `vm`'s own waypoint taken away.
     ClearWaypoint { vm: u64 },
+    /// Round A3 (`frame_actions`): invite the target, the pet's commands, an emote, a jump, a buff taken off.
+    Frame(super::frame_actions::FrameAction),
 }
 
 impl ActionKind {
@@ -213,6 +215,7 @@ impl ActionKind {
             Self::Talk { .. } => "talk",
             Self::SetWaypoint { .. } => "set_waypoint",
             Self::ClearWaypoint { .. } => "clear_waypoint",
+            Self::Frame(action) => action.name(),
         }
     }
 
@@ -259,7 +262,8 @@ impl ActionKind {
             | Self::OpenLoot { .. }
             | Self::Talk { .. }
             | Self::SetWaypoint { .. }
-            | Self::ClearWaypoint { .. } => None,
+            | Self::ClearWaypoint { .. }
+            | Self::Frame(_) => None,
         }
     }
 

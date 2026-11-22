@@ -35,6 +35,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_map_search",
     "eqoa_round_minimap",
     "eqoa_bag_viewer",
+    "eqoa_frames",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -551,6 +552,21 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "wereoxxs_ui/wereoxxs_ui.lua",
         package: "wereoxxs_ui",
         data: include_bytes!("../../../../bundled-mods/wereoxxs_ui/wereoxxs_ui.lua"),
+    },
+    BundledFile {
+        path: "eqoa_frames/mod.json",
+        package: "eqoa_frames",
+        data: include_bytes!("../../../../bundled-mods/eqoa_frames/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_frames/main.lua",
+        package: "eqoa_frames",
+        data: include_bytes!("../../../../bundled-mods/eqoa_frames/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_frames/README.md",
+        package: "eqoa_frames",
+        data: include_bytes!("../../../../bundled-mods/eqoa_frames/README.md"),
     },
 ];
 

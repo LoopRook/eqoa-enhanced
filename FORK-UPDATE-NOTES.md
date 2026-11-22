@@ -2,6 +2,11 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## Unreleased
+
+- **Frames demo mod (off until you enable it in Mods & Addons).** Three small windows you can drag: your effects with the time left on each (click one to take it off, where the server lets you), a cast bar for you and for your target, and the target's name in its consider colour with its title and guild, plus buttons to invite it to your group, send your pet in and call it back off. With the mod off nothing changes. The effect times need a server that offers the buff window and **Buff Window** on in Options; the cast bars are a clock from the cast's announced length, because the game is never told when a cast is interrupted or lands.
+- For mod authors (`eqoa/1`, additions only): effects with time left, whose and removable (`eqoa.effects.buffs`, `eqoa.effects.pet`), casts with start, length and end (`eqoa.casts`, the events `cast.started` and `cast.ended`), the quest tracker's goals with how many you have (`eqoa.quests.goals`, on servers that send them), training points, breath, the target's title, guild and consider colour, and each raid member's group, role and marks. New actions, each behind its own permission that Mods & Addons shows: `group_invite`, `pet_attack`, `pet_back_off`, `emote` (wave, bow, point, cheer), `jump` and `remove_effect`. Each reports that it was sent, never that it worked.
+
 ## 2026-11-21 · Enhanced 0.7.0
 
 - **Documentation for mod authors.** `docs/modding/` now describes the mod API (`eqoa/1`) as it is built: a getting-started guide, a starter mod to copy, the full reference, what each bundled mod shows, and what `eqoa/1` promises. **`eqoa/1` is a stable candidate:** the guard is on and we do not expect breaking changes; the final freeze comes when the API is offered upstream (the PR), after upstream has had its say.
