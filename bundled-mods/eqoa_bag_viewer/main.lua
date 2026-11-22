@@ -5,7 +5,11 @@ local B = require("bags")
 local HP = require("helpers")
 
 -- Sizes are in HUD frame pixels (640x448), scaled as the HUD is.
-local W, PAD, SLOT, GAP, LINE, LOG_LINES = 318, 8, 36, 2, 12, 5
+local W, PAD, SLOT, GAP, LINE = 318, 8, 36, 2, 12
+-- The loot log shows LOG_LINES lines (the wheel scrolls the rest); LOG_LINES_HELPERS while the Restock / Bank marked row is
+-- up, so the window still fits the 448-pixel HUD frame with the helper rows (the game's frame is the limit, not the screen).
+local LOG_LINES, LOG_LINES_HELPERS = 3, 2
+local log_shown = LOG_LINES
 local wmemo, wmemo_k, wmemo_n = {}, nil, 0
 local tokens, escape, tab_hits, slot_hits, menu_hits, action_hits, log_rect, grid_rect = {}, nil, {}, {}, {}, {}, nil, nil
 
@@ -90,7 +94,7 @@ local function open()
         if steps ~= 0 then
             local delta = steps > 0 and -1 or 1
             if inside(d.x, d.y, log_rect) then
-                B.scroll = math.max(0, math.min(math.max(0, #B.log - LOG_LINES), B.scroll + delta))
+                B.scroll = math.max(0, math.min(math.max(0, #B.log - log_shown), B.scroll + delta))
             elseif inside(d.x, d.y, grid_rect) then
                 B.scroll_grid(delta)
             end
@@ -202,7 +206,15 @@ function draw()
     local div_y = res_y + 13
     local log_hdr_y = div_y + 4
     local log_y = log_hdr_y + 15
-    local bar_y = log_y + LOG_LINES * LINE + 4
+    -- Row 3 (Restock / Bank marked: only when a mark exists and the merchant or banker is near or open) makes the loot log
+    -- one line shorter; Row 4 is the three "do it when I get near" choices (always there: off by default)
+    local bank_open_now = eqoa.bank.get() and eqoa.bank.get().open
+    local show_restock = next(HP.keep) ~= nil and (eqoa.merchant.get() ~= nil or B.nearby_npc("merchant") ~= nil)
+    local show_bank = next(HP.bank) ~= nil and (bank_open_now or B.nearby_npc("bank") ~= nil)
+    local has_row3 = show_restock or show_bank
+    local log_n = has_row3 and LOG_LINES_HELPERS or LOG_LINES
+    log_shown = log_n
+    local bar_y = log_y + log_n * LINE + 4
     local expl_y = bar_y + 18
     local bar2_y = expl_y + 14
     local is_corpse = B.tab == 7
@@ -213,13 +225,7 @@ function draw()
         or eqoa.loot.get() ~= nil
         or B.nearby_npc("merchant") ~= nil
         or (is_bank and not (eqoa.bank.get() and eqoa.bank.get().open) and B.nearby_npc("bank") ~= nil)
-    -- Row 3: Restock / Bank marked (only when a mark exists and the merchant or banker is near or open); Row 4: the three
-    -- "do it when I get near" choices (always there: off by default)
     local row3_y = has_ctx_btn and (bar2_y + 18) or bar2_y
-    local show_restock = next(HP.keep) ~= nil and (eqoa.merchant.get() ~= nil or B.nearby_npc("merchant") ~= nil)
-    local bank_open_now = eqoa.bank.get() and eqoa.bank.get().open
-    local show_bank = next(HP.bank) ~= nil and (bank_open_now or B.nearby_npc("bank") ~= nil)
-    local has_row3 = show_restock or show_bank
     local row4_y = has_row3 and (row3_y + 18) or row3_y
     local H = row4_y + 17 + PAD
     -- centred in the HUD frame, and on screen wherever the window is sized
@@ -355,9 +361,9 @@ function draw()
 
     fill(PAD, div_y, W - 2 * PAD, 1, c.border)
     text(PAD, log_hdr_y, "Loot log", c.muted)
-    log_rect = {x = x0 + PAD * k, y = y0 + log_y * k, w = (W - 2 * PAD) * k, h = LOG_LINES * LINE * k}
+    log_rect = {x = x0 + PAD * k, y = y0 + log_y * k, w = (W - 2 * PAD) * k, h = log_n * LINE * k}
     if #B.log == 0 then text(PAD, log_y, "Nothing looted yet", c.muted) end
-    for i = 1, LOG_LINES do
+    for i = 1, log_n do
         local entry = B.log[B.scroll + i]
         if entry then text(PAD, log_y + (i - 1) * LINE, entry.text, c.text, W - 2 * PAD) end
     end
