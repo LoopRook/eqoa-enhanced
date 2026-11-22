@@ -10613,10 +10613,11 @@ impl Play {
                         crate::hudmenu::UtilityLayout::UpperLeft => crate::hudmenu::UPPER_LEFT_AT,
                         crate::hudmenu::UtilityLayout::Below => [left, top],
                     };
-                    if crate::hud::fork_hud::utility_bar_visible() { self.hud_menus.draw_utility(vui, &mut r, bars, utility, at); }
+                    let shown = crate::hud::fork_hud::utility_bar_visible();
+                    if shown { self.hud_menus.draw_utility(vui, &mut r, bars, utility, at); }
                     let screen = crate::hudlayout::screen_x(r.ui, &m);
                     let m = crate::hudlayout::seal(r.ui, m);
-                    if crate::hud::fork_hud::utility_bar_visible() { self.hud_menus.draw_name(vui, &mut r, now as i64, true, Some(screen), &name); }
+                    if shown { self.hud_menus.draw_name(vui, &mut r, now as i64, true, Some(screen), &name); }
                     crate::hudlayout::end(r.ui, m);
                     (r.ui.anchor, r.ui.vertical) = (anchor, vertical);
                 } else {

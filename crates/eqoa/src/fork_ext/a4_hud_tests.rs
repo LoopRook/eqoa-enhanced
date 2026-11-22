@@ -297,20 +297,85 @@ fn a4_hud_hide_tokens_roundtrip_and_all_token() {
         assert!(ok && vis_back && hb_back == 0, "{tok}: show must restore visibility");
     }
 
-    // "all" covers all HUD pieces except minimap.
+    // "all" preserves its pre-A4 meaning: hides the original 14 HUD leaves, and must NOT hide
+    // raid_list, quest_tracker, dps_meter, breath, or minimap.
     hud_layout::set_hud_state(true, true, true, 93, 0);
     host.lua
         .load(r#"_G._all_tok = assert(eqoa.hud.hide("all"))"#)
         .exec()
         .unwrap();
     publish_claims(&hud_claims.borrow());
-    let (all_vis, raid_vis, meter_vis, spell_vis, util_vis, mini_vis): (bool, bool, bool, bool, bool, bool) = host
+    let (all_vis, health_vis, raid_vis, quest_vis, meter_vis, breath_vis, mini_vis): (
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+    ) = host
         .lua
         .load(
             r#"
             return eqoa.hud.visible("all"),
+                   eqoa.hud.visible("health"),
                    eqoa.hud.visible("raid_list"),
+                   eqoa.hud.visible("quest_tracker"),
                    eqoa.hud.visible("dps_meter"),
+                   eqoa.hud.visible("breath"),
+                   eqoa.hud.visible("minimap")
+            "#,
+        )
+        .eval()
+        .unwrap();
+    let (raid_hb, spell_hb, util_hb): (usize, usize, usize) = host
+        .lua
+        .load(
+            r#"
+            return #assert(eqoa.hud.hidden_by("raid_list")),
+                   #assert(eqoa.hud.hidden_by("spell_bars")),
+                   #assert(eqoa.hud.hidden_by("utility_bars"))
+            "#,
+        )
+        .eval()
+        .unwrap();
+    host.lua.load(r#"assert(eqoa.hud.show(_G._all_tok))"#).exec().unwrap();
+    publish_claims(&hud_claims.borrow());
+    assert!(!all_vis && !health_vis, "all must still hide its original 14 leaves");
+    assert!(
+        raid_vis && quest_vis && meter_vis && breath_vis && mini_vis,
+        "all must NOT hide the 6 A4 pieces or minimap (eqoa/1 additive-only rule)"
+    );
+    assert_eq!(
+        (raid_hb, spell_hb, util_hb),
+        (0, 0, 0),
+        "all must not register hidden_by claims on raid_list/spell_bars/utility_bars"
+    );
+
+    // "all_pieces" covers every HUD piece except minimap.
+    host.lua
+        .load(r#"_G._allp_tok = assert(eqoa.hud.hide("all_pieces"))"#)
+        .exec()
+        .unwrap();
+    publish_claims(&hud_claims.borrow());
+    let (allp_vis, raid_vis, quest_vis, meter_vis, breath_vis, spell_vis, util_vis, mini_vis): (
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+    ) = host
+        .lua
+        .load(
+            r#"
+            return eqoa.hud.visible("all_pieces"),
+                   eqoa.hud.visible("raid_list"),
+                   eqoa.hud.visible("quest_tracker"),
+                   eqoa.hud.visible("dps_meter"),
+                   eqoa.hud.visible("breath"),
                    eqoa.hud.visible("spell_bars"),
                    eqoa.hud.visible("utility_bars"),
                    eqoa.hud.visible("minimap")
@@ -318,10 +383,13 @@ fn a4_hud_hide_tokens_roundtrip_and_all_token() {
         )
         .eval()
         .unwrap();
-    host.lua.load(r#"assert(eqoa.hud.show(_G._all_tok))"#).exec().unwrap();
+    host.lua.load(r#"assert(eqoa.hud.show(_G._allp_tok))"#).exec().unwrap();
     publish_claims(&hud_claims.borrow());
-    assert!(!all_vis && !raid_vis && !meter_vis && !spell_vis && !util_vis, "all must hide new HUD pieces");
-    assert!(mini_vis, "all must NOT hide minimap");
+    assert!(
+        !allp_vis && !raid_vis && !quest_vis && !meter_vis && !breath_vis && !spell_vis && !util_vis,
+        "all_pieces must hide every HUD piece except minimap"
+    );
+    assert!(mini_vis, "all_pieces must NOT hide minimap");
 
     // Unknown token refused with invalid_argument.
     let code: String = host
@@ -370,24 +438,38 @@ fn a4_every_hud_piece_drops_quads_bounds_and_clicks_when_hidden() {
         (Piece::UtilityBars, "utility_bars", false, true),
     ];
 
+    let visible_quads = |ui: &render::ui::Ui| -> usize {
+        ui.quads
+            .iter()
+            .filter(|q| {
+                q.color[3] > 0.0
+                    && q.clip
+                        .map_or(true, |[x0, y0, x1, y1]| x1 > x0 && y1 > y0)
+            })
+            .count()
+    };
+
     for &(piece, token, in_raid, uses_seal) in cases {
         hud_layout::set_hud_state(true, true, in_raid, 93, 0);
 
-        // Negative control: unhidden -> quads stay, Move HUD notes the piece.
+        // Negative control: unhidden -> quads stay visible, Move HUD notes the piece.
         publish_claims(&HudClaimsRegistry::new());
         crate::hudlayout::frame_begin();
         ui.begin((640, 448));
+        ui.anchor = render::ui::Anchor::Left;
+        ui.vertical = render::ui::Vertical::Top;
         let mut m = crate::hudlayout::begin(&mut ui, piece);
-        ui.quads.push(quad_of([20.0, 20.0, 120.0, 60.0]));
+        ui.push(quad_of([20.0, 20.0, 120.0, 60.0]));
         if uses_seal {
             m = crate::hudlayout::seal(&mut ui, m);
             // Simulate draw_name emitted after seal().
-            ui.quads.push(quad_of([20.0, 62.0, 100.0, 76.0]));
+            ui.push(quad_of([20.0, 62.0, 100.0, 76.0]));
         }
         crate::hudlayout::end(&mut ui, m);
+        ui.end();
         crate::hudlayout::frame_end();
         assert_eq!(
-            ui.quads.len(),
+            visible_quads(&ui),
             if uses_seal { 2 } else { 1 },
             "{piece:?} ({token}): negative control must keep drawn quads"
         );
@@ -396,7 +478,8 @@ fn a4_every_hud_piece_drops_quads_bounds_and_clicks_when_hidden() {
             "{piece:?} ({token}): negative control must note Move HUD bounds"
         );
 
-        // Hidden via token: quads dropped to 0 (including post-seal draw_name) and Move HUD not noted.
+        // Hidden via token: quads blanked in place (0 visible quads, including post-seal draw_name)
+        // and Move HUD not noted.
         let mut reg = HudClaimsRegistry::new();
         let owner = InstanceToken::next().unwrap();
         let mut ok = false;
@@ -409,18 +492,21 @@ fn a4_every_hud_piece_drops_quads_bounds_and_clicks_when_hidden() {
 
         crate::hudlayout::frame_begin();
         ui.begin((640, 448));
+        ui.anchor = render::ui::Anchor::Left;
+        ui.vertical = render::ui::Vertical::Top;
         let mut m = crate::hudlayout::begin(&mut ui, piece);
-        ui.quads.push(quad_of([20.0, 20.0, 120.0, 60.0]));
+        ui.push(quad_of([20.0, 20.0, 120.0, 60.0]));
         if uses_seal {
             m = crate::hudlayout::seal(&mut ui, m);
-            ui.quads.push(quad_of([20.0, 62.0, 100.0, 76.0]));
+            ui.push(quad_of([20.0, 62.0, 100.0, 76.0]));
         }
         crate::hudlayout::end(&mut ui, m);
+        ui.end();
         crate::hudlayout::frame_end();
         assert_eq!(
-            ui.quads.len(),
+            visible_quads(&ui),
             0,
-            "{piece:?} ({token}): hidden piece must emit 0 quads"
+            "{piece:?} ({token}): hidden piece must leave 0 visible quads"
         );
         assert!(
             crate::hudlayout::drawn(piece).is_none(),
@@ -432,10 +518,11 @@ fn a4_every_hud_piece_drops_quads_bounds_and_clicks_when_hidden() {
             hud_layout::set_hud_state(true, true, !in_raid, 93, 0);
             ui.begin((640, 448));
             let m = crate::hudlayout::begin(&mut ui, Piece::Group);
-            ui.quads.push(quad_of([20.0, 20.0, 120.0, 60.0]));
+            ui.push(quad_of([20.0, 20.0, 120.0, 60.0]));
             crate::hudlayout::end(&mut ui, m);
+            ui.end();
             assert_eq!(
-                ui.quads.len(),
+                visible_quads(&ui),
                 1,
                 "hiding {token} must not hide the sibling group/raid mode"
             );
@@ -552,10 +639,10 @@ fn a4_every_hud_piece_drops_quads_bounds_and_clicks_when_hidden() {
         "negative control: meter click"
     );
 
-    // Hide all + minimap -> every click area is gone, while Pick::Report stays unaffected.
+    // Hide all_pieces + minimap -> every click area is gone, while Pick::Report stays unaffected.
     let mut reg = HudClaimsRegistry::new();
     let owner = InstanceToken::next().unwrap();
-    for tok in ["all", "minimap"] {
+    for tok in ["all_pieces", "minimap"] {
         for leaf in visibility::native_leaves(tok).unwrap() {
             reg.disable(leaf, owner, "hide_everything");
         }
@@ -1385,4 +1472,350 @@ fn a4_target_frame_demo_mod_off_by_default_and_replaces_target_when_enabled() {
             "disabling demo mod must restore native target visibility"
         );
     });
+}
+
+// =========================================================================
+// 6. Fix round 1 regressions: H1 widescreen/tall Ui::end safety & M2 bar layouts
+// =========================================================================
+
+#[test]
+fn a4_hidden_pieces_preserve_ui_indices_on_widescreen_and_tall_windows() {
+    let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut ui) = crate::ui::tests::layer() else {
+        eprintln!("SKIP: no graphics adapter");
+        return;
+    };
+    reset_a4_state();
+
+    let quad_of = |r: [f32; 4], blend: u8| render::ui::Quad {
+        tex: 0,
+        blend,
+        pos: [[r[0], r[1]], [r[2], r[1]], [r[2], r[3]], [r[0], r[3]]],
+        uv: [[0.0; 2]; 4],
+        color: [1.0; 4],
+        clip: None,
+    };
+
+    let cases: &[(Piece, &str, bool, bool)] = &[
+        (Piece::Player, "player", false, false),
+        (Piece::Group, "group_panel", false, false),
+        (Piece::Group, "raid_list", true, false),
+        (Piece::Pet, "pet", false, false),
+        (Piece::Target, "target", false, false),
+        (Piece::Minimap, "minimap", false, false),
+        (Piece::Quests, "quest_tracker", false, false),
+        (Piece::Meter, "dps_meter", false, false),
+        (Piece::Effects, "effects", false, false),
+        (Piece::Chat, "chat", false, false),
+        (Piece::Breath, "breath", false, false),
+        (Piece::QuickMenus, "hotbar", false, false),
+        (Piece::SpellBars, "spell_bars", false, true),
+        (Piece::UtilityBars, "utility_bars", false, true),
+    ];
+
+    // Check both widescreen (16:9 -> side > 0) and tall portrait (top > 0).
+    for (label, size) in [("16:9 widescreen", (1280u32, 720u32)), ("tall portrait", (480u32, 900u32))] {
+        let side = render::ui::side(size);
+        let top = render::ui::top(size);
+        if label.starts_with("16:9") {
+            assert!(side > 0.0, "16:9 window must have side > 0");
+        } else {
+            assert!(top > 0.0, "tall window must have top > 0");
+        }
+
+        // Negative control A: the old `ui.quads.truncate(from)` panics in `Ui::end()` because
+        // `sided` / `risen` still hold indices >= quads.len().
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ui.begin(size);
+            ui.anchor = render::ui::Anchor::Left;
+            ui.vertical = render::ui::Vertical::Top;
+            let from = ui.quads.len();
+            ui.push(quad_of([20.0, 20.0, 120.0, 60.0], 3));
+            ui.push(quad_of([20.0, 64.0, 120.0, 100.0], 3));
+            ui.quads.truncate(from);
+            ui.end();
+        }))
+        .is_err();
+        assert!(
+            panicked,
+            "{label}: negative control — truncating ui.quads must panic in Ui::end()"
+        );
+
+        // Negative control B: truncating a middle piece and pushing a later anchored quad leaves
+        // a stale index pointing at the later quad, so an opaque full-width backdrop double-shifts it.
+        ui.begin(size);
+        ui.anchor = render::ui::Anchor::Left;
+        ui.vertical = render::ui::Vertical::Top;
+        ui.push(quad_of([20.0, 20.0, 100.0, 60.0], 3)); // index 0: piece A
+        ui.push(quad_of([20.0, 20.0, 100.0, 60.0], 3)); // index 1: piece B (visible baseline)
+        ui.anchor = render::ui::Anchor::Middle;
+        ui.vertical = render::ui::Vertical::Middle;
+        ui.push(quad_of([0.0, 0.0, 640.0, 448.0], 0)); // full-width opaque backdrop
+        ui.end();
+        let baseline_b_pos = ui.quads[1].pos;
+
+        ui.begin(size);
+        ui.anchor = render::ui::Anchor::Left;
+        ui.vertical = render::ui::Vertical::Top;
+        let from_a = ui.quads.len();
+        ui.push(quad_of([20.0, 20.0, 100.0, 60.0], 3)); // index 0 in sided/risen
+        ui.quads.truncate(from_a); // buggy truncate leaves stale (0, d)
+        ui.push(quad_of([20.0, 20.0, 100.0, 60.0], 3)); // now at index 0 -> gets TWO (0, d) entries!
+        ui.anchor = render::ui::Anchor::Middle;
+        ui.vertical = render::ui::Vertical::Middle;
+        ui.push(quad_of([0.0, 0.0, 640.0, 448.0], 0));
+        ui.end();
+        assert_ne!(
+            ui.quads[0].pos, baseline_b_pos,
+            "{label}: negative control — truncate must corrupt/double-shift the later quad"
+        );
+
+        // Now verify our real `piece_hidden` fix for EVERY HUD piece in both Scenario A (last piece)
+        // and Scenario B (middle piece between two visible pieces + full-width opaque backdrop).
+        let owner = InstanceToken::next().unwrap();
+        for &(piece, token, in_raid, uses_seal) in cases {
+            hud_layout::set_hud_state(true, true, in_raid, 93, 0);
+
+            // Baseline with nothing hidden (before + middle + after + opaque backdrop).
+            publish_claims(&HudClaimsRegistry::new());
+            ui.begin(size);
+            ui.anchor = render::ui::Anchor::Left;
+            ui.vertical = render::ui::Vertical::Top;
+            ui.push(quad_of([10.0, 10.0, 80.0, 40.0], 3)); // idx 0: before
+            let mut m = crate::hudlayout::begin(&mut ui, piece);
+            let mid_start = ui.quads.len();
+            ui.push(quad_of([20.0, 80.0, 140.0, 120.0], 3));
+            if uses_seal {
+                m = crate::hudlayout::seal(&mut ui, m);
+                ui.push(quad_of([20.0, 122.0, 120.0, 136.0], 3));
+            }
+            crate::hudlayout::end(&mut ui, m);
+            let mid_end = ui.quads.len();
+            ui.anchor = render::ui::Anchor::Right;
+            ui.vertical = render::ui::Vertical::Bottom;
+            let after_idx = ui.quads.len();
+            ui.push(quad_of([520.0, 380.0, 620.0, 420.0], 3)); // after
+            ui.anchor = render::ui::Anchor::Middle;
+            ui.vertical = render::ui::Vertical::Middle;
+            ui.push(quad_of([0.0, 0.0, 640.0, 448.0], 0)); // opaque backdrop
+            ui.end();
+            let expect_before = (ui.quads[0].pos, ui.quads[0].clip);
+            let expect_after = (ui.quads[after_idx].pos, ui.quads[after_idx].clip);
+
+            // Hide `piece` and run Scenario B (middle piece + opaque backdrop).
+            let mut reg = HudClaimsRegistry::new();
+            for leaf in visibility::native_leaves(token).unwrap() {
+                reg.disable(leaf, owner, "widescreen_test");
+            }
+            publish_claims(&reg);
+
+            ui.begin(size);
+            ui.anchor = render::ui::Anchor::Left;
+            ui.vertical = render::ui::Vertical::Top;
+            ui.push(quad_of([10.0, 10.0, 80.0, 40.0], 3)); // idx 0: before
+            let mut m = crate::hudlayout::begin(&mut ui, piece);
+            ui.push(quad_of([20.0, 80.0, 140.0, 120.0], 3));
+            if uses_seal {
+                m = crate::hudlayout::seal(&mut ui, m);
+                ui.push(quad_of([20.0, 122.0, 120.0, 136.0], 3));
+            }
+            crate::hudlayout::end(&mut ui, m);
+            ui.anchor = render::ui::Anchor::Right;
+            ui.vertical = render::ui::Vertical::Bottom;
+            ui.push(quad_of([520.0, 380.0, 620.0, 420.0], 3)); // after
+            ui.anchor = render::ui::Anchor::Middle;
+            ui.vertical = render::ui::Vertical::Middle;
+            ui.push(quad_of([0.0, 0.0, 640.0, 448.0], 0));
+            ui.end();
+
+            assert_eq!(
+                (ui.quads[0].pos, ui.quads[0].clip),
+                expect_before,
+                "{label} {piece:?}: before-piece quad must be unmoved"
+            );
+            assert_eq!(
+                (ui.quads[after_idx].pos, ui.quads[after_idx].clip),
+                expect_after,
+                "{label} {piece:?}: after-piece quad must be unmoved (no double-shift)"
+            );
+            for q in &ui.quads[mid_start..mid_end] {
+                assert_eq!(q.color[3], 0.0, "{label} {piece:?}: hidden quad alpha must be 0");
+                let [x0, y0, x1, y1] = q.clip.expect("hidden quad must carry an empty clip");
+                assert!(
+                    x1 <= x0 || y1 <= y0,
+                    "{label} {piece:?}: hidden quad clip must stay empty after Ui::end(), got {:?}",
+                    q.clip
+                );
+            }
+
+            // Scenario A: hidden piece is the LAST thing drawn before Ui::end() (no trailing quads).
+            ui.begin(size);
+            ui.anchor = render::ui::Anchor::Right;
+            ui.vertical = render::ui::Vertical::Top;
+            let mut m = crate::hudlayout::begin(&mut ui, piece);
+            ui.push(quad_of([500.0, 20.0, 620.0, 90.0], 3));
+            if uses_seal {
+                m = crate::hudlayout::seal(&mut ui, m);
+                ui.push(quad_of([500.0, 92.0, 600.0, 106.0], 3));
+            }
+            crate::hudlayout::end(&mut ui, m);
+            ui.end(); // must NOT panic
+            for q in &ui.quads {
+                assert_eq!(q.color[3], 0.0, "{label} {piece:?} last: hidden quad alpha must be 0");
+                let [x0, y0, x1, y1] = q.clip.expect("hidden quad must carry an empty clip");
+                assert!(x1 <= x0 || y1 <= y0, "{label} {piece:?} last: clip must stay empty");
+            }
+        }
+    }
+
+    publish_claims(&HudClaimsRegistry::new());
+}
+
+#[test]
+fn a4_spell_and_utility_bars_hide_draw_and_clicks_in_both_layouts() {
+    reset_a4_state();
+    let vui = test_vui_with_atlas();
+    let owner = InstanceToken::next().unwrap();
+
+    let mut menus = crate::hudmenu::HudMenus::default();
+    let mut abilities = std::collections::BTreeMap::new();
+    for slot in 0..5 {
+        abilities.insert(
+            slot + 1,
+            net::dump::Ability {
+                id: slot + 1,
+                valid: 1,
+                slot,
+                icon_front: 10,
+                ..Default::default()
+            },
+        );
+    }
+    let bars = crate::hudmenu::Bars {
+        abilities: 2,
+        gear: true,
+    };
+    menus.build(&abilities, &ItemList::default(), &Default::default(), bars);
+    let no_name = |_: u32, _: i64| Vec::new();
+
+    // --- Layout 1: Non-stacked (classic carousel) ---
+    menus.stacked = false;
+    let carousel_click_pt = |menus: &crate::hudmenu::HudMenus| -> [f32; 2] {
+        let k = menus.sel.clamp(0, 5) as usize;
+        // HudMenu::new places every carousel menu at [430, 25].
+        let at = [430.0f32, 25.0f32];
+        if matches!(k, 2 | 3) {
+            [at[0] + 175.0, at[1] + 10.0]
+        } else {
+            [at[0] + 170.0, at[1] + 4.0]
+        }
+    };
+
+    // Negative control (unhidden): all 6 carousel menus draw and accept clicks.
+    publish_claims(&HudClaimsRegistry::new());
+    for sel in [0, 1, 2, 3, 4, 5] {
+        menus.sel = sel;
+        let mut r = CountingRaster::default();
+        crate::hud::fork_hud::draw_hud_menus(&mut menus, &vui, &mut r, 0, &no_name);
+        assert!(r.total() > 0, "carousel sel={sel}: negative control must draw");
+        assert!(
+            crate::hud::fork_hud::hud_menu_visible(&menus),
+            "carousel sel={sel}: negative control must be visible"
+        );
+        let pt = carousel_click_pt(&menus);
+        assert!(
+            menus.point(pt).is_some(),
+            "carousel sel={sel}: negative control click must hit"
+        );
+    }
+
+    // Hide spell_bars in carousel layout: menus 0, 1, 4, 5 hidden (draw=0, clicks gated off);
+    // utility menus 2 (items) and 3 (gear) stay visible and clickable.
+    let mut sp_reg = HudClaimsRegistry::new();
+    sp_reg.disable("spell_bars", owner, "bars_mod");
+    publish_claims(&sp_reg);
+    for sel in [0, 1, 4, 5] {
+        menus.sel = sel;
+        let mut r = CountingRaster::default();
+        crate::hud::fork_hud::draw_hud_menus(&mut menus, &vui, &mut r, 0, &no_name);
+        assert_eq!(r.total(), 0, "carousel sel={sel}: spell_bars must suppress drawing");
+        assert!(
+            !crate::hud::fork_hud::hud_menu_visible(&menus),
+            "carousel sel={sel}: spell_bars must gate clicks & right-click autocast off"
+        );
+    }
+    for sel in [2, 3] {
+        menus.sel = sel;
+        let mut r = CountingRaster::default();
+        crate::hud::fork_hud::draw_hud_menus(&mut menus, &vui, &mut r, 0, &no_name);
+        assert!(r.total() > 0, "carousel sel={sel}: spell_bars must leave utility menu drawn");
+        assert!(
+            crate::hud::fork_hud::hud_menu_visible(&menus),
+            "carousel sel={sel}: spell_bars must leave utility menu clickable"
+        );
+    }
+
+    // Hide utility_bars in carousel layout: menus 2 and 3 hidden (draw=0, clicks gated off);
+    // spell menus 0, 1, 4, 5 stay visible and clickable.
+    let mut ut_reg = HudClaimsRegistry::new();
+    ut_reg.disable("utility_bars", owner, "bars_mod");
+    publish_claims(&ut_reg);
+    for sel in [2, 3] {
+        menus.sel = sel;
+        let mut r = CountingRaster::default();
+        crate::hud::fork_hud::draw_hud_menus(&mut menus, &vui, &mut r, 0, &no_name);
+        assert_eq!(r.total(), 0, "carousel sel={sel}: utility_bars must suppress drawing");
+        assert!(
+            !crate::hud::fork_hud::hud_menu_visible(&menus),
+            "carousel sel={sel}: utility_bars must gate clicks off"
+        );
+    }
+    for sel in [0, 1, 4, 5] {
+        menus.sel = sel;
+        let mut r = CountingRaster::default();
+        crate::hud::fork_hud::draw_hud_menus(&mut menus, &vui, &mut r, 0, &no_name);
+        assert!(r.total() > 0, "carousel sel={sel}: utility_bars must leave spell menu drawn");
+        assert!(
+            crate::hud::fork_hud::hud_menu_visible(&menus),
+            "carousel sel={sel}: utility_bars must leave spell menu clickable"
+        );
+    }
+
+    // --- Layout 2: Stacked spell bars + utility bars ---
+    menus.stacked = true;
+    menus.sel = 0;
+    publish_claims(&HudClaimsRegistry::new());
+    let mut r_sp = CountingRaster::default();
+    menus.draw_stacked(&vui, &mut r_sp, 350, 400, bars, crate::hudmenu::Layout::Stacked);
+    let mut r_ut = CountingRaster::default();
+    menus.draw_utility(
+        &vui,
+        &mut r_ut,
+        bars,
+        crate::hudmenu::UtilityLayout::UpperLeft,
+        crate::hudmenu::UPPER_LEFT_AT,
+    );
+    assert!(r_sp.total() > 0 && r_ut.total() > 0, "stacked negative control draws both");
+    let ut_pt = [
+        crate::hudmenu::UPPER_LEFT_AT[0] as f32 + 10.0,
+        crate::hudmenu::UPPER_LEFT_AT[1] as f32 + 10.0,
+    ];
+    assert!(
+        crate::hud::fork_hud::utility_point(&mut menus, ut_pt).is_some(),
+        "stacked negative control: utility_point must hit when visible"
+    );
+
+    // Hide spell_bars in stacked layout: spell bars gated off, utility bars still visible & clickable.
+    publish_claims(&sp_reg);
+    assert!(!crate::hud::fork_hud::hud_menu_visible(&menus));
+    assert!(crate::hud::fork_hud::utility_bar_visible());
+    assert!(crate::hud::fork_hud::utility_point(&mut menus, ut_pt).is_some());
+
+    // Hide utility_bars in stacked layout: utility bars gated off & clicks return None, spell bars visible.
+    publish_claims(&ut_reg);
+    assert!(crate::hud::fork_hud::hud_menu_visible(&menus));
+    assert!(!crate::hud::fork_hud::utility_bar_visible());
+    assert_eq!(crate::hud::fork_hud::utility_point(&mut menus, ut_pt), None);
+
+    publish_claims(&HudClaimsRegistry::new());
 }

@@ -953,6 +953,7 @@ fn replacement_labels(replaces: &[String], can_takeover: bool) -> [Option<String
                 "hud.breath" => "Breath gauge",
                 "hud.spell_bars" => "Spell Bars",
                 "hud.utility_bars" => "Utility Bars",
+                "hud.all_pieces" => "All HUD pieces",
                 _ => kind.as_str(),
             };
             let list = if can_takeover { &mut now } else { &mut hud };

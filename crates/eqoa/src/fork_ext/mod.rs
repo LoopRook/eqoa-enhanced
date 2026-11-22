@@ -91,8 +91,9 @@ pub(crate) fn minimap_contains(map: &crate::map::Map, point: [f32; 2]) -> bool {
     map.mini_contains(point)
 }
 
-/// Drops the quads of a HUD piece hidden by a mod (seam 3 in `hudlayout::end` and `seal`) so hidden
-/// pieces draw nothing and are not outlined by Move HUD.
+/// Blanks the quads of a HUD piece hidden by a mod (seam 3 in `hudlayout::end` and `seal`) in place
+/// so hidden pieces draw nothing and are not outlined by Move HUD, while keeping `ui.quads.len()`
+/// intact so `Ui::end()`'s `sided`/`risen`/`opaque` indices stay valid on widescreen and tall windows.
 pub(crate) fn piece_hidden(_ui: &mut render::ui::Ui, _piece: crate::hudlayout::Piece, _from: usize) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -113,12 +114,18 @@ pub(crate) fn piece_hidden(_ui: &mut render::ui::Ui, _piece: crate::hudlayout::P
             Piece::Effects => v.active_effects,
             Piece::Chat => v.chat,
             Piece::Breath => v.breath,
-            Piece::QuickMenus => v.ability_bar,
+            Piece::QuickMenus => v.ability_bar || (v.spell_bars && v.utility_bars),
             Piece::SpellBars => v.ability_bar || v.spell_bars,
             Piece::UtilityBars => v.ability_bar || v.utility_bars,
         };
         if hidden {
-            _ui.quads.truncate(_from.min(_ui.quads.len()));
+            let start = _from.min(_ui.quads.len());
+            for q in &mut _ui.quads[start..] {
+                q.pos = [[0.0; 2]; 4];
+                q.color = [0.0; 4];
+                q.blend = 3;
+                q.clip = Some([0, 0, 0, 0]);
+            }
             return true;
         }
     }

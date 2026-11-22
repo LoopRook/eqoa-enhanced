@@ -255,6 +255,20 @@ pub fn hud_element_visible(element: &str) -> bool {
                 && !v.target
                 && !v.group_panel
                 && !v.group_compass_marks
+                && !v.pet
+                && !v.chat
+                && !v.ability_bar
+                && !v.active_effects
+        }
+        "all_pieces" => {
+            !v.health_bar
+                && !v.power_bar
+                && !v.main_exp_bar
+                && !v.secondary_exp_bar
+                && !v.compass
+                && !v.target
+                && !v.group_panel
+                && !v.group_compass_marks
                 && !v.raid_list
                 && !v.pet
                 && !v.chat

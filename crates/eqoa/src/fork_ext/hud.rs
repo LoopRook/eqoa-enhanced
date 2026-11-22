@@ -246,17 +246,32 @@ pub(crate) fn draw_chat_window(
     }
 }
 
-/// Whether the currently selected HUD menu is visible (all carousel menus
-/// 0 to 5, including items and weapon sets, are suppressed when an addon
-/// claims ability bars).
+/// Whether the currently selected HUD menu is visible.
+///
+/// - `ability_bar` (`hotbar`) hides all menus (0..5) in both stacked and carousel layouts.
+/// - `spell_bars` hides the stacked spell bars when stacked, and the ability-bar menus
+///   (0, 1, 4, 5) when using the carousel layout.
+/// - `utility_bars` hides the utility bars when stacked (via `utility_bar_visible`), and
+///   the item quick-slot and weapon-set menus (2, 3) when using the carousel layout.
 ///
 /// NOTE: We do NOT gate `hud_key` (pad/keyboard carousel use). The reference shows
 /// that Forge's 3 hotbars include the item bar (`scripts/ff_example.lua:788-840`;
 /// Avoids' "all THREE hotbar windows"), and Wereoxxs draws the item slots itself
 /// (`wereoxxs_ui/modules/ability_bars.lua:51-53`). Game input therefore stays unchanged
-/// and only the game's drawing is hidden.
+/// and only the game's drawing and pointer clicks are hidden.
 pub(crate) fn hud_menu_visible(menus: &crate::hudmenu::HudMenus) -> bool {
-    published(|v| !v.ability_bar && !(menus.stacked && v.spell_bars))
+    published(|v| {
+        if v.ability_bar {
+            return false;
+        }
+        if menus.stacked {
+            !v.spell_bars
+        } else if matches!(menus.sel, 2 | 3) {
+            !v.utility_bars
+        } else {
+            !v.spell_bars
+        }
+    })
 }
 
 /// A click at `at` on the Utility Bars: nothing while an addon claims the

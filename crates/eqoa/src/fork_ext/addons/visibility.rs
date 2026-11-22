@@ -648,7 +648,8 @@ pub(crate) fn native_leaves(element: &str) -> Option<Vec<&'static str>> {
         "quest_tracker" => vec!["quest_tracker"],
         "dps_meter" => vec!["dps_meter"],
         "breath" => vec!["breath"],
-        "all" => {
+        "all" => ALL_UI_ELEMENTS.to_vec(),
+        "all_pieces" => {
             let mut all = ALL_UI_ELEMENTS.to_vec();
             all.extend_from_slice(&[
                 "raid_list",
