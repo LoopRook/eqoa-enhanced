@@ -175,7 +175,7 @@ fn round7h_low_input_bind_twice_runs_one_callback_per_press() {
     CORE.with(|c| {
         c.borrow_mut().emit(
             "input.key",
-            serde_json::json!({"key":"y","down":true,"repeat":false,"synthetic":false,"text":""}),
+            serde_json::json!({"key":"9","down":true,"repeat":false,"synthetic":false,"text":""}),
         )
     });
     native_events::dispatch(&host).unwrap();

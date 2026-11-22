@@ -425,7 +425,7 @@ fn round7e_fix_h1_ctrl_u_on_a_game_row_does_not_also_fire_a_bare_u_mod() {
     let mut rt = runtime();
     let slot = row_named("bar1_slot1").unwrap();
     let mut game = settings::binds();
-    game.bind_key(slot, "ctrl+u");
+    game.bind_key(slot, "ctrl+9");
     settings::set_binds(game);
     let u = Key::Character("9".into());
     assert_eq!(game_sends(CTRL, &u), Some(Sent::Slot(0, 0)), "the game acts on Ctrl+9");
@@ -441,8 +441,8 @@ fn round7e_fix_h1_a_mod_bound_to_a_combo_fires_on_that_combo_only() {
     reset();
     let host = bind("alpha", "");
     let mut rt = runtime();
-    capture(&mut ControlsPage::default(), ROWS.len(), "ctrl+u");
-    assert_eq!(mod_key_of("alpha"), "ctrl+u");
+    capture(&mut ControlsPage::default(), ROWS.len(), "ctrl+9");
+    assert_eq!(mod_key_of("alpha"), "ctrl+9");
     let u = Key::Character("9".into());
     press_key(&mut rt, NONE, &u, &[&host]);
     press_key(&mut rt, ALT, &u, &[&host]);
@@ -553,7 +553,7 @@ fn round7e_fix_m6_the_winner_of_a_shared_default_does_not_depend_on_load_order()
 fn round7e_fix_m6_a_saved_key_beats_a_default_in_either_load_order() {
     for order in [["alpha", "beta"], ["beta", "alpha"]] {
         reset();
-        testing::put(MOD_KEYS, b"mod.beta.act=u\n");
+        testing::put(MOD_KEYS, b"mod.beta.act=9\n");
         let mut hosts = Vec::new();
         for who in order {
             hosts.push((who, bind(who, if who == "alpha" { "9" } else { "" })));
@@ -763,7 +763,7 @@ fn round7e_h3_a_cancel_after_defaults_brings_the_saved_mod_keys_back() {
     assert!(!mod_file().contains("mod.alpha.act="), "and forgot the saved one: {}", mod_file());
     s.cancel();
     assert_eq!(mod_key_of("alpha"), "9");
-    assert!(mod_file().contains("mod.alpha.act=u"), "{}", mod_file());
+    assert!(mod_file().contains("mod.alpha.act=9"), "{}", mod_file());
 }
 
 #[test]
@@ -977,7 +977,7 @@ fn round7e_fix2_m2_a_release_is_named_as_its_press_was() {
     rt_key(&mut rt, 9002, false, &u, None);
     input::set_modifiers(NONE);
     native_events::dispatch(&host).unwrap();
-    host.execute("assert(table.concat(log, ',') == 'ctrl+u+,ctrl+u-,u+,u-', table.concat(log, ','))")
+    host.execute("assert(table.concat(log, ',') == 'ctrl+9+,ctrl+9-,9+,9-', table.concat(log, ','))")
         .unwrap();
 }
 
@@ -988,10 +988,10 @@ fn round7e_fix2_m2_the_game_names_a_release_the_same_way() {
     let mut game = GameKeys::new();
     let u = Key::Character("9".into());
     let mut b = settings::binds();
-    b.bind_key(row_named("bar1_slot1").unwrap(), "ctrl+u");
+    b.bind_key(row_named("bar1_slot1").unwrap(), "ctrl+9");
     settings::set_binds(b);
-    assert_eq!(game.name(CTRL, &u, None, true, false, false, false).as_deref(), Some("ctrl+u"));
-    assert_eq!(game.name(NONE, &u, None, false, false, false, false).as_deref(), Some("ctrl+u"));
+    assert_eq!(game.name(CTRL, &u, None, true, false, false, false).as_deref(), Some("ctrl+9"));
+    assert_eq!(game.name(NONE, &u, None, false, false, false, false).as_deref(), Some("ctrl+9"));
 }
 
 #[test]
@@ -1132,17 +1132,17 @@ fn round7e_fix3_a_let_go_key_is_forgotten_wherever_it_went() {
     rt.scripted_key_based(9202, &u, None, None, ElementState::Pressed, false);
     rt.scripted_key_based(9202, &u, None, None, ElementState::Released, true);
     native_events::dispatch(&host).unwrap();
-    host.execute("assert(table.concat(log, ',') == 'ctrl+u+,u-', table.concat(log, ','))").unwrap();
+    host.execute("assert(table.concat(log, ',') == 'ctrl+9+,9-', table.concat(log, ','))").unwrap();
 }
 
 #[test]
 fn round7e_fix3_modifier_order_in_a_saved_name_does_not_matter() {
     reset();
-    testing::put(MOD_KEYS, b"mod.alpha.act=shift+ctrl+u\nmod.beta.act=ctrl+super+c\nmod.gamma.act=alt+super+enter\n");
+    testing::put(MOD_KEYS, b"mod.alpha.act=shift+ctrl+9\nmod.beta.act=ctrl+super+c\nmod.gamma.act=alt+super+enter\n");
     let alpha = bind("alpha", "");
     let _beta = bind("beta", "");
     let _gamma = bind("gamma", "");
-    assert_eq!(mod_key_of("alpha"), "ctrl+shift+u", "read in the order the client names a press");
+    assert_eq!(mod_key_of("alpha"), "ctrl+shift+9", "read in the order the client names a press");
     assert_eq!(mod_key_of("beta"), "", "ctrl+super+c is the client's however it is written");
     assert_eq!(mod_key_of("gamma"), "", "alt+super+enter too");
     let mut rt = runtime();
@@ -1407,7 +1407,7 @@ fn round7e_owner1_a_bare_mod_key_is_never_consumed_only_a_modifier_combination_i
     let u = Key::Character("9".into());
     assert!(!press_consumed(&mut rt, NONE, &u, Some("9"), &[&host]), "a bare key reaches the game as always");
     hits(&host, 1);
-    assert!(bindpage::set_key("alpha", "act", "ctrl+u"));
+    assert!(bindpage::set_key("alpha", "act", "ctrl+9"));
     assert!(press_consumed(&mut rt, CTRL, &u, Some("9"), &[&host]), "Ctrl+9 is the mod's alone");
     hits(&host, 2);
 }

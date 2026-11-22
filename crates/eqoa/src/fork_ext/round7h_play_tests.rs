@@ -34,7 +34,7 @@ fn rig() -> (Play, Host) {
         r#"
         results = {}
         eqoa.events.on("action.result", function(e) results[#results + 1] = e.data end)
-        eqoa.input.bind({ id = "go", label = "Go", default_key = "y" }, function()
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "9" }, function()
             last_req, last_err = next_fn()
         end)
         "#,
@@ -51,7 +51,7 @@ fn gesture(p: &mut Play, host: &Host, code: &str) {
     CORE.with(|c| {
         c.borrow_mut().emit(
             "input.key",
-            serde_json::json!({"key":"y","down":true,"repeat":false,"synthetic":false,"text":""}),
+            serde_json::json!({"key":"9","down":true,"repeat":false,"synthetic":false,"text":""}),
         )
     });
     native_events::dispatch(host).unwrap();
