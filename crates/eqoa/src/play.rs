@@ -6001,7 +6001,7 @@ impl Play {
                 crate::hudmenu::UtilityLayout::UpperLeft => [f[0] + side - utility[0], f[1] + up - utility[1]],
                 crate::hudmenu::UtilityLayout::Below => [f[0] - side - utility[0], f[1] - up - utility[1]],
             };
-            if let Some(k) = self.hud_menus.point_utility(utility_at) {
+            if let Some(k) = crate::hud::fork_hud::utility_point(&mut self.hud_menus, utility_at) {
                 self.note_hud_key(k, true);
                 self.hud_key(k);
                 self.note_hud_key(k, false);

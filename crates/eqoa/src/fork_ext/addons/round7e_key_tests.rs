@@ -1146,7 +1146,7 @@ fn round7e_fix3_modifier_order_in_a_saved_name_does_not_matter() {
     assert_eq!(mod_key_of("beta"), "", "ctrl+super+c is the client's however it is written");
     assert_eq!(mod_key_of("gamma"), "", "alt+super+enter too");
     let mut rt = runtime();
-    press_based(&mut rt, CTRL_SHIFT, &Key::Character("U".into()), Some("9"), &[&alpha]);
+    press_based(&mut rt, CTRL_SHIFT, &Key::Character("(".into()), Some("9"), &[&alpha]);
     hits(&alpha, 1);
 }
 
