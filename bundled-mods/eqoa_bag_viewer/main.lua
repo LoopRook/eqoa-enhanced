@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 local ui = eqoa.imgui
 local B = require("bags")
+local HP = require("helpers")
 
 -- Sizes are in HUD frame pixels (640x448), scaled as the HUD is.
 local W, PAD, SLOT, GAP, LINE, LOG_LINES = 318, 8, 36, 2, 12, 5
@@ -64,8 +65,10 @@ local function open()
             if d.button == "left" then
                 for _, h in ipairs(menu_hits) do
                     if inside(d.x, d.y, h) then
+                        local shown = B.menu
                         B.trigger_menu(h.row)
-                        B.menu, B.menu_rect = nil, nil
+                        -- a question ("sell it anyway?") is the menu's next page: it stays up for the answer
+                        if B.menu == shown then B.menu, B.menu_rect = nil, nil end
                         return
                     end
                 end
@@ -102,6 +105,7 @@ eqoa.input.bind({id = "open", label = "Bag viewer", default_key = ""}, function(
 end)
 -- The loot log is the one thing kept while the window is closed, from events only.
 B.load_junk()
+HP.load()
 eqoa.events.on("loot.changed", function(e)
     B.log_loot(e.data)
     B.note_loot_closed(e.data)
@@ -126,6 +130,19 @@ local function auto_listeners(on)
 end
 B.on_auto_mode = function(mode) auto_listeners(mode ~= "off") end
 auto_listeners(B.auto_mode ~= "off")
+-- The automatic helpers (Sell junk, Restock, Bank marked near a merchant or a banker; each off by default) look from the
+-- render event, every HP.AUTO_POLL_SECS, and only while one is on for some character.
+local helper_token
+local function helper_listeners()
+    if HP.any_auto() and not helper_token then
+        helper_token = eqoa.events.on("render", function() HP.auto_poll() end)
+    elseif not HP.any_auto() and helper_token then
+        eqoa.events.off(helper_token)
+        helper_token = nil
+    end
+end
+HP.on_auto_change = helper_listeners
+helper_listeners()
 -- a merchant or bank the player opened by hand is a real answer from where they stand: the mod learns the reach
 eqoa.events.on("merchant.changed", function(e)
     if e.data and e.data.cause == "open" and eqoa.merchant.get() ~= nil then B.learn_native_open("merchant") end
@@ -146,7 +163,7 @@ end)
 eqoa.events.on("world.leaving", function(e)
     if e.data and e.data.reason == "disconnect" then B.on_disconnect() end
 end)
-eqoa.events.on("state.reset", function() B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); B.char_dirty = true; B.dirty() end)
+eqoa.events.on("state.reset", function() B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); HP.reset(); B.char_dirty = true; B.dirty() end)
 -- the character is read once the world is up (and again after a new world or login): the Auto-loot choice is per character
 eqoa.events.on("player.changed", function(e)
     -- asked on a new world or login, when the update names another character, and once a second besides
@@ -159,6 +176,7 @@ eqoa.events.on("player.changed", function(e)
 end)
 eqoa.events.on("disabling", function()
     auto_listeners(false)
+    if helper_token then eqoa.events.off(helper_token); helper_token = nil end
     close()
     if eqoa.windows and eqoa.windows.release then eqoa.windows.release() end
 end)
@@ -195,7 +213,15 @@ function draw()
         or eqoa.loot.get() ~= nil
         or B.nearby_npc("merchant") ~= nil
         or (is_bank and not (eqoa.bank.get() and eqoa.bank.get().open) and B.nearby_npc("bank") ~= nil)
-    local H = (has_ctx_btn and (bar2_y + 18) or bar2_y) + PAD
+    -- Row 3: Restock / Bank marked (only when a mark exists and the merchant or banker is near or open); Row 4: the three
+    -- "do it when I get near" choices (always there: off by default)
+    local row3_y = has_ctx_btn and (bar2_y + 18) or bar2_y
+    local show_restock = next(HP.keep) ~= nil and (eqoa.merchant.get() ~= nil or B.nearby_npc("merchant") ~= nil)
+    local bank_open_now = eqoa.bank.get() and eqoa.bank.get().open
+    local show_bank = next(HP.bank) ~= nil and (bank_open_now or B.nearby_npc("bank") ~= nil)
+    local has_row3 = show_restock or show_bank
+    local row4_y = has_row3 and (row3_y + 18) or row3_y
+    local H = row4_y + 17 + PAD
     -- centred in the HUD frame, and on screen wherever the window is sized
     local x0 = math.max(0, math.min(dw - W * k, f.offset_x + (640 - W) / 2 * f.scale_x))
     local y0 = math.max(0, math.min(dh - H * k, f.offset_y + (448 - H) / 2 * f.scale_y))
@@ -425,6 +451,63 @@ function draw()
         end
     end
 
+    -- Row 3: the marked-item helpers
+    if has_row3 then
+        local bw = show_restock and show_bank and (W - 2 * PAD - 6) / 2 or (W - 2 * PAD)
+        local bx = PAD
+        local function row3_btn(lbl, col, bcol, run)
+            fill(bx, row3_y, bw, 16, c.raised)
+            frame(bx, row3_y, bw, 16, bcol)
+            text(bx + 4, row3_y + 2, lbl, col, bw - 8)
+            action_hits[#action_hits + 1] = {
+                label = lbl, x = x0 + bx * k, y = y0 + row3_y * k, w = bw * k, h = 16 * k, run = run,
+            }
+            bx = bx + bw + 6
+        end
+        if show_restock then
+            local lbl
+            local plan = eqoa.merchant.get() ~= nil and HP.restock_plan_cached() or nil
+            local n = plan and #plan.buys or HP.short_count()
+            local far = eqoa.merchant.get() == nil and B.too_far("merchant") or nil
+            if far then
+                lbl = "Restock: " .. far
+            elseif plan then
+                lbl = string.format("Restock (%d %s, %s tunar)", plan.total, plan.total == 1 and "item" or "items", B.tunar(plan.cost))
+            else
+                lbl = string.format("Restock (%d)", n)
+            end
+            local live = (plan and plan.total or n) > 0 and not far
+            row3_btn(lbl, live and c.text or c.muted, live and c.worn or c.border, HP.start_restock)
+        end
+        if show_bank then
+            local n = HP.bank_count()
+            local far = not bank_open_now and B.too_far("bank") or nil
+            local lbl = far and ("Bank marked: " .. far) or string.format("Bank marked (%d)", n)
+            local live = n > 0 and not far
+            row3_btn(lbl, live and c.text or c.muted, live and c.worn or c.border, HP.start_bank)
+        end
+    end
+
+    -- Row 4: do it automatically when I get near (each helper's own choice, per character, off by default)
+    do
+        local lead = "Do it when I get near:"
+        text(PAD, row4_y + 2, lead, c.muted)
+        local cx = PAD + tw(lead) / k + 6
+        for _, h in ipairs(HP.HELPERS) do
+            local on = HP.auto_on(h.key)
+            local cw = tw(h.label) / k + 12
+            fill(cx, row4_y, cw, 16, on and c.menu_hl or c.raised)
+            frame(cx, row4_y, cw, 16, on and c.worn or c.border)
+            text(cx + 6, row4_y + 2, h.label, on and c.text or c.muted)
+            local key, now_on = h.key, on
+            action_hits[#action_hits + 1] = {
+                label = "Auto " .. string.lower(h.label), x = x0 + cx * k, y = y0 + row4_y * k, w = cw * k, h = 16 * k,
+                run = function() HP.set_auto(key, not now_on) end,
+            }
+            cx = cx + cw + 3
+        end
+    end
+
     eqoa.input.claim_pointer({x = x0, y = y0, width = W * k, height = H * k})
 
     menu_hits = {}
@@ -446,7 +529,7 @@ function draw()
             if r.enabled and p and p.inside_window and inside(p.x, p.y, hr) then
                 fill(mx + 2, ry, mw - 4, rh, c.menu_hl)
             end
-            local label = r.enabled and r.label or (r.label .. " (" .. (r.reason or "disabled") .. ")")
+            local label = r.enabled and (r.text or r.label) or (r.label .. " (" .. (r.reason or "disabled") .. ")")
             text(mx + 6, ry + 2, label, r.enabled and c.text or c.muted, mw - 12)
             menu_hits[#menu_hits + 1] = hr
         end

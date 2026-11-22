@@ -532,6 +532,7 @@ function M.card(it)
     if (it.value or 0) > 0 then lines[#lines + 1] = {"Value " .. M.tunar(it.value) .. " tunar", "muted"} end
     local can = eqoa.items.can_use(it.ref)
     if can and not can.allowed then lines[#lines + 1] = {"You can't use this", "red"} end
+    if M.helpers and it.list == "inventory" then M.helpers.card_lines(it, lines) end
     M.hover = {key = it.ref, lines = lines}
     return lines
 end
@@ -675,20 +676,47 @@ function M.set_junk(it, flag)
     M.save_junk()
 end
 
+-- Why an item is not sold without a question: the game's own merchant window asks Yes or No in these cases (an item worn,
+-- quick-slotted, no-trade, or not a misc one). Returns the reasons as a list (worn items are never sold at all), nil when
+-- the item is an ordinary one.
+function M.sell_risk(it)
+    local why = {}
+    if it.quick_slot ~= nil then why[#why + 1] = "quick-slotted" end
+    if it.no_trade then why[#why + 1] = "no-trade" end
+    if not has_tab(it, "misc") then why[#why + 1] = "not an ordinary item" end
+    if #why == 0 then return nil end
+    return why
+end
+
+-- "quick-slotted and no-trade"
+function M.risk_text(why)
+    if #why <= 1 then return why[1] or "" end
+    return table.concat(why, ", ", 1, #why - 1) .. " and " .. why[#why]
+end
+
+-- The junk the one-click Sell junk sells: every stack marked as junk that is not worn and that the game would not ask
+-- about (see `sell_risk`). Returns the batch steps, their count, the quoted tunar and, last, the marked junk left alone
+-- ({item, reasons}) and the quote of each step (for the line said when the batch ends).
 function M.junk_sell_list()
     local inv = eqoa.inventory.get()
-    if not inv then return {}, 0, 0 end
+    if not inv then return {}, 0, 0, {}, {} end
     local has_merch = eqoa.merchant.get() ~= nil
-    local steps, total_tunar = {}, 0
+    local steps, total_tunar, skipped, quotes = {}, 0, {}, {}
     for _, it in ipairs(inv.items) do
         if not it.equipped and M.is_junk(it) then
-            local qty = it.quantity or 1
-            local q = has_merch and eqoa.merchant.price(it.ref, "sell", qty) or 0
-            steps[#steps + 1] = {kind = "sell", item = it.ref, count = qty}
-            total_tunar = total_tunar + (q or 0)
+            local risk = M.sell_risk(it)
+            if risk then
+                skipped[#skipped + 1] = {item = it, reasons = risk}
+            else
+                local qty = it.quantity or 1
+                local q = has_merch and eqoa.merchant.price(it.ref, "sell", qty) or 0
+                steps[#steps + 1] = {kind = "sell", item = it.ref, count = qty}
+                quotes[#quotes + 1] = q or 0
+                total_tunar = total_tunar + (q or 0)
+            end
         end
     end
-    return steps, #steps, total_tunar
+    return steps, #steps, total_tunar, skipped, quotes
 end
 
 function M.loot_non_junk_list()
@@ -776,10 +804,13 @@ function M.start_sell_junk()
         M.result = {text = "Sell junk: merchant is not open", ok = false}
         return false
     end
-    local steps, count = M.junk_sell_list()
+    local steps, count, _, skipped, quotes = M.junk_sell_list()
     if count == 0 then
         release_takeover("merchant")
         M.result = {text = "No junk items to sell", ok = false}
+        if #skipped > 0 and M.helpers then
+            M.helpers.say(M.helpers.skipped_line(skipped), false)
+        end
         return false
     end
     local bid, err = eqoa.actions.batch({steps = steps, require_window = "merchant"})
@@ -793,6 +824,7 @@ function M.start_sell_junk()
     M.batch_kind = "sell"
     M.batch_verb = "Sold"
     M.batch_total = count
+    M.batch_quotes, M.batch_skipped = quotes, skipped
     M.result = {text = string.format("Selling junk 0 of %d...", count), ok = nil}
     return true
 end
@@ -896,7 +928,7 @@ end
 
 function M.on_batch_progress(d)
     if not d or not M.batch_id or d.batch_id ~= M.batch_id then return end
-    local verb = M.batch_kind == "loot" and "Looting" or "Selling junk"
+    local verb = ({loot = "Looting", restock = "Restocking", bank = "Banking"})[M.batch_kind] or "Selling junk"
     M.result = {
         text = string.format("%s %d of %d...", verb, d.completed or 0, d.total or M.batch_total or 0),
         ok = nil,
@@ -924,14 +956,20 @@ function M.on_batch_result(d)
         M.corpse_tab_kept = true
     end
     M.batch_id = nil
-    release_takeover(kind == "loot" and "loot" or "merchant")
+    -- a helper's batch (Sell junk, Restock, Bank marked) tells the player what it did
+    if M.on_helper_batch_done and (kind == "sell" or kind == "restock" or kind == "bank") then
+        M.on_helper_batch_done(kind, d)
+    end
+    local session = kind == "loot" and "loot" or (kind == "bank" and "bank" or "merchant")
+    if not (session == "bank" and M.tab == 6) then release_takeover(session) end
 end
 
 -- Build the click menu for one stack (never includes Destroy; refused entries carry the game's reason).
 function M.build_menu(it, fx, fy)
     local rows = {}
-    local function add(label, enabled, reason, run, local_only, far_kind)
-        rows[#rows + 1] = {label = label, enabled = enabled, reason = reason, run = run, local_only = local_only, far_kind = far_kind}
+    local function add(label, enabled, reason, run, local_only, far_kind, confirm)
+        rows[#rows + 1] = {label = label, enabled = enabled, reason = reason, run = run, local_only = local_only,
+            far_kind = far_kind, confirm = confirm}
     end
     local loot = eqoa.loot.get()
     local bank = eqoa.bank.get()
@@ -1022,13 +1060,16 @@ function M.build_menu(it, fx, fy)
                 M.run_single(label, function() return eqoa.actions.sell(it.ref, qty) end)
             end)
         end
+        -- an item the game's own merchant window would ask about is asked about here too (`ask_to_sell`)
+        local risk = M.sell_risk(it)
+        local risk_why = risk and M.risk_text(risk) or nil
         local p1 = merch_open and eqoa.merchant.price(it.ref, "sell", 1) or nil
         add("Sell 1" .. (p1 and (" (" .. M.tunar(p1) .. "t)") or ""), sell_deny == nil, sell_deny,
-            function() return sell_or_talk("Sell 1", 1) end, nil, sell_far_kind)
+            function() return sell_or_talk("Sell 1", 1) end, nil, sell_far_kind, risk_why)
         if (it.quantity or 1) > 1 then
             local ps = merch_open and eqoa.merchant.price(it.ref, "sell", it.quantity) or nil
             add("Sell stack (" .. it.quantity .. (ps and (", " .. M.tunar(ps) .. "t)") or ")"), sell_deny == nil,
-                sell_deny, function() return sell_or_talk("Sell stack", it.quantity) end, nil, sell_far_kind)
+                sell_deny, function() return sell_or_talk("Sell stack", it.quantity) end, nil, sell_far_kind, risk_why)
         end
 
         local near_bank = M.nearby_npc("bank") ~= nil
@@ -1062,6 +1103,9 @@ function M.build_menu(it, fx, fy)
             it.equipped and "cannot mark an equipped item as junk" or nil,
             function() M.set_junk(it, true) end, true)
     end
+    -- the helpers' marks ("keep N" for Restock, "bank this" for Bank marked) are made on the pack's items
+    local H = M.helpers
+    if H and it.list == "inventory" then H.menu_rows(it, add) end
     M.menu = {title = it.name, ref = it.ref, rows = rows, fx = fx or 8, fy = fy or 46}
     return M.menu
 end
@@ -1083,8 +1127,25 @@ function M.run_single(label, fn)
     return req, err
 end
 
+-- Selling an item the game's merchant window would ask about: the menu asks first (Yes sells it, No keeps it). The
+-- question names the item and why; only the player's click on Yes goes on.
+function M.ask_to_sell(row)
+    local menu = M.menu
+    local yes = {label = row.label, text = "Yes, sell it: it is " .. row.confirm, enabled = true, run = row.run,
+        confirmed = true}
+    local no = {label = "No", text = "No, keep it", enabled = true, local_only = true, run = function() end}
+    M.menu = {title = "Sell " .. (menu and menu.title or "this item") .. "?", ref = menu and menu.ref,
+        rows = {yes, no}, fx = menu and menu.fx or 8, fy = menu and menu.fy or 46, asking = true}
+end
+
 function M.trigger_menu(row)
     if not row then return end
+    if row.confirm and not row.confirmed and row.run and (row.enabled or row.far_kind) then
+        -- the greyed-for-distance gate speaks first (its second click is the player's "try anyway")
+        if not row.enabled and row.far_kind and M.far_gate(row.far_kind, row.label) then return end
+        M.ask_to_sell(row)
+        return
+    end
     if row.local_only and row.enabled and row.run then
         row.run()
         return
