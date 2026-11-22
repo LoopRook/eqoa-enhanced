@@ -129,6 +129,10 @@ BUNDLED_MOD_FILES = (
 # The player's program: "EQOA Enhanced.exe" for Stable, "EQOA Enhanced -
 # Nightly.exe" for Nightly. The updater replaces whichever file is running.
 EXE_NAMES = {"enhanced": "EQOA Enhanced.exe", "enhanced-dev": "EQOA Enhanced - Nightly.exe"}
+# Start-with-the-performance-log launcher: tracked here, copied into the ZIP unless
+# build_release(perf_launcher=False) / --no-perf-launcher. Verification accepts both.
+RELEASE_FILES = Path(__file__).resolve().parent / "release-files"
+PERF_LAUNCHER = "Start EQOA (performance log).bat"
 SHARED_ZIP_MEMBERS = frozenset({
     "map-entities.json", "LICENSE", "NOTICE", "FrontiersForge-MIT.txt",
     "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt", "README.txt",
@@ -149,8 +153,9 @@ def exe_name(channel="enhanced"):
     return EXE_NAMES[channel]
 
 
-def zip_members(channel="enhanced"):
-    return SHARED_ZIP_MEMBERS | {exe_name(channel)}
+def zip_members(channel="enhanced", perf_launcher=True):
+    members = SHARED_ZIP_MEMBERS | {exe_name(channel)}
+    return members | {PERF_LAUNCHER} if perf_launcher else members
 
 
 EXPECTED_ZIP_MEMBERS = zip_members()
@@ -312,7 +317,7 @@ def validate_executable(data, commit, base=DOWNLOAD_BASE):
 
 
 def build_release(*, root, executable, output, catalog=None, commit=None, version=None,
-                  channel="enhanced"):
+                  channel="enhanced", perf_launcher=True):
     root = Path(root).resolve()
     executable = Path(executable).resolve()
     output = Path(output).resolve()
@@ -364,6 +369,8 @@ def build_release(*, root, executable, output, catalog=None, commit=None, versio
     payload["README.txt"] = (payload["README.txt"].replace(b"{version}", label.encode("ascii"))
                              .replace(b"{exe}", program.encode("ascii")))
     payload["mods/README.txt"] = mods_readme.read_bytes()
+    if perf_launcher:
+        payload[PERF_LAUNCHER] = (RELEASE_FILES / PERF_LAUNCHER).read_bytes()
     for rel_path, expected_hash in expected_mod_hashes.items():
         file_path = bundled_dir / rel_path
         if not file_path.is_file():
@@ -484,7 +491,8 @@ def verify_release(output, channel="enhanced"):
     if update != expected_update:
         raise ValueError("Update manifest is not in canonical format")
     with zipfile.ZipFile(output / player_zip) as archive:
-        members = zip_members(channel)
+        # The performance launcher is optional, but when present it must be the tracked file.
+        members = zip_members(channel, PERF_LAUNCHER in archive.namelist())
         if len(archive.infolist()) != len(members) or set(archive.namelist()) != members:
             raise ValueError("Player ZIP member allowlist mismatch")
         if any(info.is_dir() or (info.external_attr >> 16) & 0o170000 == 0o120000 for info in archive.infolist()):
@@ -502,6 +510,8 @@ def verify_release(output, channel="enhanced"):
         raise ValueError("Release manifest provenance or version mismatch")
     if manifest.get("catalog") != {"revision": CATALOG_REVISION, "url": CATALOG_URL, "sha256": CATALOG_SHA256}:
         raise ValueError("Release manifest catalog provenance mismatch")
+    if PERF_LAUNCHER in payload and payload[PERF_LAUNCHER] != (RELEASE_FILES / PERF_LAUNCHER).read_bytes():
+        raise ValueError("Player ZIP performance launcher does not match the tracked file")
     file_hashes = {name: sha256(data) for name, data in payload.items() if name != "release-manifest.json"}
     if manifest.get("files") != file_hashes:
         raise ValueError("Release manifest file hashes mismatch")
@@ -522,6 +532,8 @@ def main():
     parser.add_argument("--version", help="optional version assertion; must match VERSION")
     parser.add_argument("--channel", choices=sorted(DOWNLOAD_BASES), default="enhanced",
                         help="updater channel compiled into the executable (default: enhanced)")
+    parser.add_argument("--no-perf-launcher", dest="perf_launcher", action="store_false",
+                        help=f"leave '{PERF_LAUNCHER}' out of the player ZIP (included by default)")
     args = parser.parse_args()
     try:
         archive = build_release(**vars(args))
