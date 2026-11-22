@@ -291,14 +291,13 @@ fn a1_a_held_corpse_is_a_session_and_pass_opens_the_games_own_window() {
     assert!(window_takeover::activate_hidden_for_test(vm, TakeoverKind::Loot, 7));
     p.npcw.corpse = Some(net::dump::ItemList { p04: 0, items: vec![item(1, "Bone", 5, 1, -1, -1)] });
     p.mode = 0;
-    p.npcw.loot_open = false;
     step(&mut p, &host);
     host.execute("held = assert(eqoa.windows.session('loot')); assert(held.origin == 'server')").unwrap();
     assert_eq!(p.mode, 0, "hidden: the game's window is not up");
     host.execute("assert(eqoa.windows.pass(held.ref))").unwrap();
     step(&mut p, &host);
     assert_eq!(p.mode, 1, "the game's own corpse window opens");
-    assert!(p.npcw.loot_open && p.npcw.corpse.is_some(), "with the list the server sent");
+    assert!(p.npcw.corpse.is_some(), "with the list the server sent");
     assert!(!window_takeover::is_hidden_active(TakeoverKind::Loot));
     assert!(window_takeover::is_taken(TakeoverKind::Loot), "the claim stays for the next opening");
     host.execute("assert(eqoa.windows.session('loot') == nil and ev[#ev] == 'closed:loot:passed', ev[#ev])").unwrap();
@@ -328,5 +327,4 @@ fn a1_pass_waits_for_plain_play_and_is_refused_over_a_game_window() {
     host.execute("assert(eqoa.windows.pass(held.ref))").unwrap();
     step(&mut p, &host);
     assert_eq!(p.mode, 11);
-    assert!(p.bank.open);
 }

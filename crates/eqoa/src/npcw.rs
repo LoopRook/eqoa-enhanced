@@ -9,6 +9,7 @@ use crate::loot::{Loot, LootOut};
 use crate::merchant::{Merchant, MerchantOut, Shop};
 use crate::trade::{Trade, TradeMsg, TradeOut, TradeState};
 use net::dump::ItemList;
+#[path = "fork_ext/a1_pass_npcw.rs"] pub(in crate::play) mod fork_pass;
 
 /// The three windows and what they read.
 #[derive(Default)]

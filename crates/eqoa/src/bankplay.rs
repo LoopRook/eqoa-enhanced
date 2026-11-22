@@ -7,6 +7,7 @@
 
 use super::Play;
 use crate::bank::{Bank, BankOut, View};
+#[path = "fork_ext/a1_pass_bank.rs"] pub(in crate::play) mod fork_pass;
 
 /// `VIBankControl`'s waiting state and the window.
 pub struct BankPlay {

@@ -160,19 +160,10 @@ pub(crate) fn tick(play: &mut Play) {
             continue;
         }
         match kind {
-            TakeoverKind::Loot => {
-                play.npcw.loot_open = true;
-                play.mode = 1;
-            }
-            TakeoverKind::Merchant => {
-                play.npcw.merchant_open = true;
-                play.mode = 10;
-            }
-            TakeoverKind::Bank => {
-                play.bank.open = true;
-                play.bank.state = 0;
-                play.mode = 11;
-            }
+            // the flags that open the game's window are private to `npcw` and `bankplay`: their children set them
+            TakeoverKind::Loot => crate::play::npcw::fork_pass::show_loot(play),
+            TakeoverKind::Merchant => crate::play::npcw::fork_pass::show_merchant(play),
+            TakeoverKind::Bank => crate::play::bankplay::fork_pass::show_bank(play),
         }
         window_sessions::finish_pass(vm, kind);
     }
