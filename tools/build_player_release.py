@@ -69,6 +69,7 @@ BUNDLED_MOD_FILES = (
     "eqoa_bag_viewer/mod.json",
     "eqoa_bag_viewer/modules/bags.lua",
     "eqoa_bag_viewer/README.md",
+    "eqoa_bag_viewer/modules/helpers.lua",
     "eqoa_creature_journal/main.lua",
     "eqoa_creature_journal/mod.json",
     "eqoa_creature_journal/README.md",
