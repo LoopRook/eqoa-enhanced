@@ -457,3 +457,22 @@ fn a1_the_new_bindings_leave_the_lua_ceiling_far_away() {
     eprintln!("A1 base host Lua memory: {used} bytes of {}", 8 * 1024 * 1024);
     assert!(used < 6 * 1024 * 1024, "the base host already uses {used} bytes");
 }
+
+#[test]
+fn a1_fix1_a_stopped_runtime_gives_the_controller_back_and_ends_sessions_and_the_question() {
+    use crate::input::{Report, bit};
+    fresh();
+    let h = host(SESSION_CAPS);
+    h.execute("s = assert(eqoa.windows.open_session('inventory')); assert(eqoa.windows.focus(s.ref))").unwrap();
+    let vm = native_events::bus(&h.lua).borrow().vm;
+    confirm::open(vm, "x", ws::get(vm, "inventory").map(|s| s.id), confirm::Act::Destroy { inv_index: 1, name: "Rock".into(), count: 1 }, "Destroy Rock?".into(), 0).unwrap();
+    let mut r = Report { buttons: bit::CROSS, ..Default::default() };
+    ws::apply_pad(&mut r);
+    assert_eq!(r.buttons, 0, "control: the mod holds the controller");
+    // `Runtime` calls this where it sets its error (the frame failed, no mod window is drawn now)
+    ws::mods_stopped("ended");
+    assert!(!confirm::is_open() && ws::sessions_for_test().is_empty() && !ws::is_active());
+    let mut r = Report { buttons: bit::CROSS | bit::UP, ..Default::default() };
+    ws::apply_pad(&mut r);
+    assert_eq!(r.buttons, bit::CROSS | bit::UP, "the game's buttons are the game's again");
+}
