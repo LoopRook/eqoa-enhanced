@@ -48,7 +48,7 @@ fn dynamic_hud_tables() -> (&'static [Category], &'static [(i32, &'static str)])
     let is_default = active.len() == 6
         && active
             .iter()
-            .zip(&ITEMS[4..])
+            .zip(&ITEMS[ITEMS.len() - HUD_ROWS..])
             .all(|((id, l), (def_id, def_l))| id == def_id && l == def_l);
     if is_default {
         return (&PAGES, ITEMS);
@@ -64,7 +64,7 @@ fn dynamic_hud_tables() -> (&'static [Category], &'static [(i32, &'static str)])
         let page: Vec<i32> = active.iter().map(|(id, _)| *id).chain(CATEGORY.items[HUD_ROWS..].iter().copied()).collect();
         pages_vec[hud_idx].items = Box::leak(page.into_boxed_slice());
         let pages_slice: &'static [Category] = Box::leak(pages_vec.into_boxed_slice());
-        let mut items_vec = ITEMS[..4].to_vec();
+        let mut items_vec = ITEMS[..ITEMS.len() - HUD_ROWS].to_vec();
         for (id, label) in &active {
             let leaked_label: &'static str = Box::leak(label.clone().into_boxed_str());
             items_vec.push((*id, leaked_label));
