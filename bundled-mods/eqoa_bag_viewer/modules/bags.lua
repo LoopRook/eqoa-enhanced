@@ -817,7 +817,8 @@ function M.start_loot_all()
         release_takeover("loot")
         local msg = err and (err.message or err.code) or "refused"
         M.result = {text = "Take all: " .. msg, ok = false}
-        M.auto_done_line("Take all refused: " .. msg, M.not_final(err) and msg or nil)
+        local passing = M.not_final(err)
+        M.auto_done_line("Take all refused: " .. msg, passing and msg or nil, passing and M.bags_block_rest(false))
         M.last_req = nil
         return false
     else
@@ -858,7 +859,8 @@ function M.start_loot_non_junk()
     if not bid then
         local msg = err and (err.message or err.code) or "refused"
         M.result = {text = "Take all but junk: " .. msg, ok = false}
-        M.auto_done_line("Take all but junk refused: " .. msg, M.not_final(err) and msg or nil)
+        local passing = M.not_final(err)
+        M.auto_done_line("Take all but junk refused: " .. msg, passing and msg or nil, passing and M.bags_block_rest(true))
         return false
     end
     M.batch_id = bid
@@ -911,7 +913,7 @@ function M.on_batch_result(d)
         if kind == "loot" then
             M.auto_done_line(string.format("stopped after %d of %d items: %s", done, total, reason),
                 d.code ~= "not_found" and d.code ~= "permission_denied" and tostring(reason) or nil,
-                tostring(reason) == "inventory is full")
+                tostring(reason) == "inventory is full" or (d.code ~= "permission_denied" and M.bags_block_rest(true)))
         end
     end
     if kind == "loot" and M.tab == 7 then
@@ -1408,6 +1410,17 @@ local function corpse_items_left()
     return l and #(l.items or {}) or 0
 end
 
+-- The pack has no free slot and the corpse still lists items: whatever the take said, nothing more fits. `non_junk`:
+-- only the items not marked as junk count (a batch leaves the junk on purpose).
+function M.bags_block_rest(non_junk)
+    if bag_free() ~= 0 then return false end
+    local l = eqoa.loot and eqoa.loot.get and eqoa.loot.get()
+    for _, it in ipairs(l and l.items or {}) do
+        if not (non_junk and M.is_junk(it)) then return true end
+    end
+    return false
+end
+
 -- Looting stays hidden: the game's own loot window must never show during an Auto-loot. It never has in the owner's
 -- play; this is a guard, not a fix: if the game's window (native mode 1) is up while Auto-loot is opening or taking
 -- from a corpse, one line says so, once per corpse.
@@ -1760,8 +1773,10 @@ function M.on_action_result(d)
             why = M.no_answer_text(d.kind)
         end
         M.result = {text = label .. ": " .. why, ok = false}
+        -- the pack was already full: the server could move nothing ("did not change corpse state") or refused
+        local full = M.auto_take ~= nil and d.code ~= "permission_denied" and M.bags_block_rest(false)
         M.auto_done_line("the take did not finish: " .. tostring(why),
-            d.code ~= "permission_denied" and tostring(why) or nil)
+            d.code ~= "permission_denied" and tostring(why) or nil, full)
         M.last_req = nil
         if M.held_for_req then
             local k = M.held_for_req
