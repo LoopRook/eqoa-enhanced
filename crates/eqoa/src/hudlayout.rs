@@ -430,6 +430,7 @@ pub fn begin(ui: &mut Ui, piece: Piece) -> Mark {
 /// frame noted of it already) and `ui`'s shift as it was.
 pub fn end(ui: &mut Ui, m: Mark) {
     ui.shift = m.before;
+    if crate::fork_ext::piece_hidden(ui, m.piece, m.from) { return; }
     if let Some(r) = covered(&ui.quads[m.from.min(ui.quads.len())..]) {
         note(m.piece, r, m.shift);
     }
@@ -443,6 +444,7 @@ pub fn end(ui: &mut Ui, m: Mark) {
 /// edge - Shifts when you select a spell that would show its name off the
 /// screen"). End the mark it gives with `end`.
 pub fn seal(ui: &mut Ui, m: Mark) -> Mark {
+    if crate::fork_ext::piece_hidden(ui, m.piece, m.from) { return Mark { from: m.from, ..m }; }
     if let Some(r) = covered(&ui.quads[m.from.min(ui.quads.len())..]) {
         note(m.piece, r, m.shift);
     }

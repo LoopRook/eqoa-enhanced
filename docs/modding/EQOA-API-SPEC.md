@@ -37,7 +37,7 @@ This is the reference for the native Lua mod API of EQOA Enhanced, **as built**:
 - a field the client does not know is nil. Absent is never reported as 0, -1 or an empty string: zero health is a real value, unknown health is nil;
 - a function that changes something returns `true, nil` or `nil, Error`;
 - nothing in `eqoa` raises a Lua error for an ordinary failure. (Passing a wrong type where a table or function is required can raise in a few functions; ImGui misuse raises as ImGui does.)
-- these take no arguments, and refuse one with `invalid_argument`: `eqoa.client.get`, `eqoa.client.display`, `eqoa.player.get`, `eqoa.player.stats`, `eqoa.target.get`, `eqoa.group.get`, `eqoa.entities.list`, `eqoa.abilities.list`, `eqoa.hotbar.list`, `eqoa.effects.list`, `eqoa.chat.get_channel`, `eqoa.combat.get_counters`, `eqoa.input.get`, `eqoa.fonts.default`, `eqoa.settings.load`, `eqoa.actions.assist`, `eqoa.actions.target_target`, `eqoa.actions.toggle_stats_box`. Other functions ignore arguments they do not take.
+- these take no arguments, and refuse one with `invalid_argument`: `eqoa.client.get`, `eqoa.client.display`, `eqoa.player.get`, `eqoa.player.stats`, `eqoa.target.get`, `eqoa.group.get`, `eqoa.raid.get`, `eqoa.raid.ready_check`, `eqoa.raid.loot_rolls`, `eqoa.entities.list`, `eqoa.abilities.list`, `eqoa.hotbar.list`, `eqoa.effects.list`, `eqoa.chat.get_channel`, `eqoa.combat.get_counters`, `eqoa.input.get`, `eqoa.fonts.default`, `eqoa.settings.load`, `eqoa.actions.assist`, `eqoa.actions.target_target`, `eqoa.actions.toggle_stats_box`. Other functions ignore arguments they do not take.
 
 **Error codes**
 
@@ -367,11 +367,11 @@ A mod can hide pieces of the game's HUD, ask where they are, and draw in the gam
 | `eqoa.hud.hide(element:string)` | A `Token` for this mod's claim to hide that piece. Only in the world (`not_in_world`); `invalid_argument` for an unknown element. |
 | `eqoa.hud.show(token:Token)` | `true` if the claim was released, `false` if it was already gone; `stale_handle` for a value that is not this mod's token. It never releases another mod's claim. |
 | `eqoa.hud.hidden_by(element:string)` | The ids of the mods hiding any part of that element, sorted. |
-| `eqoa.hud.visible(element:string?)` | Whether a piece is being drawn now, counting the player's hide-UI key and every mod's claims. `element` is one of the names below, or `"hud"` (the default: the HUD as a whole), `"all"` (true while none of the pieces `all` covers is hidden) or `"stats_box"` (also `"plain_play"`: the HUD's right-hand side is up, as in plain play). `"mana_bars"` always answers true. `false` outside the world and for a name it does not know. |
+| `eqoa.hud.visible(element:string?)` | Whether a piece is being drawn now, counting the player's hide-UI key and every mod's claims. `element` is one of the names below, or `"hud"` (the default: the HUD as a whole), `"all"` (true while none of the original 14 HUD leaves `all` covers is hidden), `"all_pieces"` (true while none of the HUD pieces except `minimap` is hidden) or `"stats_box"` (also `"plain_play"`: the HUD's right-hand side is up, as in plain play). `"mana_bars"` always answers true. `false` outside the world and for a name it does not know. |
 | `eqoa.hud.frame(size?)` | `Frame`: how the game's 640 x 448 HUD frame maps onto the window. `size = {width, height}` asks about another window size (a field left out counts as 640 or 448); with no argument, the window as it is. |
 | `eqoa.hud.layout(size?)` | `Layout`: where the game's HUD pieces are now, including the player's Move HUD changes. |
 
-Elements for `hide`, `show` and `hidden_by`: `health`, `power`, `experience_main`, `experience_secondary`, `compass`, `target`, `group_panel`, `group_markers`, `pet`, `effects`, `hotbar`, `chat`, `minimap`, and `all` (every piece except `minimap`, which is hidden only by name). Hiding the minimap also turns off its clicks.
+Elements for `hide`, `show` and `hidden_by`: `player` (the whole player frame: health, power, both experience bars and compass together), `health`, `power`, `experience_main`, `experience_secondary`, `compass`, `target`, `group_panel`, `group_markers`, `raid_list`, `pet`, `effects`, `hotbar`, `spell_bars`, `utility_bars`, `chat`, `quest_tracker`, `dps_meter`, `breath`, `minimap`, `all` (the original set: `health`, `power`, `experience_main`, `experience_secondary`, `compass`, `target`, `group_panel`, `group_markers`, `pet`, `effects`, `hotbar`, and `chat`), and `all_pieces` (every HUD piece except `minimap`, which is hidden only by name — adding `raid_list`, `quest_tracker`, `dps_meter`, `breath`, `spell_bars`, and `utility_bars` to `all`). `spell_bars` hides the ability/spell bars and `utility_bars` hides the item quick slots and weapon sets in both the stacked bar layout and the classic carousel layout (drawing and clicks). Hiding a HUD piece suppresses its drawn output, clears its Move HUD bounds (except `minimap`, which keeps Move HUD dragging while hidden), removes its click areas, and stops mouse-wheel capture (`raid_list`, `dps_meter`); clicking or scrolling where a hidden piece sat does nothing. The local report button is never hidden.
 
 A piece stays hidden while at least one enabled mod holds a claim on it. Claims end when the mod releases them, is disabled or fails, and when the world is left; a token from before is then answered with `false`. Hiding never changes the player's saved HUD options and never hides the game's dialogs, the full map or Mods & Addons.
 
@@ -557,7 +557,7 @@ Reading items needs no capability. Buying, selling, looting and moving items are
 
 All four return `nil, Error{code="not_in_world"}` outside the world and `invalid_argument` if given an argument. They also answer during a hidden session (§7 "Taking over a window"): what matters is the session with the server, not whether the game's window is drawn.
 
-`Container = {kind, revision, open, items, capacity, used, remaining, full, money, view, merchant, source}`
+`Container = {kind, revision, open, items, capacity, used, remaining, full, money, view, merchant, source, master_loot}`
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -572,6 +572,7 @@ All four return `nil, Error{code="not_in_world"}` outside the world and `invalid
 | `view` | `ContainerView?` | What the game's own window shows; see below. nil for bank and loot. |
 | `merchant` | `MerchantState?` | Merchant only. |
 | `source` | `LootSource?` | Loot only: `{entity_id:uint, name:string}`, the corpse the client asked to loot. It is given only when it cannot be wrong, so a missing `source` is normal (for example after two loot requests overlapped). |
+| `master_loot` | `MasterLoot?` | Loot only, while the corpse is under Master Looter rules: `MasterLoot = {seconds:uint, members:MasterLootMember[]}` with `MasterLootMember = {id:uint, name:string}` listing the eligible recipients. |
 
 `ContainerView = {tab, tabs, rows, selected, selected_row}`. For the pack it exists only while the start menu's item page is up: `tabs` is four `Tab = {index:uint, key:string, label:string?}` rows with keys `"usable"`, `"equipment"`, `"charged"`, `"misc"` (index 1 to 4), `tab` the index of the one showing, `rows` the `ItemRef`s under that tab in the page's order, `selected` the lit stack and `selected_row` its 1-based row (both nil when no stack is lit). For a merchant it always exists: `tabs` is empty, `tab` nil, and `rows` are the wares while buying, the pack's stacks while selling, and empty in the merchant's menu.
 
@@ -721,40 +722,60 @@ The journal holds titles only: there are no objective or progress fields in `Que
 
 Operating a window (rows, dialogs, text boxes) is done with actions (§8).
 
-### Taking over a window
+### Raid, ready checks and loot rolls
 
-A mod can keep the game's corpse, merchant or bank window from appearing while it shows the same thing its own way, or while it works unseen (selling junk, taking loot). The session with the server is real and unchanged; only the game's window is hidden. `eqoa.loot.get`, `eqoa.merchant.get`, `eqoa.bank.get` and the item actions work on a hidden session; the window actions do not.
+`eqoa.raid` reads the raid roster, marks, loot rule, and open ready-check or loot-roll strips. Reading needs no capability; answering strips and assigning master loot are actions (§8).
 
 | Function | Returns |
 |---|---|
-| `eqoa.windows.takeover(kind:string, {scope="own"\|"all"}?)` | `true` when the mod holds the claim. `kind` is `"loot"`, `"merchant"` or `"bank"`. Calling it again while holding the claim keeps it and renews a running hidden session's idle time. Calling it again with the other scope changes the claim's scope for sessions that start later; a hidden session already running keeps the scope it started with. |
+| `eqoa.raid.get()` | `RaidState`: raid membership, marks, loot rule, roster and any open strips. |
+| `eqoa.raid.ready_check()` | `ReadyCheckSession?` for the open ready check, or `nil, nil` when none is up. |
+| `eqoa.raid.loot_rolls()` | `LootRollSession?` for open loot rolls, or `nil, nil` when none are up. |
+
+`RaidState = {in_raid:bool, leader_id:uint?, helper_id:uint?, assist_id:uint?, loot_rule:string, in_combat:bool, leads:bool, helps:bool, members:RaidMember[], ready_check:ReadyCheckSession?, loot_rolls:LootRollSession?}` where `loot_rule` is `"free_for_all"`, `"need_before_greed"` or `"master_looter"`.
+
+`RaidMember = {id:uint, name:string, hp_fraction:number, power_fraction:number, group:uint, merc:bool, leader:bool, helper:bool, assist:bool}`.
+
+`ReadyCheckSession = {kind:"raid_ready", origin:"server", revision:uint, data:ReadyCheckData}` with `ReadyCheckData = {id:uint, asker:string, seconds_remaining:number, duration:number, deadline_ms:int, choices:string[]}`.
+
+`LootRollSession = {kind:"raid_roll", origin:"server", revision:uint, data:LootRollData}` with `LootRollData = {rolls:LootRollItem[]}` and `LootRollItem = {id:uint, item_name:string, item_id:Id, icon:uint?, may_need:bool, choices:string[], seconds_remaining:number, duration:number, deadline_ms:int}`.
+
+### Taking over a window
+
+A mod can keep the game's corpse, merchant or bank window from appearing while it shows the same thing its own way, or while it works unseen (selling junk, taking loot), or hide the raid ready-check (`raid_ready`) and loot-roll (`raid_roll`) strips while it draws and answers them itself. The session with the server is real and unchanged; only the game's window or strip is hidden. `eqoa.loot.get`, `eqoa.merchant.get`, `eqoa.bank.get`, `eqoa.raid.ready_check`, `eqoa.raid.loot_rolls`, and the item/raid actions work while hidden; the window actions do not.
+
+| Function | Returns |
+|---|---|
+| `eqoa.windows.takeover(kind:string, {scope="own"\|"all"}?)` | `true` when the mod holds the claim. `kind` is `"loot"`, `"merchant"`, `"bank"`, `"raid_ready"` or `"raid_roll"`. `"raid_ready"` and `"raid_roll"` accept only `scope = "all"` (`invalid_argument` for `"own"`). Calling it again while holding the claim keeps it and renews a running hidden session's idle time. Calling it again with the other scope changes the claim's scope for sessions that start later; a hidden session already running keeps the scope it started with. |
 | `eqoa.windows.release(kind:string?)` | `true` if the mod held it. With no argument, releases every kind the mod holds. |
-| `eqoa.windows.taken(kind:string?)` | Whether any mod holds a claim on `kind`. With no argument: `{loot:bool, merchant:bool, bank:bool, holders:table}`, where `holders` maps each held kind to the holding mod's id. |
+| `eqoa.windows.taken(kind:string?)` | Whether any mod holds a claim on `kind`. With no argument: `{loot:bool, merchant:bool, bank:bool, raid_ready:bool, raid_roll:bool, holders:table}`, where `holders` maps each held kind to the holding mod's id. |
+
+While a mod holds `"raid_ready"` or `"raid_roll"`, that strip is not drawn and takes no native keys or clicks, while its expiration timer keeps running. If the holder releases the claim, is disabled or fails, or the player turns on **Use the game's windows**, the native strip draws and responds again at once.
 
 **Scopes.**
 
 - `"own"` (the default) hides only the sessions the mod itself starts with `eqoa.actions.open_loot` or `eqoa.actions.talk` (or a batch). A corpse, merchant or banker the player clicks still opens the game's window. This is the scope for helpers.
-- `"all"` hides every session of that kind, also the ones the player starts. It is for a mod that draws a complete replacement window: the mod must draw it and give the player a way to close it (`release`).
+- `"all"` hides every session or strip of that kind, also the ones the player starts. It is for a mod that draws a complete replacement window or strip: the mod must draw it and give the player a way to close or answer it (`release`).
 
 **What `takeover` checks, in this order.** The first failure is the answer:
 
 | Check | Error code |
 |---|---|
 | The mod declares `eqoa.windows.takeover` | `not_declared` (no `capabilities` list) or `permission_denied` (not in the list) |
-| `kind` names one of the game's windows (a `Window.kind` from the table above, or an overlay) and `scope` is `"own"` or `"all"` | `invalid_argument` |
-| Scope `"own"` is not asked for a window that exists only in the client (`inventory`, `spellbook`, `quest_log`, `trainer`, `mastery`, `recipe_book`, `experiment`, `start_menu`, `map`): there is no session to start, so such a window can only be replaced whole | `invalid_argument` |
-| This build can replace that window: `loot`, `merchant` or `bank` | `unsupported` for every other window |
+| `kind` names one of the game's windows (a `Window.kind` from the table above, an overlay, or `"raid_ready"` / `"raid_roll"`) and `scope` is `"own"` or `"all"` | `invalid_argument` |
+| Scope `"own"` is not asked for a window that exists only in the client (`inventory`, `spellbook`, `quest_log`, `trainer`, `mastery`, `recipe_book`, `experiment`, `start_menu`, `map`) or a server-pushed strip (`raid_ready`, `raid_roll`): there is no session to start, so it can only be replaced whole | `invalid_argument` |
+| This build can replace that window or strip: `loot`, `merchant`, `bank`, `raid_ready` or `raid_roll` | `unsupported` for every other window |
 | For scope `"all"`: the manifest's `replaces` list names that window | `not_declared` |
 | For scope `"all"`: the player's **Use the game's windows** switch is off | `unavailable` |
 | No other mod holds that kind | `busy` (with a diagnostic naming the holder) |
 
 So `not_declared` has two meanings for takeover: no `capabilities` list at all, or no matching `replaces` entry for a full replacement. `release` and `taken` need no capability and answer `invalid_argument` or `unsupported` for a kind the same way.
 
-**Declaring it.** A mod that uses scope `"all"` lists the windows in `replaces` in `mod.json` (§2). `replaces` accepts every window kind, so a mod written for a later client can already say what it means to replace, and the `hud.<piece>` names (`hud.target`, `hud.minimap`, ... : the `eqoa.hud.hide` element names with `hud.` in front), which are only shown to the player; HUD pieces are hidden with `eqoa.hud.hide`, not `takeover`. A mod that only uses scope `"own"` needs no `replaces`.
+**Declaring it.** A mod that uses scope `"all"` lists the windows in `replaces` in `mod.json` (§2). `replaces` accepts every window kind (including `raid_ready` and `raid_roll`), so a mod written for a later client can already say what it means to replace, and the `hud.<piece>` names (`hud.target`, `hud.minimap`, `hud.player`, `hud.raid_list`, `hud.quest_tracker`, `hud.dps_meter`, `hud.breath`, `hud.spell_bars`, `hud.utility_bars`, ... : the `eqoa.hud.hide` element names with `hud.` in front), which are only shown to the player; HUD pieces are hidden with `eqoa.hud.hide`, not `takeover`. A mod that only uses scope `"own"` needs no `replaces`.
 
 **What the player is shown** (Mods & Addons, from the manifest, before enabling):
 
-- `Replaces game windows: Loot, Merchant, Bank` for the windows in `replaces` this build can replace (only when the mod also declares `eqoa.windows.takeover`);
+- `Replaces game windows: Loot, Merchant, Bank, Ready Check, Loot Roll` for the windows or strips in `replaces` this build can replace (only when the mod also declares `eqoa.windows.takeover`);
 - `Not replaceable in this version: ...` for the other windows in `replaces`, by the game's own titles;
 - `Replaces HUD: ...` for `hud.<piece>` entries, by token (`hud.target` reads `Target frame`). For a mod that also declares `eqoa.windows.takeover` these are listed in the `Replaces game windows` line instead.
 
@@ -902,6 +923,9 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 | `eqoa.actions.unmemorize_ability(x)`, `eqoa.actions.unmemorize_all()` | Clears one memorized ability (a slot number 1..20, or an ability) or all of them. The game itself asks nothing before Unmemorize All, and neither does this. |
 | `eqoa.actions.arrange_ability(from, to)` | Moves an ability in the Abilities window's order. |
 | `eqoa.actions.loot(item:ItemRef, count:uint?)`, `eqoa.actions.loot_all()` | Takes one stack from the open corpse (the whole stack when `count` is omitted, else `count` of it), or everything. `window_closed` if no corpse is open. |
+| `eqoa.actions.loot_assign(item:ItemRef, member:uint\|EntityRef)`, `eqoa.actions.loot_abandon()` | Master-looter actions on the open corpse: assigns one stack to an eligible recipient (`MasterLoot.members`), or abandons master loot so the corpse falls back to open looting. `window_closed` if no corpse is open, `permission_denied` when master loot is not active, `not_found` for an ineligible recipient, `stale_handle` if the stack is gone. |
+| `eqoa.actions.ready_check_answer(id:uint, ready:bool)` | Answers the open raid ready check (`id` from `eqoa.raid.ready_check()`). `not_found` when no matching ready check is open. |
+| `eqoa.actions.loot_roll(id:uint, choice:"need"\|"greed"\|"pass")` | Answers an open raid loot roll (`id` from `eqoa.raid.loot_rolls()`). `not_found` when no matching roll is open, `not_ready` if `"need"` is asked on a roll with `may_need = false`. |
 | `eqoa.actions.buy(item:ItemRef, count:uint=1)`, `eqoa.actions.sell(item:ItemRef, count:uint=1)` | Buys from the open merchant's wares, sells a pack stack to it. `window_closed` if no merchant is open. |
 | `eqoa.actions.bank_move(item:ItemRef, count:uint=1)` or `(from:string, item:ItemRef, count:uint=1)` | Moves `count` of a stack between pack and bank. **Omitting `count` moves 1, not the stack**: pass `item.quantity` to move it all. The direction follows from the list the item is in. The optional `from` names that list and must agree with it (`invalid_argument` otherwise): `"bank"` or `"withdraw"` for an item in the bank, `"inventory"`, `"bags"` or `"deposit"` for one in the pack. `window_closed` if no bank is open. |
 | `eqoa.actions.bank_money(direction:"deposit"\|"withdraw", amount:uint)` | Moves tunar. |

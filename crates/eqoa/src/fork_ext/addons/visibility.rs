@@ -618,9 +618,18 @@ fn install_icon_helpers(host: &Host, ui: &mlua::Table) -> mlua::Result<()> {
     host.register_host_module("frontiers_forge.ui", Value::Table(ui.clone()))
 }
 
-fn native_leaves(element: &str) -> Option<Vec<&'static str>> {
+pub(crate) fn native_leaves(element: &str) -> Option<Vec<&'static str>> {
     Some(match element {
         "minimap" => vec!["minimap"],
+        "player" => vec![
+            "health_bar",
+            "power_bar",
+            "main_exp_bar",
+            "secondary_exp_bar",
+            "compass_face",
+            "compass_back",
+            "group_compass_marks",
+        ],
         "health" => vec!["health_bar"],
         "power" => vec!["power_bar"],
         "experience_main" => vec!["main_exp_bar"],
@@ -629,11 +638,29 @@ fn native_leaves(element: &str) -> Option<Vec<&'static str>> {
         "target" => vec!["target_nameplate"],
         "group_panel" => vec!["group_member_panel"],
         "group_markers" => vec!["group_compass_marks"],
+        "raid_list" => vec!["raid_list"],
         "pet" => vec!["pet_panel"],
         "effects" => vec!["active_effects"],
         "hotbar" => vec!["hotbar_draw_compact", "hotbar_draw_expanded"],
+        "spell_bars" => vec!["spell_bars"],
+        "utility_bars" => vec!["utility_bars"],
         "chat" => vec!["chat_window"],
+        "quest_tracker" => vec!["quest_tracker"],
+        "dps_meter" => vec!["dps_meter"],
+        "breath" => vec!["breath"],
         "all" => ALL_UI_ELEMENTS.to_vec(),
+        "all_pieces" => {
+            let mut all = ALL_UI_ELEMENTS.to_vec();
+            all.extend_from_slice(&[
+                "raid_list",
+                "quest_tracker",
+                "dps_meter",
+                "breath",
+                "spell_bars",
+                "utility_bars",
+            ]);
+            all
+        }
         _ => return None,
     })
 }
@@ -820,14 +847,28 @@ pub struct PublishedVisibility {
     pub target: bool,
     pub group_panel: bool,
     pub group_compass_marks: bool,
+    pub raid_list: bool,
     pub pet: bool,
     pub chat: bool,
     pub ability_bar: bool,
+    pub spell_bars: bool,
+    pub utility_bars: bool,
     pub active_effects: bool,
+    pub quest_tracker: bool,
+    pub dps_meter: bool,
+    pub breath: bool,
 }
 
 #[allow(dead_code)]
 impl PublishedVisibility {
+    pub fn player_hidden(&self) -> bool {
+        self.compass
+            && self.health_bar
+            && self.power_bar
+            && self.main_exp_bar
+            && self.secondary_exp_bar
+    }
+
     pub fn any_hidden(&self) -> bool {
         self.minimap
             || self.health_bar
@@ -838,15 +879,44 @@ impl PublishedVisibility {
             || self.target
             || self.group_panel
             || self.group_compass_marks
+            || self.raid_list
             || self.pet
             || self.chat
             || self.ability_bar
+            || self.spell_bars
+            || self.utility_bars
             || self.active_effects
+            || self.quest_tracker
+            || self.dps_meter
+            || self.breath
     }
 }
 
+const REPORT_ELEMENTS: &[&str] = &[
+    "health_bar",
+    "power_bar",
+    "main_exp_bar",
+    "secondary_exp_bar",
+    "compass_face",
+    "compass_back",
+    "target_nameplate",
+    "group_member_panel",
+    "group_compass_marks",
+    "pet_panel",
+    "chat_window",
+    "hotbar_draw_compact",
+    "hotbar_draw_expanded",
+    "active_effects",
+    "raid_list",
+    "quest_tracker",
+    "dps_meter",
+    "breath",
+    "spell_bars",
+    "utility_bars",
+];
+
 thread_local! {
-    static REPORT_CLAIMS: Cell<u16> = const { Cell::new(0) };
+    static REPORT_CLAIMS: Cell<u32> = const { Cell::new(0) };
     static PLAY_READY: Cell<bool> = const { Cell::new(true) };
     static PUBLISHED_VIS: Cell<PublishedVisibility> = const { Cell::new(PublishedVisibility {
         minimap: false,
@@ -858,15 +928,21 @@ thread_local! {
         target: false,
         group_panel: false,
         group_compass_marks: false,
+        raid_list: false,
         pet: false,
         chat: false,
         ability_bar: false,
+        spell_bars: false,
+        utility_bars: false,
         active_effects: false,
+        quest_tracker: false,
+        dps_meter: false,
+        breath: false,
     }) };
 }
 
 pub(crate) fn publish(hidden: bool) {
-    REPORT_CLAIMS.set(u16::from(hidden));
+    REPORT_CLAIMS.set(u32::from(hidden));
     PLAY_READY.set(true);
     PUBLISHED_VIS.set(PublishedVisibility {
         health_bar: hidden,
@@ -876,11 +952,11 @@ pub(crate) fn publish(hidden: bool) {
 
 pub(crate) fn publish_claims(claims: &HudClaimsRegistry) {
     REPORT_CLAIMS.set(
-        ALL_UI_ELEMENTS
+        REPORT_ELEMENTS
             .iter()
             .enumerate()
-            .fold(0, |bits, (i, element)| {
-                bits | (u16::from(claims.is_hidden(element)) << i)
+            .fold(0u32, |bits, (i, element)| {
+                bits | (u32::from(claims.is_hidden(element)) << i)
             }),
     );
     PLAY_READY.set(true);
@@ -894,11 +970,17 @@ pub(crate) fn publish_claims(claims: &HudClaimsRegistry) {
         target: claims.is_hidden("target_nameplate"),
         group_panel: claims.is_hidden("group_member_panel"),
         group_compass_marks: claims.is_hidden("group_compass_marks"),
+        raid_list: claims.is_hidden("raid_list"),
         pet: claims.is_hidden("pet_panel"),
         chat: claims.is_hidden("chat_window"),
         ability_bar: claims.is_hidden("hotbar_draw_compact")
             || claims.is_hidden("hotbar_draw_expanded"),
+        spell_bars: claims.is_hidden("spell_bars"),
+        utility_bars: claims.is_hidden("utility_bars"),
         active_effects: claims.is_hidden("active_effects"),
+        quest_tracker: claims.is_hidden("quest_tracker"),
+        dps_meter: claims.is_hidden("dps_meter"),
+        breath: claims.is_hidden("breath"),
     });
 }
 
@@ -920,10 +1002,10 @@ pub(crate) fn published_visibility() -> PublishedVisibility {
 
 pub(crate) fn report_claims() -> String {
     let bits = REPORT_CLAIMS.get();
-    let names: Vec<_> = ALL_UI_ELEMENTS
+    let names: Vec<_> = REPORT_ELEMENTS
         .iter()
         .enumerate()
-        .filter_map(|(i, name)| (bits & (1 << i) != 0).then_some(*name))
+        .filter_map(|(i, name)| (bits & (1u32 << i) != 0).then_some(*name))
         .collect();
     if names.is_empty() {
         "none".into()
