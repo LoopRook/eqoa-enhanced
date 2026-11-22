@@ -157,6 +157,93 @@ fn a3_buffs_read_time_left_whose_spell_and_removable_and_count_down_on_the_game_
 }
 
 #[test]
+fn a3_a_buff_reads_the_description_of_the_players_ability_with_its_name_and_nil_without_one() {
+    let (mut p, h) = world();
+    p.abilities.insert(
+        9304,
+        net::dump::Ability { id: 9304, name: "Dark Ward".into(), desc: "Target, Increase armor by 30".into(), ..Default::default() },
+    );
+    // an ability with no description says nothing, and one with another name is not the effect
+    p.abilities.insert(5, net::dump::Ability { id: 5, name: "Plague".into(), desc: String::new(), ..Default::default() });
+    p.abilities.insert(6, net::dump::Ability { id: 6, name: "Other".into(), desc: "Not this one".into(), ..Default::default() });
+    buffs_on(
+        &mut p,
+        vec![line(0, true, 9304, 11, 60_000, "Dark Ward"), line(1, false, 77, 12, 30_000, "Plague"), line(0, true, 1, 13, 5_000, "Stranger's Boon")],
+    );
+    frame(&p, &h);
+    h.execute(
+        r#"
+        local b = eqoa.effects.buffs()
+        assert(b[1].description == 'Target, Increase armor by 30', tostring(b[1].description))
+        assert(b[2].description == nil, 'an ability with no description gives none')
+        assert(b[3].description == nil, 'an effect of a spell the player does not have gives none')
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn a3_a_melee_round_is_not_a_cast_but_a_spell_of_the_same_length_is() {
+    let (mut p, h) = world();
+    p.entities.slots[1] = player_entity(0x2001, "Mira");
+    p.target = 0x2001;
+    h.execute(
+        r#"
+        n = 0
+        eqoa.events.on('cast.started', function(e) n = n + 1 end)
+        "#,
+    )
+    .unwrap();
+    frame(&p, &h);
+    // every melee effect the client plays for a swing, at every delay the swings have: no cast, no event
+    for k in 0..=11 {
+        let effect = vi::swing::swing_effect(k);
+        if effect == 0 {
+            continue;
+        }
+        apply(&p, cast_packet(0x2001, 0x100, vi::swing::swing_delay(k) as u32, effect));
+    }
+    frame(&p, &h);
+    h.execute("assert(n == 0 and #eqoa.casts.list() == 0 and eqoa.casts.get(0x2001) == nil, 'a swing is not a cast: ' .. n)").unwrap();
+    // control: the same caster, target and time, with the effect of a spell, is a cast with its bar
+    apply(&p, cast_packet(0x2001, 0x100, 3500, 0xBEEF));
+    frame(&p, &h);
+    h.execute("assert(n == 1 and eqoa.casts.get(0x2001).duration == 3.5, 'a real cast of the same length still starts')").unwrap();
+    // the player's own swing is no cast either
+    apply(&p, cast_packet(0x100, 0x2001, 3500, vi::swing::swing_effect(1)));
+    frame(&p, &h);
+    h.execute("assert(n == 1 and eqoa.casts.get(0x100) == nil)").unwrap();
+}
+
+#[test]
+fn a3_the_swing_effects_are_exactly_the_clients_swing_effects() {
+    use super::a3::is_melee_swing;
+    for name in ["Attack1", "Attack2", "Attack3", "Attack4", "Range1", "Range2", "Range3", "Range4"] {
+        assert!(is_melee_swing(vi::hash::hash_resource_id(name)), "{name}");
+    }
+    assert!(!is_melee_swing(0) && !is_melee_swing(0xAA) && !is_melee_swing(vi::hash::hash_resource_id("Fireball")));
+}
+
+#[test]
+fn a3_a_cast_of_the_target_is_written_to_the_log_with_its_packet_and_fields() {
+    let c = native_a3::Cast {
+        caster: 0x2001,
+        target: 0x100,
+        targets: vec![1, 2],
+        effect: 0xBEEF,
+        duration_ms: 3500,
+        start_tick: 0,
+        ends_tick: 105,
+        own: false,
+    };
+    assert_eq!(
+        native_a3::cast_log_line("cast.started", &c, None),
+        "frames: cast.started caster=0x2001 target=0x100 targets=2 effect=0x0000beef time=3500ms own=false src=0x00B1"
+    );
+    assert!(native_a3::cast_log_line("cast.ended", &c, Some("elapsed")).ends_with(" reason=elapsed"));
+}
+
+#[test]
 fn a3_buffs_changed_fires_for_a_new_set_and_for_a_line_running_out_but_not_for_a_resent_set() {
     let (mut p, h) = world();
     h.execute(
@@ -650,6 +737,8 @@ fn a3_every_frame_event_reaches_lua_with_its_declared_fields_and_every_record_ma
     .unwrap();
     frame(&p, &h);
     // the buff list comes, a goal list comes, and two casts start (one with a caster in view)
+    // an ability the effect names, so that its description is a field the record must hold
+    p.abilities.insert(9304, net::dump::Ability { id: 9304, name: "Dark Ward".into(), desc: "Target, Increase armor by 30".into(), ..Default::default() });
     buffs_on(&mut p, vec![line(0, true, 9304, 11, 60_000, "Dark Ward"), line(1, false, 77, 12, net::buffs::NO_END, "Plague")]);
     p.session.quest_progress =
         vec![TrackedQuest { name: "Bat Eyes".into(), ability: false, goals: vec![QuestGoal { text: "Bat eyes".into(), have: 1, need: 5 }] }];
