@@ -865,6 +865,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.loot.changed.data.before` | supported | 5 |  |
 | `eqoa.events.loot.changed.data.cause` | supported | 5 |  |
 | `eqoa.events.loot.changed.data.changed` | supported | 5 |  |
+| `eqoa.events.loot.changed.data.closed_by` | supported | 7 |  |
 | `eqoa.events.map.changed.data.after` | supported | 4 |  |
 | `eqoa.events.map.changed.data.before` | supported | 4 |  |
 | `eqoa.events.map.changed.data.changed` | supported | 4 |  |

@@ -43,6 +43,13 @@ pub(crate) struct ItemChange {
     before: Json,
     after: Json,
     cause: String,
+    /// Who closed a corpse window (`loot.changed` with cause `close`): `"player"`, `"mod"`, `"server"` or `"other"`.
+    closed_by: Option<&'static str>,
+}
+
+/// `closed_by` for a loot change whose cause came out `close`.
+fn closed_by_for(name: &str, cause: &str, native: &str) -> Option<&'static str> {
+    (name == "loot" && cause == "close").then(|| crate::fork_ext::loot_by_id::take_closed_by(native))
 }
 
 fn without_revision(v: &Json) -> Json {
@@ -69,10 +76,11 @@ fn cause_of(before: &Json, after: &Json, native: &str) -> String {
 
 fn event_data(change: ItemChange) -> (String, Json) {
     let changed = changed_fields(&without_revision(&change.before), &without_revision(&change.after));
-    (
-        format!("{}.changed", change.name),
-        json!({"before":change.before,"after":change.after,"changed":changed,"cause":change.cause}),
-    )
+    let mut data = json!({"before":change.before,"after":change.after,"changed":changed,"cause":change.cause});
+    if let Some(by) = change.closed_by {
+        data["closed_by"] = json!(by);
+    }
+    (format!("{}.changed", change.name), data)
 }
 
 impl Core {
@@ -168,7 +176,8 @@ impl Core {
                 } else {
                     cause_of(&before, after, "refresh")
                 };
-                changes.push(ItemChange { name, before, after: after.clone(), cause });
+                let closed_by = closed_by_for(name, &cause, "frame");
+                changes.push(ItemChange { name, before, after: after.clone(), cause, closed_by });
             }
         }
         changes
@@ -186,7 +195,7 @@ impl Core {
             if before.is_null() || !native_events::interested(&format!("{name}.changed")) {
                 continue;
             }
-            let (event, data) = event_data(ItemChange { name, before, after: Json::Null, cause: "reset".into() });
+            let (event, data) = event_data(ItemChange { name, before, after: Json::Null, cause: "reset".into(), closed_by: None });
             self.emit(&event, data);
         }
     }
@@ -213,7 +222,8 @@ impl Core {
         let cause = wanted.then(|| cause_of(&before, &after, native_cause));
         *slot(&mut self.view, name) = after.clone();
         if let Some(cause) = cause {
-            let (event, data) = event_data(ItemChange { name, before, after, cause });
+            let closed_by = closed_by_for(name, &cause, native_cause);
+            let (event, data) = event_data(ItemChange { name, before, after, cause, closed_by });
             self.emit(&event, data);
         }
     }
@@ -279,6 +289,7 @@ impl Core {
             before,
             after,
             cause,
+            closed_by: None,
         });
         self.emit(&event, data);
     }
