@@ -271,6 +271,10 @@ function M.clear_corpse_hold()
     M.recently_dead = nil
     M.engaged = {}
     M.auto_retry = {}
+    -- corpses waiting for bag space or for another try, the close marks and the guard are the old world's: a new creature
+    -- may be given the same entity id
+    M.auto_bags, M.auto_more = {}, {}
+    M.last_close, M.auto_player_open, M.keep_req = nil, nil, nil
     M.auto_take = nil
     M.auto_done = {}
     M.auto_said = {}
