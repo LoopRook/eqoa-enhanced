@@ -1286,6 +1286,7 @@ pub(crate) fn bank_requests(_play: &Play, _out: &mut Vec<crate::bank::BankOut>) 
 pub(crate) fn apply_camera(_play: &mut Play, _walker: &mut crate::walker::Walker) {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        api_capture::a3::apply_jump(_play, _walker);
         let Some(req) = PENDING_CAMERA.with(|c| c.take()) else {
             return;
         };
@@ -3025,6 +3026,7 @@ fn dispatch_broker_action(
                 detail: None,
             }
         }
+        ActionKind::Frame(action) => api_capture::a3::dispatch(play, action),
         ActionKind::DropQuest { .. }
         | ActionKind::MasteryShare { .. }
         | ActionKind::MasteryBrowse { .. }

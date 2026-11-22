@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_frames",
+  "name": "EQOA Frames (demo)",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "capabilities": [
+    "eqoa.player.get",
+    "eqoa.player.breath",
+    "eqoa.target.get",
+    "eqoa.target.info",
+    "eqoa.entities.find",
+    "eqoa.effects.list",
+    "eqoa.effects.buffs",
+    "eqoa.effects.pet",
+    "eqoa.casts.list",
+    "eqoa.casts.get",
+    "eqoa.actions.remove_effect",
+    "eqoa.actions.group_invite",
+    "eqoa.actions.pet_attack",
+    "eqoa.actions.pet_back_off",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ]
+}
