@@ -45,6 +45,29 @@ second, ten times a second while a creature you hit is being followed, not on ev
 Every decision is a line in the game's log (`eqoa.log`), starting
 `addon eqoa_bag_viewer: [info] auto-loot:` with the corpse id and the reason.
 
+**Helpers at a merchant or a banker** (`modules/helpers.lua`). They work through hidden sessions of the mod's own
+(`eqoa.windows.takeover(kind)`, scope `own`), so a merchant or banker you talk to yourself still opens the game's window
+exactly as before, and a helper acts only on its button or on its own switch.
+
+- **Sell junk** (near a merchant, or with the merchant open): one click sells every stack marked as junk. Left alone, and
+  counted in a "Kept N junk items" line: worn items, quick-slotted items, no-trade items and items that are not ordinary
+  (not under the game's **Misc** tab). These are the four cases in which the game's own merchant window asks Yes or No;
+  `eqoa.actions.sell` does not ask, so the mod does. The line "Sold N junk items for X tunar" gives the game's own
+  quote for the stacks the server confirmed.
+- **Restock**: an item's menu has **Keep up to N (Restock)** (N starts at what the bags hold; the menu steps it by 5). Near
+  a merchant, **Restock (N)** buys up to N of each kept item that merchant sells, counting everything of that kind in the
+  pack, never more than N. It stops, and says why, when money or bag space runs out.
+- **Bank marked**: **Bank this** in an item's menu; near a banker, **Bank marked (N)** deposits the marked stacks (never worn
+  ones) and says so when the bank is full.
+- **Do it when I get near**: three switches under the buttons (Sell junk, Restock, Bank), kept for each character, off by
+  default. A helper acts once per approach (it arms again after you have been out of the NPC's reach by 5 more units),
+  never while any game window or session of any kind is up, a batch is running, or you are in a fight.
+- **Sell 1 / Sell stack** in an item's menu ask first (Yes / No) for a quick-slotted, no-trade or not ordinary item, naming
+  the item and why.
+- Marks and the switches are saved in `helpers.cfg` (private files of the mod): `keep:<id>=<n>`, `bank:<id>`,
+  `auto:<character>:<helper>=1`. The lines the helpers say go to the result line and the game's log (`addon eqoa_bag_viewer:
+  [info] bag helpers: ...`); `eqoa/1` has no way yet to put a line in the chat window without sending it to the server.
+
 It uses only the public `eqoa/1` API (`eqoa.inventory`, `eqoa.bank`, `eqoa.items`,
 `eqoa.icons`, the `inventory.changed`, `bank.changed` and `loot.changed` events)
 and is the worked example for the items API. While the window is closed it does
