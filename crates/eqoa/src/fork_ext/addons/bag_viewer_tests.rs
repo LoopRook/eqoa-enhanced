@@ -2699,8 +2699,10 @@ fn round65_fix_bag_viewer_auto_loot_only_corpses_of_creatures_you_hit_body() {
     super::super::action_broker::reset_all_for_test();
 }
 
-/// M1: Auto-loot never runs while you are in combat (it retargets, which ends the auto-attack); it waits
-/// and goes on when the fight is over.
+/// M1: with the old way of opening a corpse (it retargets, which ends the auto-attack) Auto-loot never runs while you
+/// are in combat; it waits and goes on when the fight is over. Opened by id (the default until the client says the
+/// server needs the old way) nothing is retargeted and a fight does not hold it back: `autoloot_*` in
+/// `autoloot_logic_tests.rs`.
 #[test]
 fn round65_fix_bag_viewer_auto_loot_waits_while_in_combat() {
     big_stack(round65_fix_bag_viewer_auto_loot_waits_while_in_combat_body)
@@ -2717,6 +2719,8 @@ fn round65_fix_bag_viewer_auto_loot_waits_while_in_combat_body() {
     bv.open();
     bv.frames(2);
     bv_auto(&bv, "non_junk");
+    // the client opens corpses the old way in this world (the state after a by-id open the server did not answer)
+    old_way_of_opening_corpses(&bv);
 
     // one kill of yours, while a second hostile still has you targeted
     bv.play.bags_spawn_npc(9201, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
@@ -3284,8 +3288,10 @@ fn r65fix4_hidden_batch(auto_loot: bool, relist: bool) {
     bv.play.bags_self_id(77);
     bv.enable();
     let _ = super::super::window_takeover::take_log_for_test();
+    // a junk item stays on the corpse: without one Auto-loot takes everything with one Take all instead of this batch
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['2005'] = true return true end)()"));
     let items = |keys_from: usize| {
-        let all = [("Rat Pelt", 2001), ("Bloodstone", 2003), ("Bone Chip", 2004)];
+        let all = [("Rat Pelt", 2001), ("Bloodstone", 2003), ("Bone Chip", 2004), ("Broken Twig", 2005)];
         serde_json::Value::Array(
             all[keys_from..]
                 .iter()
@@ -3432,6 +3438,14 @@ fn round65_fix4_item2_a_players_own_click_on_the_corpse_still_shows_the_game_win
 
 // ---- Round 6.5 fix round 4, items 3-6: Auto-loot choice, Look/Take labels, no grey items, out-of-range buttons ------
 
+/// The state after a by-id open the server did not answer: the client opens corpses the old way (it targets the corpse
+/// and gives the target back) and Bag Viewer knows it, so Auto-loot waits out a fight. The tests written before the by-id
+/// open keep their meaning under it; the new default is in `autoloot_logic_tests.rs` and the `autoloot_*` tests.
+fn old_way_of_opening_corpses(bv: &Bv) {
+    crate::fork_ext::loot_by_id::force_method_for_test(crate::fork_ext::loot_by_id::Method::Retarget);
+    assert!(bv.eval::<bool>("(function() require('bags').loot_method = 'retarget' return true end)()"));
+}
+
 /// A killed creature of yours (you hit it), looted by Auto-loot under `mode`: returns the viewer with the creature
 /// dead, junk Rat Pelt (2001) marked.
 fn r65fix4_auto_kill(mode: &str) -> Option<Bv> {
@@ -3454,6 +3468,7 @@ fn r65fix4_auto_kill(mode: &str) -> Option<Bv> {
         bv.click((x, y));
     }
     assert_eq!(bv.eval::<String>("require('bags').auto_mode"), mode);
+    old_way_of_opening_corpses(&bv);
     bv.play.bags_spawn_npc(9011, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
     bv.play.bags_target_sync(9011);
     bv.play.bags_combat_hit(77, 9011, -12);
@@ -4360,7 +4375,7 @@ fn round65_fix5_item4_a_list_the_game_turns_away_ends_the_open() {
 fn round65_fix5_item4_a_list_the_game_turns_away_ends_the_open_body() {
     let Some(mut bv) = r65fix4_auto_kill("all") else { return };
     r65fix5_first_taken(&mut bv);
-    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 1e9 return true end)()");
+    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 1e9 require('bags').AUTO_NOTREADY_SECS = 1e9 return true end)()");
     let _ = super::super::window_takeover::take_log_for_test();
     r65fix5_kill(&mut bv, 9021, [3.0, 0.0, 0.0]);
     bv.play.bags_broker_tick();
@@ -4384,7 +4399,7 @@ fn round65_fix5_item4_a_list_the_game_turns_away_ends_the_open_body() {
     assert!(log.iter().any(|l| l.contains("turned away by the game (mode 13")), "{log:#?}");
     assert!(!r65fix5_asked(&log, 9021), "no loop of re-asks while the menu is up: {log:#?}");
     // the menu closes: Auto-loot asks again and the corpse opens hidden
-    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 0 return true end)()");
+    bv.eval::<bool>("(function() require('bags').AUTO_RETRY_SECS = 0 require('bags').AUTO_NOTREADY_SECS = 0 return true end)()");
     bv.play.mode = 0;
     r65fix5_tick(&mut bv);
     let log = super::super::window_takeover::take_log_for_test();
@@ -4810,6 +4825,112 @@ fn round7c_bag_viewer_second_sell_before_the_merchant_answers_is_refused_body() 
     assert_eq!(bv.eval::<i64>("eqoa.inventory.get().items[2].quantity"), 4, "one potion sold");
     assert_eq!(bv.eval::<i64>("eqoa.inventory.get().items[7].quantity"), 3, "the pelts were not sold");
     assert_eq!(bv.play.mode, 0);
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---- Auto-loot follow-ups (2026-11-21): the end-to-end run of the by-id open in a fight ---------------------------------
+
+/// A kill of yours dies while another creature is fighting you (targeted, auto-attack on). With the by-id open the corpse
+/// is asked for at once and the fight goes on: the target stays on the live creature and the auto-attack keeps swinging,
+/// and the game's own window never shows. Negative control: when the client opens corpses the old way, the same kill
+/// ends the auto-attack (the corpse is targeted for the open).
+#[test]
+fn autoloot_e2e_loots_a_kill_in_the_middle_of_a_fight_without_moving_the_target() {
+    big_stack(autoloot_e2e_loots_a_kill_in_the_middle_of_a_fight_without_moving_the_target_body)
+}
+fn autoloot_e2e_loots_a_kill_in_the_middle_of_a_fight_without_moving_the_target_body() {
+    for by_id in [true, false] {
+        super::super::action_broker::reset_all_for_test();
+        super::super::window_takeover::reset_all_for_test();
+        crate::fork_ext::loot_source::clear();
+        crate::fork_ext::loot_by_id::reset_for_test();
+        let Some(mut bv) = Bv::new() else {
+            eprintln!("SKIP autoloot e2e: no GPU adapter");
+            return;
+        };
+        if !by_id {
+            // only the client's side: Bag Viewer still believes by id works (the first open tells it otherwise)
+            crate::fork_ext::loot_by_id::force_method_for_test(crate::fork_ext::loot_by_id::Method::Retarget);
+        }
+        bv.play.bags_connect();
+        bv.play.bags_set(&bv_world());
+        bv.play.bags_player_at([0.0, 0.0, 0.0]);
+        bv.play.bags_self_id(77);
+        bv.enable();
+        bv.open();
+        bv.frames(2);
+        bv_auto(&bv, "all");
+        bv.play.bags_spawn_npc(9201, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
+        bv.play.bags_spawn_npc(9202, "a gnoll scout", 0, 1, [4.0, 0.0, 0.0]);
+        bv.play.bags_creature(9202, 0, 77);
+        bv.play.bags_combat_hit(77, 9201, -12);
+        bv.play.bags_target_sync(9202);
+        bv.play.bags_auto_attack(true);
+        bv_look_again(&mut bv);
+        let _ = super::super::window_takeover::take_log_for_test();
+        let before = bv.play.bags_sends_lost();
+        bv.play.bags_entity_die(9201);
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+        assert!(bv.play.bags_sends_lost() > before, "{by_id}: the corpse is asked for at once, in the fight");
+        if by_id {
+            assert_eq!(bv.play.target, 9202, "by id: the target stays on the creature that is fighting you");
+            assert!(bv.play.auto_attack, "by id: the auto-attack goes on");
+        } else {
+            assert_eq!(bv.play.target, 9201, "old way: the corpse is targeted for the open");
+            assert!(!bv.play.auto_attack, "old way: which ends the auto-attack");
+        }
+        bv.play.bags_corpse(&serde_json::json!([{"name":"Aquamarine","id":2102,"key":0,"qty":1,"max_stack":20}]));
+        bv.frames(2);
+        assert_eq!(bv.play.mode, 0, "{by_id}: the game's corpse window stays closed");
+        bv.play.bags_broker_tick(); // Take all: 0x001A
+        bv.play.bags_loot_confirm_all();
+        bv.play.bags_loot_close();
+        bv.play.bags_broker_tick();
+        bv.frames(3);
+        assert_eq!(bv.result_text(), Some(("Take all: ok".into(), Some(true))), "{by_id}");
+        assert_eq!(bv.eval::<String>("require('bags').loot_method"), if by_id { "keep_target" } else { "retarget" });
+        let log = super::super::window_takeover::take_log_for_test();
+        assert!(!log.iter().any(|l| l.contains("left to the game")), "{by_id}: nothing was shown: {log:#?}");
+        if by_id {
+            assert_eq!(bv.play.target, 9202, "by id: still the creature that is fighting you");
+            assert!(bv.play.auto_attack);
+        }
+        bv.clean();
+        super::super::window_takeover::reset_all_for_test();
+        super::super::action_broker::reset_all_for_test();
+    }
+}
+
+// ---- Auto-loot fix round 2 (2026-11-22) ------------------------------------------------------------------------------
+
+/// A disconnect (another server may answer differently) makes Bag Viewer forget which way the client opened corpses;
+/// a zone change (the same server) does not.
+#[test]
+fn autoloot_fix2_world_leaving_by_disconnect_resets_the_method_but_a_zone_does_not() {
+    big_stack(autoloot_fix2_world_leaving_by_disconnect_resets_the_method_but_a_zone_does_not_body)
+}
+fn autoloot_fix2_world_leaving_by_disconnect_resets_the_method_but_a_zone_does_not_body() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else {
+        eprintln!("SKIP autoloot fix2 disconnect: no GPU adapter");
+        return;
+    };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.frames(3);
+    assert!(bv.eval::<bool>("(function() require('bags').loot_method = 'retarget' return true end)()"));
+    crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow_mut().reset("zone"));
+    bv.frames(2);
+    assert_eq!(bv.eval::<String>("tostring(require('bags').loot_method)"), "retarget", "a zone change: the same server");
+    crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow_mut().reset("disconnect"));
+    bv.frames(2);
+    assert_eq!(bv.eval::<String>("tostring(require('bags').loot_method)"), "nil", "a disconnect: decided again");
     bv.clean();
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();

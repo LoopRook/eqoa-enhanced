@@ -81,7 +81,7 @@ pub(crate) enum BrokerReply {
     LootOne { confirmed_key: Option<u32> },
     LootAll { corpse_before: Vec<(u32, i64)> },
     LootClose,
-    LootBlocked(String),
+    LootBlocked(String, u8),
     TxCancel,
     BankMove {
         is_deposit: bool,
@@ -191,7 +191,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
                         3 => "You cannot loot that corpse.".into(),
                         _ => "Loot blocked by server.".into(),
                     });
-                Some(BrokerReply::LootBlocked(reason))
+                Some(BrokerReply::LootBlocked(reason, code))
             }
             net::session::Event::Opcode { op: 0x00D7, .. } => Some(BrokerReply::TxCancel),
             net::session::Event::Opcode { op: 0x1250, data } => {
@@ -331,6 +331,7 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
         }
         Some(BrokerReply::OpenLootRefused { code, reason }) => {
             tlog!("takeover: the server refused the corpse open: {reason}");
+            let _ = crate::fork_ext::loot_by_id::note_refusal(crate::fork_ext::loot_by_id::Refusal::OutOfRange, open_waits);
             crate::fork_ext::addons::window_takeover::clear_pending_open(
                 crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
             );
@@ -343,6 +344,7 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
             if mode_before != 0 && crate::fork_ext::addons::action_broker::open_loot_in_flight() =>
         {
             tlog!("takeover: corpse list turned away by the game (mode {mode_before}: another window is up); the open is refused");
+            crate::fork_ext::loot_by_id::drop_probe();
             crate::fork_ext::addons::window_takeover::clear_pending_open(
                 crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
             );
@@ -352,6 +354,7 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
             );
         }
         Some(BrokerReply::LootOpen { .. }) => {
+            crate::fork_ext::loot_by_id::note_list_reply(api_capture::items::loot_source_named(), open_waits);
             crate::fork_ext::addons::window_takeover::touch_hidden_session(
                 crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
             );
@@ -389,12 +392,24 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
                 None,
             );
         }
-        Some(BrokerReply::LootBlocked(reason)) => {
+        Some(BrokerReply::LootBlocked(reason, code)) => {
             LOOT_BUSY.with(|b| b.set(false));
-            crate::fork_ext::addons::window_takeover::clear_pending_open(
-                crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
-            );
-            crate::fork_ext::addons::action_broker::resolve_server_loot_blocked(Some(&reason));
+            use crate::fork_ext::loot_by_id::Refusal;
+            let kind = match code {
+                1 => Refusal::OutOfRange,
+                2 => Refusal::Understood,
+                _ => Refusal::Unclear,
+            };
+            if crate::fork_ext::loot_by_id::note_refusal(kind, open_waits) {
+                // the by-id open was refused without a reason: the old request goes out at the next step and the
+                // mod's open stays in flight (it ends with that request's answer)
+                tlog!("takeover: the server refused the by-id corpse open without a reason ({reason}); asking the old way");
+            } else {
+                crate::fork_ext::addons::window_takeover::clear_pending_open(
+                    crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
+                );
+                crate::fork_ext::addons::action_broker::resolve_server_loot_blocked(Some(&reason));
+            }
         }
         Some(BrokerReply::TxCancel) => {
             LOOT_BUSY.with(|b| b.set(false));
@@ -611,6 +626,7 @@ fn close_hidden_session(
                 }
             );
             if sent {
+                crate::fork_ext::loot_by_id::mark_close("mod");
                 let _ = play.npcw_opcode(0x0016, &[]);
             }
             LOOT_BUSY.with(|b| b.set(false));
@@ -695,6 +711,60 @@ fn sync_hidden_sessions(play: &mut Play) {
             }
         }
     }
+}
+
+/// Whether the mod's `open_loot` for `corpse` is still waiting for the server (what a by-id probe may be judged by).
+#[cfg(not(target_arch = "wasm32"))]
+fn open_waits(vm: u64, corpse: u32) -> bool {
+    crate::fork_ext::addons::action_broker::open_loot_waiting(vm, corpse)
+}
+
+/// The loot request (0x0015) for `corpse_id` itself, with no target set first: what `Play::attack_press` sends for a
+/// targeted corpse, minus the target (`loot_by_id`). The request is noted as the client's own, as `attack_press` notes it.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn send_loot_request_by_id(play: &mut Play, corpse_id: u32) {
+    crate::fork_ext::loot_requested(corpse_id);
+    let mut w = net::stream::Writer::op(0x0015);
+    w.u32(corpse_id);
+    play.session.send(&w.data);
+}
+
+/// The by-id open got no usable answer: ask again the old way (target the corpse, loot, the target comes back later).
+#[cfg(not(target_arch = "wasm32"))]
+fn retry_open_the_old_way(play: &mut Play, fb: crate::fork_ext::loot_by_id::Fallback) {
+    use crate::fork_ext::addons::{action_broker, window_takeover};
+    let valid = play
+        .entities
+        .slots
+        .iter()
+        .flatten()
+        .any(|e| e.id == fb.corpse && play.in_scene(e) && (e.p18 & 1 != 0) && (e.p18 & 2 != 0));
+    if !valid || !matches!(play.mode, 0 | 38) || play.is_dead() || play.control_client().casting {
+        // nothing can be sent: the mod's open ends now with the reason, and nothing was tried the old way, so the method is
+        // undecided again instead of left on a fallback nobody tried
+        tlog!("takeover: by-id fallback for corpse {:#x}: the corpse or the player is not ready; the open is refused", fb.corpse);
+        crate::fork_ext::loot_by_id::abandon_fallback(fb.corpse);
+        window_takeover::clear_pending_open(window_takeover::TakeoverKind::Loot);
+        let (code, reason) = if valid {
+            ("not_ready", "cannot open corpse right now")
+        } else {
+            ("not_found", "the corpse is no longer in the scene")
+        };
+        action_broker::resolve_server_open_loot_refused(code, reason);
+        return;
+    }
+    // the first request's late answer, if any, still names this corpse; nothing is waiting but this one
+    crate::fork_ext::loot_source::clear();
+    if play.target != fb.corpse {
+        let prev = play.target;
+        play.target_id(fb.corpse);
+        window_takeover::note_retarget(fb.vm, prev, fb.corpse);
+    }
+    let _ = window_takeover::arm_pending_open(window_takeover::TakeoverKind::Loot, fb.vm, fb.corpse);
+    tlog!("takeover: fallback open_loot -> corpse {:#x}, opcode 0x0015 after targeting it", fb.corpse);
+    play.attack_press();
+    crate::fork_ext::loot_by_id::note_sent_retarget(fb.vm, fb.corpse);
+    action_broker::set_open_loot_method(fb.corpse, "retarget");
 }
 
 pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
@@ -801,14 +871,36 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
             if crate::fork_ext::addons::action_broker::take_loot_timeout_expired() {
                 LOOT_BUSY.with(|b| b.set(false));
             }
-            let corpse_target = (_play.target != 0
-                && _play
+            // a by-id corpse open that nobody answers, or that the server refused without a reason, goes out again the
+            // old way (target the corpse, loot) for the rest of the session
+            crate::fork_ext::loot_by_id::step();
+            let fallback = crate::fork_ext::loot_by_id::take_retry().or_else(|| {
+                crate::fork_ext::loot_by_id::poll_timeout(|vm, corpse| {
+                    crate::fork_ext::addons::action_broker::open_loot_waiting(vm, corpse)
+                })
+            });
+            if let Some(fb) = fallback {
+                retry_open_the_old_way(_play, fb);
+            }
+            // a corpse opened by id is not the player's target: it is the one the mod asked for
+            let by_id_corpse = crate::fork_ext::addons::window_takeover::by_id_corpse().filter(|id| {
+                _play
                     .entities
                     .slots
                     .iter()
                     .flatten()
-                    .any(|e| e.id == _play.target && e.p18 & 2 != 0))
-            .then_some(_play.target);
+                    .any(|e| e.id == *id && e.p18 & 2 != 0)
+            });
+            let corpse_target = by_id_corpse.or_else(|| {
+                (_play.target != 0
+                    && _play
+                        .entities
+                        .slots
+                        .iter()
+                        .flatten()
+                        .any(|e| e.id == _play.target && e.p18 & 2 != 0))
+                .then_some(_play.target)
+            });
             crate::fork_ext::addons::action_broker::set_corpse_target_id(corpse_target);
             if _play.map.open || _play.mode == 38 {
                 crate::fork_ext::addons::action_broker::abort_corpse_reopen(
@@ -826,12 +918,18 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
                     crate::fork_ext::addons::action_broker::take_corpse_reopen_ask()
                 && corpse_target == Some(reopen_cid)
             {
-                let _ = crate::fork_ext::addons::window_takeover::arm_pending_open(
-                    crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
-                    reopen_vm,
-                    reopen_cid,
-                );
-                _play.attack_press();
+                if by_id_corpse == Some(reopen_cid) {
+                    // the session was opened by id: the corpse is asked for again by id, the target stays as it is
+                    let _ = crate::fork_ext::addons::window_takeover::arm_pending_open_by_id(reopen_vm, reopen_cid);
+                    send_loot_request_by_id(_play, reopen_cid);
+                } else {
+                    let _ = crate::fork_ext::addons::window_takeover::arm_pending_open(
+                        crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
+                        reopen_vm,
+                        reopen_cid,
+                    );
+                    _play.attack_press();
+                }
             }
             let wheel = crate::fork_ext::addons::pointer_api::take_wheel();
             if ready && wheel != 0.0 {
@@ -969,7 +1067,12 @@ pub(crate) fn npcw_requests(
             mark_player_activity(Subsystem::Loot);
             for o in _loot_out.iter() {
                 match *o {
-                    crate::loot::LootOut::Close => api_capture::items::clear_pending_loot(),
+                    crate::loot::LootOut::Close => {
+                        // this list holds only what the player's own use of the game's window asked for: the mod's
+                        // staged requests are added after it
+                        crate::fork_ext::loot_by_id::mark_close("player");
+                        api_capture::items::clear_pending_loot()
+                    }
                     crate::loot::LootOut::One(key, n) => {
                         api_capture::items::note_loot_send(_play, Some(key as u32), n as i64, false);
                     }
@@ -1543,7 +1646,7 @@ fn dispatch_broker_action(
             play.interact_with_target();
             DispatchOutcome::Completed { detail: None }
         }
-        ActionKind::OpenLoot { entity_id } => {
+        ActionKind::OpenLoot { entity_id, keep_target } => {
             if play.is_dead() || !matches!(play.mode, 0 | 38) || play.control_client().casting {
                 return DispatchOutcome::Refused {
                     code: "not_ready",
@@ -1593,6 +1696,19 @@ fn dispatch_broker_action(
                     id
                 }
             };
+            if *keep_target && crate::fork_ext::loot_by_id::use_by_id() {
+                // by id: the request names the corpse and nothing else of the player's changes (target, auto-attack)
+                let vm = crate::fork_ext::addons::action_broker::current_dispatch_vm().unwrap_or(0);
+                let target_was = play.target;
+                let _ = crate::fork_ext::addons::window_takeover::arm_pending_open_by_id(vm, corpse_id);
+                crate::fork_ext::loot_by_id::note_sent_by_id(vm, corpse_id, target_was);
+                tlog!("takeover: mod open_loot BY ID -> corpse {corpse_id:#x}, opcode 0x0015, target left at {target_was:#x}");
+                send_loot_request_by_id(play, corpse_id);
+                return DispatchOutcome::AwaitingServer {
+                    matcher: crate::fork_ext::addons::action_broker::ServerMatcher::OpenLoot { corpse_id },
+                    detail: Some(serde_json::json!({ "entity_id": corpse_id, "method": "keep_target" })),
+                };
+            }
             if play.target != corpse_id {
                 let prev = play.target;
                 play.target_id(corpse_id);
@@ -1622,11 +1738,21 @@ fn dispatch_broker_action(
             }
             tlog!("takeover: mod open_loot -> corpse {corpse_id:#x}, opcode 0x0015");
             play.attack_press();
+            // keep_target asked for, but this session fell back to the old method: say so in the result
+            let detail = if *keep_target {
+                crate::fork_ext::loot_by_id::note_sent_retarget(
+                    crate::fork_ext::addons::action_broker::current_dispatch_vm().unwrap_or(0),
+                    corpse_id,
+                );
+                serde_json::json!({ "entity_id": corpse_id, "method": "retarget" })
+            } else {
+                serde_json::json!({ "entity_id": corpse_id })
+            };
             DispatchOutcome::AwaitingServer {
                 matcher: crate::fork_ext::addons::action_broker::ServerMatcher::OpenLoot {
                     corpse_id,
                 },
-                detail: Some(serde_json::json!({ "entity_id": corpse_id })),
+                detail: Some(detail),
             }
         }
         ActionKind::Talk { entity_id, kind } => {

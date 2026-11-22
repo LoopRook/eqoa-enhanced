@@ -16,6 +16,8 @@ pub mod app_icon;
 pub mod bundled;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod loot_source;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod loot_by_id;
 pub mod chat_history;
 pub mod mods;
 pub mod player_stats;

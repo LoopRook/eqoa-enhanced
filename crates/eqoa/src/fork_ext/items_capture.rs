@@ -318,8 +318,18 @@ struct PendingLootTake {
 
 thread_local! {static PENDING_TAKE: std::cell::RefCell<Option<PendingLootTake>> = const { std::cell::RefCell::new(None) };}
 
+/// The corpse the client's own loot request named for the window that is open (`note_source`), and nothing guessed from
+/// the target or a mod's session: what a by-id open is confirmed by.
+pub(crate) fn loot_source_named() -> Option<u32> {
+    SOURCE.with(|s| s.borrow().as_ref().map(|(id, _)| *id))
+}
+
 pub(crate) fn current_loot_source_id(play: &Play) -> Option<u32> {
     if let Some((id, _)) = SOURCE.with(|s| s.borrow().clone()) {
+        return Some(id);
+    }
+    // a corpse the mod opened by id (the player's target is not it): the server's relists are that corpse's too
+    if let Some(id) = crate::fork_ext::addons::window_takeover::by_id_corpse() {
         return Some(id);
     }
     (play.target != 0
