@@ -388,11 +388,13 @@ fn a1_the_three_windows_take_their_keys_and_the_stats_box_gives_up_b() {
     bindpage::register("eqoa_y", "dup", "shift+j", "Second journal");
     let holders = ["eqoa_quest_journal", "eqoa_y"].map(|a| bindpage::get_key(a, if a == "eqoa_y" { "dup" } else { "open" }).unwrap());
     assert_eq!(holders.iter().filter(|k| !k.is_empty()).count(), 1, "{holders:?}");
-    // control: with the old default the Bag Viewer's B would have been the Stats Box's
+    // control: with the old default both would want B and one of them would have an empty row (the Stats Box would
+    // lose it here, by name order: that is what moving it to Y avoids)
     bindpage::reset_in_memory();
     bindpage::register("eqoa_stats_box", "toggle", "b", "old default");
     bindpage::register("eqoa_bag_viewer", "open", "b", "bags");
-    assert_eq!(bindpage::get_key("eqoa_bag_viewer", "open").as_deref(), Some(""), "that is what moving the Stats Box to Y fixes");
+    let both = [bindpage::get_key("eqoa_bag_viewer", "open").unwrap(), bindpage::get_key("eqoa_stats_box", "toggle").unwrap()];
+    assert_eq!(both.iter().filter(|k| k.is_empty()).count(), 1, "{both:?}");
     bindpage::reset_in_memory();
 }
 
