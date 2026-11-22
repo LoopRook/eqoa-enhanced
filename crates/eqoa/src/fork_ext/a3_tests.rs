@@ -10,6 +10,7 @@ use crate::fork_ext::addons::{
     native_core::{self, CORE, Core},
     native_events,
 };
+use crate::fork_ext::addons::native_tests::{FRAME_EVENTS, install_field_check};
 use net::buffs::Line;
 use net::session::{Event, PetEffect, QuestGoal, RaidMember, TrackedQuest};
 use net::stream::Writer;
@@ -551,6 +552,81 @@ fn a3_nothing_is_captured_or_sent_while_no_mod_is_enabled() {
     assert_eq!(sent(&p).len(), before, "the frames code sends nothing of its own");
     assert!(!a3::jump_pending());
     native_core::fixture_demand(true);
+}
+
+#[test]
+fn a3_every_frame_event_reaches_lua_with_its_declared_fields_and_every_record_matches_its_declaration() {
+    let (mut p, h) = world();
+    install_field_check(&h).unwrap();
+    p.entities.slots[1] = player_entity(0x2001, "Mira");
+    p.quests.titles = vec![crate::ui::wide("Bat Eyes")];
+    p.quests.stamp = 1;
+    p.session.quest_progress_offer = true;
+    h.lua.globals().set("frame_events", h.lua.create_sequence_from(FRAME_EVENTS.iter().copied()).unwrap()).unwrap();
+    h.execute(
+        r#"
+        seen = {}
+        for _, name in ipairs(frame_events) do
+            assert(eqoa.capabilities.has('eqoa.events.' .. name), name)
+            assert(eqoa.events.on(name, function(e) seen[name] = e; round7c_note(name, e) end))
+        end
+        "#,
+    )
+    .unwrap();
+    frame(&p, &h);
+    // the buff list comes, a goal list comes, and two casts start (one with a caster in view)
+    buffs_on(&mut p, vec![line(0, true, 9304, 11, 60_000, "Dark Ward"), line(1, false, 77, 12, net::buffs::NO_END, "Plague")]);
+    p.session.quest_progress =
+        vec![TrackedQuest { name: "Bat Eyes".into(), ability: false, goals: vec![QuestGoal { text: "Bat eyes".into(), have: 1, need: 5 }] }];
+    p.session.pet_effects_offer = true;
+    p.session.agree_pet_effects(true);
+    p.session.pet_effects = vec![PetEffect { icon: 21, left_ms: 30_000, name: "Rage".into() }];
+    p.session.pet_effects_at = p.session.now().max(1);
+    frame(&p, &h);
+    // the lists change again, so that an event has a before as well as an after
+    p.session.buffs.pop();
+    p.session.buffs_at += 1;
+    p.session.quest_progress[0].goals[0].have = 2;
+    frame(&p, &h);
+    apply(&p, cast_packet(0x2001, 0x100, 1000, 0xBB));
+    frame(&p, &h);
+    // her cast runs out
+    steps(31);
+    frame(&p, &h);
+    // every record the new reads give is what its declaration says it is
+    p.target = 0x2001;
+    p.target_info = Some(4);
+    p.rings.con = Some(1);
+    p.target_title = "Warlord".into();
+    p.target_guild = "Iron Tide".into();
+    p.group.raid = vec![RaidMember { id: 11, name: "Tanky".into(), class: 0, group: 1, ..Default::default() }];
+    frame(&p, &h);
+    apply(&p, cast_packet(0x2001, 0x100, 9000, 0xCC));
+    frame(&p, &h);
+    h.execute(
+        r#"
+        local missing = {}
+        for _, name in ipairs(frame_events) do if not seen[name] then missing[#missing + 1] = name end end
+        assert(#missing == 0, 'not emitted: ' .. table.concat(missing, ', '))
+        event_fields(seen, frame_events)
+
+        local b = eqoa.effects.buffs()
+        fields('effects.Buff', b[1])
+        fields('effects.PetEffect', eqoa.effects.pet()[1])
+        fields('casts.Cast', eqoa.casts.list()[1], 'target_id')
+        local g = eqoa.quests.goals()
+        fields('quests.QuestGoals', g[1])
+        fields('quests.QuestGoal', g[1].goals[1])
+        fields('player.Training', eqoa.player.training())
+        fields('player.Breath', eqoa.player.breath(), 'underwater')
+        local info = eqoa.target.info()
+        fields('target.TargetInfo', info)
+        fields('target.Consider', info.consider)
+        fields('Color', info.consider.color)
+        fields('group.RaidRole', eqoa.group.raid_roles()[1])
+        "#,
+    )
+    .unwrap();
 }
 
 // ---- the actions ------------------------------------------------------------------------------------------------
