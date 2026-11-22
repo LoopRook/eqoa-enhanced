@@ -112,8 +112,11 @@ BUNDLED_MOD_FILES = [
     "wereoxxs_ui/wereoxxs_ui.lua",
 ]
 
+PERF_LAUNCHER = "Start EQOA (performance log).bat"
+TRACKED_LAUNCHER = Path(__file__).with_name("release-files") / PERF_LAUNCHER
+
 EXPECTED_ZIP_MEMBERS = [
-    "EQOA Enhanced.exe", "map-entities.json", "LICENSE", "NOTICE", "FrontiersForge-MIT.txt",
+    PERF_LAUNCHER, "EQOA Enhanced.exe", "map-entities.json", "LICENSE", "NOTICE", "FrontiersForge-MIT.txt",
     "SpaceMono-OFL.txt", "Native-Addon-Runtime-NOTICES.txt", "README.txt",
     "release-manifest.json", "mods/README.txt",
     *(f"mods/{rel}" for rel in BUNDLED_MOD_FILES),
@@ -252,6 +255,49 @@ class PlayerReleaseTests(unittest.TestCase):
         for row in sums:
             digest, name = row.split("  ")
             self.assertEqual(hashlib.sha256((self.output / name).read_bytes()).hexdigest(), digest)
+
+    def _rezip(self, directory, mutate):
+        """Rewrite the ZIP with mutate(payload), keeping manifest hashes and SHA256SUMS consistent."""
+        path = directory / "EQOA-Enhanced-0.1.0-Windows-x64.zip"
+        with zipfile.ZipFile(path) as archive:
+            payload = {name: archive.read(name) for name in archive.namelist()}
+        mutate(payload)
+        manifest = json.loads(payload["release-manifest.json"])
+        manifest["files"] = {n: hashlib.sha256(d).hexdigest() for n, d in payload.items()
+                             if n != "release-manifest.json"}
+        payload["release-manifest.json"] = json.dumps(manifest).encode()
+        with zipfile.ZipFile(path, "w") as archive:
+            for name, data in payload.items():
+                archive.writestr(name, data)
+        sums = directory / "SHA256SUMS"
+        names = [row.split("  ")[1] for row in sums.read_text().splitlines()]
+        sums.write_text("".join(f"{hashlib.sha256((directory / n).read_bytes()).hexdigest()}  {n}\n" for n in names))
+
+    def test_zip_carries_the_tracked_performance_launcher(self):
+        self.build()
+        data = TRACKED_LAUNCHER.read_bytes()
+        self.assertIn(b"\r\n", data)
+        self.assertNotIn(b"\n", data.replace(b"\r\n", b""))
+        self.assertIn(b"EQOA_PERF=1", data)
+        self.assertIn(b"%~dp0", data)
+        self.assertIn(b"%*", data)
+        self.assertIn(rb"%APPDATA%\eqoa-rs\eqoa.log", data)
+        with zipfile.ZipFile(self.output / "EQOA-Enhanced-0.1.0-Windows-x64.zip") as archive:
+            self.assertEqual(archive.read(PERF_LAUNCHER), data)
+        self.packager.verify_release(self.output)
+
+    def test_no_perf_launcher_flag_leaves_it_out_and_still_verifies(self):
+        self.build(perf_launcher=False)
+        with zipfile.ZipFile(self.output / "EQOA-Enhanced-0.1.0-Windows-x64.zip") as archive:
+            self.assertNotIn(PERF_LAUNCHER, archive.namelist())
+            self.assertNotIn(PERF_LAUNCHER, json.loads(archive.read("release-manifest.json"))["files"])
+        self.assertEqual(self.packager.verify_release(self.output)["sourceCommit"], self.commit)
+
+    def test_verification_rejects_a_tampered_performance_launcher(self):
+        self.build()
+        self._rezip(self.output, lambda p: p.__setitem__(PERF_LAUNCHER, b"@echo off\r\ndel /q *\r\n"))
+        with self.assertRaisesRegex(ValueError, "performance launcher"):
+            self.packager.verify_release(self.output)
 
     def test_missing_license_refuses_packaging(self):
         (self.root / "LICENSE").unlink()

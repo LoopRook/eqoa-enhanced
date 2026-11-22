@@ -12,3 +12,5 @@ mods/resources/map-entities.json -text
 # lightshadow::receivers_wgsl): their lines end \n on every checkout,
 # Windows (core.autocrlf) included.
 *.wgsl text eol=lf
+# Release-packaged helper files keep their exact bytes (hash-checked by build_player_release.py).
+tools/release-files/** -text
