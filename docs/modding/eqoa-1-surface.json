@@ -3494,6 +3494,7 @@
     },
     {
       "children": [
+        "eqoa.effects.Buff.description",
         "eqoa.effects.Buff.icon",
         "eqoa.effects.Buff.index",
         "eqoa.effects.Buff.name",
@@ -3504,6 +3505,14 @@
         "eqoa.effects.Buff.whose"
       ],
       "path": "eqoa.effects.Buff",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.Buff.description",
       "reason": null,
       "revision": 1,
       "round": 8,

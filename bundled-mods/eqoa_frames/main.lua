@@ -8,6 +8,9 @@
 
 local ui = eqoa.imgui
 
+-- ImGuiCond_FirstUseEver: the windows start side by side, and keep where the player drags them
+local FIRST_USE = 4
+
 local function has(path) return eqoa.capabilities.has(path) end
 
 -- "1:05", "12s" or "--" where the server keeps no end for an effect.
@@ -17,7 +20,22 @@ local function clock(seconds)
     return string.format("%ds", math.ceil(seconds))
 end
 
+-- What hovering an effect says: its name, what it does where the client knows (the description of an ability the
+-- player has with that name), the time left, and how to take it off where that is allowed.
+local function effect_tip(b)
+    local lines = { b.name }
+    if b.description and b.description ~= "" then
+        lines[#lines + 1] = b.description
+    else
+        lines[#lines + 1] = "(the game does not say what this one does)"
+    end
+    if b.time_left ~= nil then lines[#lines + 1] = "time left: " .. clock(b.time_left) end
+    if b.removable then lines[#lines + 1] = "click to take it off" end
+    return table.concat(lines, "\n")
+end
+
 local function effects_window()
+    ui.SetNextWindowPos(60, 60, FIRST_USE)
     if not ui.Begin("Effects") then ui.End() return end
     local buffs = has("eqoa.effects.buffs") and eqoa.effects.buffs() or nil
     if buffs then
@@ -29,7 +47,8 @@ local function effects_window()
                 local req, err = eqoa.actions.remove_effect(b.ref)
                 if not req then eqoa.log.write("info", "frames: " .. tostring(err and err.code)) end
             end
-            if b.removable then ui.SetTooltip("click to take it off") end
+            -- a tooltip only while the pointer is on this effect (SetTooltip draws at once, wherever it is called)
+            if ui.IsItemHovered() then ui.SetTooltip(effect_tip(b)) end
         end
     else
         -- no buff window from this server: the game's own strip has names and no times
@@ -55,6 +74,7 @@ local function cast_bar(who, cast)
 end
 
 local function cast_window(player, target)
+    ui.SetNextWindowPos(60, 240, FIRST_USE)
     if not ui.Begin("Casting") then ui.End() return end
     local mine = player and eqoa.casts.get(player.id) or nil
     local theirs = target and eqoa.casts.get(target.id) or nil
@@ -65,6 +85,7 @@ local function cast_window(player, target)
 end
 
 local function target_window(player, target)
+    ui.SetNextWindowPos(320, 60, FIRST_USE)
     if not ui.Begin("Target") then ui.End() return end
     if not target then ui.TextDisabled("no target") ui.End() return end
     local info = eqoa.target.info()
