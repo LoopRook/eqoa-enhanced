@@ -214,10 +214,10 @@ impl Bv {
         self.frame();
     }
     fn bind_k(&mut self) {
-        assert!(crate::fork_ext::bindpage::set_key(BV, "open", "u"));
+        assert!(crate::fork_ext::bindpage::set_key(BV, "open", "9"));
     }
     fn toggle(&mut self) {
-        self.key(winit::keyboard::Key::Character("u".into()));
+        self.key(winit::keyboard::Key::Character("9".into()));
     }
     fn open(&mut self) {
         self.bind_k();
@@ -322,7 +322,7 @@ fn round5b_off_by_default_loads_clean_has_an_unbound_controls_row_and_its_key_op
     // the row exists, and it is unbound: the game's keys are not changed
     assert_eq!(crate::fork_ext::bindpage::get_key(BV, "open"), Some(String::new()));
     assert_eq!(bv.eval::<Option<String>>("eqoa.binds.get('open')"), Some(String::new()));
-    bv.key(Key::Character("u".into()));
+    bv.key(Key::Character("9".into()));
     assert!(!bv.is_open(), "an unbound row opens nothing");
     // bound to K: the key opens and closes
     bv.bind_k();
@@ -343,7 +343,7 @@ fn round5b_off_by_default_loads_clean_has_an_unbound_controls_row_and_its_key_op
     assert!(!bv.is_open());
     bv.manager.queue(Command::Enable(BV.into(), false));
     bv.frames(2);
-    assert_eq!(crate::fork_ext::bindpage::dispatch_keypress("u"), None, "a disabled mod's key fires nothing");
+    assert_eq!(crate::fork_ext::bindpage::dispatch_keypress("9"), None, "a disabled mod's key fires nothing");
     let _ = crate::fork_ext::bindpage::set_key(BV, "open", "");
 }
 

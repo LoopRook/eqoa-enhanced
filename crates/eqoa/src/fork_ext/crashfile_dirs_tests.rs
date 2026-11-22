@@ -186,3 +186,24 @@ fn a_failed_move_still_keeps_old_reports_from_the_server_and_retries() {
     assert_eq!(migrate_legacy(&root), 0, "and then it is done");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Enhanced never uploads a crash report: upstream's POST to a report server
+/// is refused at its network boundary, so a listener standing in for that
+/// server is never connected to. Control (run by hand): with the hook line
+/// removed from `post_one` the same call connects and this test fails.
+#[test]
+fn a_crash_report_is_never_posted_to_a_report_server() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let answer = post_one(&base, "EQOA crash report
+panic: boom
+");
+    assert!(answer.is_err(), "the upload is refused: {answer:?}");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    match listener.accept() {
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+        other => panic!("a connection reached the report server: {other:?}"),
+    }
+    assert!(crate::fork_ext::report_no_upload::blocked());
+}

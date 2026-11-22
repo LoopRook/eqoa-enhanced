@@ -23,7 +23,7 @@
 //! server's to keep: a server that keeps any slot (go-eqoa-server does)
 //! needs no change for them.
 //!
-//! Stacked Spell Bars (Extended > UI > HUD, Jibwiz's ticket 1913, "move your
+//! Stacked Spell Bars (Extended > UI > HUD, a player's ticket 1913, "move your
 //! spellbars vertically, and nest them x2 evenly above the chat box stacked on
 //! top of each other. Scale them down about 5% and remove the pop up horizontal
 //! box on the current bar that tells you what the spell is. This should be for
@@ -37,7 +37,42 @@
 //! slot uses it, a right click turns its auto (`stacked_at`), and each slot
 //! of both can be given a key on the Controls page (`binds::bar_slot`,
 //! `slot_entry`). The arrows and E still walk and use the bar up, its
-//! selection outlined.
+//! selection outlined: stacked, the bars lie across, so left and right walk
+//! along the bar up and up and down go to the bar above and below, round the
+//! carousel's order (`HudMenus::key`; a player's petition 2457: "since the
+//! bars are now horizontal, it would make much more sense that left/right on
+//! the dpad would cycle through the same bar's 5 icons and up/down would go
+//! to the next"), the d-pad's and the arrows' alike. Played with a controller
+//! (`HudMenus::named`: the last input no key, mouse or finger), the name of
+//! what the selection holds shows over the bars while the bar is lit, as the
+//! carousel's title bar shows it (`draw_name`; the same petition: "can we
+//! still see the name of the spell/item the cursor is over when using the
+//! dpad?"); on the keyboard and the mouse, none, as ticket 1913 asked.
+//!
+//! With Ability Bars at 3 or 4 (the server owner, 2026-11-18: "When players
+//! turn on 4 they need to be able to stack 4 spell bars, or 2 columns of 2,
+//! side by side"), bars 3 and 4 (menus 4 and 5) are stacked too, as Spell Bar
+//! Layout has them (`Layout`, `stacked_grid`): Stacked, one column, bar 1 on
+//! top and the last bar on the chat box; 2 Columns, bars 1 and 2 at the left
+//! and bars 3 and 4 beside them, bar 3 level with bar 1. Their slots take
+//! keys as the first two bars' do (`BAR_MENUS`), and the whole block is one
+//! piece to move (`Piece::SpellBars`): every cell's frame is drawn, at Spell
+//! Bar Opacity 0 unseen, so the piece is the whole block wherever its
+//! abilities are.
+//!
+//! The Utility Bars (the server owner, 2026-11-18: "the player also needs the
+//! utility bars in this fashion. They can go in the upper left, side by side
+//! vertical, or down below and the player decides. They need to be able to
+//! free move these in freemove mode like the others but otherwise work the
+//! same way"): while the spell bars are stacked the carousel is not drawn, and
+//! with it went the item quick slots (menu 2) and the weapon sets (menu 3).
+//! They are drawn as bars of the stacked bars' cells (`draw_utility`), as
+//! Utility Bar Layout has them (`UtilityLayout`): Upper Left, a column a bar
+//! side by side; Below, a row a bar on the chat box, the spell bars standing
+//! on them (`utility_height`). A piece of their own to move
+//! (`Piece::UtilityBars`); a click on a cell uses it (`point_utility`), and
+//! each slot can be given a key on the Controls page (`ITEMS_BAR`,
+//! `SETS_BAR`, `key_menu`), stacked or not.
 
 use crate::gear::Gear;
 use crate::ui::Vui;
@@ -84,6 +119,9 @@ const GEAR: usize = 3;
 const ORDER: [usize; MENUS] = [0, 1, 4, 5, 2, 3];
 /// The most bars the client shows (the Extended page's Ability Bars).
 pub const MAX_BARS: i32 = 4;
+/// Each ability bar's menu, by the bar (from 0): the game's two, then the
+/// client's bars 3 and 4.
+pub const BAR_MENUS: [usize; MAX_BARS as usize] = [0, 1, 4, 5];
 
 /// The first slot of the bar menu `k` shows, five from it: menu 1's 5, and
 /// the client's bars 3 and 4 (menus 4 and 5) 10 and 15 (menu 0 is built as
@@ -145,6 +183,145 @@ const CELL: [i32; 2] = [36, 31];
 /// How far the stacked bars stand above the chat box's window top, frame pixels:
 /// its panel is drawn 10 inside it, so they stand 2 above the panel.
 const STACKED_GAP: i32 = -8;
+
+/// The space between the stacked bars' two columns (Spell Bar Layout's 2
+/// Columns), frame pixels before `STACKED_SCALE`.
+const COLUMN_GAP: i32 = 6;
+
+/// The keys' bars (`binds::bar_slot`) past the ability bars: the item quick
+/// slots' (`items_slot1`..4) and the weapon sets' (`sets_slot1`..5).
+pub const ITEMS_BAR: usize = 4;
+pub const SETS_BAR: usize = 5;
+
+/// The menu a key's bar reads (`binds::bar_slot`): the ability bars'
+/// (`BAR_MENUS`), then the items' and the weapon sets'.
+pub fn key_menu(bar: usize) -> Option<usize> {
+    match bar {
+        b if b < BAR_MENUS.len() => Some(BAR_MENUS[b]),
+        ITEMS_BAR => Some(ITEMS),
+        SETS_BAR => Some(GEAR),
+        _ => None,
+    }
+}
+
+/// Utility Bar Layout (Extended > HUD Layout; the server owner, 2026-11-18:
+/// "the player also needs the utility bars in this fashion. They can go in
+/// the upper left, side by side vertical, or down below and the player
+/// decides"): where the Utility Bars (the item quick slots, and the weapon
+/// sets on a server that keeps them) stand while the spell bars are stacked
+/// (`HudMenus::draw_utility`), each a piece of its own to move.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UtilityLayout {
+    /// a column a bar, side by side, at the screen's upper left
+    /// (`UPPER_LEFT_AT`, clear of the character's frame, the effects and
+    /// the group's bars)
+    #[default]
+    UpperLeft,
+    /// a row a bar, the items over the sets, standing on the chat box with
+    /// the spell bars standing on them
+    Below,
+}
+
+impl UtilityLayout {
+    /// The Extended row's word.
+    pub fn name(self) -> &'static str {
+        match self {
+            UtilityLayout::UpperLeft => "Upper Left",
+            UtilityLayout::Below => "Below",
+        }
+    }
+
+    /// The other layout (the row turned either way).
+    pub fn other(self) -> UtilityLayout {
+        match self {
+            UtilityLayout::UpperLeft => UtilityLayout::Below,
+            UtilityLayout::Below => UtilityLayout::UpperLeft,
+        }
+    }
+
+    /// As `client.opt` keeps it (`settings`).
+    pub fn opt(self) -> &'static str {
+        match self {
+            UtilityLayout::UpperLeft => "upper_left",
+            UtilityLayout::Below => "below",
+        }
+    }
+
+    /// From `client.opt`'s word.
+    pub fn from_opt(s: &str) -> Option<UtilityLayout> {
+        match s {
+            "upper_left" => Some(UtilityLayout::UpperLeft),
+            "below" => Some(UtilityLayout::Below),
+            _ => None,
+        }
+    }
+}
+
+/// Upper Left's top left, frame pixels (anchored at the screen's left and
+/// top): right of the group's bars (from x 20, about 180 wide) and under the
+/// effects' strip and the buff window (from (143, 15)).
+pub const UPPER_LEFT_AT: [i32; 2] = [206, 120];
+
+/// Spell Bar Layout (Extended > HUD Layout; the server owner, 2026-11-18):
+/// how the stacked bars stand once Ability Bars shows more than two
+/// (`stacked_grid`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Layout {
+    /// one column: bar 1 on top, the last bar on the chat box
+    #[default]
+    Stacked,
+    /// columns of two side by side: bars 1 and 2 at the left, bars 3 and 4
+    /// at their right, bar 3 level with bar 1
+    Columns,
+}
+
+impl Layout {
+    /// The Extended row's word.
+    pub fn name(self) -> &'static str {
+        match self {
+            Layout::Stacked => "Stacked",
+            Layout::Columns => "2 Columns",
+        }
+    }
+
+    /// The other layout (the row turned either way).
+    pub fn other(self) -> Layout {
+        match self {
+            Layout::Stacked => Layout::Columns,
+            Layout::Columns => Layout::Stacked,
+        }
+    }
+
+    /// As `client.opt` keeps it (`settings`).
+    pub fn opt(self) -> &'static str {
+        match self {
+            Layout::Stacked => "stacked",
+            Layout::Columns => "columns",
+        }
+    }
+
+    /// From `client.opt`'s word.
+    pub fn from_opt(s: &str) -> Option<Layout> {
+        match s {
+            "stacked" => Some(Layout::Stacked),
+            "columns" => Some(Layout::Columns),
+            _ => None,
+        }
+    }
+}
+
+/// Where each bar shown stands in the stacked block: (its menu, its column,
+/// its row in the column from the top), and how many rows a column holds.
+/// Stacked: one column of every bar; 2 Columns: columns of two, bar n in
+/// column n / 2 (one bar or two stay one column).
+fn stacked_grid(bars: Bars, layout: Layout) -> (Vec<(usize, usize, usize)>, usize) {
+    let n = bars.abilities.clamp(1, MAX_BARS) as usize;
+    let per = match layout {
+        Layout::Stacked => n,
+        Layout::Columns => n.min(2),
+    };
+    (BAR_MENUS[..n].iter().enumerate().map(|(b, &menu)| (menu, b / per, b % per)).collect(), per)
+}
 
 /// `VIWndHUDMenu`
 pub struct HudMenu {
@@ -345,6 +522,13 @@ pub struct HudMenus {
     /// The cells the stacked bars last drew: (menu, entry, rectangle x0, y0,
     /// x1, y1 in the chat box's frame points).
     stacked_hits: Vec<(usize, i32, [i32; 4])>,
+    /// The cells the Utility Bars last drew, as `stacked_hits` (in their
+    /// own place, `draw_utility`).
+    utility_hits: Vec<(usize, i32, [i32; 4])>,
+    /// The stacked bars are played with a controller (the last input no key,
+    /// mouse or finger: play's): the selection's name is drawn over them
+    /// (`draw_name`).
+    pub named: bool,
 }
 
 impl Default for HudMenus {
@@ -361,6 +545,8 @@ impl Default for HudMenus {
             auto: Vec::new(),
             stacked: false,
             stacked_hits: Vec::new(),
+            utility_hits: Vec::new(),
+            named: false,
         }
     }
 }
@@ -467,31 +653,43 @@ impl HudMenus {
         self.menus[k].draw(vui, r, &def, now, name, live, &self.auto);
     }
 
-    /// Stacked Spell Bars (the module's doc): the first bar's slots over the
-    /// second's (the second with the expansion's second bar), each a slot's
-    /// frame scaled `STACKED_SCALE` with its icon, lock badge and auto mark,
-    /// the rows standing on `chat_top` (the chat box's top at its full
-    /// height, frame points, as it is drawn) from its left at `left`; the
-    /// menu up's selection outlined; no title bar. The cells are noted for
-    /// the pointer (`stacked_at`).
-    pub fn draw_stacked(&mut self, vui: &Vui, r: &mut dyn Raster, chat_top: i32, left: i32, bars: Bars) {
+    /// Stacked Spell Bars (the module's doc): every bar shown (the second
+    /// with the expansion's second bar, the third and fourth with Ability
+    /// Bars) as a row of its slots, laid out as `layout` says
+    /// (`stacked_grid`), each a slot's frame scaled `STACKED_SCALE` with its
+    /// icon, lock badge and auto mark, the lowest rows standing on `chat_top`
+    /// (the chat box's top at its full height, frame points, as it is drawn)
+    /// from its left at `left`, a second column as far right of the first as
+    /// its widest bar and `COLUMN_GAP`; the menu up's selection outlined; no
+    /// title bar. The cells are noted for the pointer (`stacked_at`).
+    pub fn draw_stacked(&mut self, vui: &Vui, r: &mut dyn Raster, chat_top: i32, left: i32, bars: Bars, layout: Layout) {
         self.stacked_hits.clear();
         let frame = vui.entry(29);
         let s = |v: i32| (v as f32 * STACKED_SCALE).round() as i32;
         let (cw, ch) = (s(CELL[0]), s(CELL[1]));
-        let rows: Vec<usize> = if bars.abilities >= 2 { vec![0, 1] } else { vec![0] };
+        let (grid, per) = stacked_grid(bars, layout);
+        // each column from the one before it: as wide as its widest bar (the
+        // first bar's packed 252-255 make it up to nine), then the gap
+        let width = |menu: usize| (self.defs[menu].count.max(0) as f32 * CELL[0] as f32 * STACKED_SCALE).round() as i32;
+        let columns = grid.iter().map(|g| g.1).max().unwrap_or(0) + 1;
+        let column_x: Vec<i32> = (0..columns)
+            .scan(left, |x, c| {
+                let at = *x;
+                *x += grid.iter().filter(|g| g.1 == c).map(|g| width(g.0)).max().unwrap_or(0) + s(COLUMN_GAP);
+                Some(at)
+            })
+            .collect();
         let up = self.up();
-        // Spell Bar Opacity (ticket 1953): the cells' frames, not the icons
+        // Spell Bar Opacity (ticket 1953): the cells' frames, not the icons;
+        // drawn at 0 too, unseen, so the piece moved is the whole block
         let opacity = frame_alpha(crate::settings::client().spell_bar_opacity);
-        for (k, &menu) in rows.iter().enumerate() {
-            let y = chat_top - STACKED_GAP - ch * (rows.len() - k) as i32;
+        for &(menu, column, row) in &grid {
+            let y = chat_top - STACKED_GAP - ch * (per - row) as i32;
             let def = &self.defs[menu];
             for n in 0..def.count.max(0) {
-                let x = left + (n as f32 * CELL[0] as f32 * STACKED_SCALE).round() as i32;
+                let x = column_x[column] + (n as f32 * CELL[0] as f32 * STACKED_SCALE).round() as i32;
                 let at = [x, y];
-                if opacity > 0.0 {
-                    r.stretch_blit(vui.entry_id(&frame), 0, at, [cw, ch], frame.uv0, frame.uv1, 3, opacity);
-                }
+                r.stretch_blit(vui.entry_id(&frame), 0, at, [cw, ch], frame.uv0, frame.uv1, 3, opacity);
                 let e = def.entries.get(n as usize).copied().unwrap_or_default();
                 // the icon where the list puts it in its frame, scaled
                 let icon = [x + s(7), y + s(2)];
@@ -513,6 +711,44 @@ impl HudMenus {
         }
     }
 
+    /// The name of what the selection of the menu up holds (`name`: an
+    /// ability's, an item's, a set's), over the stacked bars (`utility`: the
+    /// Utility Bars) where the menu up is one of theirs, as they were last
+    /// drawn: centred over the selected cell, a line above the block's top,
+    /// with a shadow; only while the bars are played with a controller
+    /// (`named`) and the menu is lit by a key (20 s, as the carousel's title
+    /// bar shows it bright). Draw it in the bars' own place (their piece),
+    /// not counted in it (`hudlayout::seal`), and kept within `screen` (its
+    /// left and right in the piece's frame pixels, `hudlayout::screen_x`):
+    /// against the screen's edge the name moves, the bars do not (petition
+    /// 2547).
+    pub fn draw_name(&self, vui: &Vui, r: &mut dyn Raster, now: i64, utility: bool, screen: Option<[i32; 2]>, name: &dyn Fn(u32, i64) -> Vec<u16>) {
+        let up = self.up();
+        let m = &self.menus[up];
+        if !self.named || m.lit <= 0 || m.time < now {
+            return;
+        }
+        let hits = if utility { &self.utility_hits } else { &self.stacked_hits };
+        let Some(&(_, _, c)) = hits.iter().find(|&&(menu, n, _)| menu == up && n == m.sel) else { return };
+        let e = self.defs[up].entries.get(m.sel.max(0) as usize).copied().unwrap_or_default();
+        if e.msg == 0 || e.id < 0 {
+            return;
+        }
+        let s = name(e.msg, e.id);
+        if s.is_empty() {
+            return;
+        }
+        let top = hits.iter().map(|h| h.2[1]).min().unwrap_or(c[1]);
+        let left = hits.iter().map(|h| h.2[0]).min().unwrap_or(c[0]);
+        let half = r.string_width(&s) / 2;
+        let mut x = ((c[0] + c[2]) / 2).max(left + half);
+        if let Some([lo, hi]) = screen {
+            x = x.min(hi - half).max(lo + half);
+        }
+        let y = top - r.point_size() / 2 - 4;
+        vui.draw_centered_string_ex(r, &s, x, y, [1.0, 1.0, 1.0, 1.0], 0, true);
+    }
+
     /// The stacked bars' cell at frame point `p` (in the chat box's place, as
     /// `draw_stacked` drew it): its menu and entry.
     pub fn stacked_at(&self, p: [f32; 2]) -> Option<(usize, i32)> {
@@ -520,12 +756,113 @@ impl HudMenus {
         self.stacked_hits.iter().find(|(_, _, c)| (c[0]..c[2]).contains(&x) && (c[1]..c[3]).contains(&y)).map(|&(m, n, _)| (m, n))
     }
 
-    /// The entry an ability bar's slot shows (`binds::bar_slot`: bar 0 is
-    /// menu 0, bar 1 menu 1), when it holds something to use.
+    /// The Utility Bars' cells (the module's doc, `UtilityLayout`): the item
+    /// quick slots' bar, and the weapon sets' with them (`bars.gear`), each
+    /// cell a stacked bar's size. Upper Left: a column a bar from `at` (their
+    /// top left), side by side `COLUMN_GAP` apart; Below: a row a bar, the
+    /// items over the sets, the lower standing on `at` (their bottom left, the
+    /// chat box's top as the stacked bars stand on it). (menu, entry,
+    /// rectangle), in frame points.
+    fn utility_cells(&self, bars: Bars, layout: UtilityLayout, at: [i32; 2]) -> Vec<(usize, i32, [i32; 4])> {
+        let s = |v: i32| (v as f32 * STACKED_SCALE).round() as i32;
+        let (cw, ch) = (s(CELL[0]), s(CELL[1]));
+        let menus: Vec<usize> = if bars.gear { vec![ITEMS, GEAR] } else { vec![ITEMS] };
+        let mut cells = Vec::new();
+        for (k, &menu) in menus.iter().enumerate() {
+            for n in 0..self.defs[menu].count.max(0) {
+                let (x, y) = match layout {
+                    UtilityLayout::UpperLeft => (at[0] + k as i32 * (cw + s(COLUMN_GAP)), at[1] + n * ch),
+                    UtilityLayout::Below => (at[0] + (n as f32 * CELL[0] as f32 * STACKED_SCALE).round() as i32, at[1] - STACKED_GAP - ch * (menus.len() - k) as i32),
+                };
+                cells.push((menu, n, [x, y, x + cw, y + ch]));
+            }
+        }
+        cells
+    }
+
+    /// How far the Utility Bars below lift the stacked bars standing on them
+    /// (Below's rows and a gap; nothing for Upper Left), frame pixels.
+    pub fn utility_height(bars: Bars, layout: UtilityLayout) -> i32 {
+        let s = |v: i32| (v as f32 * STACKED_SCALE).round() as i32;
+        match layout {
+            UtilityLayout::UpperLeft => 0,
+            UtilityLayout::Below => s(CELL[1]) * (1 + bars.gear as i32) + s(COLUMN_GAP),
+        }
+    }
+
+    /// The Utility Bars (`utility_cells`): each cell a slot's frame at Spell
+    /// Bar Opacity, an item slot's icon the game's for that slot (the
+    /// carousel's stack draws the same, `SLOT_ICONS`; an item's own picture
+    /// is the inventory's banner, not a square), whole while it holds an item
+    /// and faint while empty; a set's badge and icon as the live client's
+    /// `DrawGear` has them; the menu up's selection outlined; no name. The
+    /// cells are noted for the pointer (`utility_at`).
+    pub fn draw_utility(&mut self, vui: &Vui, r: &mut dyn Raster, bars: Bars, layout: UtilityLayout, at: [i32; 2]) {
+        let cells = self.utility_cells(bars, layout, at);
+        let frame = vui.entry(29);
+        let s = |v: i32| (v as f32 * STACKED_SCALE).round() as i32;
+        let opacity = frame_alpha(crate::settings::client().spell_bar_opacity);
+        let icons = if self.live { SLOT_ICONS_LIVE } else { SLOT_ICONS };
+        let up = self.up();
+        for &(menu, n, c) in &cells {
+            r.stretch_blit(vui.entry_id(&frame), 0, [c[0], c[1]], [c[2] - c[0], c[3] - c[1]], frame.uv0, frame.uv1, 3, opacity);
+            let e = self.defs[menu].entries.get(n as usize).copied().unwrap_or_default();
+            let icon = [c[0] + s(7), c[1] + s(2)];
+            if menu == ITEMS {
+                let id = icons[(n.max(0) as usize).min(3)];
+                let size = vui.entry(id).uv1;
+                let size = [s(size[0]), s(size[1])];
+                let centre = [c[0] + (c[2] - c[0] - size[0]) / 2, c[1] + (c[3] - c[1] - size[1]) / 2];
+                vui.blit_ex_size(r, id, centre, size, 3, if e.msg != 0 { 1.0 } else { 0.35 }, 0);
+            } else {
+                for id in [e.x08, e.icon2] {
+                    if id != -1 {
+                        r.stretch_blit(id as u32, 0, icon, [s(22), s(22)], [0, 0], [22, 22], 3, 1.0);
+                    }
+                }
+            }
+            if menu == up && n == self.menus[menu].sel {
+                outline(r, [icon[0] - 2, icon[1] - 2, icon[0] + s(22) + 1, icon[1] + s(22) + 1], [1.0, 0.85, 0.3, 1.0]);
+            }
+        }
+        self.utility_hits = cells;
+    }
+
+    /// The Utility Bars' cell at frame point `p` (in their own place, as
+    /// `draw_utility` drew them): its menu and entry.
+    pub fn utility_at(&self, p: [f32; 2]) -> Option<(usize, i32)> {
+        let (x, y) = (p[0] as i32, p[1] as i32);
+        self.utility_hits.iter().find(|(_, _, c)| (c[0]..c[2]).contains(&x) && (c[1]..c[3]).contains(&y)).map(|&(m, n, _)| (m, n))
+    }
+
+    /// A pointer on the Utility Bars at `p` (their place): a cell makes its
+    /// bar the one up and its entry the selection, and is used, as a stacked
+    /// bar's cell is (`point`).
+    pub fn point_utility(&mut self, p: [f32; 2]) -> Option<Key> {
+        if !self.stacked {
+            return None;
+        }
+        let (menu, n) = self.utility_at(p)?;
+        self.sel = menu as i32;
+        self.menus[menu].sel = n;
+        Some(Key::Use)
+    }
+
+    /// The Utility Bars are not drawn (the stacked bars are not): their
+    /// cells forgotten, so no pointer finds them.
+    pub fn hide_utility(&mut self) {
+        self.utility_hits.clear();
+    }
+
+    /// The entry a key's bar's slot shows (`binds::bar_slot`, `key_menu`: the
+    /// ability bars, bar 0 menu 0, bar 1 menu 1, bars 2 and 3 menus 4 and 5;
+    /// then the item quick slots and the weapon sets), when it holds something
+    /// to use.
     pub fn slot_entry(&self, bar: usize, slot: usize) -> Option<(u32, i64)> {
-        let menu = [0, 1].get(bar).copied()?;
+        let menu = key_menu(bar)?;
         let e = self.defs[menu].entries.get(slot).copied()?;
-        (e.msg != 0 && e.id >= 0 && e.icon2 != -1).then_some((e.msg, e.id))
+        // an item's entry has no icon of its own (the stack draws the slot's)
+        (e.msg != 0 && e.id >= 0 && (e.icon2 != -1 || menu == ITEMS)).then_some((e.msg, e.id))
     }
 
     /// A pointer at frame point `p`, in the menu's own place (before a wide
@@ -593,8 +930,12 @@ impl HudMenus {
     /// sets). Returns what was used:
     /// (message, id). `switch`: left and right go round the menus
     /// (`VIWndGame::Interact` and `Attack`, play's alone); without it they
-    /// only light the menu up.
+    /// only light the menu up. Stacked (`stacked`, the module's doc) the bars
+    /// lie across: left and right walk the bar up as up and down walk the
+    /// carousel's, and up and down go round the menus (up the one before, the
+    /// bar above), or only light it, as left and right do the carousel's.
     pub fn key(&mut self, key: Key, now: i64, bars: Bars, switch: bool, cues: &mut Vec<crate::sound::Cue>) -> Option<(u32, i64)> {
+        let key = if self.stacked { across(key) } else { key };
         let k = self.up();
         let def = self.defs[k].clone();
         let m = &mut self.menus[k];
@@ -648,6 +989,20 @@ impl HudMenus {
         m.lit = 1;
         m.alpha = 0.3;
         m.time = now + 20000;
+    }
+}
+
+/// A key on the stacked bars, which lie across (`HudMenus::key`; petition
+/// 2457), as the carousel's column takes it: left and right walk the bar
+/// (the column's up and down), up and down go round the bars (its left and
+/// right).
+fn across(key: Key) -> Key {
+    match key {
+        Key::Left => Key::Up,
+        Key::Right => Key::Down,
+        Key::Up => Key::Left,
+        Key::Down => Key::Right,
+        Key::Use => Key::Use,
     }
 }
 
@@ -762,7 +1117,7 @@ mod tests {
         assert!(!r.0.is_empty(), "the control: the carousel's title draws the name");
         let mut r = Rec(Vec::new(), Vec::new());
         h.stacked = true;
-        h.draw_stacked(&vui, &mut r, 320, 216, DISC);
+        h.draw_stacked(&vui, &mut r, 320, 216, DISC, Layout::Stacked);
         assert!(r.0.is_empty(), "no name popped up: {:?}", r.0);
         assert_eq!(h.stacked_hits.len(), 10);
         let hits = h.stacked_hits.clone();
@@ -782,8 +1137,274 @@ mod tests {
         assert_eq!(h.ability_at(mid(cell(1, 0))), None, "an empty slot");
         assert_eq!(h.point([0.0, 0.0]), None);
         assert_eq!((h.slot_entry(0, 1), h.slot_entry(1, 4), h.slot_entry(1, 0), h.slot_entry(2, 0)), (Some((0x8060000, 12)), Some((0x8060000, 25)), None, None));
-        h.draw_stacked(&vui, &mut r, 320, 216, Bars { abilities: 1, gear: false });
+        h.draw_stacked(&vui, &mut r, 320, 216, Bars { abilities: 1, gear: false }, Layout::Stacked);
         assert_eq!(h.stacked_hits.len(), 5, "one bar, one row");
+        h.draw_stacked(&vui, &mut r, 320, 216, DISC, Layout::Columns);
+        assert_eq!(h.stacked_hits, hits, "two bars: 2 Columns is one column of two, as Stacked");
+    }
+
+    /// Petition 2457: on the stacked bars, which lie across, left and right
+    /// walk the bar up (round its five) and up and down go to the bar above
+    /// and below, without the switch only lighting it; and played with a
+    /// controller (`named`) the selection's name is drawn over the bars, at
+    /// the selected cell, while the bar is lit, none past its 20 s or with a
+    /// key or the mouse last. The controls: the carousel (not stacked) walks
+    /// up and down and switches with left and right, as the game's.
+    #[test]
+    fn stacked_bars_walk_across_and_name_the_selection_for_a_controller() {
+        struct Rec(Vec<([i32; 2], Vec<u16>)>);
+        impl Raster for Rec {
+            fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+            fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+            fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
+            fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
+            fn draw_string(&mut self, at: [i32; 2], _: [f32; 4], s: &[u16]) {
+                self.0.push((at, s.to_vec()));
+            }
+            fn draw_centered_string(&mut self, at: [i32; 2], _: [f32; 4], s: &[u16], _: u32) {
+                self.0.push((at, s.to_vec()));
+            }
+            fn string_width(&self, s: &[u16]) -> i32 {
+                s.len() as i32 * 8
+            }
+            fn point_size(&self) -> i32 {
+                16
+            }
+            fn viewport(&self) -> [i32; 4] {
+                [0, 0, 640, 448]
+            }
+            fn set_viewport(&mut self, _: [i32; 4]) {}
+        }
+        let walk = |stacked: bool, keys: &[Key], switch: bool| {
+            let mut h = HudMenus { stacked, ..Default::default() };
+            for &k in keys {
+                h.key(k, 0, DISC, switch, &mut Vec::new());
+            }
+            (h.sel, h.menus[0].sel, h.menus[1].sel)
+        };
+        // stacked: along the bar, then down to bar 2 (its own selection kept)
+        assert_eq!(walk(true, &[Key::Right, Key::Right], true), (0, 2, 0), "right walks the bar");
+        assert_eq!(walk(true, &[Key::Left], true), (0, 4, 0), "left from the first goes round to the fifth");
+        assert_eq!(walk(true, &[Key::Down], true), (1, 0, 0), "down: the bar below");
+        assert_eq!(walk(true, &[Key::Down, Key::Up], true), (0, 0, 0), "up: the bar above");
+        assert_eq!(walk(true, &[Key::Down, Key::Right], true), (1, 0, 1), "along bar 2");
+        assert_eq!(walk(true, &[Key::Down, Key::Up], false), (0, 0, 0), "without the switch up and down only light");
+        assert_eq!(walk(true, &[Key::Right], false), (0, 1, 0), "and left and right still walk");
+        // the controls: the carousel, the game's keys
+        assert_eq!(walk(false, &[Key::Down, Key::Down], true), (0, 2, 0), "the carousel: down walks");
+        assert_eq!(walk(false, &[Key::Right], true), (1, 0, 0), "the carousel: right switches");
+        // the name, over the bars, at the selected cell
+        let vui = crate::pointer::testing::vui();
+        let ab = |id: i64| Entry { icon2: 5, x08: -1, msg: 0x8060000, id };
+        let named_in = |pad: bool, at: i64, screen: Option<[i32; 2]>| {
+            let mut h = HudMenus { stacked: true, named: pad, ..Default::default() };
+            h.defs[0] = MenuDef { count: 5, entries: vec![ab(11), ab(12), ab(13), Entry::default(), Entry::default()] };
+            h.defs[1] = MenuDef { count: 5, entries: vec![ab(21), Entry::default(), Entry::default(), Entry::default(), Entry::default()] };
+            h.key(Key::Right, 100, DISC, true, &mut Vec::new());
+            let mut r = Rec(Vec::new());
+            h.draw_stacked(&vui, &mut r, 320, 216, DISC, Layout::Stacked);
+            assert!(r.0.is_empty(), "the bars draw no name themselves");
+            let name = |msg: u32, id: i64| crate::ui::wide(&format!("{msg:x} {id}"));
+            h.draw_name(&vui, &mut r, at, false, screen, &name);
+            let cell = h.stacked_hits.iter().find(|c| c.0 == 0 && c.1 == 1).unwrap().2;
+            let top = h.stacked_hits.iter().map(|c| c.2[1]).min().unwrap();
+            (r.0, cell, top)
+        };
+        let named = |pad: bool, at: i64| named_in(pad, at, None);
+        let (drawn, cell, top) = named(true, 5000);
+        assert_eq!(drawn.len(), 2, "the name and its shadow: {drawn:?}");
+        let (at, s) = &drawn[1];
+        assert_eq!(String::from_utf16_lossy(s), "8060000 12", "the second slot's ability");
+        assert!(at[1] < top && at[0] >= cell[0] && at[0] <= cell[2], "over the bars at the cell: {at:?} {cell:?} top {top}");
+        assert!(named(true, 100 + 20001).0.is_empty(), "past the bar's 20 s lit: none");
+        assert!(named(false, 5000).0.is_empty(), "a key or the mouse last: none (ticket 1913)");
+        // petition 2547: the bars against the screen's right edge, the name
+        // (the piece does not count it, so the bars stay) kept on the screen
+        let half = "8060000 12".len() as i32 * 8 / 2;
+        let mid = (cell[0] + cell[2]) / 2;
+        let edge = mid + 10;
+        let (drawn, _, _) = named_in(true, 5000, Some([0, edge]));
+        assert_eq!(drawn[1].0[0], edge - half, "pulled in to end at the screen's edge: {drawn:?}");
+        let (drawn, _, _) = named_in(true, 5000, Some([0, 4000]));
+        assert_eq!(drawn[1].0[0], mid, "the control: room on the screen, over the cell");
+    }
+
+    /// The server owner's "stack 4 spell bars, or 2 columns of 2, side by
+    /// side" (2026-11-18): with four bars, Stacked is four rows of five, bar
+    /// 1 on top and bar 4 on the chat box, all from its left; 2 Columns is
+    /// bars 1 and 2 at the left and bars 3 and 4 to their right past the gap,
+    /// bar 3 level with bar 1, the lower rows on the chat box. A click on a
+    /// third or fourth bar's cell makes that bar the one up and uses it; their
+    /// slots' keys find their entries (`slot_entry`); three bars in columns
+    /// leave bar 3 beside bar 1. Every cell's frame is drawn, at Spell Bar
+    /// Opacity 0 too (unseen), so the moved piece is the whole block.
+    #[test]
+    fn four_bars_stack_or_stand_in_two_columns() {
+        struct Rec(Vec<([i32; 2], [i32; 2], f32)>);
+        impl Raster for Rec {
+            fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+            fn stretch_blit(&mut self, _: u32, _: u32, at: [i32; 2], size: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, alpha: f32) {
+                self.0.push((at, size, alpha));
+            }
+            fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
+            fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
+            fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) {}
+            fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16], _: u32) {}
+            fn string_width(&self, s: &[u16]) -> i32 {
+                s.len() as i32 * 8
+            }
+            fn point_size(&self) -> i32 {
+                16
+            }
+            fn viewport(&self) -> [i32; 4] {
+                [0, 0, 640, 448]
+            }
+            fn set_viewport(&mut self, _: [i32; 4]) {}
+        }
+        crate::settings::testing::reset(false);
+        let vui = crate::pointer::testing::vui();
+        let mut h = HudMenus::default();
+        let ab = |id: i64| Entry { icon2: 5, x08: -1, msg: 0x8060000, id };
+        let bar = |first: i64| MenuDef { count: 5, entries: (0..5).map(|n| if n == 2 { Entry::default() } else { ab(first + n) }).collect() };
+        for (k, &menu) in BAR_MENUS.iter().enumerate() {
+            h.defs[menu] = bar(10 * (k as i64 + 1));
+        }
+        h.stacked = true;
+        let four = Bars { abilities: 4, gear: false };
+        let s = |v: i32| (v as f32 * STACKED_SCALE).round() as i32;
+        let (cw, ch) = (s(CELL[0]), s(CELL[1]));
+        let bottom = 320 - STACKED_GAP;
+
+        let mut r = Rec(Vec::new());
+        h.draw_stacked(&vui, &mut r, 320, 216, four, Layout::Stacked);
+        assert_eq!(h.stacked_hits.len(), 20, "four bars of five");
+        let hits = h.stacked_hits.clone();
+        let cell = |hits: &[(usize, i32, [i32; 4])], m: usize, n: i32| hits.iter().find(|c| c.0 == m && c.1 == n).unwrap().2;
+        for (k, &menu) in BAR_MENUS.iter().enumerate() {
+            let c = cell(&hits, menu, 0);
+            assert_eq!([c[0], c[1]], [216, bottom - ch * (4 - k as i32)], "bar {} in its row from the chat box's left", k + 1);
+        }
+        assert_eq!(cell(&hits, 5, 4)[3], bottom, "bar 4 on the chat box");
+        assert_eq!(r.0.iter().filter(|&&(_, size, _)| size == [cw, ch]).count(), 20, "every cell's frame");
+
+        let mut r = Rec(Vec::new());
+        h.draw_stacked(&vui, &mut r, 320, 216, four, Layout::Columns);
+        assert_eq!(h.stacked_hits.len(), 20);
+        let hits = h.stacked_hits.clone();
+        let right = 216 + (5.0 * CELL[0] as f32 * STACKED_SCALE).round() as i32 + s(COLUMN_GAP);
+        let at = |m: usize| {
+            let c = cell(&hits, m, 0);
+            [c[0], c[1]]
+        };
+        assert_eq!((at(0), at(1)), ([216, bottom - 2 * ch], [216, bottom - ch]), "bars 1 and 2 at the left");
+        assert_eq!((at(4), at(5)), ([right, bottom - 2 * ch], [right, bottom - ch]), "bars 3 and 4 beside them");
+        assert!(cell(&hits, 0, 4)[2] < right, "the columns apart");
+        let mid = |c: [i32; 4]| [(c[0] + c[2]) as f32 / 2.0, (c[1] + c[3]) as f32 / 2.0];
+        assert_eq!(h.point(mid(cell(&hits, 5, 3))), Some(Key::Use));
+        assert_eq!((h.sel, h.menus[5].sel), (5, 3), "bar 4 up, its fourth selected");
+        assert_eq!(h.key(Key::Use, 0, four, false, &mut Vec::new()), Some((0x8060000, 43)));
+        assert_eq!(h.ability_at(mid(cell(&hits, 4, 1))), Some(31));
+        assert_eq!((h.slot_entry(2, 0), h.slot_entry(3, 4), h.slot_entry(3, 2), h.slot_entry(6, 0)), (Some((0x8060000, 30)), Some((0x8060000, 44)), None, None));
+
+        // three bars in columns: bar 3 beside bar 1, nothing beside bar 2
+        h.draw_stacked(&vui, &mut r, 320, 216, Bars { abilities: 3, gear: false }, Layout::Columns);
+        assert_eq!(h.stacked_hits.len(), 15);
+        let c = cell(&h.stacked_hits, 4, 0);
+        assert_eq!([c[0], c[1]], [right, bottom - 2 * ch]);
+        assert!(!h.stacked_hits.iter().any(|c| c.0 == 5), "no fourth bar");
+
+        // Spell Bar Opacity 0: the frames drawn unseen, the block whole
+        crate::settings::set_client(crate::settings::ClientOptions { spell_bar_opacity: 0, ..crate::settings::client() });
+        let mut r = Rec(Vec::new());
+        h.draw_stacked(&vui, &mut r, 320, 216, four, Layout::Columns);
+        let frames: Vec<f32> = r.0.iter().filter(|&&(_, size, _)| size == [cw, ch]).map(|f| f.2).collect();
+        assert!(frames.len() == 20 && frames.iter().all(|&a| a == 0.0), "{frames:?}");
+        crate::settings::testing::reset(false);
+    }
+
+    /// The Utility Bars (the server owner's "upper left, side by side
+    /// vertical, or down below", 2026-11-18): with a server's weapon sets,
+    /// Upper Left is the items' column of four and the sets' of five beside
+    /// it from `UPPER_LEFT_AT`; Below is the items' row over the sets', the
+    /// sets' standing on the chat box, and lifts the spell bars by both rows
+    /// and the gap. A slot holding an item is drawn whole, an empty one faint.
+    /// A click on a cell makes its bar the one up and uses its entry (an
+    /// item, a set); the keys' bars find their entries. The controls: with
+    /// the bars not stacked a click finds nothing; without the sets, the
+    /// items alone, and Below lifts the spell bars one row.
+    #[test]
+    fn the_utility_bars_stand_upper_left_or_below() {
+        struct Rec(Vec<f32>);
+        impl Raster for Rec {
+            fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, alpha: f32) {
+                self.0.push(alpha);
+            }
+            fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, alpha: f32) {
+                self.0.push(alpha);
+            }
+            fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
+            fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
+            fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) {}
+            fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16], _: u32) {}
+            fn string_width(&self, s: &[u16]) -> i32 {
+                s.len() as i32 * 8
+            }
+            fn point_size(&self) -> i32 {
+                16
+            }
+            fn viewport(&self) -> [i32; 4] {
+                [0, 0, 640, 448]
+            }
+            fn set_viewport(&mut self, _: [i32; 4]) {}
+        }
+        crate::settings::testing::reset(false);
+        let vui = crate::pointer::testing::vui();
+        let mut h = HudMenus::default();
+        let item = |k: i64| Entry { icon2: -1, x08: -1, msg: 0x2030000, id: k };
+        h.defs[ITEMS] = MenuDef { count: 4, entries: vec![item(3), Entry::default(), item(5), Entry::default()] };
+        let set = |k: i64| Entry { icon2: 7, x08: -1, msg: crate::gear::MSG, id: k };
+        h.defs[GEAR] = MenuDef { count: 5, entries: vec![set(0), Entry::default(), Entry::default(), Entry::default(), set(BARE_HANDS)] };
+        let s = |v: i32| (v as f32 * STACKED_SCALE).round() as i32;
+        let (cw, ch) = (s(CELL[0]), s(CELL[1]));
+        let cell = |h: &HudMenus, m: usize, n: i32| h.utility_hits.iter().find(|c| c.0 == m && c.1 == n).unwrap().2;
+        let mid = |c: [i32; 4]| [(c[0] + c[2]) as f32 / 2.0, (c[1] + c[3]) as f32 / 2.0];
+
+        let mut r = Rec(Vec::new());
+        h.draw_utility(&vui, &mut r, LIVE, UtilityLayout::UpperLeft, UPPER_LEFT_AT);
+        assert_eq!(h.utility_hits.len(), 9, "four items and five sets");
+        let [x, y] = UPPER_LEFT_AT;
+        assert_eq!((cell(&h, ITEMS, 0), cell(&h, ITEMS, 3)[1]), ([x, y, x + cw, y + ch], y + 3 * ch), "the items' column");
+        assert_eq!(cell(&h, GEAR, 4)[..2], [x + cw + s(COLUMN_GAP), y + 4 * ch], "the sets' column beside it");
+        assert_eq!(r.0.iter().filter(|&&a| a == 0.35).count(), 2, "two empty item slots faint: {:?}", r.0);
+        assert_eq!(HudMenus::utility_height(LIVE, UtilityLayout::UpperLeft), 0, "the spell bars where they were");
+
+        assert_eq!(h.point_utility(mid(cell(&h, ITEMS, 2))), None, "the control: not stacked");
+        h.stacked = true;
+        assert_eq!(h.point_utility(mid(cell(&h, ITEMS, 2))), Some(Key::Use));
+        assert_eq!((h.sel, h.menus[ITEMS].sel), (ITEMS as i32, 2));
+        assert_eq!(h.key(Key::Use, 0, LIVE, false, &mut Vec::new()), Some((0x2030000, 5)), "the third slot's item");
+        assert_eq!(h.point_utility(mid(cell(&h, GEAR, 4))), Some(Key::Use));
+        assert_eq!(h.key(Key::Use, 0, LIVE, false, &mut Vec::new()), Some((MSG, BARE_HANDS)), "bare hands");
+        assert_eq!(h.point_utility([0.0, 0.0]), None);
+        assert_eq!(
+            (h.slot_entry(ITEMS_BAR, 0), h.slot_entry(ITEMS_BAR, 1), h.slot_entry(SETS_BAR, 4), h.slot_entry(SETS_BAR, 2)),
+            (Some((0x2030000, 3)), None, Some((MSG, BARE_HANDS)), None)
+        );
+
+        let bottom = 320 - STACKED_GAP;
+        h.draw_utility(&vui, &mut r, LIVE, UtilityLayout::Below, [216, 320]);
+        assert_eq!(h.utility_hits.len(), 9);
+        assert_eq!(cell(&h, ITEMS, 0)[..2], [216, bottom - 2 * ch], "the items' row over");
+        assert_eq!(cell(&h, GEAR, 0)[..2], [216, bottom - ch], "the sets' row on the chat box");
+        assert_eq!(cell(&h, GEAR, 4)[0], 216 + (4.0 * CELL[0] as f32 * STACKED_SCALE).round() as i32);
+        assert_eq!(HudMenus::utility_height(LIVE, UtilityLayout::Below), 2 * ch + s(COLUMN_GAP), "the spell bars over both rows");
+
+        h.draw_utility(&vui, &mut r, DISC, UtilityLayout::Below, [216, 320]);
+        assert_eq!(h.utility_hits.len(), 4, "no sets: the items alone");
+        assert_eq!(cell(&h, ITEMS, 0)[..2], [216, bottom - ch]);
+        assert_eq!(HudMenus::utility_height(DISC, UtilityLayout::Below), ch + s(COLUMN_GAP));
+        h.hide_utility();
+        assert_eq!(h.point_utility(mid([216, bottom - ch, 216 + cw, bottom])), None, "hidden: nothing found");
     }
 
     /// A pointer on the quick menu up: the title bar is the next menu, a

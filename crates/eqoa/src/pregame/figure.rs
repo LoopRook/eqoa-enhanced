@@ -507,7 +507,7 @@ mod tests {
             all_classes: true,
             races: vec![net::creation::Race { id: 29, like: 9, city: 0, bonus: [0; 7], class_mask: 0x7FFF, body: [GARGOYLE, GARGOYLE], name: "Gargoyle".into(), short: "GAR".into(), desc: String::new() }],
         }));
-        assert_eq!(nodes(&mut g), [11, 20], "the sword on node 11, the shield on 20");
+        assert_eq!(nodes(&mut g), [49, 51], "the sword on the main hand's seat, the shield on the off hand's (petition 2493)");
         tables::set_offer(None);
     }
 
@@ -662,8 +662,8 @@ mod tests {
     /// disc's CHARSEL files standing in, the human of 2002 (another
     /// skeleton), made again as Frontiers' when the art goes back, its look
     /// and items kept. The control is the Frontiers view's own figure. Needs
-    /// both discs (`run/eqoa.iso`, `$EQOA_2002_ISO` or the USA disc under
-    /// `../decomp-builds`) and a graphics adapter.
+    /// both discs (`run/eqoa.iso`, `$EQOA_2002_ISO` or the USA disc among
+    /// the other disc builds) and a graphics adapter.
     #[test]
     fn a_figure_is_its_model_in_the_art_drawn() {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");

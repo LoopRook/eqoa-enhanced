@@ -180,6 +180,12 @@ pub(crate) fn hud_menu_visible(_menus: &crate::hudmenu::HudMenus) -> bool {
     ability_bar_visible()
 }
 
+/// A click at `at` on the Utility Bars: nothing while an addon claims the
+/// ability bars (the bars are not drawn, so their last cells are stale).
+pub(crate) fn utility_point(menus: &mut crate::hudmenu::HudMenus, at: [f32; 2]) -> Option<crate::hudmenu::Key> {
+    if hud_menu_visible(menus) { menus.point_utility(at) } else { None }
+}
+
 /// Draws the HUD menu carousel, suppressing all carousel menus (indices 0 to 5,
 /// including items and weapon sets) when an addon has claimed ability bars.
 pub(crate) fn draw_hud_menus(
@@ -1193,6 +1199,31 @@ mod tests {
         drop(context);
         unsafe { sys::igSetCurrentContext(original_context) };
         let _ = fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn utility_bar_clicks_do_nothing_while_an_addon_hides_the_bars() {
+        use crate::hudmenu::{Bars, Entry, Key, MenuDef, UtilityLayout, UPPER_LEFT_AT};
+        crate::settings::testing::reset(false);
+        let vui = test_vui();
+        let mut menus = crate::hudmenu::HudMenus::default();
+        menus.stacked = true;
+        let item = Entry { icon2: -1, x08: -1, msg: 0x2030000, id: 3 };
+        menus.defs[2] = MenuDef { count: 1, entries: vec![item] };
+        let bars = Bars { abilities: 2, gear: false };
+        clear_claims();
+        let mut r = BlitRecorder::default();
+        menus.draw_utility(&vui, &mut r, bars, UtilityLayout::UpperLeft, UPPER_LEFT_AT);
+        let at = [UPPER_LEFT_AT[0] as f32 + 2.0, UPPER_LEFT_AT[1] as f32 + 2.0];
+
+        // shown: the click finds the cell
+        assert_eq!(utility_point(&mut menus, at), Some(Key::Use), "shown bars take the click");
+        // hidden by a mod: the same stale cell does nothing
+        set_claims(&["hotbar_draw_compact", "hotbar_draw_expanded"]);
+        assert_eq!(utility_point(&mut menus, at), None, "hidden bars take no click");
+        clear_claims();
+        assert_eq!(utility_point(&mut menus, at), Some(Key::Use), "shown again, the click works");
     }
 
     #[test]
