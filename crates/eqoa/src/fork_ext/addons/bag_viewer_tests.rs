@@ -977,6 +977,13 @@ fn round6b_bag_viewer_merchant_bank_and_corpse_menus_and_captures_body() {
     bv.click((sx, sy));
     bv.play.bags_broker_tick();
     bv.frames(2);
+    // A0: the potions are quick-slotted and not an ordinary item, so the menu asks first and nothing is sent yet
+    assert!(!bv.play.bags_shop_pending(), "the question comes before the sale");
+    let (yx, yy, yen, _, _) = bv.menu_row("Sell stack").expect("the question's Yes row");
+    assert!(yen);
+    bv.click((yx, yy));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
     assert!(bv.play.bags_shop_pending(), "Sell stack dispatches merchant 0x004B");
     bv.play.bags_sell_confirm(1, 5);
     bv.frames(2);
@@ -1094,6 +1101,12 @@ fn round6c_bag_viewer_junk_marks_and_auto_loot_choice_persist_across_reload_and_
     assert!(men);
     bv.click((mx, my));
     bv.frames(2);
+    // Fix round 1: Odd Thing is equipment, so the first click asks "Mark Odd Thing as junk?" and marks nothing; Yes marks it
+    assert!(!bv.eval::<bool>("require('bags').junk_ids['900008'] == true"), "the question comes first");
+    let (yx, yy, yen, _, _) = bv.menu_row("Mark as junk").expect("the question's Yes row");
+    assert!(yen);
+    bv.click((yx, yy));
+    bv.frames(2);
     assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"));
     assert!(!bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "an unmarked misc item is never junk: only the marks decide");
     bv.click(s8);
@@ -1203,7 +1216,7 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_b
     bv_r6_png(&rm_pixels(&bv.gpu, &stopped_tex), bv.win, "r6-junk-stopped.png");
     let (res, ok) = bv.result_text().unwrap();
     assert_eq!(ok, Some(false));
-    assert_eq!(res, "Sold 1 of 4: stopped");
+    assert_eq!(res, "Sold 1 junk item for 20 tunar; Sell junk stopped after 1 of 4: stopped"); // fix round 2: the real final line
 
     // Start batch for remaining 3 junk items, confirm step 1, then close merchant -> stops cleanly!
     let (bx, by, lbl2) = bv.action_hit("Sell junk (").unwrap();
@@ -1218,7 +1231,7 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_b
     bv.frames(2);
     let (res, ok) = bv.result_text().unwrap();
     assert_eq!(ok, Some(false));
-    assert_eq!(res, "Sold 1 of 3: merchant closed");
+    assert_eq!(res, "Sold 1 junk item for 20 tunar; Sell junk stopped after 1 of 3: merchant closed");
 
     // Remaining 2 junk items: start batch, confirm step 1, then zone -> stops cleanly without replay!
     bv.play.bags_open_merchant(44);
@@ -1235,7 +1248,7 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_b
     bv.frames(2);
     let (res, ok) = bv.result_text().unwrap();
     assert_eq!(ok, Some(false));
-    assert!(res.starts_with("Sold 1 of 2: zone"), "{res}");
+    assert!(res.contains("Sell junk stopped after 1 of 2: zone"), "{res}");
 
     // Corpse open: mark Rat Pelt (id 2001) as junk, switch to Corpse tab, capture r6-junk-corpse.png.
     bv.play.bags_target_corpse(5001, "a decaying skeleton");
@@ -2446,7 +2459,7 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     assert_eq!(
         super::super::runtime::autonomous_action_label(&entry.metadata.requested_capabilities)
             .as_deref(),
-        Some("Actions: can act on its own (open_loot, talk, loot, loot_all, sell, bank_move, use_item, equip, quick_slot, batch)"),
+        Some("Actions: can act on its own (open_loot, talk, loot, loot_all, sell, buy, bank_move, use_item, equip, quick_slot, batch)"),
         "L7: the label names exactly the actions the mod uses, not all of them"
     );
 
@@ -2525,6 +2538,11 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     assert!(en);
     bv.click((mx, my));
     bv.frames(2);
+    // Fix round 1: Odd Thing is equipment, so marking asks once ("Mark Odd Thing as junk?"); Yes marks it
+    let (yx, yy, yen, _, _) = bv.menu_row("Mark as junk").expect("the question's Yes row");
+    assert!(yen);
+    bv.click((yx, yy));
+    bv.frames(2);
 
     let (sx, sy, slbl) = bv.action_hit("Sell junk (").unwrap();
     assert!(slbl.starts_with("Sell junk (1 item)"), "{slbl}");
@@ -2540,7 +2558,7 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     assert!(bv.play.bags_shop_pending(), "sell step sent silently");
     bv.play.bags_sell_confirm(7, 1);
     bv.frames(2);
-    assert_eq!(bv.result_text(), Some(("Sold 1 of 1".into(), Some(true))));
+    assert_eq!(bv.result_text(), Some(("Sold 1 junk item for 9 tunar".into(), Some(true)))); // fix round 2: the window says the tunar total
     assert!(bv.eval::<bool>("not eqoa.windows.taken('merchant')"), "Bag Viewer must release merchant takeover when batch ends");
 
     // 5. Deposit near Banker (native bank closed): click item -> Deposit -> talks & deposits silently (mode stays 0).
@@ -2823,7 +2841,7 @@ fn round65_fix_bag_viewer_manifest_declares_exactly_the_actions_it_uses() {
 fn round65_fix_bag_viewer_manifest_declares_exactly_the_actions_it_uses_body() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods/eqoa_bag_viewer");
     let mut used = std::collections::BTreeSet::new();
-    for file in ["main.lua", "modules/bags.lua"] {
+    for file in ["main.lua", "modules/bags.lua", "modules/helpers.lua"] {
         let src = std::fs::read_to_string(root.join(file)).unwrap();
         let mut rest = src.as_str();
         while let Some(i) = rest.find("eqoa.actions.") {
@@ -4706,13 +4724,22 @@ fn round7c_bag_viewer_sells_single_items_near_a_merchant_body() {
     bv.frames(2);
 
     // Sell 1 of the Healing Potions (slot 2, 5 of them), no merchant window open
-    let sell = |bv: &mut Bv, slot: usize, row: &str, inv_slot: usize, n: i64| {
+    let sell = |bv: &mut Bv, slot: usize, row: &str, inv_slot: usize, n: i64, asks: bool| {
         bv.click(bv.slot(slot));
         bv.frames(2);
         let (x, y, enabled, reason, label) = bv.menu_row(row).unwrap_or_else(|| panic!("{row} is offered"));
         assert!(enabled, "{label} offered near a merchant with no window open: {reason:?}");
         let sends = bv.play.bags_sends_lost();
         bv.click((x, y));
+        if asks {
+            // A0: a quick-slotted or not ordinary item is asked about first: nothing goes out until Yes
+            bv.frames(2);
+            bv.play.bags_broker_tick();
+            assert_eq!(bv.play.bags_sends_lost(), sends, "{row}: the question comes before anything is sent");
+            let (yx, yy, yen, _, _) = bv.menu_row(row).expect("the question's Yes row");
+            assert!(yen);
+            bv.click((yx, yy));
+        }
         bv.play.bags_broker_tick();
         assert!(bv.play.bags_sends_lost() > sends, "{row} talks to the merchant first");
         assert_eq!(bv.play.target, 9002);
@@ -4733,9 +4760,9 @@ fn round7c_bag_viewer_sells_single_items_near_a_merchant_body() {
         assert!(bv.eval::<bool>("not eqoa.windows.taken('merchant')"), "the hidden session is closed afterwards");
         assert_eq!(bv.play.mode, 0);
     };
-    sell(&mut bv, 2, "Sell 1", 1, 1);
-    // Sell stack of the Rat Pelts (slot 7, 3 of them)
-    sell(&mut bv, 7, "Sell stack", 6, 3);
+    sell(&mut bv, 2, "Sell 1", 1, 1, true);
+    // Sell stack of the Rat Pelts (slot 7, 3 of them): an ordinary item, sold at once as in the game
+    sell(&mut bv, 7, "Sell stack", 6, 3, false);
 
     // the player talked to the merchant: its window is open, and Sell 1 sells through it as before
     bv.play.bags_merchant_packet(9002);
@@ -4747,6 +4774,13 @@ fn round7c_bag_viewer_sells_single_items_near_a_merchant_body() {
     assert!(enabled);
     let sends = bv.play.bags_sends_lost();
     bv.click((x, y));
+    // A0: the potion is quick-slotted: asked first, then sold through the open window
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends, "the question comes before the sale");
+    let (yx, yy, yen, _, _) = bv.menu_row("Sell 1").expect("the question's Yes row");
+    assert!(yen);
+    bv.click((yx, yy));
     bv.play.bags_broker_tick();
     assert!(bv.play.bags_shop_pending(), "sold through the open window");
     assert!(bv.play.bags_sends_lost() > sends);
@@ -4791,20 +4825,27 @@ fn round7c_bag_viewer_second_sell_before_the_merchant_answers_is_refused_body() 
     bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [6.0, 0.0, 0.0]);
     bv.open();
     bv.frames(2);
-    let click_sell = |bv: &mut Bv, slot: usize| {
+    let click_sell = |bv: &mut Bv, slot: usize, asks: bool| {
         bv.click(bv.slot(slot));
         bv.frames(2);
         let (x, y, enabled, _, _) = bv.menu_row("Sell 1").expect("Sell 1 is offered");
         assert!(enabled);
         bv.click((x, y));
         bv.frames(1);
+        if asks {
+            // A0: the potion is quick-slotted: the question first, then Yes
+            let (yx, yy, yen, _, _) = bv.menu_row("Sell 1").expect("the question's Yes row");
+            assert!(yen);
+            bv.click((yx, yy));
+            bv.frames(1);
+        }
     };
     // Sell 1 of the potions: its talk goes out, no answer yet
-    click_sell(&mut bv, 2);
+    click_sell(&mut bv, 2, true);
     bv.play.bags_broker_tick();
     assert_eq!(bv.play.target, 9002);
     // Sell 1 of the pelts before the merchant answers
-    click_sell(&mut bv, 7);
+    click_sell(&mut bv, 7, false);
     let (text, ok) = bv.result_text().expect("a result line");
     assert_eq!(ok, Some(false), "{text}");
     assert_eq!(text, "Sell 1: still waiting for the server to open the merchant");
@@ -4931,6 +4972,80 @@ fn autoloot_fix2_world_leaving_by_disconnect_resets_the_method_but_a_zone_does_n
     crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow_mut().reset("disconnect"));
     bv.frames(2);
     assert_eq!(bv.eval::<String>("tostring(require('bags').loot_method)"), "nil", "a disconnect: decided again");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---- A0 helper mods (2026-11-22): the buttons, the switches and the marks, drawn and clicked ---------------------------
+// The behaviour (what each helper sells, buys, banks and says) is tested without a window in `bag_helpers_tests.rs`; this
+// one shows that the real window draws them and that a click reaches them.
+#[test]
+fn a0_bag_viewer_helper_switches_marks_and_buttons_are_drawn_and_clickable() {
+    big_stack(a0_bag_viewer_helper_switches_marks_and_buttons_are_drawn_and_clickable_body)
+}
+fn a0_bag_viewer_helper_switches_marks_and_buttons_are_drawn_and_clickable_body() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else {
+        eprintln!("SKIP a0 helper buttons: no GPU adapter");
+        return;
+    };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    // the three switches are always there and all off
+    for label in ["Auto sell junk", "Auto restock", "Auto bank"] {
+        assert!(bv.action_hit(label).is_some(), "{label} is drawn");
+    }
+    assert!(!bv.eval::<bool>("require('helpers').any_auto()"), "off by default");
+    assert!(bv.action_hit("Restock (").is_none() && bv.action_hit("Bank marked").is_none(), "no buttons without a mark");
+    // a click on a switch turns that helper on for this character and saves it
+    let (x, y, _) = bv.action_hit("Auto restock").unwrap();
+    bv.click((x, y));
+    bv.frames(2);
+    assert!(bv.eval::<bool>("require('helpers').auto_on('restock') and not require('helpers').auto_on('sell')"));
+    assert!(bv.eval::<String>("eqoa.files.read('helpers.cfg')").contains("restock=1"));
+    bv.click((x, y));
+    bv.frames(2);
+    assert!(!bv.eval::<bool>("require('helpers').any_auto()"), "a second click turns it off again");
+
+    // the marks are in an item's menu: Bank this (Rat Pelt, slot 7) and Keep up to N (Healing Potion, slot 2)
+    bv.click(bv.slot(7));
+    bv.frames(2);
+    let (bx, by, ben, _, _) = bv.menu_row("Bank this").expect("Bank this is offered");
+    assert!(ben);
+    bv.click((bx, by));
+    bv.frames(2);
+    assert!(bv.eval::<bool>("require('helpers').bank['900007'] == true"));
+    bv.click(bv.slot(2));
+    bv.frames(2);
+    let (kx, ky, ken, _, klabel) = bv.menu_row("Keep up to").expect("Keep up to N is offered");
+    assert!(ken && klabel == "Keep up to 5 (Restock)", "{klabel}");
+    bv.click((kx, ky));
+    bv.frames(2);
+    assert_eq!(bv.eval::<i64>("require('helpers').keep['900002']"), 5);
+    assert!(bv.eval::<String>("eqoa.files.read('helpers.cfg')").contains("keep:900002=5"));
+
+    // a merchant open: the Restock button is there (the pack already holds 5, so nothing to buy and it is greyed)
+    bv.play.bags_open_merchant(44);
+    bv.frames(2);
+    let (_, _, rlabel) = bv.action_hit("Restock (").expect("the Restock button");
+    assert!(rlabel.starts_with("Restock (0 items"), "{rlabel}");
+    bv.play.bags_close_merchant();
+    bv.frames(2);
+
+    // a bank open: Bank marked (1) is there, and a click starts the deposit batch
+    bv.play.bags_open_bank();
+    bv.frames(2);
+    let (dx, dy, dlabel) = bv.action_hit("Bank marked").expect("the Bank marked button");
+    assert_eq!(dlabel, "Bank marked (1)");
+    bv.click((dx, dy));
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.eval::<String>("require('bags').batch_kind"), "bank", "the deposit batch is running");
     bv.clean();
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();

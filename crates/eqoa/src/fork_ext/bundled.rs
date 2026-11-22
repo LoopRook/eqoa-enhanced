@@ -161,6 +161,11 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/modules/bags.lua"),
     },
     BundledFile {
+        path: "eqoa_bag_viewer/modules/helpers.lua",
+        package: "eqoa_bag_viewer",
+        data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/modules/helpers.lua"),
+    },
+    BundledFile {
         path: "eqoa_bag_viewer/README.md",
         package: "eqoa_bag_viewer",
         data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/README.md"),
