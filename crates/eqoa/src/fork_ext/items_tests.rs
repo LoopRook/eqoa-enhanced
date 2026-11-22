@@ -5097,3 +5097,147 @@ fn autoloot_loot_changed_says_who_closed_the_window() {
     }
     bid_reset();
 }
+
+// ---- Auto-loot fix round 1 (2026-11-22): review findings on the by-id open -------------------------------------------
+
+/// HIGH 1: a zone change forgets a by-id request still waiting for its answer (the player's own open in the new zone
+/// must not confirm the method), and a disconnect (another server may answer differently) forgets the chosen method.
+#[test]
+fn autoloot_fix1_zoning_forgets_the_waiting_request_and_a_disconnect_forgets_the_method() {
+    use crate::fork_ext::loot_by_id::{self, Method};
+    // zoning while the by-id open waits
+    let (host, mut p) = bid_fight();
+    host.execute("req = assert(eqoa.actions.open_loot(9001, {keep_target = true}))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    p.bags_zone();
+    // a moment into the new zone the player opens a corpse of their own (targeted: the old request)
+    p.target = 9004;
+    p.attack_press();
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 1, "the player's own window");
+    assert_eq!(loot_by_id::method(), Method::Unknown, "the old zone's request proves nothing about the player's open");
+    // a disconnect: the next server may not take by-id requests
+    bid_reset();
+    loot_by_id::force_method_for_test(Method::ById);
+    let mut p = bid_world();
+    let ev = Event::Disconnected(0);
+    let cap = super::super::begin_game_event(&p, &ev);
+    super::super::end_game_event(&p, cap);
+    let _ = &mut p;
+    assert_eq!(loot_by_id::method(), Method::Unknown, "a new connection decides again");
+    // control: a zone change alone keeps the method (the same server)
+    loot_by_id::force_method_for_test(Method::Retarget);
+    let cap = super::super::begin_game_event(&p, &Event::Teleport { world: 0, pos: [0.0; 3], hpr: [0.0; 3], token: 0 });
+    super::super::end_game_event(&p, cap);
+    assert_eq!(loot_by_id::method(), Method::Retarget, "same server: the choice stays across zones");
+    bid_reset();
+}
+
+/// HIGH 2: while the mod's by-id open waits, a corpse the player asks for is the player's: shown, never the mod's source,
+/// and it never confirms the method.
+#[test]
+fn autoloot_fix1_a_players_own_open_beside_a_waiting_by_id_open_is_never_the_mods() {
+    use crate::fork_ext::loot_by_id::{self, Method};
+    let (host, mut p) = bid_fight();
+    host.execute("req = assert(eqoa.actions.open_loot(9001, {keep_target = true}))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    // before 9001 answers, the player attacks 9004: their own loot request
+    p.target = 9004;
+    p.attack_press();
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 1, "the player's window is shown to the player");
+    assert_ne!(
+        items::current_loot_source_id(&p),
+        Some(9001),
+        "the window is not sourced from the corpse the mod asked for"
+    );
+    assert_eq!(loot_by_id::method(), Method::Unknown, "an overlapping list proves nothing about the method");
+    bid_reset();
+}
+
+/// HIGH 2 (second half): a request the player sent just before the mod's hidden session ended must not have its list
+/// hidden and closed by the grace that follows the session.
+#[test]
+fn autoloot_fix1_the_grace_after_a_session_does_not_hide_a_players_own_request() {
+    use crate::fork_ext::addons::window_takeover::{self, TakeoverKind};
+    for by_id in [true, false] {
+        bid_reset();
+        let mut p = bid_world();
+        r65fix_own(TakeoverKind::Loot);
+        p.target = 9500;
+        if by_id {
+            assert!(window_takeover::arm_pending_open_by_id(1, 9001));
+        } else {
+            p.target = 9001;
+            assert!(window_takeover::arm_pending_open(TakeoverKind::Loot, 1, 9001));
+        }
+        crate::fork_ext::loot_requested(9001);
+        apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+        assert_eq!(p.mode, 0);
+        // the player asks for another corpse while the session is up, then the mod's session ends
+        crate::fork_ext::loot_requested(9004);
+        window_takeover::end_session_for_vm(1, TakeoverKind::Loot);
+        apply(&mut p, opcode(0x0016, vec![]));
+        if !by_id {
+            p.target = 9001;
+        }
+        apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+        assert_eq!(p.mode, 1, "by_id={by_id}: the player's own list is the player's");
+    }
+    bid_reset();
+}
+
+/// HIGH 3: when the fallback cannot be sent (another window is up, the player is dead or casting, the corpse is gone) the
+/// mod's open ends with a reason and the method is undecided again, not left on a fallback nobody tried.
+#[test]
+fn autoloot_fix1_a_fallback_that_cannot_be_sent_ends_the_open_and_leaves_the_method_undecided() {
+    use crate::fork_ext::loot_by_id::{self, Method};
+    for how in ["silence", "refusal"] {
+        let (host, mut p) = bid_fight();
+        host.execute("req = assert(eqoa.actions.open_loot(9001, {keep_target = true}))").unwrap();
+        super::super::begin_iteration(&mut p, true);
+        let _ = bid_sent(&mut p);
+        // a window of the player's own opens before the fallback goes out
+        p.mode = 13;
+        if how == "silence" {
+            for _ in 0..(loot_by_id::REPLY_TICKS + 2) {
+                super::super::begin_iteration(&mut p, true);
+            }
+        } else {
+            apply(&mut p, opcode(0x0085, vec![3]));
+            super::super::begin_iteration(&mut p, true);
+            super::super::begin_iteration(&mut p, true);
+        }
+        assert_eq!(loot_by_id::method(), Method::Unknown, "{how}: nothing was tried the old way");
+        assert!(bid_sent(&mut p).is_empty(), "{how}: nothing was sent");
+        host.execute(
+            "local s = assert(eqoa.actions.status(req)); assert(s.state == 'refused' and s.code == 'not_ready', 'state ' .. s.state .. ' ' .. tostring(s.code))",
+        )
+        .unwrap();
+        bid_reset();
+    }
+}
+
+/// MEDIUM 1: a request the mod no longer waits for (its mod went away, it was zoned away) neither confirms the method nor
+/// makes the client fall back when the server's answer to something else arrives.
+#[test]
+fn autoloot_fix1_an_open_nobody_waits_for_any_more_decides_nothing() {
+    use crate::fork_ext::loot_by_id::{self, Method};
+    for how in ["list", "refusal"] {
+        let (host, mut p) = bid_fight();
+        host.execute("req = assert(eqoa.actions.open_loot(9001, {keep_target = true}))").unwrap();
+        super::super::begin_iteration(&mut p, true);
+        // the mod's request is gone (its VM was reset)
+        crate::fork_ext::addons::action_broker::reset_all_for_test();
+        if how == "list" {
+            p.target = 9004;
+            p.attack_press();
+            apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+        } else {
+            apply(&mut p, opcode(0x0085, vec![3]));
+        }
+        assert_eq!(loot_by_id::method(), Method::Unknown, "{how}: nothing is decided from a request nobody waits for");
+        let _ = host;
+        bid_reset();
+    }
+}

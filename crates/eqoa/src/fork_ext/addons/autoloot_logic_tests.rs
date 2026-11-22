@@ -347,3 +347,62 @@ fn creatures_you_hit_are_followed_every_tenth_of_a_second_and_the_idle_poll_stay
     run(&lua, "later(0.15); B.auto_poll()");
     assert_eq!(int(&lua, "B.poll_count"), base + 1);
 }
+
+// ---- Auto-loot fix round 1 (2026-11-22) ------------------------------------------------------------------------------
+
+#[test]
+fn autoloot_fix1_attempts_that_never_opened_the_corpse_do_not_use_up_the_retries() {
+    // after an unfinished take, "the game could not open it now" (casting, another window) is asked again every half
+    // second and is no attempt: the two more tries are for real reopens
+    let lua = world();
+    run(&lua, "kill(9300); poll()");
+    take_all_ends(&lua, 2);
+    assert_eq!(int(&lua, "B.auto_more[9300].left"), 2);
+    run(&lua, "OPEN_FAILS = {code = 'not_ready', message = 'cannot open corpse right now'}; later(11); poll(); later(0.6); poll(); later(0.6); poll()");
+    assert_eq!(int(&lua, "#OPENS"), 4, "the first open and three refused asks");
+    assert_eq!(int(&lua, "B.auto_more[9300].left"), 2, "refusals used none of the retries");
+    // the corpse opens at last: that is the first of the two more tries
+    run(&lua, "OPEN_FAILS = nil; later(0.6); poll(); corpse_list(2); open_answered('keep_target')");
+    assert_eq!(int(&lua, "B.auto_more[9300].left"), 1);
+}
+
+#[test]
+fn autoloot_fix1_a_corpse_the_player_closed_does_not_block_another_corpse() {
+    // the player left the Loot tab of corpse A (not the one Auto-loot is taking): B's take that ends early is still asked again
+    let lua = world();
+    run(&lua, "B.auto_mode = 'non_junk'; kill(9300); poll(); corpse_list(2); B.junk_ids['3002'] = true; open_answered('keep_target')");
+    run(&lua, "B.note_loot_closed({before = {source = {entity_id = 9999}}, after = nil, closed_by = 'player'})");
+    run(&lua, "B.on_batch_result({batch_id = B.batch_id, ok = false, state = 'refused', code = 'window_closed', reason = 'corpse window closed', completed = 0, total = 1}); LOOT = nil");
+    assert!(boolean(&lua, "logged('unfinished')"), "another corpse's close is not this one's");
+    assert!(!boolean(&lua, "logged('you closed it')"));
+    // control: the same close naming this corpse is the player's
+    let lua = world();
+    run(&lua, "B.auto_mode = 'non_junk'; kill(9300); poll(); corpse_list(2); B.junk_ids['3002'] = true; open_answered('keep_target')");
+    run(&lua, "B.note_loot_closed({before = {source = {entity_id = 9300}}, after = nil, closed_by = 'player'})");
+    run(&lua, "B.on_batch_result({batch_id = B.batch_id, ok = false, state = 'refused', code = 'window_closed', reason = 'corpse window closed', completed = 0, total = 1}); LOOT = nil");
+    assert!(boolean(&lua, "logged('you closed it')"));
+}
+
+#[test]
+fn autoloot_fix1_stop_and_the_tab_belong_to_the_corpse_being_taken_only() {
+    // Stop while corpse A's batch runs, then corpse B's take ends early within five seconds: B is asked again
+    let lua = world();
+    run(&lua, "B.auto_mode = 'non_junk'; kill(9300); poll(); corpse_list(2); B.junk_ids['3002'] = true; open_answered('keep_target'); B.stop_batch()");
+    run(&lua, "B.on_batch_result({batch_id = B.batch_id, ok = false, state = 'stopped', code = 'cancelled', reason = 'stopped', completed = 0, total = 1}); LOOT = nil");
+    assert!(boolean(&lua, "logged('you closed it')"), "A was stopped by the player");
+    run(&lua, "later(1); kill(9301, 3); poll(); corpse_list(2); LOOT.source.entity_id = 9301; B.junk_ids['3002'] = true; open_answered('keep_target')");
+    run(&lua, "B.on_batch_result({batch_id = B.batch_id, ok = false, state = 'refused', code = 'window_closed', reason = 'corpse window closed', completed = 0, total = 1}); LOOT = nil");
+    assert!(boolean(&lua, "B.auto_done == nil or not B.auto_done[9301]"), "B was not the one the player stopped");
+    assert!(boolean(&lua, "B.auto_more ~= nil and B.auto_more[9301] ~= nil"), "B is scheduled to be asked again");
+}
+
+#[test]
+fn autoloot_fix1_a_corpse_the_player_opened_is_guarded_again_when_the_mod_reopens_it() {
+    let lua = world();
+    run(&lua, "kill(9300); NATIVE_MODE = 1; corpse_list(2); poll(); later(0.3); poll()");
+    assert!(!boolean(&lua, "logged('SHOWN')"), "the player's own window is theirs");
+    // that take ended with items left: asked again later, this time by the mod, and the game's window must stay hidden
+    run(&lua, "B.on_action_result({request_id = 'all1', ok = true, state = 'completed', phase = 'server', kind = 'loot_all'}); LOOT = nil; NATIVE_MODE = 0");
+    run(&lua, "later(11); poll(); corpse_list(2); open_answered('keep_target'); NATIVE_MODE = 1; later(0.3); poll()");
+    assert!(boolean(&lua, "logged('SHOWN')"), "the mod's own take is guarded: a window showing now is the mod's fault");
+}
