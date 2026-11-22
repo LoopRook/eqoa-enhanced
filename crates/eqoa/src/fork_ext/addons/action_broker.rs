@@ -157,7 +157,8 @@ pub(crate) enum ActionKind {
     /// dispatch can judge the line the chat editor will send then (H1's rule, fix round 3 item 3).
     InputText { win: WinTarget, text: String, submit: bool, grants: LineGrants },
     MenuCommand { win: WinTarget, command: String },
-    OpenLoot { entity_id: Option<u32> },
+    /// `keep_target`: ask by the corpse's id and leave the player's target alone (`loot_by_id`).
+    OpenLoot { entity_id: Option<u32>, keep_target: bool },
     Talk { entity_id: Option<u32>, kind: TalkKind },
     /// `eqoa.map.set_waypoint`: the player's own waypoint of `world` moved to (`x`, `z`) by mod `addon`.
     SetWaypoint { vm: u64, addon: String, world: i32, x: f32, z: f32, label: Option<String> },
@@ -2298,6 +2299,40 @@ pub(crate) fn vm_is_idle(vm: u64) -> bool {
     })
 }
 
+/// The mod's `open_loot` for `corpse_id` is still waiting for the server (in flight and sent).
+pub(crate) fn open_loot_waiting(vm: u64, corpse_id: u32) -> bool {
+    BROKER.with(|b| {
+        b.borrow().vms.get(&vm).is_some_and(|v| {
+            v.in_flight.values().any(|f| {
+                f.native_sent
+                    && matches!(f.matcher, ServerMatcher::OpenLoot { corpse_id: c } if c == corpse_id)
+            }) || v.active_batch.as_ref().is_some_and(|batch| {
+                batch.corpse_reopen.as_ref().is_some_and(|r| r.asked && r.corpse_id == corpse_id)
+            })
+        })
+    })
+}
+
+/// Which method the open of `corpse_id` ended up using, written into the in-flight request's `detail.method`, so the
+/// result the mod reads says what the client did (`"keep_target"` or, after a fallback, `"retarget"`).
+pub(crate) fn set_open_loot_method(corpse_id: u32, method: &str) {
+    BROKER.with(|b| {
+        let mut b = b.borrow_mut();
+        for v in b.vms.values_mut() {
+            for f in v.in_flight.values_mut() {
+                if matches!(f.matcher, ServerMatcher::OpenLoot { corpse_id: c } if c == corpse_id) {
+                    match f.detail.as_mut().and_then(Json::as_object_mut) {
+                        Some(o) => {
+                            o.insert("method".into(), Json::from(method));
+                        }
+                        None => f.detail = Some(serde_json::json!({ "entity_id": corpse_id, "method": method })),
+                    }
+                }
+            }
+        }
+    });
+}
+
 pub(crate) fn take_corpse_reopen_ask() -> Option<(u64, u32)> {
     BROKER.with(|b| {
         let mut b = b.borrow_mut();
@@ -3390,6 +3425,15 @@ fn step_int(v: &Value) -> Option<i64> {
     }
 }
 
+/// `open_loot`'s `keep_target` option: a boolean, nil meaning false.
+fn parse_keep_target(v: Value) -> std::result::Result<bool, (&'static str, String)> {
+    match v {
+        Value::Nil => Ok(false),
+        Value::Boolean(b) => Ok(b),
+        _ => Err(("invalid_argument", "open_loot keep_target must be a boolean".into())),
+    }
+}
+
 fn parse_batch_step(raw: Value) -> std::result::Result<ActionKind, (&'static str, String)> {
     let Value::Table(t) = raw else {
         return Err(("invalid_argument", "each batch step must be a table".into()));
@@ -3411,6 +3455,7 @@ fn parse_batch_step(raw: Value) -> std::result::Result<ActionKind, (&'static str
         "interact" => Ok(ActionKind::Interact),
         "open_loot" => Ok(ActionKind::OpenLoot {
             entity_id: parse_entity_id(step_field(&t, "entity_id", Some(1)))?,
+            keep_target: parse_keep_target(step_field(&t, "keep_target", None))?,
         }),
         "talk" => {
             let entity_id = parse_entity_id(step_field(&t, "entity_id", Some(1)))?;
@@ -4452,13 +4497,20 @@ fn install_non_item_actions(lua: &Lua) -> Result<()> {
         lua,
         "actions",
         "open_loot",
-        lua.create_function(|lua, entity: Option<Value>| {
+        lua.create_function(|lua, (entity, options): (Option<Value>, Option<Value>)| {
             enqueue_lua_with(lua, "eqoa.actions.open_loot", || {
                 let entity_id = match entity {
                     None | Some(Value::Nil) => None,
                     Some(v) => parse_entity_id(v)?,
                 };
-                Ok(ActionKind::OpenLoot { entity_id })
+                let keep_target = match options {
+                    None | Some(Value::Nil) => false,
+                    Some(Value::Table(t)) => parse_keep_target(t.get::<Value>("keep_target").unwrap_or(Value::Nil))?,
+                    Some(_) => {
+                        return Err(("invalid_argument", "open_loot options must be a table or nil".into()));
+                    }
+                };
+                Ok(ActionKind::OpenLoot { entity_id, keep_target })
             })
         })?,
     )?;

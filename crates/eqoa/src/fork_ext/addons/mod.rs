@@ -47,6 +47,8 @@ pub(crate) mod bit;
 pub(crate) mod chat;
 pub(crate) mod chat_history;
 #[cfg(test)]
+mod autoloot_logic_tests;
+#[cfg(test)]
 mod chat_history_tests;
 #[cfg(test)]
 mod docs_tests;

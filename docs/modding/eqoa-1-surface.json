@@ -5395,6 +5395,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.loot.changed.data.closed_by",
+      "reason": null,
+      "revision": 1,
+      "round": 7,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.map.changed",
       "reason": null,
       "revision": 1,

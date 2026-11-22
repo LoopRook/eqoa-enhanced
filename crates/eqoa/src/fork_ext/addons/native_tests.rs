@@ -127,6 +127,8 @@ EVENT_OPTIONAL = {
     ['batch.result'] = 'code reason failed_step',
     -- text: only a key that types a character
     ['input.key'] = 'text',
+    -- closed_by: only a change that reports a corpse window going
+    ['loot.changed'] = 'closed_by',
     -- handle: a texture, font or sound (or a decoded JSON value); request: a file or JSON request; value: only
     -- json; path: only import and export (round 7H: declared, and filled only there)
     ['resource.ready'] = 'handle request value path',

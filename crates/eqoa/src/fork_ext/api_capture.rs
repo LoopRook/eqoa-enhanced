@@ -309,6 +309,10 @@ impl Drop for ChangeCapture {
 }
 pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> ChangeCapture {
     use net::session::Event;
+    if matches!(event, Event::Disconnected(_)) {
+        // another server may answer a by-id corpse open differently: decided again on the next connection
+        crate::fork_ext::loot_by_id::reset_session();
+    }
     let interested = crate::fork_ext::addons::native_core::capture_requested();
     if !interested {
         updates::inactive();
