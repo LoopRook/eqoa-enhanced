@@ -121,13 +121,13 @@ fn round7e_game_takes_mod_key_on_controls_and_keeps_the_swap() {
 fn round7e_mods_swap_keys_on_controls() {
     reset();
     let alpha = bind("alpha", "b");
-    let beta = bind("beta", "u");
+    let beta = bind("beta", "9");
     capture(&mut ControlsPage::default(), ROWS.len() + 1, "b");
-    assert_eq!(bindpage::get_key("alpha", "act").as_deref(), Some("u"));
+    assert_eq!(bindpage::get_key("alpha", "act").as_deref(), Some("9"));
     press("b", true, false, &[&alpha, &beta]);
     hits(&alpha, 0);
     hits(&beta, 1);
-    press("u", true, false, &[&alpha, &beta]);
+    press("9", true, false, &[&alpha, &beta]);
     hits(&alpha, 1);
     hits(&beta, 1);
 }
@@ -333,7 +333,7 @@ fn capture_refused(row: usize, name: &str) {
 fn round7e_defaults_button_keeps_a_blocked_default_empty() {
     reset();
     let _alpha = bind("alpha", "space");
-    assert!(bindpage::set_key("alpha", "act", "u"));
+    assert!(bindpage::set_key("alpha", "act", "9"));
     let mut page = ControlsPage::default();
     page.row = crate::bindpage::defaults();
     let mut cues = Vec::new();
@@ -421,14 +421,14 @@ fn refused(row: usize, name: &str, why: &str) {
 #[test]
 fn round7e_fix_h1_ctrl_u_on_a_game_row_does_not_also_fire_a_bare_u_mod() {
     reset();
-    let host = bind("alpha", "u");
+    let host = bind("alpha", "9");
     let mut rt = runtime();
     let slot = row_named("bar1_slot1").unwrap();
     let mut game = settings::binds();
     game.bind_key(slot, "ctrl+u");
     settings::set_binds(game);
-    let u = Key::Character("u".into());
-    assert_eq!(game_sends(CTRL, &u), Some(Sent::Slot(0, 0)), "the game acts on Ctrl+U");
+    let u = Key::Character("9".into());
+    assert_eq!(game_sends(CTRL, &u), Some(Sent::Slot(0, 0)), "the game acts on Ctrl+9");
     press_key(&mut rt, CTRL, &u, &[&host]);
     hits(&host, 0);
     // control: a plain U is the mod's
@@ -443,7 +443,7 @@ fn round7e_fix_h1_a_mod_bound_to_a_combo_fires_on_that_combo_only() {
     let mut rt = runtime();
     capture(&mut ControlsPage::default(), ROWS.len(), "ctrl+u");
     assert_eq!(mod_key_of("alpha"), "ctrl+u");
-    let u = Key::Character("u".into());
+    let u = Key::Character("9".into());
     press_key(&mut rt, NONE, &u, &[&host]);
     press_key(&mut rt, ALT, &u, &[&host]);
     hits(&host, 0);
@@ -529,11 +529,11 @@ fn round7e_fix_h2_the_clients_own_combos_are_refused_for_a_mod() {
 #[test]
 fn round7e_fix_m7_a_bare_mod_key_does_not_fire_on_the_clipboard_combo() {
     reset();
-    let host = bind("alpha", "u");
+    let host = bind("alpha", "9");
     let mut rt = runtime();
-    press_key(&mut rt, CTRL, &Key::Character("u".into()), &[&host]);
+    press_key(&mut rt, CTRL, &Key::Character("9".into()), &[&host]);
     hits(&host, 0);
-    press_key(&mut rt, NONE, &Key::Character("u".into()), &[&host]);
+    press_key(&mut rt, NONE, &Key::Character("9".into()), &[&host]);
     hits(&host, 1);
 }
 
@@ -542,9 +542,9 @@ fn round7e_fix_m6_the_winner_of_a_shared_default_does_not_depend_on_load_order()
     for order in [["alpha", "beta"], ["beta", "alpha"]] {
         reset();
         for who in order {
-            let _ = bind(who, "u");
+            let _ = bind(who, "9");
         }
-        assert_eq!(mod_key_of("alpha"), "u", "{order:?}");
+        assert_eq!(mod_key_of("alpha"), "9", "{order:?}");
         assert_eq!(mod_key_of("beta"), "", "{order:?}");
     }
 }
@@ -556,15 +556,15 @@ fn round7e_fix_m6_a_saved_key_beats_a_default_in_either_load_order() {
         testing::put(MOD_KEYS, b"mod.beta.act=u\n");
         let mut hosts = Vec::new();
         for who in order {
-            hosts.push((who, bind(who, if who == "alpha" { "u" } else { "" })));
+            hosts.push((who, bind(who, if who == "alpha" { "9" } else { "" })));
         }
-        assert_eq!(mod_key_of("beta"), "u", "{order:?}");
+        assert_eq!(mod_key_of("beta"), "9", "{order:?}");
         assert_eq!(mod_key_of("alpha"), "", "{order:?}");
         let (alpha, beta) = (
             &hosts.iter().find(|h| h.0 == "alpha").unwrap().1,
             &hosts.iter().find(|h| h.0 == "beta").unwrap().1,
         );
-        press("u", true, false, &[alpha, beta]);
+        press("9", true, false, &[alpha, beta]);
         hits(alpha, 0);
         hits(beta, 1);
     }
@@ -573,25 +573,25 @@ fn round7e_fix_m6_a_saved_key_beats_a_default_in_either_load_order() {
 #[test]
 fn round7e_fix_m5_a_mod_returning_from_disabled_is_checked_again() {
     reset();
-    let _alpha = bind("alpha", "u");
+    let _alpha = bind("alpha", "9");
     bindpage::set_addon_enabled("alpha", false);
     let _beta = bind("beta", "");
-    capture(&mut ControlsPage::default(), ROWS.len(), "u");
-    assert_eq!(mod_key_of("beta"), "u");
+    capture(&mut ControlsPage::default(), ROWS.len(), "9");
+    assert_eq!(mod_key_of("beta"), "9");
     bindpage::set_addon_enabled("alpha", true);
     assert_eq!(mod_key_of("alpha"), "", "u was taken while it was off");
-    assert_eq!(mod_key_of("beta"), "u");
+    assert_eq!(mod_key_of("beta"), "9");
 }
 
 #[test]
 fn round7e_fix_m5_a_mod_returning_is_checked_against_the_game_too() {
     reset();
-    let _alpha = bind("alpha", "u");
+    let _alpha = bind("alpha", "9");
     bindpage::set_addon_enabled("alpha", false);
     // while it is off, a game control takes the key
     let slot = row_named("bar1_slot1").unwrap();
-    capture(&mut ControlsPage::default(), slot, "u");
-    assert_eq!(settings::binds().key(slot), Some("u"));
+    capture(&mut ControlsPage::default(), slot, "9");
+    assert_eq!(settings::binds().key(slot), Some("9"));
     bindpage::set_addon_enabled("alpha", true);
     assert_eq!(mod_key_of("alpha"), "", "u is the game's now");
     assert!(controls_text(ROWS.len()).join(" ").contains("Bar 1: slot 1"), "and the row says whose");
@@ -603,7 +603,7 @@ fn round7e_fix_m5_the_defaults_button_obeys_the_rule_for_every_mod_and_keeps_its
     let _alpha = bind("alpha", "space");
     let _gamma = bind("gamma", "space");
     bindpage::set_addon_enabled("gamma", false);
-    assert!(bindpage::set_key("alpha", "act", "u"));
+    assert!(bindpage::set_key("alpha", "act", "9"));
     let mut page = ControlsPage::default();
     page.row = crate::bindpage::defaults();
     let mut cues = Vec::new();
@@ -636,7 +636,7 @@ fn round7e_fix_l9_a_key_that_cannot_be_kept_is_said_not_hidden() {
     testing::reset(true);
     let _host = bind("alpha", "");
     let mut page = ControlsPage::default();
-    capture(&mut page, ROWS.len(), "u");
+    capture(&mut page, ROWS.len(), "9");
     assert!(said(&mut page).contains("Key not kept"), "{}", said(&mut page));
     assert_eq!(mod_key_of("alpha"), "", "the old key stays");
 }
@@ -756,13 +756,13 @@ fn round7e_h3_a_cancel_puts_back_what_a_mod_took_from_a_game_row() {
 fn round7e_h3_a_cancel_after_defaults_brings_the_saved_mod_keys_back() {
     reset();
     let _alpha = bind("alpha", "b");
-    assert!(bindpage::set_key("alpha", "act", "u"));
+    assert!(bindpage::set_key("alpha", "act", "9"));
     let mut s = Session::open();
     s.give(crate::bindpage::defaults() as usize, "unused");
     assert_eq!(mod_key_of("alpha"), "b", "Defaults put the default back");
     assert!(!mod_file().contains("mod.alpha.act="), "and forgot the saved one: {}", mod_file());
     s.cancel();
-    assert_eq!(mod_key_of("alpha"), "u");
+    assert_eq!(mod_key_of("alpha"), "9");
     assert!(mod_file().contains("mod.alpha.act=u"), "{}", mod_file());
 }
 
@@ -965,8 +965,8 @@ fn round7e_fix2_m2_a_release_is_named_as_its_press_was() {
     host.execute("log = {}; eqoa.events.on('input.key', function(e) log[#log + 1] = e.data.combo .. (e.data.down and '+' or '-') end)")
         .unwrap();
     let mut rt = runtime();
-    let u = Key::Character("u".into());
-    // Ctrl+U down, Ctrl let go, U let go
+    let u = Key::Character("9".into());
+    // Ctrl+9 down, Ctrl let go, U let go
     input::set_modifiers(CTRL);
     rt_key(&mut rt, 9001, true, &u, None);
     input::set_modifiers(NONE);
@@ -986,7 +986,7 @@ fn round7e_fix2_m2_the_game_names_a_release_the_same_way() {
     // the mirror agrees: the game's own release is named as its press (viewer.rs key_names)
     reset();
     let mut game = GameKeys::new();
-    let u = Key::Character("u".into());
+    let u = Key::Character("9".into());
     let mut b = settings::binds();
     b.bind_key(row_named("bar1_slot1").unwrap(), "ctrl+u");
     settings::set_binds(b);
@@ -997,14 +997,14 @@ fn round7e_fix2_m2_the_game_names_a_release_the_same_way() {
 #[test]
 fn round7e_fix2_l3_super_is_no_plain_key() {
     reset();
-    let host = bind("alpha", "u");
+    let host = bind("alpha", "9");
     let mut rt = runtime();
     // Cmd+U is not a plain U for a mod
     input::set_super(true);
-    press_based(&mut rt, NONE, &Key::Character("u".into()), None, &[&host]);
+    press_based(&mut rt, NONE, &Key::Character("9".into()), None, &[&host]);
     input::set_super(false);
     hits(&host, 0);
-    press_based(&mut rt, NONE, &Key::Character("u".into()), None, &[&host]);
+    press_based(&mut rt, NONE, &Key::Character("9".into()), None, &[&host]);
     hits(&host, 1);
     // Cmd+C, V, X and Cmd+, are the client's as Ctrl+C, V, X are
     for key in ["super+c", "super+v", "super+x", "super+,"] {
@@ -1020,12 +1020,12 @@ fn round7e_fix2_l3_window_modifier_events_carry_super() {
     use winit::keyboard::ModifiersState;
     reset();
     input::observe_modifiers(&WindowEvent::ModifiersChanged(Modifiers::from(ModifiersState::SUPER)));
-    let host = bind("alpha", "u");
+    let host = bind("alpha", "9");
     let mut rt = runtime();
-    press_based(&mut rt, NONE, &Key::Character("u".into()), None, &[&host]);
+    press_based(&mut rt, NONE, &Key::Character("9".into()), None, &[&host]);
     hits(&host, 0);
     input::observe_modifiers(&WindowEvent::ModifiersChanged(Modifiers::from(ModifiersState::empty())));
-    press_based(&mut rt, NONE, &Key::Character("u".into()), None, &[&host]);
+    press_based(&mut rt, NONE, &Key::Character("9".into()), None, &[&host]);
     hits(&host, 1);
 }
 
@@ -1122,7 +1122,7 @@ fn round7e_fix3_a_let_go_key_is_forgotten_wherever_it_went() {
     host.execute("log = {}; eqoa.events.on('input.key', function(e) log[#log + 1] = e.data.combo .. (e.data.down and '+' or '-') end)")
         .unwrap();
     let mut rt = runtime();
-    let u = Key::Character("u".into());
+    let u = Key::Character("9".into());
     input::set_modifiers(CTRL);
     rt.scripted_key_based(9201, &u, None, None, ElementState::Pressed, true);
     input::set_modifiers(NONE);
@@ -1146,7 +1146,7 @@ fn round7e_fix3_modifier_order_in_a_saved_name_does_not_matter() {
     assert_eq!(mod_key_of("beta"), "", "ctrl+super+c is the client's however it is written");
     assert_eq!(mod_key_of("gamma"), "", "alt+super+enter too");
     let mut rt = runtime();
-    press_based(&mut rt, CTRL_SHIFT, &Key::Character("U".into()), Some("u"), &[&alpha]);
+    press_based(&mut rt, CTRL_SHIFT, &Key::Character("U".into()), Some("9"), &[&alpha]);
     hits(&alpha, 1);
 }
 
@@ -1156,15 +1156,15 @@ fn round7e_fix3_nothing_listening_means_no_key_work() {
     reset();
     bindpage::reset_in_memory();
     let mut rt = runtime();
-    let u = Key::Character("u".into());
+    let u = Key::Character("9".into());
     // no mod at all: the runtime keeps nothing of the key
     input::set_modifiers(CTRL);
-    rt_key(&mut rt, 9301, true, &u, Some("u"));
-    rt_key(&mut rt, 9301, false, &u, Some("u"));
+    rt_key(&mut rt, 9301, true, &u, Some("9"));
+    rt_key(&mut rt, 9301, false, &u, Some("9"));
     let (_, _, allocs, _) = measure(|| {
         for _ in 0..300 {
-            rt_key(&mut rt, 9301, true, &u, Some("u"));
-            rt_key(&mut rt, 9301, false, &u, Some("u"));
+            rt_key(&mut rt, 9301, true, &u, Some("9"));
+            rt_key(&mut rt, 9301, false, &u, Some("9"));
         }
     });
     input::set_modifiers(NONE);
@@ -1173,12 +1173,12 @@ fn round7e_fix3_nothing_listening_means_no_key_work() {
     // one mod that is on, with no key bound and no input.key listener
     let _quiet = option_test_host("quiet");
     input::set_modifiers(CTRL);
-    input::route_mod_key_based(&u, Some("u"), true, false, false, true, false);
-    input::route_mod_key_based(&u, Some("u"), false, false, false, true, false);
+    input::route_mod_key_based(&u, Some("9"), true, false, false, true, false);
+    input::route_mod_key_based(&u, Some("9"), false, false, false, true, false);
     let (_, _, allocs, _) = measure(|| {
         for _ in 0..300 {
-            input::route_mod_key_based(&u, Some("u"), true, false, false, true, false);
-            input::route_mod_key_based(&u, Some("u"), false, false, false, true, false);
+            input::route_mod_key_based(&u, Some("9"), true, false, false, true, false);
+            input::route_mod_key_based(&u, Some("9"), false, false, false, true, false);
         }
     });
     input::set_modifiers(NONE);
@@ -1187,8 +1187,8 @@ fn round7e_fix3_nothing_listening_means_no_key_work() {
     let _loud = bind("loud", "");
     input::set_modifiers(CTRL);
     let (_, _, allocs, _) = measure(|| {
-        input::route_mod_key_based(&u, Some("u"), true, false, false, true, false);
-        input::route_mod_key_based(&u, Some("u"), false, false, false, true, false);
+        input::route_mod_key_based(&u, Some("9"), true, false, false, true, false);
+        input::route_mod_key_based(&u, Some("9"), false, false, false, true, false);
     });
     input::set_modifiers(NONE);
     assert!(allocs > 0, "the meter sees a listening mod's key work");
@@ -1402,13 +1402,13 @@ fn round7e_owner1_a_game_control_on_shift_space_is_a_real_conflict_and_swaps_as_
 #[test]
 fn round7e_owner1_a_bare_mod_key_is_never_consumed_only_a_modifier_combination_is() {
     reset();
-    let host = bind("alpha", "u");
+    let host = bind("alpha", "9");
     let mut rt = runtime();
-    let u = Key::Character("u".into());
-    assert!(!press_consumed(&mut rt, NONE, &u, Some("u"), &[&host]), "a bare key reaches the game as always");
+    let u = Key::Character("9".into());
+    assert!(!press_consumed(&mut rt, NONE, &u, Some("9"), &[&host]), "a bare key reaches the game as always");
     hits(&host, 1);
     assert!(bindpage::set_key("alpha", "act", "ctrl+u"));
-    assert!(press_consumed(&mut rt, CTRL, &u, Some("u"), &[&host]), "Ctrl+U is the mod's alone");
+    assert!(press_consumed(&mut rt, CTRL, &u, Some("9"), &[&host]), "Ctrl+9 is the mod's alone");
     hits(&host, 2);
 }
 
@@ -1557,13 +1557,13 @@ fn round7e_mgr1_no_key_set_means_no_key_work_and_a_key_survives_a_restart_and_a_
     bindpage::register_manager_row();
     assert!(bindpage::set_key(MGR.0, MGR.1, ""));
     let mut rt = runtime();
-    let u = Key::Character("u".into());
+    let u = Key::Character("9".into());
     // no key set: F10 and every other key cost no allocation
     rt.scripted_key_based(13001, &f(10), None, None, ElementState::Pressed, true);
     rt.scripted_key_based(13001, &f(10), None, None, ElementState::Released, true);
     let (_, _, allocs, _) = measure(|| {
         for _ in 0..300 {
-            for (key, base) in [(&f(10), None), (&u, Some("u"))] {
+            for (key, base) in [(&f(10), None), (&u, Some("9"))] {
                 rt.scripted_key_based(13002, key, base, None, ElementState::Pressed, true);
                 rt.scripted_key_based(13002, key, base, None, ElementState::Released, true);
             }
@@ -1575,8 +1575,8 @@ fn round7e_mgr1_no_key_set_means_no_key_work_and_a_key_survives_a_restart_and_a_
     assert!(bindpage::set_key(MGR.0, MGR.1, "f10"));
     let (_, _, allocs, _) = measure(|| {
         for _ in 0..300 {
-            rt.scripted_key_based(13003, &u, Some("u"), None, ElementState::Pressed, true);
-            rt.scripted_key_based(13003, &u, Some("u"), None, ElementState::Released, true);
+            rt.scripted_key_based(13003, &u, Some("9"), None, ElementState::Pressed, true);
+            rt.scripted_key_based(13003, &u, Some("9"), None, ElementState::Released, true);
         }
     });
     assert_eq!(allocs, 0, "a key that is not the manager's costs nothing");

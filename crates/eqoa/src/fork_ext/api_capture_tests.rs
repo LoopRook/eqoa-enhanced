@@ -1053,13 +1053,13 @@ fn performance_busy_world_zero_addons_frame_and_packet_allocation_bound() {
     // a key with modifiers held, press and release, with nothing listening; the Mods & Addons
     // row is there (default F10) as it is with no mod enabled, and its key test costs nothing
     crate::fork_ext::bindpage::register_manager_row();
-    let key = winit::keyboard::Key::Character("u".into());
+    let key = winit::keyboard::Key::Character("y".into());
     input::set_modifiers((true, false, true));
     let (_, key_time, key_allocs, key_bytes) = measure(|| {
         for _ in 0..600 {
-            input::route_mod_key_based(&key, Some("u"), true, false, false, true, false);
-            input::route_mod_key_based(&key, Some("u"), false, false, false, true, false);
-            input::manager_key_pressed(&key, Some("u"), true, false, false, true, false);
+            input::route_mod_key_based(&key, Some("y"), true, false, false, true, false);
+            input::route_mod_key_based(&key, Some("y"), false, false, false, true, false);
+            input::manager_key_pressed(&key, Some("y"), true, false, false, true, false);
         }
     });
     crate::fork_ext::bindpage::reset_in_memory();
@@ -2207,7 +2207,7 @@ fn addon_actions_use_live_camera_assist_and_summary_overlay_gates() {
         local auto_id, e_g = eqoa.actions.assist()
         assert(auto_id ~= nil and e_g == nil)
         queued = { auto_id }
-        eqoa.input.bind({ id = 'a', label = 'A', default_key = "u" }, function()
+        eqoa.input.bind({ id = 'a', label = 'A', default_key = "y" }, function()
             local id, e = eqoa.actions.assist()
             last_id, last_err = id, e
             if id then queued[#queued + 1] = id end
@@ -2219,7 +2219,7 @@ fn addon_actions_use_live_camera_assist_and_summary_overlay_gates() {
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
+                serde_json::json!({"key":"y","down":true,"repeat":false,"synthetic":false,"text":""}),
             )
         });
         crate::fork_ext::addons::native_events::dispatch(&host).unwrap();
@@ -2228,7 +2228,7 @@ fn addon_actions_use_live_camera_assist_and_summary_overlay_gates() {
     CORE.with(|c| {
         c.borrow_mut().emit(
             "input.key",
-            serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
+            serde_json::json!({"key":"y","down":true,"repeat":false,"synthetic":false,"text":""}),
         )
     });
     crate::fork_ext::addons::native_events::dispatch(&host).unwrap();
@@ -2288,7 +2288,7 @@ fn round6b_assist_emits_dispatch_and_server_phases_via_play() {
                 code = e.data.code,
             }
         end)
-        eqoa.input.bind({ id = "a", label = "Assist", default_key = "u" }, function()
+        eqoa.input.bind({ id = "a", label = "Assist", default_key = "y" }, function()
             req, req_err = eqoa.actions.assist()
         end)
     "#,
@@ -2299,7 +2299,7 @@ fn round6b_assist_emits_dispatch_and_server_phases_via_play() {
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
+                serde_json::json!({"key":"y","down":true,"repeat":false,"synthetic":false,"text":""}),
             )
         });
         native_events::dispatch(&host).unwrap();
@@ -2467,7 +2467,7 @@ fn round6b_non_item_target_cycle_interact_attack_cast_hotbar_move() {
         eqoa.events.on("action.result", function(e)
             results[#results + 1] = e.data
         end)
-        eqoa.input.bind({ id = "go", label = "Go", default_key = "u" }, function()
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "y" }, function()
             last_req, last_err = next_fn()
         end)
     "#,
@@ -2479,7 +2479,7 @@ fn round6b_non_item_target_cycle_interact_attack_cast_hotbar_move() {
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
+                serde_json::json!({"key":"y","down":true,"repeat":false,"synthetic":false,"text":""}),
             )
         });
         native_events::dispatch(&host).unwrap();
@@ -2595,7 +2595,7 @@ fn round6b_non_item_chat_command_windows_weapon_sets_and_spellbook() {
         eqoa.events.on("action.result", function(e)
             results[#results + 1] = e.data
         end)
-        eqoa.input.bind({ id = "go", label = "Go", default_key = "u" }, function()
+        eqoa.input.bind({ id = "go", label = "Go", default_key = "y" }, function()
             last_req, last_err = next_fn()
         end)
     "#,
@@ -2607,7 +2607,7 @@ fn round6b_non_item_chat_command_windows_weapon_sets_and_spellbook() {
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
+                serde_json::json!({"key":"y","down":true,"repeat":false,"synthetic":false,"text":""}),
             )
         });
         native_events::dispatch(&host).unwrap();

@@ -1278,11 +1278,11 @@ mod tests {
     fn mod_bind_register_rebind_and_negative_control() {
         crate::settings::testing::reset(false);
         reset_in_memory();
-        let _ = register("test_addon", "toggle_window", "u", "Test Window");
-        assert_eq!(get_key("test_addon", "toggle_window"), Some("u".into()));
+        let _ = register("test_addon", "toggle_window", "y", "Test Window");
+        assert_eq!(get_key("test_addon", "toggle_window"), Some("y".into()));
 
         // Initial key 'u' fires
-        let fired = dispatch_keypress("u");
+        let fired = dispatch_keypress("y");
         assert_eq!(fired, Some(("test_addon".into(), "toggle_window".into())));
 
         // Negative control: 'y' does not fire initially
@@ -1294,7 +1294,7 @@ mod tests {
 
         // Negative control: old key 'u' does NOTHING now!
         assert_eq!(
-            dispatch_keypress("u"),
+            dispatch_keypress("y"),
             None,
             "old key does nothing after rebind"
         );
@@ -1336,10 +1336,10 @@ mod tests {
         reset_in_memory();
         register("alpha", "act", "b", "Alpha");
         session_begin();
-        assert!(set_key("alpha", "act", "u"));
+        assert!(set_key("alpha", "act", "y"));
         let errors = restore_session(|_, _, _| Err("disk full".into()));
         assert_eq!(errors.len(), 1, "the failure is reported: {errors:?}");
-        assert_eq!(get_key("alpha", "act"), Some("u".into()), "memory stays with the file");
+        assert_eq!(get_key("alpha", "act"), Some("y".into()), "memory stays with the file");
         let file = String::from_utf8(crate::settings::testing::kept(KEYS_FILE).unwrap()).unwrap();
         assert!(file.contains("mod.alpha.act=u"), "{file}");
         // control: with the write working the key is put back
@@ -1350,7 +1350,7 @@ mod tests {
             None => forget_mod_bind(a, i),
         })
         .is_empty());
-        assert_eq!(get_key("alpha", "act"), Some("u".into()));
+        assert_eq!(get_key("alpha", "act"), Some("y".into()));
         crate::settings::testing::reset(false);
         reset_in_memory();
     }
