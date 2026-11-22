@@ -147,7 +147,7 @@ fn a1_zoning_death_leaving_the_world_and_the_players_switch_each_end_open_window
     let h = host(SESSION_CAPS);
     h.execute("log = {}; eqoa.events.on('windows.session', function(e) if e.data.phase == 'closed' then log[#log + 1] = e.data.reason end end)").unwrap();
     for (what, end) in [
-        ("death", Box::new(|| ws::set_env(ws::Env { dead: true, ..ws::Env::default() }))),
+        ("death", Box::new(|| ws::set_env(ws::Env { dead: true, ..ws::Env::default() })) as Box<dyn Fn()>),
         ("left_world", Box::new(|| ws::set_env(ws::Env { away: true, ..ws::Env::default() }))),
         ("game_windows", Box::new(|| window_takeover::set_use_game_windows(true))),
     ] {
