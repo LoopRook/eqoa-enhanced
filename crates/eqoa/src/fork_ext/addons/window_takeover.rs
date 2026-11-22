@@ -385,6 +385,8 @@ pub(crate) fn release_vm(vm: u64) {
 
 pub(crate) fn release_all() {
     let _ = release_claims_where("zoning", |_| true);
+    // a by-id open of the world left that still waits for its answer decides nothing in the next one
+    crate::fork_ext::loot_by_id::clear();
     // a list after the mod's last take or sale belongs to the zone left: a new zone may reuse its entity id
     with_state_mut(|s| {
         s.grace_loot = None;

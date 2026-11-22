@@ -234,7 +234,9 @@ pub(crate) fn take_closed_by(native_cause: &str) -> &'static str {
     })
 }
 
-/// The world ended: no request of the old world waits, no mark applies. The chosen method is kept (same server).
+/// The world ended (a zone change, a respawn teleport, a disconnect, the world reset): no request of the old world waits,
+/// no mark applies. The chosen method is kept: the zone is the same server, which answers the same way. Called from
+/// `window_takeover::release_all`, which every one of those ends runs.
 pub(crate) fn clear() {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
@@ -242,6 +244,19 @@ pub(crate) fn clear() {
         s.retry = None;
         s.close_mark = None;
     });
+}
+
+/// The connection ended (`Event::Disconnected`, which is also how the player switches server): the next server may treat
+/// a loot request that names a corpse the player has not targeted differently, so the method is decided again, and the
+/// log says which method is in use again at the next request.
+pub(crate) fn reset_session() {
+    clear();
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        s.method = Method::Unknown;
+        s.provisional = false;
+    });
+    LOGGED_START.with(|l| l.set(false));
 }
 
 #[cfg(test)]
