@@ -1018,6 +1018,9 @@ pub(super) fn dropped(_play: &mut Play) {
     // a mod disabled since the last game step: its pins go before the world does (a logout)
     #[cfg(not(target_arch = "wasm32"))]
     drain_released_waypoints(_play);
+    // round A1: no mod window, question or controller focus outlives the world
+    #[cfg(not(target_arch = "wasm32"))]
+    a1_play::play_dropped();
 }
 
 /// Clears the pins disabled mods still own, once the map has read the window's pins; until then the

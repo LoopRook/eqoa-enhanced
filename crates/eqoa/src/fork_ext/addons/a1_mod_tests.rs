@@ -5,6 +5,7 @@
 use super::{
     action_broker,
     bridge::Bridge,
+    confirm,
     discovery::{DiscoveredAddon, EntryMode},
     host::Host,
     native_core::{CORE, Core},
@@ -200,4 +201,165 @@ fn a1_spellbook_opens_on_shift_k_draws_and_closes_every_way_it_should() {
 #[test]
 fn a1_quest_journal_opens_on_shift_j_draws_and_closes_every_way_it_should() {
     run("eqoa_quest_journal", "j", "shift+j", "quest_log");
+}
+
+// ---- fix round 1 (review findings 1 and 2) ----
+
+/// A one-file mod in a scratch folder, with the capabilities it declares.
+fn scratch_addon(name: &str, caps: &[&str], source: &str) -> (DiscoveredAddon, PathBuf) {
+    let dir = std::env::temp_dir().join(format!("eqoa-a1-fix1-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("main.lua"), source).unwrap();
+    let dir = dir.canonicalize().unwrap();
+    let addon = DiscoveredAddon {
+        id: name.into(),
+        name: name.into(),
+        entry: dir.join("main.lua"),
+        script_root: dir.clone(),
+        package_root: dir.clone(),
+        module_dirs: vec![dir.clone()],
+        resource_dirs: vec![dir.clone()],
+        api: Some("eqoa/1".into()),
+        entry_mode: EntryMode::Once,
+        capabilities_declared: true,
+        requested_capabilities: caps.iter().map(|c| c.to_string()).collect(),
+        extensions: Default::default(),
+        initially_enabled: false,
+        mods_root: None,
+    };
+    (addon, dir)
+}
+
+/// One frame the way the runtime draws it: the mods' windows, then the client's question over them.
+fn frame_with_question(host: &Host, bridge: &Bridge, context: &mut Context) {
+    let ui = context.frame();
+    bridge
+        .invoke(|| {
+            super::runtime::with_question_on_top(ui, || {
+                native_events::dispatch(host)?;
+                native_events::render(host)
+            })
+        })
+        .unwrap();
+    drop(context.render_legacy());
+}
+
+fn window_rect(name: &str) -> Option<([f32; 2], [f32; 2])> {
+    let name = std::ffi::CString::new(name).unwrap();
+    let w = unsafe { dear_imgui_rs::sys::igFindWindowByName(name.as_ptr()) };
+    (!w.is_null()).then(|| unsafe { ([(*w).Pos.x, (*w).Pos.y], [(*w).Size.x, (*w).Size.y]) })
+}
+
+fn hovered_window_name() -> String {
+    unsafe {
+        let g = dear_imgui_rs::sys::igGetCurrentContext();
+        let w = (*g).HoveredWindow;
+        if w.is_null() { String::new() } else { std::ffi::CStr::from_ptr((*w).Name).to_string_lossy().into_owned() }
+    }
+}
+
+#[test]
+fn a1_fix1_the_question_is_over_every_mod_window_and_a_mod_cannot_take_its_name() {
+    fixture();
+    // a mod window as big as the screen, with a fake button over where the question's Yes will be; and a mod that
+    // tries to open a window with the question's id, to add to it
+    let (a, dir) = scratch_addon(
+        "cover",
+        &["eqoa.events.on", "eqoa.imgui"],
+        r#"
+        local ui = eqoa.imgui
+        eqoa.events.on("render", function()
+            ui.SetNextWindowPos(0, 0, ImGuiCond.Always)
+            ui.SetNextWindowSize(1024, 768, ImGuiCond.Always)
+            ui.Begin("cover", true, ImGuiWindowFlags.NoTitleBar + ImGuiWindowFlags.NoSavedSettings)
+            ui.Button("Fake harmless button")
+            ui.End()
+            local ok = pcall(function() ui.Begin("Are you sure?###eqoa-client-confirm"); ui.End() end)
+            took_the_name = ok
+        end)
+        "#,
+    );
+    let mut context = context();
+    let host = Host::for_addon(&a).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&a).unwrap();
+    let vm = native_events::bus(&host.lua).borrow().vm;
+    let ask = |act| confirm::open(vm, "cover", None, act, "Destroy Rock?".into(), 0).unwrap();
+    // control: with no question up, the mod's window is what the pointer finds anywhere on the screen
+    frame_with_question(&host, &bridge, &mut context);
+    context.io_mut().add_mouse_pos_event([512.0, 384.0]);
+    context.frame();
+    assert_eq!(hovered_window_name(), "cover");
+    drop(context.render_legacy());
+    // the question comes up: it is drawn after the mod's window ...
+    ask(confirm::Act::Destroy { inv_index: 1, name: "Rock".into(), count: 1 });
+    for _ in 0..3 {
+        frame_with_question(&host, &bridge, &mut context);
+    }
+    let (pos, size) = window_rect(confirm::WINDOW).expect("the question is drawn");
+    let centre = [pos[0] + size[0] * 0.5, pos[1] + size[1] * 0.5];
+    // ... so a pointer anywhere on its face finds the question, not the mod's window over the whole screen
+    context.io_mut().add_mouse_pos_event(centre);
+    context.frame();
+    let found = hovered_window_name();
+    drop(context.render_legacy());
+    assert!(found.starts_with("Are you sure?"), "the pointer on the question finds {found:?}, not the question");
+    // and it stays in front every frame, even after the mod's window has been drawn and clicked many times
+    for _ in 0..5 {
+        frame_with_question(&host, &bridge, &mut context);
+        context.io_mut().add_mouse_pos_event(centre);
+        context.frame();
+        let found = hovered_window_name();
+        drop(context.render_legacy());
+        assert!(found.starts_with("Are you sure?"), "still in front: {found:?}");
+    }
+    // the mod could not open a window with the question's id
+    let took: String = host.lua.load("return tostring(took_the_name)").eval().unwrap();
+    assert_eq!(took, "false", "Begin with the client's window id is refused");
+    assert!(confirm::reserved("Are you sure?###eqoa-client-confirm") && !confirm::reserved("Are you sure?"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a1_fix1_a_mod_that_errors_in_render_or_windows_key_loses_the_controller_and_its_windows_at_once() {
+    use crate::input::{Report, bit};
+    for event in ["render", "windows.key"] {
+        fixture();
+        let (a, dir) = scratch_addon(
+            "breaks",
+            &["eqoa.events.on", "eqoa.windows.session", "eqoa.windows.focus", "eqoa.imgui"],
+            &format!(
+                r#"
+                s = assert(eqoa.windows.open_session("inventory"))
+                assert(eqoa.windows.focus(s.ref))
+                eqoa.events.on("{event}", function() error("boom") end)
+                "#
+            ),
+        );
+        let mut context = context();
+        let host = Host::for_addon(&a).unwrap();
+        let bridge = Bridge::install(&host).unwrap();
+        host.run_addon(&a).unwrap();
+        let vm = native_events::bus(&host.lua).borrow().vm;
+        // control: before the error the mod holds the controller, the game gets no Cross
+        assert!(ws::get(vm, "inventory").is_some());
+        let mut r = Report { buttons: bit::CROSS, ..Default::default() };
+        ws::apply_pad(&mut r);
+        assert_eq!(r.buttons, 0, "{event}: the mod holds the controller until it fails");
+        // that press was told to the mod as windows.key (its handler fails); the render handler fails on this frame
+        context.frame();
+        bridge
+            .invoke(|| {
+                native_events::dispatch(&host)?;
+                native_events::render(&host)
+            })
+            .unwrap();
+        drop(context.render_legacy());
+        assert!(ws::get(vm, "inventory").is_none(), "{event}: its window session ended with the error");
+        let mut r = Report { buttons: bit::CROSS | bit::UP | bit::TRIANGLE, ..Default::default() };
+        ws::apply_pad(&mut r);
+        assert_eq!(r.buttons, bit::CROSS | bit::UP | bit::TRIANGLE, "{event}: the game's buttons are the game's again");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

@@ -285,6 +285,12 @@ impl Bridge {
             "Begin",
             lua.create_function(
                 move |_, (label, open, flags): (String, Option<bool>, Option<i32>)| {
+                    if super::confirm::reserved(&label) {
+                        // the client's own question window (`confirm.rs`) is not a mod's to open or add to
+                        return Err(mlua::Error::runtime(
+                            "ImGui.Begin: a window id starting '###eqoa-client-' is the client's",
+                        ));
+                    }
                     let label = text(&label)?;
                     let flags = flags.unwrap_or(0);
                     widgets::window_flags(flags)?;

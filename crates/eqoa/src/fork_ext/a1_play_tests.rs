@@ -338,3 +338,80 @@ fn a1_pass_waits_for_plain_play_and_is_refused_over_a_game_window() {
     step(&mut p, &host);
     assert_eq!(p.mode, 11);
 }
+
+// ---- fix round 1 (review findings 3, 4 and 5) ----
+
+#[test]
+fn a1_fix1_leaving_the_world_ends_every_mod_window_the_question_and_the_controller() {
+    use crate::input::{Report, bit};
+    for how in ["quit", "disconnect"] {
+        let (mut p, host) = rig();
+        host.execute("s = assert(eqoa.windows.open_session('inventory')); assert(eqoa.windows.focus(s.ref))").unwrap();
+        ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.destroy(inv.items[2].ref)");
+        // control: all three are up while play runs
+        assert!(confirm::is_open() && ws::is_active());
+        let mut r = Report { buttons: bit::CROSS, ..Default::default() };
+        ws::apply_pad(&mut r);
+        assert_eq!(r.buttons, 0, "{how}: the controller is the mod's while play runs");
+        match how {
+            "quit" => p.quit = true,
+            _ => p.disconnected = Some(3),
+        }
+        // the viewer goes back to the pregame with no further step: the world is simply let go
+        drop(p);
+        assert!(!confirm::is_open(), "{how}: the question is over (as No), nothing is left to expire over the pregame");
+        assert!(ws::sessions_for_test().is_empty(), "{how}: no mod window session stays");
+        assert!(!ws::is_active(), "{how}: nothing is held or focused");
+        let mut r = Report { buttons: bit::CROSS, ..Default::default() };
+        ws::apply_pad(&mut r);
+        assert_eq!(r.buttons, bit::CROSS, "{how}: the controller is the game's again");
+        assert!(!ws::env().plain && ws::env().away, "{how}: no window opens until a world is entered");
+        // and the mod hears that its window ended
+        native_events::dispatch(&host).unwrap();
+        host.execute("assert(closed[1].answer ~= 'yes' and closed[1].answer ~= nil)").unwrap();
+    }
+}
+
+#[test]
+fn a1_fix1_the_full_map_is_not_plain_play_for_the_controller_or_a_new_window() {
+    use crate::input::{Report, bit};
+    let (mut p, host) = rig();
+    host.execute("s = assert(eqoa.windows.open_session('inventory')); assert(eqoa.windows.focus(s.ref))").unwrap();
+    step(&mut p, &host);
+    assert!(ws::env().plain, "control: plain play before the map opens");
+    let mut r = Report { buttons: bit::CROSS, ..Default::default() };
+    ws::apply_pad(&mut r);
+    assert_eq!(r.buttons, 0, "control: the focused mod window holds Cross");
+    ws::apply_pad(&mut Report::default());
+    p.map.show();
+    step(&mut p, &host);
+    assert!(!ws::env().plain, "the full map up: not plain");
+    let mut r = Report { buttons: bit::CROSS | bit::UP, ..Default::default() };
+    ws::apply_pad(&mut r);
+    assert_eq!(r.buttons, bit::CROSS | bit::UP, "nothing is masked behind the map");
+    host.execute("local ok, e = eqoa.windows.focus(s.ref); assert(ok == nil and e.code == 'not_ready', e and e.code)").unwrap();
+    // an ordinary mod key's rule is not what this changes (round7e_mgr2 keeps that)
+    assert!(p.addon_input_available());
+}
+
+#[test]
+fn a1_fix1_pass_is_refused_where_the_game_cannot_open_its_window() {
+    let (mut p, host) = rig();
+    let vm = native_events::bus(&host.lua).borrow().vm;
+    window_takeover::takeover(vm, "mod", TakeoverKind::Loot, TakeoverScope::Own).unwrap();
+    window_takeover::activate_hidden_for_test(vm, TakeoverKind::Loot, 5);
+    p.npcw.corpse = Some(net::dump::ItemList { p04: 0, items: vec![item(1, "Bone", 5, 1, -1, -1)] });
+    step(&mut p, &host);
+    host.execute("held = assert(eqoa.windows.session('loot'))").unwrap();
+    // the manual camera (mode 38) is plain play for mod keys, but the game's windows do not open from it
+    p.mode = 38;
+    step(&mut p, &host);
+    host.execute("local ok, e = eqoa.windows.pass(held.ref); assert(ok == nil and e.code == 'busy', 'pass said ' .. tostring(ok))").unwrap();
+    assert!(ws::take_passes().is_empty(), "nothing is queued to be silently cancelled");
+    // control: from the game's own camera the same call is accepted and opens the window
+    p.mode = 0;
+    step(&mut p, &host);
+    host.execute("assert(eqoa.windows.pass(held.ref) == true)").unwrap();
+    step(&mut p, &host);
+    assert_eq!(p.mode, 1);
+}

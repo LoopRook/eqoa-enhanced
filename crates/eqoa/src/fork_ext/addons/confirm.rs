@@ -18,6 +18,16 @@ use serde_json::json;
 use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
+/// The question's window. After `###` is its id: a mod's own window can never take it (`reserved`).
+pub(crate) const WINDOW: &str = "Are you sure?###eqoa-client-confirm";
+const RESERVED_ID: &str = "###eqoa-client-";
+
+/// A mod's window name that would be the client's question's (or any `eqoa-client` window's) id: refused, so a mod
+/// cannot append to the question or take its place.
+pub(crate) fn reserved(label: &str) -> bool {
+    label.contains(RESERVED_ID)
+}
+
 /// How long a question waits for its answer.
 pub(crate) const TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -231,7 +241,9 @@ pub(crate) fn draw(ui: &Ui) {
     let [w, h] = ui.io().display_size();
     let mut answer: Option<bool> = None;
     let width = (w * 0.6).clamp(280.0, 420.0);
-    ui.window("Are you sure?")
+    ui.window(WINDOW)
+        // in front of every mod window, every frame it is shown (an earlier-drawn window never covers it)
+        .focused(true)
         .position([(w - width) * 0.5, h * 0.35], Condition::Always)
         .size([width, 0.0], Condition::Always)
         .flags(WindowFlags::NO_COLLAPSE | WindowFlags::NO_MOVE | WindowFlags::NO_SAVED_SETTINGS | WindowFlags::ALWAYS_AUTO_RESIZE)

@@ -731,6 +731,12 @@ fn deliver_data(
                 &err.to_string(),
             );
             shared.borrow_mut().subscriptions.retain(|s| s.token != t);
+            // round A1 fix: a mod whose window code or key handling just failed has no working window; the
+            // controller and its held sessions are the game's again at once, not at some later disable
+            if matches!(e.name.as_str(), "render" | "windows.key") {
+                let vm = shared.borrow().vm;
+                super::window_sessions::end_vm(vm);
+            }
         }
     }
     Ok(())

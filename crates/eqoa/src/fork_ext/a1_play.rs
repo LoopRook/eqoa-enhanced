@@ -151,15 +151,27 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
     }
 }
 
+/// The world is let go (a logout, a lost connection, the character left): every mod window, a question and the
+/// controller end now, not at a step that will never run, so nothing stays drawn or masked over the game's own
+/// screens (`Play`'s drop calls this).
+pub(crate) fn play_dropped() {
+    window_sessions::set_env(Env { plain: false, dead: false, away: true, passable: false });
+    window_sessions::mods_stopped("left_world");
+}
+
 /// Each game step's work for the modern UI's contract.
 pub(crate) fn tick(play: &mut Play) {
     // what play is doing is told every step, even when nothing is open: a window a mod opens a moment later must
     // be judged by now, not by the last time anything was
     let away = !play.in_world_now() || play.world_change.is_some();
     let dead = play.is_dead();
-    // the same test mod keys use (`addon_input_available`): a mod window is over plain play, never over a game window
-    let plain = !away && play.addon_input_available();
-    window_sessions::set_env(Env { plain, dead, away });
+    // the same test mod keys use (`addon_input_available`): a mod window is over plain play, never over a game window.
+    // The full-screen World Map is not plain play either: nothing is masked behind it (ordinary mod keys, which
+    // `addon_input_available` serves, are unchanged).
+    let plain = !away && play.addon_input_available() && !play.map.open;
+    // the game's own window opens from plain play with the game's camera only (`pass` below)
+    let passable = plain && play.mode == 0;
+    window_sessions::set_env(Env { plain, dead, away, passable });
     if !window_sessions::is_active() && !confirm::has_work() && !window_takeover::has_activity() {
         return;
     }

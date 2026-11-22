@@ -85,11 +85,14 @@ pub(crate) struct Env {
     pub dead: bool,
     /// Out of the world (loading, a world change, disconnected).
     pub away: bool,
+    /// The game can open one of its own windows now (`pass`): plain play and no manual camera, which the game's
+    /// windows do not open from.
+    pub passable: bool,
 }
 
 impl Default for Env {
     fn default() -> Self {
-        Self { plain: true, dead: false, away: false }
+        Self { plain: true, dead: false, away: false, passable: true }
     }
 }
 
@@ -310,6 +313,14 @@ pub(crate) fn end_own(reason: &str) {
     super::confirm::cancel_all(reason);
 }
 
+/// No mod window can be shown or answered now (the addon runtime stopped on an error, play was left): every session
+/// ends, a question is answered No and the controller is the game's again, so nothing is masked with no window to
+/// use it.
+pub(crate) fn mods_stopped(reason: &str) {
+    end_all(reason);
+    release_focus_all(reason);
+}
+
 /// `vm` is gone (disabled, reloaded, crashed): its sessions, its focus and its question go with it, told to no one.
 pub(crate) fn end_vm(vm: u64) {
     if is_active() {
@@ -387,8 +398,8 @@ pub(crate) fn pass(vm: u64, id: &str) -> std::result::Result<(), (&'static str, 
         ));
     };
     with(|s| {
-        if !s.env.plain {
-            return Err(("busy", "the game's window cannot open while another window or box is up".into()));
+        if !s.env.plain || !s.env.passable {
+            return Err(("busy", "the game's window cannot open now: another window or box is up, or the camera is manual".into()));
         }
         if !s.passes.contains(&(vm, kind)) {
             s.passes.push((vm, kind));

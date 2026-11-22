@@ -348,6 +348,7 @@ impl Runtime {
                             .handle_window_event(&mut active.context, window, event)
                 {
                     self.error = Some(e.to_string());
+                    super::window_sessions::mods_stopped("ended");
                     crate::say(&format!("Addons: {e}"));
                 }
                 if self.error.is_none() {
@@ -652,6 +653,8 @@ impl Runtime {
                         super::visibility::publish(false);
                         self.want_mouse = false;
                         crate::say(&format!("Addons paused: {e}"));
+                        // round A1: no mod window is drawn now, so none holds a session, a question or the controller
+                        super::window_sessions::mods_stopped("ended");
                         self.error = Some(e);
                     }
                 }
@@ -908,6 +911,15 @@ pub(super) fn dispatch_frame(
     selected
 }
 
+/// round A1: the question a mod's destroy or drop-quest put to the player is the client's. It is drawn LAST, after
+/// every mod window (`mods` draws them), and brought to the front each frame, so nothing a mod draws can cover it,
+/// take the click meant for its buttons or ride on it.
+pub(super) fn with_question_on_top<R>(ui: &Ui, mods: impl FnOnce() -> R) -> R {
+    let out = mods();
+    super::confirm::draw(ui);
+    out
+}
+
 struct FrameState {
     open: bool,
     settings: Option<String>,
@@ -1118,15 +1130,13 @@ fn render_managed(
         }
         let mut open = plan.controls.unwrap_or(false);
         super::window_sessions::set_manager_open(open && !snapshot.start_menu);
-        // round A1: the question a mod's destroy or drop-quest put to the player is the client's, drawn over play
-        super::confirm::draw(ui);
         if open && !snapshot.start_menu {
             let actions = controls(ui, manager, &mut open, plan.root.as_ref());
             let extra = FramePlan::collect(actions, plan.settings.take());
             plan.commands.extend(extra.commands);
             plan.settings = extra.settings;
         }
-        let settings = dispatch_frame(ui, manager, snapshot, plan);
+        let settings = with_question_on_top(ui, || dispatch_frame(ui, manager, snapshot, plan));
         #[cfg(test)]
         if fault == Some(RenderFault::PrepareRender) {
             return Err("injected prepare_render failure".into());
