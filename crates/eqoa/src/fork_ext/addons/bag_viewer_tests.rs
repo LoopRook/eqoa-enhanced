@@ -2522,16 +2522,20 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     );
     assert!(bv.eval::<bool>("not eqoa.windows.taken('loot')"), "Bag Viewer must release loot takeover when batch ends");
 
-    // 4. Mark Rat Pelt (slot 7) as junk on All tab, then click Sell junk near Merchant (native merchant closed) -> talks & sells without native window!
-    // (A0: Odd Thing is equipment, which the one-click Sell junk leaves alone, so an ordinary misc stack is the junk here.)
+    // 4. Mark Odd Thing (slot 8) as junk on All tab, then click Sell junk near Merchant (native merchant closed) -> talks & sells without native window!
     bv.click(bv.tab(1));
     bv.frames(1);
-    let s7 = bv.slot(7);
-    bv.click(s7);
+    let s8 = bv.slot(8);
+    bv.click(s8);
     bv.frames(2);
     let (mx, my, en, _, _) = bv.menu_row("Mark as junk").unwrap();
     assert!(en);
     bv.click((mx, my));
+    bv.frames(2);
+    // Fix round 1: Odd Thing is equipment, so marking asks once ("Mark Odd Thing as junk?"); Yes marks it
+    let (yx, yy, yen, _, _) = bv.menu_row("Mark as junk").expect("the question's Yes row");
+    assert!(yen);
+    bv.click((yx, yy));
     bv.frames(2);
 
     let (sx, sy, slbl) = bv.action_hit("Sell junk (").unwrap();
@@ -2546,7 +2550,7 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     bv.frames(2);
     bv.play.bags_broker_tick(); // dispatches step 1 sell
     assert!(bv.play.bags_shop_pending(), "sell step sent silently");
-    bv.play.bags_sell_confirm(6, 3);
+    bv.play.bags_sell_confirm(7, 1);
     bv.frames(2);
     assert_eq!(bv.result_text(), Some(("Sold 1 of 1".into(), Some(true))));
     assert!(bv.eval::<bool>("not eqoa.windows.taken('merchant')"), "Bag Viewer must release merchant takeover when batch ends");
@@ -3668,8 +3672,7 @@ fn round65_fix4_item6_out_of_range_buttons_grey_out_and_the_reach_is_learned_bod
     // the merchant and the banker stand 30 units away: past the default reach
     bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [30.0, 0.0, 0.0]);
     bv.play.bags_spawn_npc(9003, "Banker Dan", 0x80 | 2, 1, [0.0, 0.0, 30.0]);
-    // A0: an ordinary misc stack (Rat Pelt); Odd Thing is equipment, which the one-click Sell junk leaves alone
-    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['900007'] = true return true end)()"));
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['900008'] = true return true end)()"));
     bv.open();
     bv.frames(2);
     bv.click(bv.tab(1));
@@ -3989,8 +3992,7 @@ fn round65_fix4_m3_a_greyed_button_still_allows_one_try_body() {
     bv.play.bags_player_at([0.0, 0.0, 0.0]);
     bv.enable();
     bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [20.0, 0.0, 0.0]);
-    // A0: an ordinary misc stack (Rat Pelt); Odd Thing is equipment, which the one-click Sell junk leaves alone
-    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['900007'] = true return true end)()"));
+    assert!(bv.eval::<bool>("(function() require('bags').junk_ids['900008'] = true return true end)()"));
     bv.open();
     bv.frames(2);
     bv.click(bv.tab(1));

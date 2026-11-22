@@ -507,18 +507,10 @@ function H.batch_done(kind, d)
 end
 B.on_helper_batch_done = H.batch_done
 
--- "Kept 2 junk items: ..." for junk the one click does not sell
+-- "Kept 1 junk item: you are wearing it": marked junk the one click does not sell (only what is worn right now)
 function H.skipped_line(skipped)
-    local why = {}
-    for _, s in ipairs(skipped) do
-        for _, r in ipairs(s.reasons or {}) do why[r] = true end
-    end
-    local names = {}
-    for _, key in ipairs({"quick-slotted", "no-trade", "not an ordinary item"}) do
-        if why[key] then names[#names + 1] = key end
-    end
-    return string.format("Kept %d junk %s (%s): sell %s one at a time from the item's menu", #skipped,
-        plural(#skipped, "item", "items"), table.concat(names, ", "), plural(#skipped, "it", "them"))
+    return string.format("Kept %d junk %s: you are wearing %s", #skipped, plural(#skipped, "item", "items"),
+        plural(#skipped, "it", "them"))
 end
 
 -- ---------------------------------------------------------------- automatic helpers

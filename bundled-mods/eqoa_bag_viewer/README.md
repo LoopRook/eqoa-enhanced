@@ -49,11 +49,13 @@ Every decision is a line in the game's log (`eqoa.log`), starting
 (`eqoa.windows.takeover(kind)`, scope `own`), so a merchant or banker you talk to yourself still opens the game's window
 exactly as before, and a helper acts only on its button or on its own switch.
 
-- **Sell junk** (near a merchant, or with the merchant open): one click sells every stack marked as junk. Left alone, and
-  counted in a "Kept N junk items" line: worn items, quick-slotted items, no-trade items and items that are not ordinary
-  (not under the game's **Misc** tab). These are the four cases in which the game's own merchant window asks Yes or No;
-  `eqoa.actions.sell` does not ask, so the mod does. The line "Sold N junk items for X tunar" gives the game's own
-  quote for the stacks the server confirmed.
+- **Mark as junk** (item menu) is the decision to sell: an ordinary **Misc** item is marked at once; equipment, a potion or
+  other usable, a quick-slotted item or a no-trade item asks once, "Mark <item> as junk?" (Yes marks it, No does not; Escape
+  is No).
+- **Sell junk** (near a merchant, or with the merchant open): one click sells every stack marked as junk, gear and potions
+  included. The one exception is an item you are wearing right now: it is kept, and a "Kept 1 junk item: you are wearing
+  it" line says so. The count on the button is what will really be sold. The line "Sold N junk items for X tunar" gives the
+  game's own quote for the stacks the server confirmed.
 - **Restock**: an item's menu has **Keep up to N (Restock)** (N starts at what the bags hold; the menu steps it by 5). Near
   a merchant, **Restock (N)** buys up to N of each kept item that merchant sells, counting everything of that kind in the
   pack, never more than N. It stops, and says why, when money or bag space runs out.
@@ -62,8 +64,9 @@ exactly as before, and a helper acts only on its button or on its own switch.
 - **Do it when I get near**: three switches under the buttons (Sell junk, Restock, Bank), kept for each character, off by
   default. A helper acts once per approach (it arms again after you have been out of the NPC's reach by 5 more units),
   never while any game window or session of any kind is up, a batch is running, or you are in a fight.
-- **Sell 1 / Sell stack** in an item's menu ask first (Yes / No) for a quick-slotted, no-trade or not ordinary item, naming
-  the item and why.
+- **Sell 1 / Sell stack** in an item's menu ask first (Yes / No) for a quick-slotted, no-trade or not ordinary item (the four
+  cases in which the game's own merchant window asks; `eqoa.actions.sell` does not ask, so the mod does), naming the item
+  and why.
 - Marks and the switches are saved in `helpers.cfg` (private files of the mod): `keep:<id>=<n>`, `bank:<id>`,
   `auto:<character>:<helper>=1`. The lines the helpers say go to the result line and the game's log (`addon eqoa_bag_viewer:
   [info] bag helpers: ...`); `eqoa/1` has no way yet to put a line in the chat window without sending it to the server.

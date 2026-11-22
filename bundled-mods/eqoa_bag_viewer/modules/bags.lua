@@ -694,19 +694,19 @@ function M.risk_text(why)
     return table.concat(why, ", ", 1, #why - 1) .. " and " .. why[#why]
 end
 
--- The junk the one-click Sell junk sells: every stack marked as junk that is not worn and that the game would not ask
--- about (see `sell_risk`). Returns the batch steps, their count, the quoted tunar and, last, the marked junk left alone
--- ({item, reasons}) and the quote of each step (for the line said when the batch ends).
+-- The junk the one-click Sell junk sells: every stack marked as junk, gear and potions included (marking is the player's
+-- decision: the menu asked once when the item was not an ordinary Misc one, see `ask_to_mark`). The one exception is an item
+-- worn right now, which is kept. Returns the batch steps, their count, the quoted tunar and, last, the marked junk left
+-- alone ({item, reasons}) and the quote of each step (for the line said when the batch ends).
 function M.junk_sell_list()
     local inv = eqoa.inventory.get()
     if not inv then return {}, 0, 0, {}, {} end
     local has_merch = eqoa.merchant.get() ~= nil
     local steps, total_tunar, skipped, quotes = {}, 0, {}, {}
     for _, it in ipairs(inv.items) do
-        if not it.equipped and M.is_junk(it) then
-            local risk = M.sell_risk(it)
-            if risk then
-                skipped[#skipped + 1] = {item = it, reasons = risk}
+        if M.is_junk(it) then
+            if it.equipped then
+                skipped[#skipped + 1] = {item = it, reasons = {"you are wearing it"}}
             else
                 local qty = it.quantity or 1
                 local q = has_merch and eqoa.merchant.price(it.ref, "sell", qty) or 0
@@ -1102,6 +1102,8 @@ function M.build_menu(it, fx, fy)
         add("Mark as junk", not it.equipped,
             it.equipped and "cannot mark an equipped item as junk" or nil,
             function() M.set_junk(it, true) end, true)
+        -- not an ordinary Misc item, quick-slotted or no-trade: asked once (`ask_to_mark`)
+        rows[#rows].mark_ask = M.sell_risk(it) ~= nil or nil
     end
     -- the helpers' marks ("keep N" for Restock, "bank this" for Bank marked) are made on the pack's items
     local H = M.helpers
@@ -1127,6 +1129,17 @@ function M.run_single(label, fn)
     return req, err
 end
 
+-- Marking an item as junk when it is not an ordinary Misc one (equipment, a potion or other usable, a quick-slotted or
+-- no-trade item): the menu asks once, short. Yes marks it, No leaves it unmarked (Escape or a click elsewhere is No too).
+function M.ask_to_mark(row)
+    local menu = M.menu
+    local yes = {label = row.label, text = "Yes, mark it as junk", enabled = true, local_only = true, run = row.run,
+        confirmed = true}
+    local no = {label = "No", text = "No, leave it", enabled = true, local_only = true, run = function() end}
+    M.menu = {title = "Mark " .. (menu and menu.title or "this item") .. " as junk?", ref = menu and menu.ref,
+        rows = {yes, no}, fx = menu and menu.fx or 8, fy = menu and menu.fy or 46, asking = true}
+end
+
 -- Selling an item the game's merchant window would ask about: the menu asks first (Yes sells it, No keeps it). The
 -- question names the item and why; only the player's click on Yes goes on.
 function M.ask_to_sell(row)
@@ -1140,6 +1153,10 @@ end
 
 function M.trigger_menu(row)
     if not row then return end
+    if row.mark_ask and not row.confirmed and row.enabled and row.run then
+        M.ask_to_mark(row)
+        return
+    end
     if row.confirm and not row.confirmed and row.run and (row.enabled or row.far_kind) then
         -- the greyed-for-distance gate speaks first (its second click is the player's "try anyway")
         if not row.enabled and row.far_kind and M.far_gate(row.far_kind, row.label) then return end

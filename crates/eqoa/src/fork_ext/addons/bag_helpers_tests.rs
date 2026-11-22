@@ -144,8 +144,8 @@ fn run(lua: &Lua, code: &str) {
     lua.load(code).exec().unwrap_or_else(|e| panic!("{e}\n{code}"));
 }
 
-/// A pack with ordinary junk (two stacks), junk the one click must leave alone (quick-slotted, no-trade, not an ordinary
-/// item, worn) and one stack that is not junk; a merchant that has opened.
+/// A pack with marked junk of every kind (ordinary Misc, a quick-slotted potion, a no-trade charm, a sword, a worn ring) and
+/// one stack that is not junk; a merchant within reach.
 const JUNK_PACK: &str = r#"
     set_pack({
       item(1, "Rat Pelt", {q = 3}), item(2, "Chipped Tooth"),
@@ -161,7 +161,7 @@ const JUNK_PACK: &str = r#"
 "#;
 
 #[test]
-fn line1_sell_junk_sells_only_ordinary_junk_out_of_sight_and_says_what_it_sold() {
+fn line1_sell_junk_sells_everything_marked_gear_included_except_what_is_worn_and_says_what_it_sold() {
     let lua = chat_world();
     run(&lua, JUNK_PACK);
     // near the merchant, nothing open: one click talks to the merchant (a hidden session: scope own) ...
@@ -170,35 +170,87 @@ fn line1_sell_junk_sells_only_ordinary_junk_out_of_sight_and_says_what_it_sold()
     assert_eq!(string(&lua, "TALKS[1].kind"), "merchant");
     assert_eq!(string(&lua, "TAKEOVERS[1].kind .. ':' .. TAKEOVERS[1].scope"), "merchant:own", "hidden, and only this mod's own session");
     assert_eq!(int(&lua, "#BATCHES"), 0, "nothing is sold before the merchant answers");
-    // ... and when it has opened, sells the two ordinary junk stacks and no other
+    // ... and when it has opened, sells every marked stack (the potion, the charm and the sword too) but not the worn ring
     run(&lua, "open_merchant({})");
     assert_eq!(int(&lua, "#BATCHES"), 1);
     assert_eq!(string(&lua, "BATCHES[1].require_window"), "merchant");
-    assert_eq!(int(&lua, "#steps_of(1)"), 2, "only Rat Pelt and Chipped Tooth: not quick-slotted, no-trade, non-ordinary or worn");
-    assert_eq!(string(&lua, "steps_of(1)[1].item .. steps_of(1)[2].item"), "ref1ref2");
+    assert_eq!(int(&lua, "#steps_of(1)"), 5, "marking is the decision: pelts, tooth, potion, charm and sword");
+    assert_eq!(string(&lua, "steps_of(1)[1].item .. steps_of(1)[2].item .. steps_of(1)[3].item .. steps_of(1)[4].item .. steps_of(1)[5].item"), "ref1ref2ref3ref4ref5");
     assert_eq!(int(&lua, "steps_of(1)[1].count"), 3, "the whole stack");
-    run(&lua, "batch_ends(2)");
-    assert_eq!(string(&lua, "said('Sold') "), "Sold 2 junk items for 32 tunar", "12 + 20 tunar, the game's quote");
-    let kept = string(&lua, "said('Kept')");
-    assert!(kept.starts_with("Kept 3 junk items (quick-slotted, no-trade, not an ordinary item)"), "{kept}");
+    run(&lua, "batch_ends(5)");
+    assert_eq!(string(&lua, "said('Sold') "), "Sold 5 junk items for 67 tunar", "12 + 20 + 25 + 5 + 5 tunar, the game's quote");
+    assert_eq!(string(&lua, "said('Kept')"), "Kept 1 junk item: you are wearing it");
     assert!(boolean(&lua, "RELEASED[#RELEASED] == 'merchant'"), "the hidden session ends with the batch");
-    // the button counts the same items
-    assert_eq!(int(&lua, "select(2, B.junk_sell_list())"), 2);
+    // the button counts what will really be sold
+    assert_eq!(int(&lua, "select(2, B.junk_sell_list())"), 5);
 
-    // negative control: without the exclusions every marked, unworn stack is sold (five of them)
-    let bad = mutated(&[("if not has_tab(it, \"misc\") then why", "if false then why")]);
+    // negative control: with the worn-item exception off the worn ring is sold too (six steps, no "Kept" line)
+    let bad = mutated(&[("if it.equipped then
+                skipped[#skipped + 1]", "if false then
+                skipped[#skipped + 1]")]);
     run(&bad, JUNK_PACK);
     run(&bad, "B.start_sell_junk(); open_merchant({})");
-    assert_eq!(int(&bad, "#steps_of(1)"), 3, "negative control: with the 'not an ordinary item' rule off the sword is sold too");
-    let bad = mutated(&[("if it.quick_slot ~= nil then", "if false then"), ("if it.no_trade then", "if false then")]);
-    run(&bad, JUNK_PACK);
-    run(
-        &bad,
-        "set_pack({item(3, 'Healing Potion', {q = 5, quick = 1}), item(4, 'Old Charm', {nt = true})}); junk(3, 4)",
-    );
-    assert_eq!(int(&bad, "select(2, B.junk_sell_list())"), 2, "negative control: misc items that are quick-slotted or no-trade are sold when those rules are off");
-    run(&lua, "set_pack({item(3, 'Healing Potion', {q = 5, quick = 1}), item(4, 'Old Charm', {nt = true})})");
-    assert_eq!(int(&lua, "select(2, B.junk_sell_list())"), 0, "shipped: a misc item that is quick-slotted or no-trade stays");
+    assert_eq!(int(&bad, "#steps_of(1)"), 6, "negative control: the worn ring would be sold");
+    // negative control: the old rule (leave quick-slotted, no-trade and non-Misc items) sells only two of them
+    let old = mutated(&[("if M.is_junk(it) then
+            if it.equipped then", "if M.is_junk(it) and M.sell_risk(it) == nil then
+            if it.equipped then")]);
+    run(&old, JUNK_PACK);
+    run(&old, "B.start_sell_junk(); open_merchant({})");
+    assert_eq!(int(&old, "#steps_of(1)"), 2, "negative control: the previous rule sold only the two ordinary stacks");
+}
+
+/// Marking an item as junk: an ordinary Misc item is marked at once; equipment, a usable, a quick-slotted or a no-trade item
+/// asks once ("Mark <name> as junk?", Yes / No); No leaves it unmarked.
+const MARK_PACK: &str = r#"
+    set_pack({
+      item(1, "Rat Pelt", {q = 3}),
+      item(2, "Rusty Sword", {tabs = {"equipment"}}),
+      item(3, "Healing Potion", {q = 5, tabs = {"usable"}}),
+      item(4, "Quick Pelt", {quick = 2}),
+      item(5, "Old Charm", {nt = true}),
+    })
+    function mark_row(idx)
+      B.build_menu(INV_ITEMS[idx])
+      for _, r in ipairs(B.menu.rows) do if r.label == "Mark as junk" then return r end end
+    end
+"#;
+
+#[test]
+fn marking_gear_usables_quick_slotted_and_no_trade_items_as_junk_asks_once_and_misc_does_not() {
+    let lua = world();
+    run(&lua, MARK_PACK);
+    // an ordinary Misc item is marked at once, with no question
+    run(&lua, "B.trigger_menu(mark_row(1))");
+    assert!(boolean(&lua, "B.is_junk(INV_ITEMS[1]) and not (B.menu and B.menu.asking)"), "Misc: marked at once");
+    for (idx, what) in [(2, "equipment"), (3, "a usable"), (4, "a quick-slotted item"), (5, "a no-trade item")] {
+        run(&lua, &format!("B.trigger_menu(mark_row({idx}))"));
+        assert!(!boolean(&lua, &format!("B.is_junk(INV_ITEMS[{idx}])")), "{what}: not marked by the first click");
+        assert!(boolean(&lua, "B.menu ~= nil and B.menu.asking == true"), "{what}: the question is up");
+        let title = string(&lua, "B.menu.title");
+        assert_eq!(title, format!("Mark {} as junk?", string(&lua, &format!("INV_ITEMS[{idx}].name"))));
+        assert_eq!(int(&lua, "#B.menu.rows"), 2, "Yes and No");
+        // No leaves it unmarked
+        run(&lua, "B.trigger_menu(B.menu.rows[2])");
+        assert!(!boolean(&lua, &format!("B.is_junk(INV_ITEMS[{idx}])")), "{what}: No leaves it unmarked");
+        // Yes marks it
+        run(&lua, &format!("B.trigger_menu(mark_row({idx})); B.trigger_menu(B.menu.rows[1])"));
+        assert!(boolean(&lua, &format!("B.is_junk(INV_ITEMS[{idx}])")), "{what}: Yes marks it");
+    }
+    // unmarking never asks
+    run(&lua, "B.build_menu(INV_ITEMS[2]); for _, r in ipairs(B.menu.rows) do if r.label == 'Unmark' then ROW = r end end; B.trigger_menu(ROW)");
+    assert!(!boolean(&lua, "B.is_junk(INV_ITEMS[2])"));
+
+    // negative control: without the question the sword is marked by the first click
+    let bad = mutated(&[("if row.mark_ask and not row.confirmed and row.enabled and row.run then", "if false then")]);
+    run(&bad, MARK_PACK);
+    run(&bad, "B.trigger_menu(mark_row(2))");
+    assert!(boolean(&bad, "B.is_junk(INV_ITEMS[2])"), "negative control: marked at once with the question off");
+    // negative control: with every item asked, a Misc item would also ask
+    let bad = mutated(&[("rows[#rows].mark_ask = M.sell_risk(it) ~= nil or nil", "rows[#rows].mark_ask = true")]);
+    run(&bad, MARK_PACK);
+    run(&bad, "B.trigger_menu(mark_row(1))");
+    assert!(!boolean(&bad, "B.is_junk(INV_ITEMS[1])"), "negative control: the Misc item would ask too");
 }
 
 #[test]
@@ -206,9 +258,9 @@ fn line1_without_chat_support_the_line_goes_to_the_result_line_and_the_log_never
     // `eqoa/1` has no local chat line yet: the line must not be sent as chat (that would say it to the world)
     let lua = world();
     run(&lua, JUNK_PACK);
-    run(&lua, "B.start_sell_junk(); open_merchant({}); batch_ends(2)");
-    assert!(boolean(&lua, "H.chat[1] == 'Sold 2 junk items for 32 tunar'"));
-    assert!(boolean(&lua, "(function() for _, l in ipairs(LOG) do if l:find('Sold 2 junk items for 32 tunar', 1, true) then return true end end end)()"));
+    run(&lua, "B.start_sell_junk(); open_merchant({}); batch_ends(5)");
+    assert!(boolean(&lua, "H.chat[1] == 'Sold 5 junk items for 67 tunar'"));
+    assert!(boolean(&lua, "(function() for _, l in ipairs(LOG) do if l:find('Sold 5 junk items for 67 tunar', 1, true) then return true end end end)()"));
     assert_eq!(int(&lua, "#SENT_CHAT"), 0, "never sent to the server as a chat line: that would say it to the world");
 }
 
