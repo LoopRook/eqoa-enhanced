@@ -179,6 +179,8 @@ pub(crate) fn tick(play: &mut Play) {
             TakeoverKind::Loot => crate::play::npcw::fork_pass::show_loot(play),
             TakeoverKind::Merchant => crate::play::npcw::fork_pass::show_merchant(play),
             TakeoverKind::Bank => crate::play::bankplay::fork_pass::show_bank(play),
+            // the raid strips are not held sessions: nothing of theirs is passed
+            TakeoverKind::RaidReady | TakeoverKind::RaidRoll => {}
         }
         window_sessions::finish_pass(vm, kind);
     }

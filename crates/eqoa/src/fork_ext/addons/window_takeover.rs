@@ -546,6 +546,9 @@ pub(crate) fn hidden_holder(kind: TakeoverKind) -> Option<(u64, String)> {
 /// hidden: nothing is closed and nothing is sent (the server's corpse, merchant or bank stays open and is now the
 /// player's native window). The mod keeps its claim for the next opening. False when `vm` has no hidden session of it.
 pub(crate) fn hand_back(vm: u64, kind: TakeoverKind) -> bool {
+    if !TakeoverKind::ALL.contains(&kind) {
+        return false;
+    }
     with_state_mut(|s| {
         let idx = kind as usize;
         if s.holders[idx].as_ref().is_some_and(|h| h.vm == vm) && s.hidden[idx].active && s.hidden[idx].vm == vm {
