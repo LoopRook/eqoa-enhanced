@@ -166,6 +166,8 @@ pub(crate) enum ActionKind {
     ClearWaypoint { vm: u64 },
     /// Round A3 (`frame_actions`): invite the target, the pet's commands, an emote, a jump, a buff taken off.
     Frame(super::frame_actions::FrameAction),
+    /// Round A1: destroy (asks the player first), link item, hide look.
+    A1(super::native_a1::A1Action),
 }
 
 impl ActionKind {
@@ -217,6 +219,7 @@ impl ActionKind {
             Self::SetWaypoint { .. } => "set_waypoint",
             Self::ClearWaypoint { .. } => "clear_waypoint",
             Self::Frame(action) => action.name(),
+            Self::A1(action) => action.name(),
         }
     }
 
@@ -264,7 +267,8 @@ impl ActionKind {
             | Self::Talk { .. }
             | Self::SetWaypoint { .. }
             | Self::ClearWaypoint { .. }
-            | Self::Frame(_) => None,
+            | Self::Frame(_)
+            | Self::A1(_) => None,
         }
     }
 
@@ -2102,6 +2106,12 @@ pub(crate) fn current_dispatch_vm() -> Option<u64> {
     DISPATCHING_VM.with(Cell::get)
 }
 
+/// The add-on id of the mod whose action is being dispatched (what a question it asks names it by).
+pub(crate) fn dispatch_addon() -> Option<String> {
+    let vm = current_dispatch_vm()?;
+    BROKER.with(|b| b.borrow().vms.get(&vm).map(|v| v.addon_id.clone()))
+}
+
 pub(crate) fn set_corpse_target_id(id: Option<u32>) {
     CURRENT_CORPSE_TARGET.with(|c| c.set(id));
 }
@@ -3809,14 +3819,6 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         }
     }
 
-    super::native::refuse_native(
-        lua,
-        "actions",
-        "destroy",
-        "unsupported",
-        None,
-        "excluded until after the upstream PR by the mod API plan",
-    )?;
     for name in ["move", "look", "buttons"] {
         super::native::refuse_native(
             lua,
@@ -5495,7 +5497,8 @@ mod tests {
             .load("return assert(eqoa.capabilities.get('eqoa.actions.destroy')).status")
             .eval()
             .unwrap();
-        assert_eq!(destroy_status, "unsupported");
+        // round A1: destroy is supported (it asks the player first, `confirm.rs`)
+        assert_eq!(destroy_status, "supported");
         for not_yet in [
             "eqoa.actions.move",
             "eqoa.actions.look",

@@ -129,6 +129,9 @@ const EVENTS: &[&str] = &[
     "action.result",
     "batch.progress",
     "batch.result",
+    "windows.session",
+    "windows.key",
+    "confirm.closed",
 ];
 fn install_event_fields(lua: &mlua::Lua) {
     for (name, fields) in [
@@ -195,6 +198,9 @@ fn install_event_fields(lua: &mlua::Lua) {
             "batch_id state ok completed total current_step code reason queued_tick completed_tick failed_step detail",
         ),
         ("events.dropped", "first_seq last_seq count streams"),
+        ("windows.session", "owner phase ref kind origin opened_from revision reason"),
+        ("windows.key", "owner ref key down"),
+        ("confirm.closed", "owner confirm kind answer detail"),
     ] {
         let payload = format!("eqoa.events.{name}.data");
         for field in fields.split_whitespace() {
@@ -223,7 +229,8 @@ fn event_round(name: &str) -> u8 {
         "inventory.changed" | "bank.changed" | "loot.changed" | "merchant.changed" => 5,
         "action.result" | "batch.progress" | "batch.result" | "quests.changed"
         | "camera.changed" | "windows.changed" | "mastery.changed" => 6,
-        "buffs.changed" | "cast.started" | "cast.ended" | "quests.goals_changed" => 8,
+        "buffs.changed" | "cast.started" | "cast.ended" | "quests.goals_changed" | "windows.session"
+        | "windows.key" | "confirm.closed" => 8,
         _ => 2,
     }
 }
@@ -820,6 +827,7 @@ pub(crate) fn clear(host: &Host) {
     super::weapon_sets::cancel_vm(vm);
     super::action_broker::clear_vm(vm, "addon disabled or reloaded");
     super::window_takeover::release_vm(vm);
+    super::window_sessions::end_vm(vm);
     let b = bus(&host.lua);
     let mut b = b.borrow_mut();
     b.subscriptions.clear();
@@ -953,7 +961,8 @@ pub(crate) fn publish(event: &Event) {
             if let Some(shared) = weak.upgrade() {
                 let mut b = shared.borrow_mut();
                 if b.active
-                    && (event.name != "guide.lost" || event.data["owner"].as_u64() == Some(b.vm))
+                    && (!matches!(event.name.as_str(), "guide.lost" | "windows.session" | "windows.key" | "confirm.closed")
+                        || event.data["owner"].as_u64() == Some(b.vm))
                 {
                     enqueue(&mut b, event.clone(), None);
                 }

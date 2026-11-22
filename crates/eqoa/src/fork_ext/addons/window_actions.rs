@@ -146,12 +146,13 @@ fn row_count(w: &Json) -> i64 {
 /// dialog rows never do. Mods & Addons labels a mod "Can answer NPC dialogs" from this list.
 pub(crate) const ANSWERS_DIALOGS: [&str; 2] = ["eqoa.actions.dialog_answer", "eqoa.actions.activate_row"];
 
-/// The steps the game itself confirms with a Yes/No box: dropping a quest (`questlog.rs`, word 574), buying a
+/// The steps the game itself confirms with a Yes/No box and that are still `not_yet` for native mods: buying a
 /// Class Mastery skill (`classmastery.rs`, words 1663/1664) and refunding one (1665/1666). The owner's rule
 /// (2026-11-19/20): an irreversible step keeps its confirmation, which a replacement UI may draw in its own
-/// look and a mod may never skip. Until the confirm contract ties a mod-drawn confirmation to the player's own
-/// answer, these are `not_yet` for native mods; their dispatch (`fork_ext/play.rs`) stays built for that day.
-pub(crate) const CONFIRM_GATED: [&str; 3] = ["drop_quest", "mastery_buy", "mastery_refund"];
+/// look and a mod may never skip. Round A1 built that confirmation (`confirm.rs`) for destroying an item and
+/// dropping a quest; mastery follows in the character-summary round (A5), so these two stay `not_yet` until then.
+/// Their dispatch (`fork_ext/play.rs`) stays built for that day.
+pub(crate) const CONFIRM_GATED: [&str; 2] = ["mastery_buy", "mastery_refund"];
 const CONFIRM_CONTRACT: &str = "the game asks the player to confirm this step; a mod cannot take it until the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer";
 
 #[cfg(test)]
@@ -185,7 +186,9 @@ pub(crate) const PROMPT_CONFIRM_CONTRACT: &str = "accepting this game prompt is 
 
 pub(crate) fn install(lua: &Lua) -> Result<()> {
     let gated = confirm_gated_bound();
-    if gated {
+    // round A1: `drop_quest` is supported. It never drops at once: the dispatch (`fork_ext/a1_play.rs`) puts the
+    // game's own "are you sure?" to the player (`confirm.rs`), and only their own Yes sends the drop.
+    {
         bind(
             lua,
             "actions",

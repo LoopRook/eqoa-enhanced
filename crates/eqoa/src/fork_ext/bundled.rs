@@ -36,6 +36,8 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_round_minimap",
     "eqoa_bag_viewer",
     "eqoa_frames",
+    "eqoa_spellbook",
+    "eqoa_quest_journal",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -163,6 +165,36 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_bag_viewer/README.md",
         package: "eqoa_bag_viewer",
         data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_spellbook/mod.json",
+        package: "eqoa_spellbook",
+        data: include_bytes!("../../../../bundled-mods/eqoa_spellbook/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_spellbook/main.lua",
+        package: "eqoa_spellbook",
+        data: include_bytes!("../../../../bundled-mods/eqoa_spellbook/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_spellbook/README.md",
+        package: "eqoa_spellbook",
+        data: include_bytes!("../../../../bundled-mods/eqoa_spellbook/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_quest_journal/mod.json",
+        package: "eqoa_quest_journal",
+        data: include_bytes!("../../../../bundled-mods/eqoa_quest_journal/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_quest_journal/main.lua",
+        package: "eqoa_quest_journal",
+        data: include_bytes!("../../../../bundled-mods/eqoa_quest_journal/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_quest_journal/README.md",
+        package: "eqoa_quest_journal",
+        data: include_bytes!("../../../../bundled-mods/eqoa_quest_journal/README.md"),
     },
     BundledFile {
         path: "eqoa_example_hearts/mod.json",

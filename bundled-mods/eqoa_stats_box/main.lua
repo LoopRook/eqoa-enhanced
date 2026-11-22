@@ -9,7 +9,7 @@ local lowered_red = { 1.0, 0.45, 0.4, 1.0 }
 
 eqoa.options.toggle({ id = "stats_box", label = "Stats Box", default = false })
 
-eqoa.input.bind({ id = "toggle", label = "Toggle Stats Box", default_key = "b" }, function()
+eqoa.input.bind({ id = "toggle", label = "Toggle Stats Box", default_key = "y" }, function()
     eqoa.actions.toggle_stats_box()
 end)
 

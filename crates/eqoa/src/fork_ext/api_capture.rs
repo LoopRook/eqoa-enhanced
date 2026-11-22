@@ -500,3 +500,6 @@ mod r6d_tests;
 #[cfg(test)]
 #[path = "round7h_play_tests.rs"]
 mod round7h_play_tests;
+#[cfg(test)]
+#[path = "a1_play_tests.rs"]
+mod a1_play_tests;

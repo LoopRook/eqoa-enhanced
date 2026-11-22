@@ -111,6 +111,11 @@ pub(crate) mod native_projection;
 pub(crate) mod native_r6a;
 pub(crate) mod native_a3;
 pub(crate) mod frame_actions;
+pub(crate) mod native_a1;
+#[cfg(test)]
+mod a1_tests;
+pub(crate) mod window_sessions;
+pub(crate) mod confirm;
 #[cfg(test)]
 mod frames_mod_tests;
 pub(crate) mod native_settings;

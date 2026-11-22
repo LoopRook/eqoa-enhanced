@@ -469,6 +469,11 @@ impl Runtime {
     }
 
     fn route_key(&mut self, event: KeyRoute<'_>, plain_play: bool, keyboard: bool) -> bool {
+        // round A1: the player's own key press answers the question a mod's destroy or drop-quest put to them
+        // (`confirm.rs`); a synthetic or repeated event never does
+        if event.down && !event.repeat && !event.synthetic && super::confirm::is_open() && super::confirm::key(event.logical) {
+            return true;
+        }
         // The manager key opens and closes the Mods & Addons window, with or without a mod.
         if super::input::manager_key_pressed(
             event.logical,
@@ -924,6 +929,8 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
                 "command" => "command (slash lines)",
                 // its own line (`TEXT_BOXES_LABEL`)
                 "input_text" => continue,
+                // round A1: these never act on their own: the player's Yes is asked first (`asks_first_label`)
+                "destroy" | "drop_quest" => continue,
                 _ => kind,
             };
             if !label.is_empty() && !kinds.contains(&label) {
@@ -986,6 +993,10 @@ pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec
     let mut lines = Vec::new();
     lines.extend(autonomous_action_label(caps));
     let can_takeover = super::native::capability_grants(caps, "eqoa.windows.takeover");
+    // round A1: what the mod adds (its windows and their keys) before what it hides
+    if !addon.extensions.provides.is_empty() {
+        lines.push(format!("Provides: {}", addon.extensions.provides.join(", ")));
+    }
     lines.extend(replacement_labels(&addon.extensions.replaces, can_takeover).into_iter().flatten());
     if declares_dialog_actions(caps) {
         lines.push("Can answer NPC dialogs".into());
@@ -993,7 +1004,20 @@ pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec
     if super::native::capability_grants(caps, "eqoa.actions.input_text") {
         lines.push(TEXT_BOXES_LABEL.into());
     }
+    lines.extend(asks_first_label(caps));
     lines
+}
+
+/// "Asks you first: ..." for the steps a mod can only start, never finish: the game's "are you sure?" goes to the
+/// player (starting on No) and only their own Yes acts (`confirm.rs`). `eqoa.actions.*` grants them too.
+pub(crate) fn asks_first_label(caps: &[String]) -> Option<String> {
+    let mut steps = Vec::new();
+    for (name, words) in [("destroy", "destroy an item"), ("drop_quest", "drop a quest")] {
+        if super::native::capability_grants(caps, &format!("eqoa.actions.{name}")) {
+            steps.push(words);
+        }
+    }
+    (!steps.is_empty()).then(|| format!("Asks you first: {}", steps.join(", ")))
 }
 
 /// What `eqoa.actions.input_text` grants, said plainly in Mods & Addons (fix round 4 item 3).
@@ -1082,6 +1106,9 @@ fn render_managed(
             manager.profile_setup_controls(ui);
         }
         let mut open = plan.controls.unwrap_or(false);
+        super::window_sessions::set_manager_open(open && !snapshot.start_menu);
+        // round A1: the question a mod's destroy or drop-quest put to the player is the client's, drawn over play
+        super::confirm::draw(ui);
         if open && !snapshot.start_menu {
             let actions = controls(ui, manager, &mut open, plan.root.as_ref());
             let extra = FramePlan::collect(actions, plan.settings.take());
