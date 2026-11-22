@@ -168,6 +168,14 @@ pub(crate) enum ActionKind {
     Frame(super::frame_actions::FrameAction),
     /// Round A1: destroy (asks the player first), link item, hide look.
     A1(super::native_a1::A1Action),
+    /// `eqoa.actions.ready_check_answer`: answer an open raid ready check.
+    ReadyCheckAnswer { id: u32, ready: bool },
+    /// `eqoa.actions.loot_roll`: answer an open raid loot roll (0=pass, 1=need, 2=greed).
+    LootRoll { id: u32, choice: u8 },
+    /// `eqoa.actions.loot_assign`: master looter assigns a corpse item to an eligible member.
+    LootAssign { item: ResolvedItemSpec, member_id: u32 },
+    /// `eqoa.actions.loot_abandon`: master looter abandons master loot on the open corpse.
+    LootAbandon { item: Option<ResolvedItemSpec> },
 }
 
 impl ActionKind {
@@ -220,6 +228,10 @@ impl ActionKind {
             Self::ClearWaypoint { .. } => "clear_waypoint",
             Self::Frame(action) => action.name(),
             Self::A1(action) => action.name(),
+            Self::ReadyCheckAnswer { .. } => "ready_check_answer",
+            Self::LootRoll { .. } => "loot_roll",
+            Self::LootAssign { .. } => "loot_assign",
+            Self::LootAbandon { .. } => "loot_abandon",
         }
     }
 
@@ -229,7 +241,10 @@ impl ActionKind {
             | Self::Equip { .. }
             | Self::SwapItems { .. }
             | Self::QuickSlot { .. } => Some(Subsystem::Inventory),
-            Self::Loot { .. } | Self::LootAll => Some(Subsystem::Loot),
+            Self::Loot { .. }
+            | Self::LootAll
+            | Self::LootAssign { .. }
+            | Self::LootAbandon { .. } => Some(Subsystem::Loot),
             Self::Buy { .. } | Self::Sell { .. } => Some(Subsystem::Merchant),
             Self::BankMove { .. } | Self::BankMoney { .. } => Some(Subsystem::Bank),
             Self::Assist
@@ -268,7 +283,9 @@ impl ActionKind {
             | Self::SetWaypoint { .. }
             | Self::ClearWaypoint { .. }
             | Self::Frame(_)
-            | Self::A1(_) => None,
+            | Self::A1(_)
+            | Self::ReadyCheckAnswer { .. }
+            | Self::LootRoll { .. } => None,
         }
     }
 
@@ -964,8 +981,10 @@ impl BrokerState {
             .filter(|(vm, state)| {
                 state.active_batch.as_ref().is_some_and(|batch| {
                     released.iter().any(|(holder, kind)| {
+                        let idx = *kind as usize;
                         holder == *vm
-                            && (batch.takeover_kinds[*kind as usize] || batch.used_claims[*kind as usize])
+                            && idx < 3
+                            && (batch.takeover_kinds[idx] || batch.used_claims[idx])
                     })
                 })
             })
@@ -2192,6 +2211,7 @@ pub(crate) fn reset_session(reason: &str) {
     MASTER_LOOT_ACTIVE.with(|m| m.set(false));
     CURRENT_CORPSE_TARGET.with(|c| c.set(None));
     EXPIRED_LOOT_TIMEOUT.with(|t| t.set(false));
+    super::raid_strips::reset();
     BROKER.with(|b| b.borrow_mut().reset_session(reason));
 }
 
@@ -4851,6 +4871,7 @@ pub(crate) fn reset_all_for_test() {
     MASTER_LOOT_ACTIVE.with(|m| m.set(false));
     CURRENT_CORPSE_TARGET.with(|c| c.set(None));
     EXPIRED_LOOT_TIMEOUT.with(|t| t.set(false));
+    super::raid_strips::reset();
     BROKER.with(|b| *b.borrow_mut() = BrokerState::default());
 }
 

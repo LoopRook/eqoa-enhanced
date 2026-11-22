@@ -39,16 +39,29 @@ pub(crate) enum TakeoverKind {
     Loot = 0,
     Merchant = 1,
     Bank = 2,
+    RaidReady = 3,
+    RaidRoll = 4,
 }
 
 impl TakeoverKind {
+    /// The three server-window kinds (loot, merchant, bank) that carry hidden server sessions and batch hooks.
     pub(crate) const ALL: [Self; 3] = [Self::Loot, Self::Merchant, Self::Bank];
+    /// Every takeover kind, including server-pushed raid strips (`raid_ready`, `raid_roll`).
+    pub(crate) const ALL_KINDS: [Self; 5] = [
+        Self::Loot,
+        Self::Merchant,
+        Self::Bank,
+        Self::RaidReady,
+        Self::RaidRoll,
+    ];
 
     pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::Loot => "loot",
             Self::Merchant => "merchant",
             Self::Bank => "bank",
+            Self::RaidReady => "raid_ready",
+            Self::RaidRoll => "raid_roll",
         }
     }
 
@@ -57,16 +70,20 @@ impl TakeoverKind {
             "loot" => Ok(Self::Loot),
             "merchant" => Ok(Self::Merchant),
             "bank" => Ok(Self::Bank),
+            "raid_ready" => Ok(Self::RaidReady),
+            "raid_roll" => Ok(Self::RaidRoll),
             _ if super::window_kinds::is_window(s) => Err((
                 "unsupported",
                 format!(
-                    "the game's '{s}' window cannot be taken over in this version (only 'loot', 'merchant' \
-                     and 'bank'); more windows follow the window-replacement roadmap"
+                    "the game's '{s}' window cannot be taken over in this version (only 'loot', 'merchant', \
+                     'bank', 'raid_ready' and 'raid_roll'); more windows follow the window-replacement roadmap"
                 ),
             )),
             _ => Err((
                 "invalid_argument",
-                format!("window takeover kind must be 'loot', 'merchant', or 'bank', got '{s}'"),
+                format!(
+                    "window takeover kind must be 'loot', 'merchant', 'bank', 'raid_ready', or 'raid_roll', got '{s}'"
+                ),
             )),
         }
     }
@@ -189,7 +206,7 @@ struct TakeoverState {
     /// The merchant's list still owed for the mod's last sale or buy when its hidden session ended (the
     /// sale's answer can follow the action's end): held hidden for `LIST_GRACE`, then closed again quietly.
     grace_merchant: Option<ListGrace>,
-    holders: [Option<Holder>; 3],
+    holders: [Option<Holder>; 5],
     pending_opens: [Option<PendingOpen>; 3],
     /// Why a kind's hidden session is to end (set by release, the mod finishing, the holder going).
     pending_close: [Option<&'static str>; 3],
@@ -332,7 +349,7 @@ pub(crate) fn takeover(
                 existing.scope = scope;
                 // asking again while holding renews a live hidden session's idle timer (L5): a mod
                 // that is still showing the session keeps it
-                if s.hidden[idx].active && s.hidden[idx].vm == vm {
+                if idx < 3 && s.hidden[idx].active && s.hidden[idx].vm == vm {
                     s.hidden[idx].last_activity = Instant::now();
                 }
                 return Ok(());
@@ -360,8 +377,10 @@ pub(crate) fn release(vm: u64, kind: TakeoverKind) -> bool {
         let idx = kind as usize;
         if s.holders[idx].as_ref().is_some_and(|h| h.vm == vm) {
             s.holders[idx] = None;
-            s.pending_opens[idx] = None;
-            s.pending_close[idx] = Some("released by the mod");
+            if idx < 3 {
+                s.pending_opens[idx] = None;
+                s.pending_close[idx] = Some("released by the mod");
+            }
             true
         } else {
             false
@@ -372,11 +391,14 @@ pub(crate) fn release(vm: u64, kind: TakeoverKind) -> bool {
 pub(crate) fn release_all_for_vm(vm: u64) -> bool {
     with_state_mut(|s| {
         let mut any = false;
-        for idx in 0..3 {
+        for kind in TakeoverKind::ALL_KINDS {
+            let idx = kind as usize;
             if s.holders[idx].as_ref().is_some_and(|h| h.vm == vm) {
                 s.holders[idx] = None;
-                s.pending_opens[idx] = None;
-                s.pending_close[idx] = Some("mod released or went away");
+                if idx < 3 {
+                    s.pending_opens[idx] = None;
+                    s.pending_close[idx] = Some("mod released or went away");
+                }
                 any = true;
             }
         }
@@ -405,13 +427,15 @@ pub(crate) fn release_all() {
 fn release_claims_where(reason: &'static str, which: impl Fn(TakeoverScope) -> bool) -> Vec<(u64, TakeoverKind)> {
     with_state_mut(|s| {
         let mut released = Vec::new();
-        for kind in TakeoverKind::ALL {
+        for kind in TakeoverKind::ALL_KINDS {
             let idx = kind as usize;
             if s.holders[idx].as_ref().is_some_and(|h| which(h.scope))
                 && let Some(holder) = s.holders[idx].take()
             {
-                s.pending_opens[idx] = None;
-                s.pending_close[idx] = Some(reason);
+                if idx < 3 {
+                    s.pending_opens[idx] = None;
+                    s.pending_close[idx] = Some(reason);
+                }
                 released.push((holder.vm, kind));
             }
         }
@@ -699,6 +723,7 @@ pub(crate) fn decide_open(
                             TakeoverKind::Merchant => observed_target,
                             TakeoverKind::Loot if !pending.foreign => Some(pending.target_id),
                             TakeoverKind::Loot => observed_target,
+                            TakeoverKind::RaidReady | TakeoverKind::RaidRoll => None,
                         };
                         known == Some(pending.target_id)
                     }

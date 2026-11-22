@@ -472,6 +472,7 @@ impl Hud {
     /// The wheel's `lines` (up positive) over the raid list, at frame point `p`:
     /// a row a notch when it holds more than it shows. False when it is not there.
     pub fn raid_wheel(&mut self, p: [f32; 2], lines: f32) -> bool {
+        if fork_hud::raid_hidden() { return false; }
         let Some((r, room)) = self.raid_panel else { return false };
         if p[0] < r[0] || p[0] > r[2] || p[1] < r[1] || p[1] > r[3] || room == 0 {
             return false;
@@ -489,6 +490,7 @@ impl Hud {
     /// `what` drawn over frame rectangle `r`, noted where the layer places
     /// it (`Ui::placed`: to a wide window's side, up or down a tall one).
     fn note(&mut self, ui: &UiRaster, r: [i32; 4], what: Pick) {
+        if fork_hud::skip_pick(what) { return; }
         let (a, b) = (ui.ui.placed([r[0] as f32, r[1] as f32]), ui.ui.placed([r[2] as f32, r[3] as f32]));
         self.hits.push([a[0], a[1], b[0], b[1]].map(|v| v.round() as i32), self.picks.len() as i32);
         self.picks.push(what);

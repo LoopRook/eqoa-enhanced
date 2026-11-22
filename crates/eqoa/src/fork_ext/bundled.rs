@@ -36,6 +36,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_round_minimap",
     "eqoa_bag_viewer",
     "eqoa_frames",
+    "eqoa_target_frame_demo",
     "eqoa_spellbook",
     "eqoa_quest_journal",
 ];
@@ -165,6 +166,21 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_bag_viewer/README.md",
         package: "eqoa_bag_viewer",
         data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_target_frame_demo/mod.json",
+        package: "eqoa_target_frame_demo",
+        data: include_bytes!("../../../../bundled-mods/eqoa_target_frame_demo/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_target_frame_demo/main.lua",
+        package: "eqoa_target_frame_demo",
+        data: include_bytes!("../../../../bundled-mods/eqoa_target_frame_demo/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_target_frame_demo/README.md",
+        package: "eqoa_target_frame_demo",
+        data: include_bytes!("../../../../bundled-mods/eqoa_target_frame_demo/README.md"),
     },
     BundledFile {
         path: "eqoa_spellbook/mod.json",
@@ -1180,6 +1196,7 @@ mod tests {
                 "eqoa_round_minimap",
                 "eqoa_bag_viewer",
                 "eqoa_frames",
+                "eqoa_target_frame_demo",
                 "eqoa_spellbook",
                 "eqoa_quest_journal"
             ]
@@ -1476,6 +1493,7 @@ mod tests {
                 "eqoa_round_minimap",
                 "eqoa_bag_viewer",
                 "eqoa_frames",
+                "eqoa_target_frame_demo",
                 "eqoa_spellbook",
                 "eqoa_quest_journal"
             ]
@@ -1525,6 +1543,7 @@ mod tests {
                 "eqoa_round_minimap",
                 "eqoa_bag_viewer",
                 "eqoa_frames",
+                "eqoa_target_frame_demo",
                 "eqoa_spellbook",
                 "eqoa_quest_journal"
             ]
@@ -1548,6 +1567,7 @@ mod tests {
                 "eqoa_round_minimap",
                 "eqoa_bag_viewer",
                 "eqoa_frames",
+                "eqoa_target_frame_demo",
                 "eqoa_spellbook",
                 "eqoa_quest_journal"
             ],
@@ -1637,6 +1657,7 @@ mod tests {
                 "eqoa_round_minimap",
                 "eqoa_bag_viewer",
                 "eqoa_frames",
+                "eqoa_target_frame_demo",
                 "eqoa_spellbook",
                 "eqoa_quest_journal"
             ],

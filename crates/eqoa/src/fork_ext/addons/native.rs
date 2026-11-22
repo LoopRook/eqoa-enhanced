@@ -902,6 +902,11 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             "status cancel batch stop_batch batch_status target cycle_target interact attack cast use_hotbar use_item equip swap_items quick_slot weapon_set prepare_weapon_set assign_ability unmemorize_ability unmemorize_all arrange_ability open_loot talk loot loot_all buy sell bank_move bank_money chat command autorun follow stop camera open_window close_window select_row activate_row dialog_answer input_text drop_quest mastery_share mastery_browse mastery_buy mastery_refund menu_command",
             6,
         ),
+        (
+            "actions",
+            "ready_check_answer loot_roll loot_assign loot_abandon",
+            7,
+        ),
         ("bank", "get", 5),
         ("binds", "get register", 3),
         ("camera", "get compass", 6),
@@ -951,6 +956,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ("player", "get experience_for_level", 2),
         ("player", "stats", 3),
         ("quests", "list get", 6),
+        ("raid", "get ready_check loot_rolls", 7),
         ("settings", "load save on_save on_load", 2),
         ("sound", "load play stop set_volume is_playing release", 2),
         ("target", "get", 2),
@@ -1113,6 +1119,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_a3::install(host)?;
     super::native_a1::install(host)?;
     super::frame_actions::install(host)?;
+    super::raid_strips::install(host)?;
     super::map_views::install(host)?;
     super::guides::install(host)?;
     super::pointer_api::install(host)?;
@@ -1219,7 +1226,15 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.items.Container", "items") => Some("eqoa.items.Item"),
         ("eqoa.items.Container", "merchant") => Some("eqoa.items.MerchantState"),
         ("eqoa.items.Container", "source") => Some("eqoa.items.LootSource"),
+        ("eqoa.items.Container", "master_loot") => Some("eqoa.items.MasterLoot"),
+        ("eqoa.items.MasterLoot", "members") => Some("eqoa.items.MasterLootMember"),
         ("eqoa.items.Container", "view") => Some("eqoa.items.ContainerView"),
+        ("eqoa.raid.RaidState", "members") => Some("eqoa.raid.RaidMember"),
+        ("eqoa.raid.RaidState", "ready_check") => Some("eqoa.raid.ReadyCheckSession"),
+        ("eqoa.raid.RaidState", "loot_rolls") => Some("eqoa.raid.LootRollSession"),
+        ("eqoa.raid.ReadyCheckSession", "data") => Some("eqoa.raid.ReadyCheckData"),
+        ("eqoa.raid.LootRollSession", "data") => Some("eqoa.raid.LootRollData"),
+        ("eqoa.raid.LootRollData", "rolls") => Some("eqoa.raid.LootRollItem"),
         ("eqoa.items.ContainerView", "tabs") => Some("eqoa.items.Tab"),
         ("eqoa.items.MerchantState", "options") => Some("eqoa.items.MerchantOption"),
         ("eqoa.items.Item", "stats") => Some("eqoa.items.ItemStat"),

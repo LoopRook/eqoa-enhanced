@@ -10613,6 +10613,7 @@ impl Play {
                         crate::hudmenu::UtilityLayout::UpperLeft => crate::hudmenu::UPPER_LEFT_AT,
                         crate::hudmenu::UtilityLayout::Below => [left, top],
                     };
+                    let shown = crate::hud::fork_hud::utility_bar_visible();
                     if shown { self.hud_menus.draw_utility(vui, &mut r, bars, utility, at); }
                     let screen = crate::hudlayout::screen_x(r.ui, &m);
                     let m = crate::hudlayout::seal(r.ui, m);
@@ -10885,6 +10886,7 @@ impl Play {
     /// The wheel's `lines` over the DPS meter (`Hud::meter_wheel`): true when
     /// it took it.
     pub fn meter_wheel(&mut self, at: (f64, f64), size: (u32, u32), lines: f32) -> bool {
+        if crate::hud::fork_hud::meter_hidden() { return false; }
         let f = render::ui::frame_from_window(size, [at.0 as f32, at.1 as f32]);
         let first = self.meter.first;
         match self.hud.as_ref().filter(|_| self.mode == 0).and_then(|h| h.2.meter_wheel(f, lines, first)) {

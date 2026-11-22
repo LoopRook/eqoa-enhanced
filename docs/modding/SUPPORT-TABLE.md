@@ -64,7 +64,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.jump` | supported | 8 |  |
 | `eqoa.actions.look` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 8) |
 | `eqoa.actions.loot` | supported | 6 |  |
+| `eqoa.actions.loot_abandon` | supported | 7 |  |
 | `eqoa.actions.loot_all` | supported | 6 |  |
+| `eqoa.actions.loot_assign` | supported | 7 |  |
+| `eqoa.actions.loot_roll` | supported | 7 |  |
 | `eqoa.actions.mastery_browse` | supported | 6 |  |
 | `eqoa.actions.mastery_buy` | not_yet | 6 | the game asks the player to confirm this step; a mod cannot take it until the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer |
 | `eqoa.actions.mastery_refund` | not_yet | 6 | the game asks the player to confirm this step; a mod cannot take it until the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer |
@@ -77,6 +80,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.pet_back_off` | supported | 8 |  |
 | `eqoa.actions.prepare_weapon_set` | supported | 6 |  |
 | `eqoa.actions.quick_slot` | supported | 6 |  |
+| `eqoa.actions.ready_check_answer` | supported | 7 |  |
 | `eqoa.actions.remove_effect` | supported | 8 |  |
 | `eqoa.actions.select_row` | supported | 6 |  |
 | `eqoa.actions.sell` | supported | 6 |  |
@@ -475,6 +479,15 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.quests.get` | supported | 6 |  |
 | `eqoa.quests.goals` | supported | 8 |  |
 | `eqoa.quests.list` | supported | 6 |  |
+
+## eqoa.raid
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.raid` | supported | 7 |  |
+| `eqoa.raid.get` | supported | 7 |  |
+| `eqoa.raid.loot_rolls` | supported | 7 |  |
+| `eqoa.raid.ready_check` | supported | 7 |  |
 
 ## eqoa.revision
 
@@ -1107,6 +1120,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.items.Container.full` | supported | 5 |  |
 | `eqoa.items.Container.items` | supported | 5 |  |
 | `eqoa.items.Container.kind` | supported | 5 |  |
+| `eqoa.items.Container.master_loot` | supported | 5 |  |
 | `eqoa.items.Container.merchant` | supported | 5 |  |
 | `eqoa.items.Container.money` | supported | 5 |  |
 | `eqoa.items.Container.open` | supported | 5 |  |
@@ -1164,6 +1178,12 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.items.LootSource` | supported | 5 |  |
 | `eqoa.items.LootSource.entity_id` | supported | 5 |  |
 | `eqoa.items.LootSource.name` | supported | 5 |  |
+| `eqoa.items.MasterLoot` | supported | 5 |  |
+| `eqoa.items.MasterLoot.members` | supported | 5 |  |
+| `eqoa.items.MasterLoot.seconds` | supported | 5 |  |
+| `eqoa.items.MasterLootMember` | supported | 5 |  |
+| `eqoa.items.MasterLootMember.id` | supported | 5 |  |
+| `eqoa.items.MasterLootMember.name` | supported | 5 |  |
 | `eqoa.items.MerchantOption` | supported | 5 |  |
 | `eqoa.items.MerchantOption.key` | supported | 5 |  |
 | `eqoa.items.MerchantOption.label` | supported | 5 |  |
@@ -1376,6 +1396,57 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.quests.QuestGoals.goals` | supported | 8 |  |
 | `eqoa.quests.QuestGoals.quest` | supported | 8 |  |
 | `eqoa.quests.QuestGoals.title` | supported | 8 |  |
+| `eqoa.raid.LootRollData` | supported | 7 |  |
+| `eqoa.raid.LootRollData.rolls` | supported | 7 |  |
+| `eqoa.raid.LootRollItem` | supported | 7 |  |
+| `eqoa.raid.LootRollItem.choices` | supported | 7 |  |
+| `eqoa.raid.LootRollItem.deadline_ms` | supported | 7 |  |
+| `eqoa.raid.LootRollItem.duration` | supported | 7 |  |
+| `eqoa.raid.LootRollItem.icon` | supported | 7 |  |
+| `eqoa.raid.LootRollItem.id` | supported | 7 |  |
+| `eqoa.raid.LootRollItem.item_id` | supported | 7 |  |
+| `eqoa.raid.LootRollItem.item_name` | supported | 7 |  |
+| `eqoa.raid.LootRollItem.may_need` | supported | 7 |  |
+| `eqoa.raid.LootRollItem.seconds_remaining` | supported | 7 |  |
+| `eqoa.raid.LootRollSession` | supported | 7 |  |
+| `eqoa.raid.LootRollSession.data` | supported | 7 |  |
+| `eqoa.raid.LootRollSession.kind` | supported | 7 |  |
+| `eqoa.raid.LootRollSession.origin` | supported | 7 |  |
+| `eqoa.raid.LootRollSession.revision` | supported | 7 |  |
+| `eqoa.raid.RaidMember` | supported | 7 |  |
+| `eqoa.raid.RaidMember.assist` | supported | 7 |  |
+| `eqoa.raid.RaidMember.group` | supported | 7 |  |
+| `eqoa.raid.RaidMember.helper` | supported | 7 |  |
+| `eqoa.raid.RaidMember.hp_fraction` | supported | 7 |  |
+| `eqoa.raid.RaidMember.id` | supported | 7 |  |
+| `eqoa.raid.RaidMember.leader` | supported | 7 |  |
+| `eqoa.raid.RaidMember.merc` | supported | 7 |  |
+| `eqoa.raid.RaidMember.name` | supported | 7 |  |
+| `eqoa.raid.RaidMember.power_fraction` | supported | 7 |  |
+| `eqoa.raid.RaidState` | supported | 7 |  |
+| `eqoa.raid.RaidState.assist_id` | supported | 7 |  |
+| `eqoa.raid.RaidState.helper_id` | supported | 7 |  |
+| `eqoa.raid.RaidState.helps` | supported | 7 |  |
+| `eqoa.raid.RaidState.in_combat` | supported | 7 |  |
+| `eqoa.raid.RaidState.in_raid` | supported | 7 |  |
+| `eqoa.raid.RaidState.leader_id` | supported | 7 |  |
+| `eqoa.raid.RaidState.leads` | supported | 7 |  |
+| `eqoa.raid.RaidState.loot_rolls` | supported | 7 |  |
+| `eqoa.raid.RaidState.loot_rule` | supported | 7 |  |
+| `eqoa.raid.RaidState.members` | supported | 7 |  |
+| `eqoa.raid.RaidState.ready_check` | supported | 7 |  |
+| `eqoa.raid.ReadyCheckData` | supported | 7 |  |
+| `eqoa.raid.ReadyCheckData.asker` | supported | 7 |  |
+| `eqoa.raid.ReadyCheckData.choices` | supported | 7 |  |
+| `eqoa.raid.ReadyCheckData.deadline_ms` | supported | 7 |  |
+| `eqoa.raid.ReadyCheckData.duration` | supported | 7 |  |
+| `eqoa.raid.ReadyCheckData.id` | supported | 7 |  |
+| `eqoa.raid.ReadyCheckData.seconds_remaining` | supported | 7 |  |
+| `eqoa.raid.ReadyCheckSession` | supported | 7 |  |
+| `eqoa.raid.ReadyCheckSession.data` | supported | 7 |  |
+| `eqoa.raid.ReadyCheckSession.kind` | supported | 7 |  |
+| `eqoa.raid.ReadyCheckSession.origin` | supported | 7 |  |
+| `eqoa.raid.ReadyCheckSession.revision` | supported | 7 |  |
 | `eqoa.target.Consider` | supported | 8 |  |
 | `eqoa.target.Consider.code` | supported | 8 |  |
 | `eqoa.target.Consider.color` | supported | 8 |  |

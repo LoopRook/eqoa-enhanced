@@ -1057,6 +1057,12 @@ fn forge_wereoxxs_disabled_startup_profile_enable_toggle_disable_reenable_all_el
         chat: true,
         ability_bar: true,
         active_effects: true,
+        raid_list: false,
+        quest_tracker: false,
+        dps_meter: false,
+        breath: false,
+        spell_bars: false,
+        utility_bars: false,
     };
     assert_eq!(
         published_visibility(),

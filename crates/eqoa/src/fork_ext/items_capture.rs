@@ -212,6 +212,10 @@ pub(super) fn build(play: &Play) -> [Json; 4] {
         (true, Some(corpse)) => {
             let mut loot = container("loot", corpse, true, Some(LOOT_CAPACITY), None, Json::Null, &ctx);
             loot["source"] = SOURCE.with(|s| s.borrow().clone()).map_or(Json::Null, |(id, name)| json!({"entity_id":id,"name":name}));
+            loot["master_loot"] = crate::fork_ext::addons::raid_strips::master_loot_detail().map_or(Json::Null, |ml| {
+                let members: Vec<Json> = ml.members.iter().map(|(id, name)| json!({"id": id, "name": name})).collect();
+                json!({"seconds": ml.seconds, "members": members})
+            });
             loot
         }
         _ => Json::Null,
@@ -272,6 +276,7 @@ fn key(play: &Play) -> u64 {
         play.dump.bank.items.items.len(),
         play.npcw.corpse.as_ref().map(|l| l.items.len()),
         play.npcw.shop.wares.items.len(),
+        crate::fork_ext::addons::raid_strips::master_loot_detail().map(|ml| (ml.seconds, ml.members.len())),
     )
         .hash(&mut h);
     h.finish()

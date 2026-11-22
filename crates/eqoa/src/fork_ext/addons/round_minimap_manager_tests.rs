@@ -1131,7 +1131,7 @@ fn every_bundled_mod_runs_a_play_session_with_zero_manager_diagnostics_body() {
     packages.sort();
     packages.dedup();
     packages.retain(|p| *p != "resources");
-    assert_eq!(packages.len(), 15, "the bundled set (twelve eqoa_* mods and the three Forge UIs): {packages:?}");
+    assert_eq!(packages.len(), 16, "the bundled set (thirteen eqoa_* mods and the three Forge UIs): {packages:?}");
     let mut failed = Vec::new();
     let mut ran = 0;
     for p in &packages {

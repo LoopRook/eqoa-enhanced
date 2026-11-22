@@ -877,9 +877,9 @@ mod tests {
             host.execute("x = string.rep('x', 32 * 1024 * 1024)")
                 .is_err()
         );
-        // the failed string leaves its buffer (a userdata with a finalizer) to the next collection, and Lua's
-        // emergency collection when the limit is hit again runs no finalizers: whether the module below finds
-        // room used to depend on where the incremental collector happened to be. Collect, as a running host does.
+        // The failed allocation leaves its partial buffer as garbage that fills the 8 MiB limit until the
+        // collector next runs (the merged surface shifted when it runs); collect so the check is about
+        // recovery, not about GC timing.
         host.lua.gc_collect().unwrap();
         host.execute("assert(package.loadlib == nil); assert(require('frontiers_forge.util').IsInGame() == 0)").unwrap();
         assert!(host.execute("require('ffi')").is_err());
