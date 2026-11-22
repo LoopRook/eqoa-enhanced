@@ -522,6 +522,7 @@
   "eqoa.events.loot.changed.data.before",
   "eqoa.events.loot.changed.data.cause",
   "eqoa.events.loot.changed.data.changed",
+  "eqoa.events.loot.changed.data.closed_by",
   "eqoa.events.map.changed",
   "eqoa.events.map.changed.data.after",
   "eqoa.events.map.changed.data.before",

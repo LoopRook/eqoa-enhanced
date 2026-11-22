@@ -322,6 +322,10 @@ pub(crate) fn current_loot_source_id(play: &Play) -> Option<u32> {
     if let Some((id, _)) = SOURCE.with(|s| s.borrow().clone()) {
         return Some(id);
     }
+    // a corpse the mod opened by id (the player's target is not it): the server's relists are that corpse's too
+    if let Some(id) = crate::fork_ext::addons::window_takeover::by_id_corpse() {
+        return Some(id);
+    }
     (play.target != 0
         && play
             .entities

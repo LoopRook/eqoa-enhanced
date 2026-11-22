@@ -104,6 +104,7 @@ end)
 B.load_junk()
 eqoa.events.on("loot.changed", function(e)
     B.log_loot(e.data)
+    B.note_loot_closed(e.data)
     if not B.open then B.on_loot_changed(e.data) end
 end)
 -- Auto-loot listens only while it is on (the default is off), and then only to your hits and to the render event it

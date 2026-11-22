@@ -592,6 +592,8 @@ All four return `nil, Error{code="not_in_world"}` outside the world and `invalid
 
 More `cause` values may be added; treat one you do not know as a plain change.
 
+When `loot.changed` reports a corpse window going (`cause = "close"`) it also carries `closed_by:string`, who closed it as far as the client knows: `"player"` (the player closed the game's loot window with its own control), `"mod"` (the client ended a mod's hidden session when the mod finished, released the takeover or went away), `"server"` (the server closed the corpse: it does so after every take, then lists it again) or `"other"` (anything else seen at a frame: the player walked away, zoned, another window took over). The field is absent on every other change. It is how a mod tells a corpse the player gave up on from one that was cut short; a corpse that the mod closed itself is `"mod"`, never `"player"`. A hidden corpse window cannot be closed by the player at all, so `"player"` only happens for a window the game itself is showing.
+
 ## 7. Quests, Class Mastery, camera, windows and the map (rounds 4 and 6)
 
 ### Quests
@@ -873,7 +875,7 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 | `eqoa.actions.buy(item:ItemRef, count:uint=1)`, `eqoa.actions.sell(item:ItemRef, count:uint=1)` | Buys from the open merchant's wares, sells a pack stack to it. `window_closed` if no merchant is open. |
 | `eqoa.actions.bank_move(item:ItemRef, count:uint=1)` or `(from:string, item:ItemRef, count:uint=1)` | Moves `count` of a stack between pack and bank. **Omitting `count` moves 1, not the stack**: pass `item.quantity` to move it all. The direction follows from the list the item is in. The optional `from` names that list and must agree with it (`invalid_argument` otherwise): `"bank"` or `"withdraw"` for an item in the bank, `"inventory"`, `"bags"` or `"deposit"` for one in the pack. `window_closed` if no bank is open. |
 | `eqoa.actions.bank_money(direction:"deposit"\|"withdraw", amount:uint)` | Moves tunar. |
-| `eqoa.actions.open_loot(entity?)` | Asks the server to open a corpse: the given one (`EntityRef` or id) or the nearest. Refuses anything that is not a corpse (`invalid_argument`); `not_found` if there is none. The result is `completed` when the corpse opens, `refused` with the server's reason (for example `out_of_range`), or `unknown`. The client targets the corpse for this and puts your previous target back when the mod is done, unless you chose another meanwhile. |
+| `eqoa.actions.open_loot(entity?, options?)` | Asks the server to open a corpse: the given one (`EntityRef` or id) or the nearest. Refuses anything that is not a corpse (`invalid_argument`); `not_found` if there is none. The result is `completed` when the corpse opens, `refused` with the server's reason (for example `out_of_range`), or `unknown`. By default the client targets the corpse for this (which ends an auto-attack) and puts your previous target back when the mod is done, unless you chose another meanwhile. `options = {keep_target = true}` asks for the corpse by its id and changes nothing else of the player's: the target and the auto-attack stay, so a mod can loot in the middle of a fight; see "Opening a corpse without moving the target" below. `options` must be a table or nil, and `keep_target` a boolean or nil (`invalid_argument` otherwise). |
 | `eqoa.actions.talk(entity?, {kind="merchant"\|"bank"}?)` | Talks to an NPC: the given one or the nearest of that kind (any friendly NPC when `kind` is omitted). Refuses corpses and NPCs that are not of the kind asked for. `completed` when the merchant or bank opens. The target is put back as for `open_loot`. |
 | `eqoa.actions.chat(text:string)` | Sends a line as if typed into chat, in the current channel. The line must be shorter than 128 UTF-16 units and contain no line break (`invalid_argument`). A second argument is refused with `unsupported`: to speak in a particular channel use `command` with that channel's slash command. Grants: rule 4 above. `chat` and `command` check the text before the grant (a bad line is `invalid_argument` even without the grant); every other action checks its capability first. |
 | `eqoa.actions.command(text:string)` | The same, for a command: a leading `/` is added if the text has none (and does not start with `#`). The game's own rules for each command still apply. |
@@ -901,6 +903,16 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 **Under review, not part of the promise.** This behaves as described today and may be corrected before or after the freeze; do not build on it:
 
 - `sell` takes no confirmation. The game's own merchant window asks Yes or No before selling an item in any of four cases: it is worn, it is quick-slotted, it is no-trade, or it is not a misc item. `eqoa.actions.sell` refuses only the first (a worn item, `not_ready`) and sells the other three at once, with no question. A misc item that is none of these sells at once in the game too.
+
+### Opening a corpse without moving the target
+
+`eqoa.actions.open_loot(entity, {keep_target = true})` (also the batch step field `keep_target = true`) asks the server for the corpse by its id and leaves the rest of the player alone: the target stays on what it was and the auto-attack goes on. A mod that loots what a fight leaves behind can do so while the fight is still going on. Without the option nothing changes: the client targets the corpse, asks, and gives your previous target back when the mod is done. The corpse still has to be in the zone, a corpse, in reach (the server's rule) and the player alive, not casting and not in another window; otherwise the result is `refused` with the usual code (`not_ready`, `not_found`, `invalid_argument`, `out_of_range`).
+
+The result says what the client did, in `ActionResult.detail.method`: `"keep_target"` (asked by id) or `"retarget"` (the old way: the client targeted the corpse and will give your target back, which ended any auto-attack). A client that does not know the option ignores it and its result has no `method`: read that as `"retarget"`. A mod that must not break an auto-attack therefore waits for the end of a fight until it has seen `method == "keep_target"` once.
+
+How the choice is made: the client sends the by-id request first. If the server answers it with the corpse's list, by id is used for the rest of the session. If the server does not answer within three seconds (or refuses it without giving a reason) while the target was another entity, the client asks again the old way and keeps to the old way for the session; the mod's request stays in flight and ends with the answer to that second request, and `detail.method` says `"retarget"`. A request sent while the target already was the corpse proves nothing either way and never changes the choice. Both outcomes are always written to the game's log (`takeover: loot open method: ...`). An "Out of range." answer, or a refusal that says why (the server's "too far" and "someone else is looting that corpse"), is an answer: the request was understood and the choice stays open.
+
+Everything that belongs to a hidden corpse session follows the corpse the mod asked for, not the player's target: the server's own list of the corpse after each take stays the mod's, a batch of takes asks the corpse again by id, and `loot.changed`'s `source.entity_id` names it. The mod's takeover and the hidden session work as for any `open_loot` (scope `"own"`, §7).
 
 ### Windows the game can be asked to open
 
@@ -965,7 +977,7 @@ A step's fields are not always named as the function's arguments are (`kind` is 
 | Step `kind` | Fields |
 |---|---|
 | `target` | `target` (an entity; nil clears) |
-| `open_loot` | `entity_id?` (nearest corpse when omitted) |
+| `open_loot` | `entity_id?` (nearest corpse when omitted), `keep_target?` (boolean; as the function's option) |
 | `talk` | `entity_id?`, `kind_filter?` (`"merchant"` or `"bank"`; any friendly NPC when omitted) |
 | `attack`, `autorun` | `on?` (toggles when omitted) |
 | `cast` | `ability` |

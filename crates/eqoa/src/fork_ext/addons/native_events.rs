@@ -203,6 +203,8 @@ fn install_event_fields(lua: &mlua::Lua) {
     // The press as the game names it, the modifiers held written before the key
     // ("ctrl+u"): what a key binding is matched by (round 7).
     super::native::describe(lua, "eqoa.events.input.key.data.combo", "supported", Some(7), "");
+    // Who closed a corpse window: only on `loot.changed` with cause `close` (after the 0.7.0 release)
+    super::native::describe(lua, "eqoa.events.loot.changed.data.closed_by", "supported", Some(7), "");
 }
 
 fn event_round(name: &str) -> u8 {

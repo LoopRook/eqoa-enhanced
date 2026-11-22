@@ -4698,3 +4698,402 @@ fn round7c_zoning_ends_the_list_graces() {
     }
     window_takeover::reset_all_for_test();
 }
+
+// ---- Auto-loot follow-ups (2026-11-21): the corpse is opened by its id -----------------------------------------------
+//
+// `eqoa.actions.open_loot(id, {keep_target = true})` sends 0x0015 with the corpse's id and changes nothing else of the
+// player's: the target and the auto-attack stay (a fight goes on), the takeover keys everything by the corpse the mod
+// asked for (not by what the player has targeted), and a server that does not answer such a request makes the client
+// fall back to the old method (target, loot, give the target back) for the session.
+
+/// A world that records what the client sends, with a live rat (9500) the player is fighting.
+fn bid_world() -> Play {
+    let mut p = r65fix_world();
+    let sys = p.session.drdp.system_endpoint;
+    let remote = drdp::address_to_endpoint([127, 0, 0, 1], 10071, drdp::PORT_LEADER);
+    p.session.conn = p.session.drdp.connection_open(sys, remote);
+    assert!(p.session.conn.is_some());
+    p.session.record = Some(vec![]);
+    p.entities.slots.push(r65fix_creature(9500, "a bristly rat", 1, 0, [2.0, 0.0, 0.0]));
+    p
+}
+
+/// The loot-related opcodes sent since the last call: (opcode, bytes after it).
+fn bid_sent(p: &mut Play) -> Vec<(u16, Vec<u8>)> {
+    p.session
+        .record
+        .as_mut()
+        .map(std::mem::take)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(channel, d)| *channel == drdp::TYPE_GUARANTEED && d.len() >= 2)
+        .map(|(_, d)| (u16::from_le_bytes([d[0], d[1]]), d[2..].to_vec()))
+        .filter(|(op, _)| matches!(op, 0x0010 | 0x0015 | 0x0016 | 0x0019 | 0x001A))
+        .collect()
+}
+
+fn bid_reset() {
+    use crate::fork_ext::addons::{action_broker, window_takeover};
+    action_broker::reset_all_for_test();
+    window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    crate::fork_ext::loot_by_id::reset_for_test();
+    let _ = window_takeover::take_log_for_test();
+}
+
+/// The player is fighting the rat (targeted, auto-attack on); a mod that holds the loot takeover.
+fn bid_fight() -> (Host, Play) {
+    bid_reset();
+    let host = r65fix_host(&["eqoa.windows.takeover", "eqoa.actions.*"]);
+    let mut p = bid_world();
+    p.forge_snapshot(None);
+    host.execute("assert(eqoa.windows.takeover('loot'))").unwrap();
+    p.target = 9500;
+    p.auto_attack = true;
+    (host, p)
+}
+
+fn corpse_id_bytes(id: u32) -> Vec<u8> {
+    id.to_le_bytes().to_vec()
+}
+
+fn target_then_loot(id: u32) -> Vec<(u16, Vec<u8>)> {
+    vec![(0x0010, [0u32.to_le_bytes(), id.to_le_bytes()].concat()), (0x0015, corpse_id_bytes(id))]
+}
+
+#[test]
+fn autoloot_open_by_id_leaves_the_target_and_the_auto_attack_alone() {
+    let (host, mut p) = bid_fight();
+    host.execute("req = assert(eqoa.actions.open_loot(9001, {keep_target = true}))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.target, 9500, "the target is still the rat");
+    assert!(p.auto_attack, "the auto-attack goes on");
+    assert_eq!(
+        bid_sent(&mut p),
+        vec![(0x0015, corpse_id_bytes(9001))],
+        "one request that names the corpse: no target request before it"
+    );
+    // the server lists the corpse: the mod's, hidden
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 0, "the game's window does not show");
+    super::super::begin_iteration(&mut p, true);
+    host.execute(
+        "local s = assert(eqoa.actions.status(req)); assert(s.state == 'completed' and s.ok == true, s.state); \
+         assert(s.detail.entity_id == 9001 and s.detail.method == 'keep_target', 'detail.method ' .. tostring(s.detail.method))",
+    )
+    .unwrap();
+    // the mod is done: the close goes out, and there is no target to give back
+    host.execute("assert(eqoa.windows.release('loot'))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(bid_sent(&mut p), vec![(0x0016, vec![])], "only the close: the target was never moved, so none is restored");
+    assert_eq!(p.target, 9500);
+    assert!(p.auto_attack);
+    let log = crate::fork_ext::addons::window_takeover::take_log_for_test().join("\n");
+    assert!(log.contains("BY ID"), "the log names the method in use: {log}");
+    assert!(log.contains("CONFIRMED: BY ID"), "the server's answer proves it (the target was not the corpse): {log}");
+    bid_reset();
+}
+
+#[test]
+fn autoloot_open_without_the_option_still_retargets_and_ends_the_auto_attack() {
+    // negative control for the test above, and the legacy contract: no option, nothing changes meaning
+    let (host, mut p) = bid_fight();
+    host.execute("req = assert(eqoa.actions.open_loot(9001))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.target, 9001, "documented: open_loot targets the corpse");
+    assert!(!p.auto_attack, "and the target request ends the auto-attack");
+    assert_eq!(bid_sent(&mut p), target_then_loot(9001), "target, then loot");
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    super::super::begin_iteration(&mut p, true);
+    host.execute(
+        "local s = assert(eqoa.actions.status(req)); assert(s.state == 'completed', s.state); assert(s.detail.method == nil, 'a plain open_loot reports no method')",
+    )
+    .unwrap();
+    // and the previous target comes back when the mod is done
+    host.execute("assert(eqoa.windows.release('loot'))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.target, 9500, "the old method gives the target back");
+    assert_eq!(
+        crate::fork_ext::loot_by_id::method(),
+        crate::fork_ext::loot_by_id::Method::Unknown,
+        "it never touched the by-id state"
+    );
+    bid_reset();
+}
+
+#[test]
+fn autoloot_by_id_session_stays_hidden_through_the_servers_relists_with_the_target_elsewhere() {
+    use crate::fork_ext::addons::window_takeover::{self, TakeoverKind};
+    for by_id in [true, false] {
+        bid_reset();
+        let mut p = bid_world();
+        r65fix_own(TakeoverKind::Loot);
+        p.target = 9500; // the player fights on
+        if by_id {
+            assert!(window_takeover::arm_pending_open_by_id(1, 9001));
+        } else {
+            assert!(window_takeover::arm_pending_open(TakeoverKind::Loot, 1, 9001));
+        }
+        crate::fork_ext::loot_requested(9001);
+        apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+        assert_eq!(p.mode, 0, "the open that answers the mod's request is the mod's");
+        // after a take the live server closes the corpse and lists it again by itself
+        apply(&mut p, opcode(0x0016, vec![]));
+        apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+        if by_id {
+            assert_eq!(p.mode, 0, "by id: the relist is the session's, whatever the player has targeted");
+            // after the mod's last take: the grace holds a list the server sends again
+            window_takeover::end_session_for_vm(1, TakeoverKind::Loot);
+            apply(&mut p, opcode(0x0016, vec![]));
+            apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+            assert_eq!(p.mode, 0, "by id: the list after the session's end is held hidden too");
+        } else {
+            // negative control: keyed by the player's target (the old rule) the same relist is shown
+            assert_eq!(p.mode, 1, "keyed by the target, a relist with the target elsewhere is left to the game");
+            let log = window_takeover::take_log_for_test().join("\n");
+            assert!(log.contains("left to the game"), "{log}");
+        }
+    }
+    bid_reset();
+}
+
+/// A batch of two takes over a session opened by id, or the old way, in a fight: the broker's re-ask of the corpse
+/// after the first take. Returns what the re-ask sent, the batch's last state and the player's target.
+fn bid_reopen(by_id: bool) -> (Vec<(u16, Vec<u8>)>, String, u32) {
+    use crate::fork_ext::addons::native_events;
+    let (host, mut p) = bid_fight();
+    p.dump.inventory = list(&[]);
+    host.execute("bres = {}; eqoa.events.on('batch.result', function(e) bres[#bres + 1] = e.data end)").unwrap();
+    let items = |from: usize| {
+        let all = [("Rat Pelt", 2001), ("Bloodstone", 2003)];
+        serde_json::Value::Array(
+            all[from..]
+                .iter()
+                .enumerate()
+                .map(|(k, (n, id))| serde_json::json!({"name": n, "id": id, "key": k, "qty": 1, "max_stack": 100}))
+                .collect(),
+        )
+    };
+    if by_id {
+        host.execute("assert(eqoa.actions.open_loot(9001, {keep_target = true}))").unwrap();
+    } else {
+        host.execute("assert(eqoa.actions.open_loot(9001))").unwrap();
+    }
+    super::super::begin_iteration(&mut p, true);
+    p.bags_corpse(&items(0));
+    // the fight goes on: whatever was targeted is the rat again
+    p.target = 9500;
+    host.execute(
+        "local l = assert(eqoa.loot.get()); \
+         batch = assert(eqoa.actions.batch({ steps = { { kind = 'loot', item = l.items[1].ref, count = 1 }, { kind = 'loot', item = l.items[2].ref, count = 1 } }, require_window = 'loot' }))",
+    )
+    .unwrap();
+    p.bags_broker_tick(); // the first take goes out
+    let _ = bid_sent(&mut p);
+    p.bags_added(&serde_json::json!({"name": "Rat Pelt", "id": 2001, "key": 80, "qty": 1, "max_stack": 100}));
+    p.bags_loot_close(); // the server closes the corpse after each take
+    p.bags_broker_tick(); // the broker asks for the corpse again
+    native_events::dispatch(&host).unwrap();
+    let asked = bid_sent(&mut p);
+    if by_id {
+        p.bags_corpse(&items(1));
+        p.bags_broker_tick(); // the second take
+        assert_eq!(p.mode, 0, "no game window");
+        p.bags_added(&serde_json::json!({"name": "Bloodstone", "id": 2003, "key": 81, "qty": 1, "max_stack": 100}));
+        p.bags_loot_close();
+        p.bags_broker_tick();
+        native_events::dispatch(&host).unwrap();
+    }
+    let state: String = host
+        .lua
+        .load("return bres[#bres] and (bres[#bres].state .. ':' .. tostring(bres[#bres].reason) .. ':' .. tostring(bres[#bres].completed)) or 'running'")
+        .eval()
+        .unwrap();
+    let target = p.target;
+    bid_reset();
+    (asked, state, target)
+}
+
+#[test]
+fn autoloot_a_batch_over_a_by_id_session_asks_the_corpse_again_by_id_in_a_fight() {
+    let (asked, state, target) = bid_reopen(true);
+    assert_eq!(asked, vec![(0x0015, corpse_id_bytes(9001))], "the re-ask names the corpse; no target request goes with it");
+    assert_eq!(target, 9500, "the fight's target was never touched");
+    assert!(state.starts_with("completed"), "both takes done: {state}");
+    assert!(state.ends_with(":2"), "{state}");
+}
+
+#[test]
+fn autoloot_the_old_session_aborts_when_the_player_targets_something_else() {
+    // negative control: a session opened the old way is keyed by the target, and the batch stops when it moves
+    let (asked, state, _) = bid_reopen(false);
+    assert!(asked.is_empty(), "no re-ask while the target is not the corpse: {asked:?}");
+    assert!(state.contains("corpse target changed"), "{state}");
+}
+
+#[test]
+fn autoloot_by_id_open_that_nobody_answers_falls_back_to_target_then_loot_and_says_so() {
+    use crate::fork_ext::loot_by_id::{self, Method};
+    let (host, mut p) = bid_fight();
+    host.execute("req = assert(eqoa.actions.open_loot(9001, {keep_target = true}))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(bid_sent(&mut p), vec![(0x0015, corpse_id_bytes(9001))]);
+    // silence for just under three seconds: nothing changes
+    for _ in 0..(loot_by_id::REPLY_TICKS - 2) {
+        super::super::begin_iteration(&mut p, true);
+    }
+    assert_eq!(p.target, 9500);
+    assert_eq!(loot_by_id::method(), Method::Unknown);
+    // three seconds: the old method goes out for the same corpse, and the session stays on it
+    for _ in 0..3 {
+        super::super::begin_iteration(&mut p, true);
+    }
+    assert_eq!(loot_by_id::method(), Method::Retarget);
+    assert_eq!(p.target, 9001, "now the corpse is targeted, as the old method does");
+    assert!(!p.auto_attack);
+    assert_eq!(bid_sent(&mut p), target_then_loot(9001), "target, then loot");
+    let log = crate::fork_ext::addons::window_takeover::take_log_for_test().join("\n");
+    assert!(log.contains("TARGET-THEN-LOOT") && log.contains("fallback"), "one line names the method now in use: {log}");
+    // that one is answered: the mod's open completes and says which method it took
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    assert_eq!(p.mode, 0, "still hidden");
+    super::super::begin_iteration(&mut p, true);
+    host.execute(
+        "local s = assert(eqoa.actions.status(req)); assert(s.state == 'completed', s.state .. ' ' .. tostring(s.reason)); \
+         assert(s.detail.method == 'retarget', 'method ' .. tostring(s.detail.method))",
+    )
+    .unwrap();
+    // the next keep_target open of the session goes the old way at once (the decision holds for the session)
+    host.execute("assert(eqoa.windows.release('loot')); assert(eqoa.windows.takeover('loot'))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    super::super::begin_iteration(&mut p, true);
+    p.target = 9500;
+    let _ = bid_sent(&mut p);
+    host.execute("req2 = assert(eqoa.actions.open_loot(9004, {keep_target = true}))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(p.target, 9004);
+    assert_eq!(bid_sent(&mut p), target_then_loot(9004));
+    bid_reset();
+}
+
+#[test]
+fn autoloot_by_id_open_answered_in_time_never_falls_back() {
+    // negative control: the same request answered inside the time
+    use crate::fork_ext::loot_by_id::{self, Method};
+    let (host, mut p) = bid_fight();
+    host.execute("req = assert(eqoa.actions.open_loot(9001, {keep_target = true}))").unwrap();
+    for _ in 0..10 {
+        super::super::begin_iteration(&mut p, true);
+    }
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    for _ in 0..(loot_by_id::REPLY_TICKS + 10) {
+        super::super::begin_iteration(&mut p, true);
+    }
+    assert_eq!(loot_by_id::method(), Method::ById);
+    assert_eq!(p.target, 9500);
+    assert!(p.auto_attack);
+    let _ = host;
+    bid_reset();
+}
+
+#[test]
+fn autoloot_silence_for_a_corpse_that_is_already_the_target_proves_nothing_about_by_id() {
+    // the request for the targeted corpse is the old request: its silence says nothing, so no fallback
+    use crate::fork_ext::loot_by_id::{self, Method};
+    let (host, mut p) = bid_fight();
+    p.target = 9001;
+    host.execute("req = assert(eqoa.actions.open_loot(9001, {keep_target = true}))").unwrap();
+    for _ in 0..(loot_by_id::REPLY_TICKS + 20) {
+        super::super::begin_iteration(&mut p, true);
+    }
+    assert_eq!(loot_by_id::method(), Method::Unknown);
+    assert_eq!(bid_sent(&mut p), vec![(0x0015, corpse_id_bytes(9001))], "one request, never repeated the old way");
+    let _ = host;
+    bid_reset();
+}
+
+#[test]
+fn autoloot_by_id_open_the_server_refuses_without_a_reason_falls_back_but_a_reasoned_refusal_does_not() {
+    use crate::fork_ext::loot_by_id::{self, Method};
+    // 0x0085 code 3 ("you cannot loot that corpse"): unclear, so the old way is tried at the next step
+    let (host, mut p) = bid_fight();
+    host.execute("req = assert(eqoa.actions.open_loot(9001, {keep_target = true}))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    let _ = bid_sent(&mut p);
+    apply(&mut p, opcode(0x0085, vec![3]));
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(loot_by_id::method(), Method::Retarget);
+    assert_eq!(p.target, 9001);
+    assert_eq!(bid_sent(&mut p), target_then_loot(9001));
+    host.execute(
+        "local s = assert(eqoa.actions.status(req)); assert(s.state ~= 'refused', 'the mod is not told it was refused while the old way is tried')",
+    )
+    .unwrap();
+    apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+    super::super::begin_iteration(&mut p, true);
+    host.execute("local s = assert(eqoa.actions.status(req)); assert(s.state == 'completed' and s.detail.method == 'retarget', s.state)")
+        .unwrap();
+
+    // negative control: code 1 ("too far") says why: the request was understood, the method stays undecided, the
+    // mod's open ends as refused
+    let (host, mut p) = bid_fight();
+    host.execute("req = assert(eqoa.actions.open_loot(9001, {keep_target = true}))").unwrap();
+    super::super::begin_iteration(&mut p, true);
+    let _ = bid_sent(&mut p);
+    apply(&mut p, opcode(0x0085, vec![1]));
+    super::super::begin_iteration(&mut p, true);
+    assert_eq!(loot_by_id::method(), Method::Unknown);
+    assert_eq!(p.target, 9500, "no retarget");
+    host.execute("local s = assert(eqoa.actions.status(req)); assert(s.state == 'refused', s.state)").unwrap();
+    bid_reset();
+}
+
+#[test]
+fn autoloot_open_loot_validates_the_option() {
+    let (host, _p) = bid_fight();
+    host.execute(
+        "local r, e = eqoa.actions.open_loot(9001, {keep_target = 'yes'}); assert(r == nil and e.code == 'invalid_argument', tostring(e and e.code)); \
+         local r2, e2 = eqoa.actions.open_loot(9001, 5); assert(r2 == nil and e2.code == 'invalid_argument', tostring(e2 and e2.code)); \
+         local r3 = eqoa.actions.open_loot(9001, {}); assert(r3, 'an empty options table is the plain call')",
+    )
+    .unwrap();
+    bid_reset();
+}
+
+#[test]
+fn autoloot_loot_changed_says_who_closed_the_window() {
+    // the player's own click on the game's window, the server's own close, and the mod's end of its session
+    for who in ["player", "server", "mod"] {
+        bid_reset();
+        let host = r65fix_host(&["eqoa.windows.takeover", "eqoa.actions.*"]);
+        let mut p = bid_world();
+        p.forge_snapshot(None);
+        host.execute("closed = {}; eqoa.events.on('loot.changed', function(e) if e.data.cause == 'close' then closed[#closed + 1] = tostring(e.data.closed_by) end end)").unwrap();
+        match who {
+            "mod" => {
+                host.execute("assert(eqoa.windows.takeover('loot')); assert(eqoa.actions.open_loot(9001, {keep_target = true}))").unwrap();
+                super::super::begin_iteration(&mut p, true);
+                apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+                host.execute("assert(eqoa.windows.release('loot'))").unwrap();
+                super::super::begin_iteration(&mut p, true);
+                super::super::begin_iteration(&mut p, true);
+            }
+            _ => {
+                apply(&mut p, opcode(0x0018, list_bytes(&[gem()])));
+                assert_eq!(p.mode, 1, "the player's own window");
+                if who == "player" {
+                    let mut out = vec![crate::loot::LootOut::Close];
+                    super::super::npcw_requests(&p, &mut out, &mut Vec::new());
+                }
+                apply(&mut p, opcode(0x0016, vec![]));
+            }
+        }
+        super::super::begin_iteration(&mut p, true);
+        frame(&p, &host);
+        host.execute(&format!("assert(#closed >= 1 and closed[1] == '{who}', 'closed_by ' .. table.concat(closed, ','))"))
+            .unwrap();
+    }
+    bid_reset();
+}

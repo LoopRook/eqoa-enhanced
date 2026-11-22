@@ -117,6 +117,8 @@ struct PendingOpen {
     request_seen: bool,
     /// Another loot request followed it while the claim waited: the reply cannot be told apart.
     foreign: bool,
+    /// Sent by id (`open_loot` with `keep_target`): the player's target is not the corpse, and is not to be.
+    by_id: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -134,6 +136,9 @@ pub(crate) struct HiddenSession {
     /// one with the merchant's list again (owner test fix 1). That list is the session going on; a list with
     /// no such answer owed (the player talking to the merchant themselves) is the player's window.
     pub relist_owed: bool,
+    /// The session was opened by id: the player's target is not the corpse, so the server's relists are the
+    /// session's by the corpse id alone (never by what the player has targeted).
+    pub by_id: bool,
 }
 
 impl Default for HiddenSession {
@@ -147,6 +152,7 @@ impl Default for HiddenSession {
             last_activity: Instant::now(),
             player_asked: false,
             relist_owed: false,
+            by_id: false,
         }
     }
 }
@@ -174,6 +180,7 @@ struct ListGrace {
     target_id: u32,
     until: Instant,
     player_asked: bool,
+    by_id: bool,
 }
 
 #[derive(Default)]
@@ -429,6 +436,16 @@ pub(crate) fn holder_of(kind: TakeoverKind) -> Option<String> {
 }
 
 pub(crate) fn arm_pending_open(kind: TakeoverKind, vm: u64, target_id: u32) -> bool {
+    arm_pending_open_with(kind, vm, target_id, false)
+}
+
+/// `arm_pending_open` for a corpse asked for by id: the open and the session it starts never depend on the player's
+/// target (`open_loot` with `keep_target`).
+pub(crate) fn arm_pending_open_by_id(vm: u64, corpse_id: u32) -> bool {
+    arm_pending_open_with(TakeoverKind::Loot, vm, corpse_id, true)
+}
+
+fn arm_pending_open_with(kind: TakeoverKind, vm: u64, target_id: u32, by_id: bool) -> bool {
     if !has_activity() {
         return false;
     }
@@ -449,6 +466,7 @@ pub(crate) fn arm_pending_open(kind: TakeoverKind, vm: u64, target_id: u32) -> b
             expires_at: Instant::now() + PENDING_OPEN_TIMEOUT,
             request_seen: false,
             foreign: false,
+            by_id,
         });
         true
     })
@@ -482,6 +500,22 @@ pub(crate) fn is_hidden_active(kind: TakeoverKind) -> bool {
         return false;
     }
     with_state(|s| s.holders[kind as usize].is_some() && s.hidden[kind as usize].active)
+}
+
+/// The corpse a by-id open of the holder is for: its hidden session, or the open still waiting for its list. The player's
+/// target is not this corpse (that is the point of `keep_target`), so everything that elsewhere reads "the corpse" from
+/// the target reads it from here first.
+pub(crate) fn by_id_corpse() -> Option<u32> {
+    if !has_activity() {
+        return None;
+    }
+    with_state(|s| {
+        let idx = TakeoverKind::Loot as usize;
+        if s.holders[idx].is_some() && s.hidden[idx].active && s.hidden[idx].by_id {
+            return Some(s.hidden[idx].target_id);
+        }
+        s.pending_opens[idx].filter(|p| p.by_id).map(|p| p.target_id)
+    })
 }
 
 pub(crate) fn hidden_bank_session() -> Option<u32> {
@@ -566,7 +600,7 @@ pub(crate) fn decide_open(
                 s.grace_loot = None;
             } else if s.pending_opens[idx].is_none()
                 && !s.hidden[idx].active
-                && fallback_player_target == Some(g.target_id)
+                && (g.by_id || fallback_player_target == Some(g.target_id))
             {
                 s.grace_loot = None;
                 if !g.player_asked {
@@ -638,6 +672,7 @@ pub(crate) fn decide_open(
                         last_activity: now,
                         player_asked: false,
                         relist_owed: false,
+                        by_id: pending.by_id,
                     };
                     return OpenDecision::Accepted("answers the holder's own request");
                 }
@@ -653,7 +688,7 @@ pub(crate) fn decide_open(
         // for the player. Unless the player asked for a corpse themselves meanwhile (`player_asked`).
         if kind == TakeoverKind::Loot && holder_scope == TakeoverScope::Own {
             let h = &mut s.hidden[idx];
-            if h.active && h.vm == holder_vm && fallback_player_target == Some(h.target_id) {
+            if h.active && h.vm == holder_vm && (h.by_id || fallback_player_target == Some(h.target_id)) {
                 if h.player_asked {
                     h.player_asked = false;
                     why = "the player asked for this corpse themselves";
@@ -692,6 +727,7 @@ pub(crate) fn decide_open(
                 last_activity: now,
                 player_asked: false,
                 relist_owed: false,
+                by_id: false,
             };
             return OpenDecision::Accepted(
                 "holder takes over every window of this kind (scope all)",
@@ -738,6 +774,7 @@ pub(crate) fn end_session_for_vm(vm: u64, kind: TakeoverKind) {
                     target_id: s.hidden[idx].target_id,
                     until: Instant::now() + LIST_GRACE,
                     player_asked: false,
+                    by_id: s.hidden[idx].by_id,
                 });
             }
             if kind == TakeoverKind::Merchant && s.hidden[idx].relist_owed {
@@ -745,6 +782,7 @@ pub(crate) fn end_session_for_vm(vm: u64, kind: TakeoverKind) {
                     target_id: s.hidden[idx].target_id,
                     until: Instant::now() + LIST_GRACE,
                     player_asked: false,
+                    by_id: false,
                 });
             }
             s.hidden[idx] = HiddenSession::default();

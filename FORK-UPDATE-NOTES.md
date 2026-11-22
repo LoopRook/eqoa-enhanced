@@ -2,6 +2,14 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## Unreleased
+
+- **Auto-loot works in a fight and leaves your target alone.** When a creature you hit dies, Auto-loot now asks for its corpse by name instead of targeting it, so it loots straight away even while you are still fighting, your target stays on the next enemy and your auto-attack keeps swinging. If the server turns out not to accept that, the game falls back to the old way (target the corpse, loot it, put your target back) for the rest of the session, writes one line to the game's log saying which method is in use, and Auto-loot waits for the end of a fight again. It never loots while you are casting.
+- **Auto-loot is quicker.** It notices a death within a tenth of a second during a fight, asks again half a second after "the game could not open it just now" (it used to wait five seconds), and takes a corpse with nothing marked as junk in one go instead of item by item.
+- **Auto-loot asks again for a take that ended early** (your bags were full, the window went away, the server was not ready): when you are in reach and ten seconds later, at most two more times per corpse. A corpse you closed or stopped yourself, and junk you chose to leave, are left alone.
+- If the game's own loot window ever shows during Auto-loot, one line in the game's log says so (it has never been seen; this is a safety check).
+- For mod authors: `eqoa.actions.open_loot(entity, {keep_target = true})` and `loot.changed`'s new `closed_by` field are described in docs/modding. Nothing that existed changed.
+
 ## 2026-11-21 · Enhanced 0.7.0
 
 - **Documentation for mod authors.** `docs/modding/` now describes the mod API (`eqoa/1`) as it is built: a getting-started guide, a starter mod to copy, the full reference, what each bundled mod shows, and what `eqoa/1` promises. **`eqoa/1` is a stable candidate:** the guard is on and we do not expect breaking changes; the final freeze comes when the API is offered upstream (the PR), after upstream has had its say.
