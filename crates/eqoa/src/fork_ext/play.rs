@@ -20,6 +20,9 @@ mod map_mod_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "api_capture_tests.rs"]
 mod native_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "a4_hud_tests.rs"]
+mod a4_hud_tests;
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy)]
 struct CachedCycleView {
@@ -104,6 +107,18 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
     let api = api_capture::begin_game_event(play, event);
     if let net::session::Event::MasterLoot(m) = event {
         crate::fork_ext::addons::action_broker::set_master_loot(m.is_some());
+        crate::fork_ext::addons::raid_strips::set_master_loot_detail(m.clone());
+    } else if matches!(
+        event,
+        net::session::Event::Opcode { op: 0x0016 | 0x0018, .. }
+            | net::session::Event::WorldEntry { .. }
+            | net::session::Event::Teleport { .. }
+            | net::session::Event::Disconnected(_)
+    ) {
+        crate::fork_ext::addons::raid_strips::set_master_loot_detail(None);
+        if !matches!(event, net::session::Event::Opcode { .. }) {
+            crate::fork_ext::addons::raid_strips::reset();
+        }
     }
     let loot_inv_add = match event {
         net::session::Event::InvAdd(item) => Some((item.item.id, item.quantity)),
@@ -372,6 +387,7 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
         Some(BrokerReply::LootClose) => {
             LOOT_BUSY.with(|b| b.set(false));
             crate::fork_ext::addons::action_broker::set_master_loot(false);
+            crate::fork_ext::addons::raid_strips::set_master_loot_detail(None);
             crate::fork_ext::addons::action_broker::resolve_server_loot_close();
         }
         Some(BrokerReply::MerchantOpen) => {
@@ -489,7 +505,7 @@ pub(crate) fn window_taken(play: &Play, mode: i32) -> bool {
         let observed_target = match kind {
             TakeoverKind::Loot => crate::fork_ext::loot_source::peek_single(),
             TakeoverKind::Merchant => play.npcw.shop.id,
-            TakeoverKind::Bank => None,
+            TakeoverKind::Bank | TakeoverKind::RaidReady | TakeoverKind::RaidRoll => None,
         };
         let fallback_player_target = (play.target != u32::MAX).then_some(play.target);
         let decision = window_takeover::decide_open(
@@ -631,6 +647,7 @@ fn close_hidden_session(
             }
             LOOT_BUSY.with(|b| b.set(false));
             crate::fork_ext::addons::action_broker::set_master_loot(false);
+            crate::fork_ext::addons::raid_strips::set_master_loot_detail(None);
             crate::fork_ext::loot_source::closed();
         }
         TakeoverKind::Merchant => {
@@ -642,6 +659,7 @@ fn close_hidden_session(
             tlog!("takeover: bank hidden session closed ({})", owed.reason);
             play.bank.state = 0;
         }
+        TakeoverKind::RaidReady | TakeoverKind::RaidRoll => {}
     }
 }
 
@@ -773,6 +791,11 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         sync_hidden_sessions(_play);
+        if crate::fork_ext::addons::native_core::capture_requested()
+            || crate::fork_ext::addons::window_takeover::has_activity()
+        {
+            super::raidplay::fork_win::snapshot_raid(_play);
+        }
         net::fork_record::drain(&mut _play.session);
         if crate::fork_ext::addons::input::is_text_capture_active() {
             _play.attack_release();
@@ -2738,6 +2761,135 @@ fn dispatch_broker_action(
             DispatchOutcome::Staged {
                 matcher: ServerMatcher::LootAll { item_ids },
                 detail: None,
+            }
+        }
+        ActionKind::ReadyCheckAnswer { id, ready } => {
+            match super::raidplay::fork_win::answer_ready(play, *id, *ready) {
+                Ok(()) => DispatchOutcome::Completed {
+                    detail: Some(serde_json::json!({"id": id, "ready": ready, "sent": true})),
+                },
+                Err((code, reason)) => DispatchOutcome::Refused { code, reason },
+            }
+        }
+        ActionKind::LootRoll { id, choice } => {
+            let c = match *choice {
+                1 => net::raid::Choice::Need,
+                2 => net::raid::Choice::Greed,
+                _ => net::raid::Choice::Pass,
+            };
+            match super::raidplay::fork_win::answer_roll(play, *id, c) {
+                Ok(()) => {
+                    let choice_name = match c {
+                        net::raid::Choice::Need => "need",
+                        net::raid::Choice::Greed => "greed",
+                        net::raid::Choice::Pass => "pass",
+                    };
+                    DispatchOutcome::Completed {
+                        detail: Some(serde_json::json!({"id": id, "choice": choice_name, "sent": true})),
+                    }
+                }
+                Err((code, reason)) => DispatchOutcome::Refused { code, reason },
+            }
+        }
+        ActionKind::LootAssign { item, member_id } => {
+            if !loot_session_open(play) {
+                return DispatchOutcome::Refused {
+                    code: "window_closed",
+                    reason: "corpse window is not open".into(),
+                };
+            }
+            let Some(ml) = crate::fork_ext::addons::raid_strips::master_loot_detail() else {
+                return DispatchOutcome::Refused {
+                    code: "permission_denied",
+                    reason: "corpse is not under master loot rules".into(),
+                };
+            };
+            if LOOT_BUSY.with(|b| b.get()) || PENDING_NPCW_TX.with(|p| p.borrow().is_some()) {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "loot transaction already pending".into(),
+                };
+            }
+            crate::fork_ext::addons::native_core::flush_deferred();
+            if !crate::fork_ext::addons::native_items::is_handle_fresh(item) {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "loot handle is stale or corpse changed".into(),
+                };
+            }
+            let Some(corpse) = play.npcw.corpse.as_ref() else {
+                return DispatchOutcome::Refused {
+                    code: "window_closed",
+                    reason: "corpse window is not open".into(),
+                };
+            };
+            let Some(it) = corpse.items.iter().find(|it| it.inv_index == item.inv_index) else {
+                return DispatchOutcome::Refused {
+                    code: "stale_handle",
+                    reason: "item is no longer on corpse".into(),
+                };
+            };
+            if !ml.members.iter().any(|(id, _)| *id == *member_id) {
+                return DispatchOutcome::Refused {
+                    code: "not_found",
+                    reason: format!("member {member_id} is not eligible for master loot on this corpse"),
+                };
+            }
+            play.session.send_raid_command(net::raid::Command::Assign {
+                key: it.inv_index,
+                id: *member_id,
+            });
+            DispatchOutcome::Completed {
+                detail: Some(serde_json::json!({
+                    "inventory_key": it.inv_index,
+                    "member_id": member_id,
+                    "sent": true
+                })),
+            }
+        }
+        ActionKind::LootAbandon { item } => {
+            if !loot_session_open(play) {
+                return DispatchOutcome::Refused {
+                    code: "window_closed",
+                    reason: "corpse window is not open".into(),
+                };
+            }
+            if crate::fork_ext::addons::raid_strips::master_loot_detail().is_none() {
+                return DispatchOutcome::Refused {
+                    code: "permission_denied",
+                    reason: "corpse is not under master loot rules".into(),
+                };
+            }
+            if LOOT_BUSY.with(|b| b.get()) || PENDING_NPCW_TX.with(|p| p.borrow().is_some()) {
+                return DispatchOutcome::Refused {
+                    code: "busy",
+                    reason: "loot transaction already pending".into(),
+                };
+            }
+            if let Some(spec) = item {
+                crate::fork_ext::addons::native_core::flush_deferred();
+                if !crate::fork_ext::addons::native_items::is_handle_fresh(spec) {
+                    return DispatchOutcome::Refused {
+                        code: "stale_handle",
+                        reason: "loot handle is stale or corpse changed".into(),
+                    };
+                }
+                let Some(corpse) = play.npcw.corpse.as_ref() else {
+                    return DispatchOutcome::Refused {
+                        code: "window_closed",
+                        reason: "corpse window is not open".into(),
+                    };
+                };
+                if !corpse.items.iter().any(|it| it.inv_index == spec.inv_index) {
+                    return DispatchOutcome::Refused {
+                        code: "stale_handle",
+                        reason: "item is no longer on corpse".into(),
+                    };
+                }
+            }
+            play.session.send_raid_command(net::raid::Command::Abandon);
+            DispatchOutcome::Completed {
+                detail: Some(serde_json::json!({"sent": true})),
             }
         }
         ActionKind::Buy { ware, count } => {

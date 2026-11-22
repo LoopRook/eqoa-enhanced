@@ -25,6 +25,8 @@ fn published<F: FnOnce(&crate::fork_ext::addons::visibility::PublishedVisibility
 #[cfg(target_arch = "wasm32")]
 mod visibility_stub {
     pub struct PublishedVisibility {
+        pub minimap: bool,
+        pub health_bar: bool,
         pub compass: bool,
         pub group_compass_marks: bool,
         pub target: bool,
@@ -36,6 +38,17 @@ mod visibility_stub {
         pub chat: bool,
         pub ability_bar: bool,
         pub active_effects: bool,
+        pub raid_list: bool,
+        pub quest_tracker: bool,
+        pub dps_meter: bool,
+        pub breath: bool,
+        pub spell_bars: bool,
+        pub utility_bars: bool,
+    }
+    impl PublishedVisibility {
+        pub fn player_hidden(&self) -> bool {
+            false
+        }
     }
 }
 
@@ -115,8 +128,74 @@ pub(crate) fn ability_bar_visible() -> bool {
     published(|v| !v.ability_bar)
 }
 
+pub(crate) fn utility_bar_visible() -> bool {
+    published(|v| !v.ability_bar && !v.utility_bars)
+}
+
 pub(crate) fn active_effects_visible() -> bool {
     published(|v| !v.active_effects)
+}
+
+pub(crate) fn raid_hidden() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        crate::fork_ext::addons::visibility::effective_visibility().raid_list
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+}
+
+pub(crate) fn meter_hidden() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        crate::fork_ext::addons::visibility::effective_visibility().dps_meter
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! {
+    static LAST_GROUP_WAS_RAID: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn take_last_group_was_raid() -> Option<bool> {
+    LAST_GROUP_WAS_RAID.with(|c| c.replace(None))
+}
+
+/// Suppresses HUD click-area registration (`Hud::note`, seam 4) when the piece is hidden by a mod.
+/// `Pick::Report` is never suppressed.
+pub(crate) fn skip_pick(_what: super::Pick) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use super::Pick;
+        let v = crate::fork_ext::addons::visibility::effective_visibility();
+        match _what {
+            Pick::Me => v.player_hidden(),
+            Pick::Member(_) => {
+                LAST_GROUP_WAS_RAID.with(|c| c.set(Some(false)));
+                v.group_panel
+            }
+            Pick::Raid(_) | Pick::RaidGroup(_) => {
+                LAST_GROUP_WAS_RAID.with(|c| c.set(Some(true)));
+                v.raid_list
+            }
+            Pick::Pet => v.pet,
+            Pick::Minimap => v.minimap,
+            Pick::Quests => v.quest_tracker,
+            Pick::Meter(_) => v.dps_meter,
+            Pick::Report => false,
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
 }
 
 /// Draws the stock active-effects bar unless an addon has claimed it.
@@ -167,23 +246,38 @@ pub(crate) fn draw_chat_window(
     }
 }
 
-/// Whether the currently selected HUD menu is visible (all carousel menus
-/// 0 to 5, including items and weapon sets, are suppressed when an addon
-/// claims ability bars).
+/// Whether the currently selected HUD menu is visible.
+///
+/// - `ability_bar` (`hotbar`) hides all menus (0..5) in both stacked and carousel layouts.
+/// - `spell_bars` hides the stacked spell bars when stacked, and the ability-bar menus
+///   (0, 1, 4, 5) when using the carousel layout.
+/// - `utility_bars` hides the utility bars when stacked (via `utility_bar_visible`), and
+///   the item quick-slot and weapon-set menus (2, 3) when using the carousel layout.
 ///
 /// NOTE: We do NOT gate `hud_key` (pad/keyboard carousel use). The reference shows
 /// that Forge's 3 hotbars include the item bar (`scripts/ff_example.lua:788-840`;
 /// Avoids' "all THREE hotbar windows"), and Wereoxxs draws the item slots itself
 /// (`wereoxxs_ui/modules/ability_bars.lua:51-53`). Game input therefore stays unchanged
-/// and only the game's drawing is hidden.
-pub(crate) fn hud_menu_visible(_menus: &crate::hudmenu::HudMenus) -> bool {
-    ability_bar_visible()
+/// and only the game's drawing and pointer clicks are hidden.
+pub(crate) fn hud_menu_visible(menus: &crate::hudmenu::HudMenus) -> bool {
+    published(|v| {
+        if v.ability_bar {
+            return false;
+        }
+        if menus.stacked {
+            !v.spell_bars
+        } else if matches!(menus.sel, 2 | 3) {
+            !v.utility_bars
+        } else {
+            !v.spell_bars
+        }
+    })
 }
 
 /// A click at `at` on the Utility Bars: nothing while an addon claims the
-/// ability bars (the bars are not drawn, so their last cells are stale).
+/// ability bars or utility bars (the bars are not drawn, so their last cells are stale).
 pub(crate) fn utility_point(menus: &mut crate::hudmenu::HudMenus, at: [f32; 2]) -> Option<crate::hudmenu::Key> {
-    if hud_menu_visible(menus) { menus.point_utility(at) } else { None }
+    if utility_bar_visible() { menus.point_utility(at) } else { None }
 }
 
 /// Draws the HUD menu carousel, suppressing all carousel menus (indices 0 to 5,

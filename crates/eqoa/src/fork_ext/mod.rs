@@ -91,4 +91,45 @@ pub(crate) fn minimap_contains(map: &crate::map::Map, point: [f32; 2]) -> bool {
     map.mini_contains(point)
 }
 
+/// Blanks the quads of a HUD piece hidden by a mod (seam 3 in `hudlayout::end` and `seal`) in place
+/// so hidden pieces draw nothing and are not outlined by Move HUD, while keeping `ui.quads.len()`
+/// intact so `Ui::end()`'s `sided`/`risen`/`opaque` indices stay valid on widescreen and tall windows.
+pub(crate) fn piece_hidden(_ui: &mut render::ui::Ui, _piece: crate::hudlayout::Piece, _from: usize) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use crate::hudlayout::Piece;
+        let v = addons::visibility::effective_visibility();
+        let hidden = match _piece {
+            Piece::Player => v.player_hidden(),
+            Piece::Group => {
+                let is_raid = crate::hud::fork_hud::take_last_group_was_raid()
+                    .unwrap_or_else(|| addons::hud_layout::get_hud_state().in_raid);
+                if is_raid { v.raid_list } else { v.group_panel }
+            }
+            Piece::Pet => v.pet,
+            Piece::Target => v.target,
+            Piece::Minimap => v.minimap,
+            Piece::Quests => v.quest_tracker,
+            Piece::Meter => v.dps_meter,
+            Piece::Effects => v.active_effects,
+            Piece::Chat => v.chat,
+            Piece::Breath => v.breath,
+            Piece::QuickMenus => v.ability_bar || (v.spell_bars && v.utility_bars),
+            Piece::SpellBars => v.ability_bar || v.spell_bars,
+            Piece::UtilityBars => v.ability_bar || v.utility_bars,
+        };
+        if hidden {
+            let start = _from.min(_ui.quads.len());
+            for q in &mut _ui.quads[start..] {
+                q.pos = [[0.0; 2]; 4];
+                q.color = [0.0; 4];
+                q.blend = 3;
+                q.clip = Some([0, 0, 0, 0]);
+            }
+            return true;
+        }
+    }
+    false
+}
+
 pub(crate) mod map_toolbar;

@@ -454,6 +454,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             if scope == TakeoverScope::Own && super::window_kinds::is_view(&kind_str) {
                 return error(lua, "eqoa.windows.takeover", "invalid_argument", "a local view requires scope 'all'");
             }
+            if scope == TakeoverScope::Own && super::window_kinds::is_strip(&kind_str) {
+                return error(lua, "eqoa.windows.takeover", "invalid_argument", "a raid strip requires scope 'all'");
+            }
             let parsed = match TakeoverKind::parse(&kind_str) {
                 Ok(k) => k,
                 Err((code, msg)) => return error(lua, "eqoa.windows.takeover", code, &msg),
@@ -533,7 +536,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua.create_function(|lua, kind: Value| match kind {
             Value::Nil => {
                 let holders = lua.create_table()?;
-                for k in TakeoverKind::ALL {
+                for k in TakeoverKind::ALL_KINDS {
                     if let Some(h) = window_takeover::holder_of(k) {
                         holders.set(k.name(), h)?;
                     }
@@ -542,6 +545,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 tbl.set("loot", window_takeover::is_taken(TakeoverKind::Loot))?;
                 tbl.set("merchant", window_takeover::is_taken(TakeoverKind::Merchant))?;
                 tbl.set("bank", window_takeover::is_taken(TakeoverKind::Bank))?;
+                tbl.set("raid_ready", window_takeover::is_taken(TakeoverKind::RaidReady))?;
+                tbl.set("raid_roll", window_takeover::is_taken(TakeoverKind::RaidRoll))?;
                 tbl.set("holders", holders)?;
                 lua.pack_multi((tbl, Value::Nil))
             }

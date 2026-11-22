@@ -225,6 +225,7 @@ pub fn hud_element_visible(element: &str) -> bool {
     match element {
         "hud" => true,
         "minimap" => crate::settings::minimap() && !v.minimap,
+        "player" => !v.player_hidden(),
         "health" | "health_bar" => !v.health_bar,
         "power" | "power_bar" => !v.power_bar,
         "experience_main" | "exp" | "main_exp_bar" => !v.main_exp_bar,
@@ -232,11 +233,17 @@ pub fn hud_element_visible(element: &str) -> bool {
         "target" | "target_nameplate" | "target_of_target" => !v.target,
         "group_panel" | "group" | "group_member_panel" => !v.group_panel && !state.in_raid,
         "group_markers" | "group_compass_marks" => !v.group_compass_marks,
+        "raid_list" => !v.raid_list && state.in_raid,
         "pet" | "pet_panel" => !v.pet,
         "compass" | "compass_face" | "compass_back" => !v.compass,
         "active_effects" | "effects" => !v.active_effects,
         "chat" | "chat_window" => !v.chat,
         "hotbar" | "ability_bar" | "hotbar_draw_compact" | "hotbar_draw_expanded" => !v.ability_bar,
+        "spell_bars" => !v.ability_bar && !v.spell_bars,
+        "utility_bars" => !v.ability_bar && !v.utility_bars,
+        "quest_tracker" | "quests" => !v.quest_tracker,
+        "dps_meter" | "meter" => !v.dps_meter,
+        "breath" => !v.breath,
         "stats_box" | "plain_play" => state.right_hud_up,
         "mana_bars" => true,
         "all" => {
@@ -252,6 +259,26 @@ pub fn hud_element_visible(element: &str) -> bool {
                 && !v.chat
                 && !v.ability_bar
                 && !v.active_effects
+        }
+        "all_pieces" => {
+            !v.health_bar
+                && !v.power_bar
+                && !v.main_exp_bar
+                && !v.secondary_exp_bar
+                && !v.compass
+                && !v.target
+                && !v.group_panel
+                && !v.group_compass_marks
+                && !v.raid_list
+                && !v.pet
+                && !v.chat
+                && !v.ability_bar
+                && !v.spell_bars
+                && !v.utility_bars
+                && !v.active_effects
+                && !v.quest_tracker
+                && !v.dps_meter
+                && !v.breath
         }
         _ => false,
     }

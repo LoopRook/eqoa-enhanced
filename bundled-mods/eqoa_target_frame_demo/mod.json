@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_target_frame_demo",
+  "name": "Target Frame Demo",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "replaces": [
+    "hud.target"
+  ],
+  "capabilities": [
+    "eqoa.hud.hide",
+    "eqoa.hud.show",
+    "eqoa.hud.visible",
+    "eqoa.hud.layout",
+    "eqoa.hud.text",
+    "eqoa.hud.gauge",
+    "eqoa.hud.panel",
+    "eqoa.target.get",
+    "eqoa.events.on"
+  ]
+}

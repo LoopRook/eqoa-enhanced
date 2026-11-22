@@ -115,9 +115,14 @@
       "reason": "Sync 2026-11-11: send-boundary hook prefixes every native/browser/legacy crash report with fork-owned Enhanced identity; upstream persistence, wire protocol and tests retained. Fix round: one test-only #[path] line loads fork_ext/crashfile_dirs_tests.rs (it needs crashfile's private files_in/pending_in/write_in/answered_in; proves the fork's local crash folder and upstream's never mix). Sync 2026-11-21: +3 for the hook at the top of post_one (fork_ext/report_no_upload::blocked) that refuses upstream's 389c7dec crash upload to a report server: Enhanced never uploads reports (fork policy)."
     },
     "crates/eqoa/src/hud.rs": {
-      "added": 52,
+      "added": 53,
       "deleted": 15,
-      "reason": "Existing Enhanced HUD plus a local report button rectangle hook and Pick variant; drawing implementation lives in fork_ext/report_core.rs. Round 3 Stage C removes hardcoded native Stats Box, ToT, and Mana Bars drawing, lowering added lines from 264 to 52 and deletions from 43 to 14. Sync 2026-11-21: deletions 14 to 15 (+1): upstream's new Health Numbers line `if let Some(n) = self_number(s)` takes `.filter(|_| fork_hud::health_visible(s))` so hiding the health bar hides its number too."
+      "reason": "Existing Enhanced HUD plus a local report button rectangle hook and Pick variant; drawing implementation lives in fork_ext/report_core.rs. Round 3 Stage C removes hardcoded native Stats Box, ToT, and Mana Bars drawing, lowering added lines from 264 to 52 and deletions from 43 to 14. Sync 2026-11-21: deletions 14 to 15 (+1): upstream's new Health Numbers line `if let Some(n) = self_number(s)` takes `.filter(|_| fork_hud::health_visible(s))` so hiding the health bar hides its number too. Round A4 (owner-approved 2026-11-22, HUD completion): +2 one-line hooks (measured 51 to 53, budget raised 52 to 53), `fork_hud::skip_pick(what)` at top of `Hud::note` (seam 4) and `fork_hud::raid_hidden()` at top of `Hud::raid_wheel` (seam 5), so hidden HUD pieces register no click rectangles and do not capture the mouse wheel."
+    },
+    "crates/eqoa/src/hudlayout.rs": {
+      "added": 2,
+      "deleted": 0,
+      "reason": "Round A4 (owner-approved 2026-11-22, HUD completion): two one-line hooks, `crate::fork_ext::piece_hidden(ui, m.piece, m.from)` in `end()` (seam 3) and `seal()` (seam 3b), blanking drawn quads in place (keeping `Ui` quad indices intact for widescreen/tall `Ui::end()`) and skipping Move HUD registration for any HUD piece hidden by a mod while keeping upstream drawing code verbatim."
     },
     "crates/eqoa/src/icon.rs": {
       "added": 4,
@@ -142,7 +147,7 @@
     "crates/eqoa/src/play.rs": {
       "added": 94,
       "deleted": 51,
-      "reason": "Integration of Parts B and C, tightened to the merged tree's measured +94/-53 (Part C removes the native circle/hover-card/search hooks, lowering Part B's +147/-54). Part B fix round: restore upstream test lines and the native map-open condition; tightened to measured. Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus... Round 3 Stage C removes native Stats Box, ToT, and Mana Bars fields, lowering added lines from 381 to 278 and deletions from 62 to 61. Sync 2026-11-11 fix round: send_bug_note wraps its note in fork_ext::report_label::bug_note (one line changed, +1/-1 against the measured 263/62) so F3's server Support note names EQOA Enhanced; deletions return to 62. Round 4 Part B: tightened to measured divergence after replacing native search/journal with bundled mods. Sync 2026-11-15: upstream's stacked spell bars and buff window take the existing ability-bar/active-effects hide hooks; the HUD pick match returns to upstream's order. Tightened to measured. Sync 2026-11-15 review (Terra M1/M2): upstream's new buff-window clicks and right-click autocast on the ability bars take the same mod hide checks as their drawing (+1/-1 each). Round 5 (owner-approved 2026-11-15, loot request seam): +1 line in attack_press, `crate::fork_ext::loot_requested(self.target);`, before the corpse request (0x0015) is built, so the loot window's source is the corpse that was asked for. round 6 action hook calls, approved by the lead on the owner's delegation 2026-11-16: +1 line in Play::frame, `fork_hooks::apply_camera(self, walker);`. Sync 2026-11-18 develop merge: upstream added `impl Drop for Play`, which conflicted with the session recorder's own Drop in fork_ext/play.rs; upstream's Drop keeps its body and gains +1 line, `fork_hooks::dropped(self);` (measured +80/-40, within budget)."
+      "reason": "Integration of Parts B and C, tightened to the merged tree's measured +94/-53 (Part C removes the native circle/hover-card/search hooks, lowering Part B's +147/-54). Part B fix round: restore upstream test lines and the native map-open condition; tightened to measured. Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus... Round 3 Stage C removes native Stats Box, ToT, and Mana Bars fields, lowering added lines from 381 to 278 and deletions from 62 to 61. Sync 2026-11-11 fix round: send_bug_note wraps its note in fork_ext::report_label::bug_note (one line changed, +1/-1 against the measured 263/62) so F3's server Support note names EQOA Enhanced; deletions return to 62. Round 4 Part B: tightened to measured divergence after replacing native search/journal with bundled mods. Sync 2026-11-15: upstream's stacked spell bars and buff window take the existing ability-bar/active-effects hide hooks; the HUD pick match returns to upstream's order. Tightened to measured. Sync 2026-11-15 review (Terra M1/M2): upstream's new buff-window clicks and right-click autocast on the ability bars take the same mod hide checks as their drawing (+1/-1 each). Round 5 (owner-approved 2026-11-15, loot request seam): +1 line in attack_press, `crate::fork_ext::loot_requested(self.target);`, before the corpse request (0x0015) is built, so the loot window's source is the corpse that was asked for. round 6 action hook calls, approved by the lead on the owner's delegation 2026-11-16: +1 line in Play::frame, `fork_hooks::apply_camera(self, walker);`. Sync 2026-11-18 develop merge: upstream added `impl Drop for Play`, which conflicted with the session recorder's own Drop in fork_ext/play.rs; upstream's Drop keeps its body and gains +1 line, `fork_hooks::dropped(self);` (measured +80/-40, within budget). Round A4 (owner-approved 2026-11-22, HUD completion): +2 one-line hooks, `if crate::hud::fork_hud::meter_hidden() { return false; }` in `meter_wheel()` (seam 6) and `let shown = crate::hud::fork_hud::utility_bar_visible();` before `draw_utility` leaving both `if shown` lines intact (measured +87/-44, within existing budget)."
     },
     "crates/eqoa/src/settings.rs": {
       "added": 17,
@@ -298,6 +303,11 @@
       "added": 8,
       "deleted": 1,
       "reason": "owner-approved 2026-11-15, round 5: merchant accessor. `merchant: Merchant,` becomes `pub merchant: Merchant,` so the fork adapter can read the window's state. round 6 action hook calls, approved by the lead on the owner's delegation 2026-11-16: round 6 read-only accessor `NpcWindows::loot_lists(&self)`. round 6 action hook: `super::fork_hooks::npcw_requests(self, &mut loot_out, &mut merch_out);` immediately before the LootOut/MerchantOut loops. round 6.5 window takeover hook calls (2 inserted one-liners, 0 deleted): `window_taken(self, 1)` on 0x0018 and `window_taken(self, 10)` on 0x00B7."
+    },
+    "crates/eqoa/src/raidplay.rs": {
+      "added": 5,
+      "deleted": 0,
+      "reason": "Round A4 (owner-approved 2026-11-22, HUD completion): 4 firm seam lines + 1 optional rolls_up guard — `#[path = \"fork_ext/win_raid.rs\"] pub(super) mod fork_win;` (seam 7), `fork_win::run_strips` after both `expire` calls in `run_rolls` (seam 8), `fork_win::roll_key` in `roll_key` (seam 9), `fork_win::roll_point` in `roll_point` (seam 10), and `fork_win::rolls_up` in `rolls_up` so taken ready-check/loot-roll strips stop drawing and taking input while timers keep running."
     }
   },
   "immutable": [
@@ -563,6 +573,36 @@
       "name": "session recorder drop",
       "pattern": "fork_hooks::dropped[(]self[)]",
       "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/hudlayout.rs",
+      "name": "HUD hidden piece quad/bounds drop",
+      "pattern": "fork_ext::piece_hidden\\(",
+      "count": 2
+    },
+    {
+      "path": "crates/eqoa/src/hud.rs",
+      "name": "HUD hidden piece pick skip",
+      "pattern": "fork_hud::skip_pick\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/hud.rs",
+      "name": "HUD hidden raid wheel skip",
+      "pattern": "fork_hud::raid_hidden\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/play.rs",
+      "name": "HUD hidden meter wheel skip",
+      "pattern": "fork_hud::meter_hidden\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/raidplay.rs",
+      "name": "raid strip takeover hooks",
+      "pattern": "fork_win::(run_strips|roll_key|roll_point|rolls_up)\\(",
+      "count": 4
     }
   ]
 }

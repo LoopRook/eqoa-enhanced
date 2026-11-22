@@ -719,13 +719,15 @@ const ATTACKS: [(&str, i64); 11] = [
 
 fn install_fields(lua: &Lua) {
     for (path, fields) in [
-        (CONTAINER, "kind revision open items capacity used remaining full money view merchant source"),
+        (CONTAINER, "kind revision open items capacity used remaining full money view merchant source master_loot"),
         (
             ITEM,
             "ref list index inventory_key id name description icon quantity charges equipped equipped_slot quick_slot wear_slot slot_name level_required range max_stack value current_hp maximum_hp durability damage attack_type attack_name class_mask race_mask allowed_classes allowed_races equippable no_trade no_rent lore stats tabs",
         ),
         ("eqoa.items.ItemStat", "id name value"),
         ("eqoa.items.LootSource", "entity_id name"),
+        ("eqoa.items.MasterLoot", "seconds members"),
+        ("eqoa.items.MasterLootMember", "id name"),
         ("eqoa.items.CanUse", "allowed reasons"),
         ("eqoa.items.SlotInfo", "id name order"),
         (
