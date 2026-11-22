@@ -2,6 +2,12 @@
 
 Upstream changes remain in UPDATE-NOTES.md.
 
+## Unreleased
+
+- **Complete HUD hiding for mods.** Mods can now hide any HUD piece (including the whole player frame, raid list, quest tracker, DPS meter, breath gauge, stacked spell bars, and utility bars) using the existing HUD hide controls. Clicking or scrolling where a hidden piece sat does nothing, while Move HUD, Hide UI, and the local report button keep working. With no mod enabled, the HUD is unchanged.
+- **Raid list, ready checks, loot rolls, and master loot for mods.** Mods can read the raid list and open ready-check or loot-roll strips, replace the ready-check and loot-roll strips (keeping their timers running and falling back to the game's strips if the mod is turned off or **Use the game's windows** is enabled), answer ready checks and loot rolls, and assign or abandon master loot.
+- **Target Frame Demo mod** (off by default in Mods & Addons): a small bundled example that hides the game's target frame and draws its own.
+
 ## 2026-11-21 · Enhanced 0.7.0
 
 - **Documentation for mod authors.** `docs/modding/` now describes the mod API (`eqoa/1`) as it is built: a getting-started guide, a starter mod to copy, the full reference, what each bundled mod shows, and what `eqoa/1` promises. **`eqoa/1` is a stable candidate:** the guard is on and we do not expect breaking changes; the final freeze comes when the API is offered upstream (the PR), after upstream has had its say.
