@@ -41,6 +41,7 @@
     "eqoa.input.pointer",
     "eqoa.input.claim_pointer",
     "eqoa.events.on",
-    "eqoa.imgui"
+    "eqoa.imgui",
+    "large_data"
   ]
 }
