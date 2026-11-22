@@ -5,7 +5,8 @@
 //!
 //! Each test names its negative control: what it would see if the change were not there.
 use super::{
-    confirm, discovery::DiscoveredAddon, host::Host, native_core, native_events, window_sessions as ws,
+    confirm, discovery::DiscoveredAddon, host::Host, native_core, native_events,
+    native_tests::{A1_EVENTS, install_field_check}, window_sessions as ws,
     window_takeover::{self, TakeoverKind},
 };
 use serde_json::json;
@@ -217,10 +218,14 @@ fn a1_focus_takes_the_menu_buttons_and_gives_them_back() {
     // focus with movement left on does not hold the walk
     h.execute("assert(eqoa.windows.focus(s.ref))").unwrap();
     assert_eq!(press(bit::DOWN, [0.5; 4]).sticks, [0.5; 4]);
+    press(0, [0.0; 4]);
+    pump(&h);
     // a game window or box up suspends it: the buttons are the game's, and a button held when it ends is no press
+    pump(&h);
     ws::set_env(ws::Env { plain: false, ..ws::Env::default() });
     assert_eq!(press(bit::CROSS, [0.0; 4]).buttons, bit::CROSS);
     ws::set_env(ws::Env::default());
+    pump(&h);
     h.execute("keys = {}").unwrap();
     assert_eq!(press(bit::CROSS, [0.0; 4]).buttons, 0);
     pump(&h);
@@ -375,4 +380,64 @@ fn a1_the_three_windows_take_their_keys_and_the_stats_box_gives_up_b() {
     bindpage::register("eqoa_bag_viewer", "open", "b", "bags");
     assert_eq!(bindpage::get_key("eqoa_bag_viewer", "open").as_deref(), Some(""), "that is what moving the Stats Box to Y fixes");
     bindpage::reset_in_memory();
+}
+
+#[test]
+fn a1_every_new_event_reaches_lua_with_its_declared_fields_and_the_records_match() {
+    use crate::input::{Report, bit};
+    fresh();
+    let h = host(SESSION_CAPS);
+    install_field_check(&h).unwrap();
+    h.lua.globals().set("a1_events", h.lua.create_sequence_from(A1_EVENTS.iter().copied()).unwrap()).unwrap();
+    h.execute(
+        r#"
+        seen = {}
+        for _, name in ipairs(a1_events) do
+            assert(eqoa.capabilities.has('eqoa.events.' .. name), name)
+            assert(eqoa.events.on(name, function(e) seen[name] = e; round7c_note(name, e) end))
+        end
+        s = assert(eqoa.windows.open_session('inventory', {opened_from = 'key'}))
+        fields('windows.Session', s)
+        assert(eqoa.windows.focus(s.ref))
+        "#,
+    )
+    .unwrap();
+    pump(&h);
+    // a button the focused window holds
+    let mut report = Report { buttons: bit::CROSS, ..Default::default() };
+    ws::apply_pad(&mut report);
+    pump(&h);
+    // a question: put, read, answered Yes by the player, and carried out
+    let vm = native_events::bus(&h.lua).borrow().vm;
+    confirm::open(vm, "x", ws::get(vm, "inventory").map(|s| s.id), confirm::Act::Destroy { inv_index: 1, name: "Rock".into(), count: 1 }, "Destroy Rock?".into(), 0).unwrap();
+    h.execute("fields('windows.Confirm', eqoa.windows.confirm())").unwrap();
+    confirm::key(&winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowRight));
+    confirm::key(&winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter));
+    let yes = confirm::take_answered();
+    assert_eq!(yes.len(), 1);
+    confirm::report_done(&yes[0], "yes", json!({"sent": true}));
+    // the focus is taken away, and the window closes
+    crate::fork_ext::addons::input::focus(false);
+    h.execute("assert(eqoa.windows.close_session(s.ref))").unwrap();
+    pump(&h);
+    h.execute(
+        r#"
+        local missing = {}
+        for _, name in ipairs(a1_events) do if not seen[name] then missing[#missing + 1] = name end end
+        assert(#missing == 0, 'not emitted: ' .. table.concat(missing, ', '))
+        event_fields(seen, a1_events)
+        "#,
+    )
+    .unwrap();
+}
+
+/// The Lua state has an 8 MiB ceiling (`host.rs`). The new bindings are a few dozen small functions: they must leave
+/// the base host far from it, because the forge host test that tries a 32 MiB string and then loads a module is
+/// the first to notice a host that has grown.
+#[test]
+fn a1_the_new_bindings_leave_the_lua_ceiling_far_away() {
+    let h = Host::new().unwrap();
+    let used = h.lua.used_memory();
+    eprintln!("A1 base host Lua memory: {used} bytes of {}", 8 * 1024 * 1024);
+    assert!(used < 6 * 1024 * 1024, "the base host already uses {used} bytes");
 }

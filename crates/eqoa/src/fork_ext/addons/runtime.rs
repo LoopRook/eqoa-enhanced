@@ -2655,6 +2655,52 @@ mod tests {
         assert!(declares_dialog_actions(&["eqoa.actions.activate_row".into()]));
     }
 
+    /// Round A1: only the player's own, first (not repeated, not synthetic) Enter or arrow answers the question
+    /// a mod's destroy or drop-quest put to them. The negative control is the same press made synthetic or a
+    /// repeat: it answers nothing, and goes on to the game as any key does.
+    #[test]
+    fn a1_the_question_takes_only_the_players_own_key_press() {
+        use super::super::confirm;
+        confirm_reset();
+        let mut runtime = Runtime::new(Paths::select(PathBuf::new(), None, None, None));
+        let open = || {
+            confirm::open(1, "mod", None, confirm::Act::DropQuest { index: 1, title: "Bat Eyes".into(), stamp: 1, revision: 1 }, "Drop?".into(), 0)
+                .unwrap();
+        };
+        let enter = Key::Named(NamedKey::Enter);
+        let right = Key::Named(NamedKey::ArrowRight);
+        let mut route = |runtime: &mut Runtime, key: &Key, down: bool, repeat: bool, synthetic: bool| {
+            runtime.route_key(
+                KeyRoute { button: Button::ScriptedKey(78), logical: key, down, repeat, synthetic, base: None },
+                true,
+                false,
+            )
+        };
+        open();
+        // a synthetic Right and a repeated Right choose nothing; neither does a key release
+        assert!(!route(&mut runtime, &right, true, false, true), "synthetic");
+        assert!(!route(&mut runtime, &right, true, true, false), "repeat");
+        assert!(!route(&mut runtime, &right, false, false, false), "release");
+        assert!(!confirm::current_for_test().unwrap().yes);
+        // and a synthetic Enter on the starting No (or after the player chose Yes) answers nothing
+        assert!(route(&mut runtime, &right, true, false, false), "the player's own Right is taken");
+        assert!(confirm::current_for_test().unwrap().yes);
+        assert!(!route(&mut runtime, &enter, true, false, true), "a synthetic Enter is not an answer");
+        assert!(!route(&mut runtime, &enter, true, true, false), "a repeated Enter is not an answer");
+        assert!(confirm::is_open() && confirm::take_answered().is_empty());
+        // the player's own Enter answers it
+        assert!(route(&mut runtime, &enter, true, false, false));
+        assert_eq!(confirm::take_answered().len(), 1);
+        assert!(!confirm::is_open());
+        // control: with no question up the same key is the game's
+        assert!(!route(&mut runtime, &enter, true, false, false));
+        confirm_reset();
+    }
+
+    fn confirm_reset() {
+        super::super::confirm::reset_for_test();
+    }
+
     #[test]
     fn round65_addons_ui_labels_autonomous_action_capabilities() {
         assert_eq!(

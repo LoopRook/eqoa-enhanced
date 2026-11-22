@@ -140,14 +140,16 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
 
 /// Each game step's work for the modern UI's contract.
 pub(crate) fn tick(play: &mut Play) {
-    if !window_sessions::is_active() && !confirm::is_open() && !window_takeover::has_activity() {
-        return;
-    }
+    // what play is doing is told every step, even when nothing is open: a window a mod opens a moment later must
+    // be judged by now, not by the last time anything was
     let away = !play.in_world_now() || play.world_change.is_some();
     let dead = play.is_dead();
     // the same test mod keys use (`addon_input_available`): a mod window is over plain play, never over a game window
     let plain = !away && play.addon_input_available();
     window_sessions::set_env(Env { plain, dead, away });
+    if !window_sessions::is_active() && !confirm::is_open() && !window_takeover::has_activity() {
+        return;
+    }
     window_sessions::sync_held([
         window_takeover::hidden_holder(TakeoverKind::Loot),
         window_takeover::hidden_holder(TakeoverKind::Merchant),

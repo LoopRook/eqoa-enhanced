@@ -184,8 +184,8 @@ fn round7h_7_steps_the_game_confirms_are_not_yet_for_mods() {
     p.mode = 22;
     p.cm.m.x08 = 50;
     p.cm.skills = vec![crate::classmastery::Skill { id: 100, x00: 1, known: 1, ..Default::default() }];
+    // round A1: drop_quest is no longer here: it is supported and asks the player first (`a1_play_tests`)
     for (name, call) in [
-        ("drop_quest", "eqoa.actions.drop_quest(eqoa.quests.list()[2].ref)"),
         ("mastery_buy", "eqoa.actions.mastery_buy(100)"),
         ("mastery_refund", "eqoa.actions.mastery_refund(100)"),
     ] {

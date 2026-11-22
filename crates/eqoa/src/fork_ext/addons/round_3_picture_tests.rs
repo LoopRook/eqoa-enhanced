@@ -1019,7 +1019,7 @@ fn fresh_hud_mod_load_defaults_and_live_stats_key_and_menu_wiring() {
         .execute("assert(eqoa.options.get('stats_box') == true)")
         .unwrap();
     assert!(options::toggle_by_item(2000));
-    let b = Key::Character("b".into());
+    let b = Key::Character("y".into());
     input::route_mod_key(&b, true, false, false, true, false);
     native_events::dispatch(&stats).unwrap();
     stats
