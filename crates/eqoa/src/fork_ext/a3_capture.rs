@@ -77,8 +77,9 @@ pub(super) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     let ends = |left_ms: u32| a3::ticks_of_ms(u64::from(left_ms));
     let buffs_available = play.buff_window_on() && session.buffs_at != 0;
     a3::sync_buffs(buffs_available, session.buffs_at, || {
+        // what is left of each line now, as the game's own window counts it (the set may have come frames ago)
         session
-            .buffs
+            .buffs_left(session.now())
             .iter()
             .map(|l| BuffLine {
                 whose: l.whose,
@@ -92,10 +93,13 @@ pub(super) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     });
     let pet_available = session.pet_effects_offer && crate::settings::pet_effects() && session.pet_effects_at != 0;
     a3::sync_pet(pet_available, session.pet_effects_at, || {
+        let gone = session.now().wrapping_sub(session.pet_effects_at);
+        let gone = if (gone as i32) < 0 { 0 } else { gone };
         session
             .pet_effects
             .iter()
-            .map(|e| PetLine { icon: e.icon, name: e.name.clone(), ends_tick: now + ends(e.left_ms) })
+            .filter(|e| e.left_ms > gone)
+            .map(|e| PetLine { icon: e.icon, name: e.name.clone(), ends_tick: now + ends(e.left_ms - gone) })
             .collect()
     });
     a3::sync_goals(session.quest_progress_offer && crate::settings::quest_tracker(), || {

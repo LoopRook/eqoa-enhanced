@@ -225,6 +225,28 @@ fn a3_remove_effect_sends_the_removal_for_a_removable_buff_and_refuses_the_rest(
     assert_eq!(sent_op(&p, net::buffs::OP_BUFF_REMOVE).len(), before);
 }
 
+#[test]
+fn a3_a_set_that_came_earlier_is_counted_from_when_it_came_not_from_when_a_mod_first_looks() {
+    let (mut p, h) = world();
+    buffs_on(&mut p, vec![line(0, true, 1, 11, 60_000, "Ward"), line(0, true, 2, 12, 20_000, "Spent")]);
+    // the set came 30 seconds ago, before any mod looked: the 20 s line is over, the 60 s one has 30 s left
+    p.session.buffs_at = p.session.now().wrapping_sub(30_000);
+    p.session.pet_effects_offer = true;
+    p.session.agree_pet_effects(true);
+    p.session.pet_effects = vec![PetEffect { icon: 21, left_ms: 30_000, name: "Rage".into() }];
+    p.session.pet_effects_at = p.session.now().wrapping_sub(10_000);
+    frame(&p, &h);
+    h.execute(
+        r#"
+        local b = eqoa.effects.buffs()
+        assert(#b == 1 and b[1].name == 'Ward' and math.abs(b[1].time_left - 30) < 0.3, #b .. ' ' .. tostring(b[1] and b[1].time_left))
+        local e = eqoa.effects.pet()
+        assert(#e == 1 and math.abs(e[1].time_left - 20) < 0.3, tostring(e[1] and e[1].time_left))
+        "#,
+    )
+    .unwrap();
+}
+
 // ---- pet effects ------------------------------------------------------------------------------------------------
 
 #[test]
