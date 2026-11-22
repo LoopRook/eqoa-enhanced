@@ -48,7 +48,7 @@ fn dynamic_hud_tables() -> (&'static [Category], &'static [(i32, &'static str)])
     let is_default = active.len() == 6
         && active
             .iter()
-            .zip(&ITEMS[4..])
+            .zip(&ITEMS[ITEMS.len() - HUD_ROWS..])
             .all(|((id, l), (def_id, def_l))| id == def_id && l == def_l);
     if is_default {
         return (&PAGES, ITEMS);
@@ -64,7 +64,7 @@ fn dynamic_hud_tables() -> (&'static [Category], &'static [(i32, &'static str)])
         let page: Vec<i32> = active.iter().map(|(id, _)| *id).chain(CATEGORY.items[HUD_ROWS..].iter().copied()).collect();
         pages_vec[hud_idx].items = Box::leak(page.into_boxed_slice());
         let pages_slice: &'static [Category] = Box::leak(pages_vec.into_boxed_slice());
-        let mut items_vec = ITEMS[..4].to_vec();
+        let mut items_vec = ITEMS[..ITEMS.len() - HUD_ROWS].to_vec();
         for (id, label) in &active {
             let leaked_label: &'static str = Box::leak(label.clone().into_boxed_str());
             items_vec.push((*id, leaked_label));
@@ -106,7 +106,6 @@ impl Drop for ForkPages {
     }
 }
 pub(super) const ITEMS: &[(i32, &str)] = &[
-    (1045, "Quest Markers"),
     (1051, "Open Mods Folder"),
     (1052, "Combat Parser"),
     #[cfg(not(target_arch = "wasm32"))]
@@ -127,7 +126,6 @@ pub(super) const CATEGORY: Category = Category {
         2003,
         2004,
         2005,
-        1045,
         1051,
         1052,
         #[cfg(not(target_arch = "wasm32"))]
@@ -151,8 +149,6 @@ pub(super) fn change(c: &mut ClientOptions, item: i32) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     if crate::fork_ext::addons::options::is_button(item) { return false; }
     match item {
-        // Independent saved marker toggle, in addition to Quest Helper.
-        1045 => c.quest_markers = !c.quest_markers,
         #[cfg(not(target_arch = "wasm32"))]
         item if item >= crate::fork_ext::addons::options::MOD_OPTION_BASE => {
             return crate::fork_ext::addons::options::toggle_by_item(item);
@@ -184,7 +180,6 @@ pub(super) fn value_text(vui: &Vui, item: i32, c: &ClientOptions) -> Option<Vec<
     if crate::fork_ext::addons::options::is_button(item) { return Some(wide("Open")); }
     let on_off = |on| wide(vui.words.get(if on { 551 } else { 552 }, vui.language));
     Some(match item {
-        1045 => on_off(c.quest_markers),
         1051 => wide("Open"),
         #[cfg(not(target_arch = "wasm32"))]
         1053 => wide("Open"),
@@ -336,7 +331,7 @@ mod tests {
         let (fork, upstream_pages) = pages().split_last().unwrap();
         assert!(super::super::fits(upstream_pages));
         assert_eq!(fork.name, "Enhanced");
-        assert_eq!(fork.items.len(), if cfg!(target_arch = "wasm32") { 9 } else { 10 }, "six HUD rows and the Mods & Addons rows");
+        assert_eq!(fork.items.len(), if cfg!(target_arch = "wasm32") { 8 } else { 9 }, "six HUD rows and the Mods & Addons rows");
         assert_eq!(pages().iter().filter(|c| c.name == "Enhanced HUD" || c.name == "Mods & Addons").count(), 0, "no second fork page");
         assert!(!super::super::fits(pages()), "control: the fork's page is more than a game page's rows");
         assert!(
@@ -377,7 +372,8 @@ mod tests {
         let first = cats.len() - 1;
         assert_eq!(cats[first].name, "Enhanced", "one fork page, after upstream's last");
         assert_eq!(&cats[first].items[..6], &[2000, 2001, 2002, 2003, 2004, 2005], "Enhanced HUD rows first");
-        assert_eq!(&cats[first].items[6..9], &[1045, 1051, 1052], "then the Mods & Addons rows");
+        assert_eq!(&cats[first].items[6..8], &[1051, 1052], "then the Mods & Addons rows");
+        assert!(!cats[first].items.contains(&1045) && !items().any(|i| i.0 == 1045), "the Quest Markers row is gone (owner 2026-11-22)");
         // Extended's groups (upstream, sync 2026-11-15): the Enhanced page closes the UI group's
         // menu and is in no other group's
         let groups = &super::super::GROUPS;
@@ -536,12 +532,19 @@ mod tests {
 
     #[test]
     fn fork_toggle_keeps_all_legacy_saved_keys() {
+        // The Quest Markers row is gone from the menu; the saved setting still loads and no row toggles it.
         let mut c = ClientOptions::from_text(
-            "map=off\nminimap=off\nmap_markers=off\nquest_helper=off\nquest_markers=off\nquest_tracker=off\n",
+            "map=off
+minimap=off
+map_markers=off
+quest_helper=off
+quest_markers=off
+quest_tracker=off
+",
         );
-        assert!(change(&mut c, 1045));
+        assert!(!change(&mut c, 1045), "no row 1045 any more");
+        assert!(!c.quest_markers, "a saved quest_markers=off still hides the marks");
         assert!(!c.map && !c.minimap && !c.map_markers && !c.quest_helper && !c.quest_tracker);
-        assert!(c.quest_markers);
         assert_eq!(ClientOptions::from_text(&c.to_text()), c);
         assert!(!change(&mut c, 41));
         assert!(!change(&mut c, 9999));
