@@ -1104,6 +1104,7 @@ local function finish_pending_open(expected_kind)
         if p.auto then
             M.auto_take = p.auto
             if M.auto_retry then M.auto_retry[p.auto] = nil end
+            M.count_more_attempt(p.auto) -- the corpse really opened: that is one of the extra tries
             if p.auto_d2 then M.note_loot_reach(math.sqrt(p.auto_d2), true) end
         end
         if p.after == "loot_all" then
@@ -1317,6 +1318,14 @@ end
 function M.player_closed_recently()
     local c = M.last_close
     return c ~= nil and c.by == "player" and os.clock() - c.at <= M.PLAYER_CLOSE_SECS
+end
+
+-- An unfinished corpse is asked again AUTO_MORE_TRIES times at most; only an attempt that really reached the corpse's list
+-- counts (an open the game could not send, the server's refusal and a silence are not a try of this kind: they are the open's
+-- own retries, `auto_open_failed`).
+function M.count_more_attempt(id)
+    local m = M.auto_more and M.auto_more[id]
+    if m and m.left > 0 then m.left = m.left - 1 end
 end
 
 -- A take that ended without getting everything it should: asked again (see AUTO_MORE_TRIES), unless the player closed
@@ -1553,6 +1562,7 @@ function M.tick_auto_loot(pl)
             M.auto_looted[src] = true
             M.auto_take = src
             M.auto_player_open = src
+            M.count_more_attempt(src)
             local take = M.auto_mode == "all" and "Take all" or "Take all but junk"
             M.alog(src, "takeopen", "it is open already (in the game's window or the mod's): taking from it (" .. take .. ")")
             if M.auto_mode == "all" then M.start_loot_all() else M.start_loot_non_junk() end
@@ -1608,7 +1618,6 @@ function M.tick_auto_loot(pl)
         M.alog(best.id, "open" .. n .. ":" .. math.floor(math.sqrt(best_d2) + 0.5) .. ":" .. tostring(m and m.left or ""), string.format(
             "opening it (%.0f units away, %s, try %d of %d%s)", math.sqrt(best_d2),
             after == "loot_all" and "Take all" or "Take all but junk", n + 1, M.AUTO_TRIES, again))
-        if m then m.left = m.left - 1 end
         local req, err = M.open_loot_corpse(after, best.id, true)
         if req and M.pending_open and M.pending_open.req == req then
             M.pending_open.auto, M.pending_open.auto_d2 = best.id, best_d2
