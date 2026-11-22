@@ -81,8 +81,8 @@ fn fixture() {
     });
     native_a3::sync_buffs(true, 5, || {
         vec![
-            BuffLine { whose: 0, id: 9304, icon: 11, removable: true, name: "Dark Ward".into(), ends_tick: Some(1800) },
-            BuffLine { whose: 1, id: 77, icon: 12, removable: false, name: "Plague".into(), ends_tick: None },
+            BuffLine { whose: 0, id: 9304, icon: 11, removable: true, name: "Dark Ward".into(), ends_tick: Some(1800), description: Some("Target, Increase armor by 30".into()) },
+            BuffLine { whose: 1, id: 77, icon: 12, removable: false, name: "Plague".into(), ends_tick: None, description: None },
         ]
     });
     native_a3::sync_pet(true, 5, || vec![PetLine { icon: 21, name: "Rage".into(), ends_tick: 900 }]);
@@ -209,5 +209,82 @@ fn a3_frames_mod_keeps_drawing_when_the_server_sends_no_buff_window_and_when_not
     // and outside the world it draws nothing and says nothing
     CORE.with(|c| c.borrow_mut().view.in_world = false);
     assert_eq!(frames(&host, &bridge, &mut context, 2), 0);
+    assert!(host.drain_logs().unwrap().is_empty());
+}
+
+/// Whether a tooltip is up this frame: ImGui draws one in a window of its own whose name starts `##Tooltip`.
+fn tooltip_up() -> bool {
+    use dear_imgui_rs::sys;
+    // SAFETY: the current context's window list is read, nothing is kept
+    unsafe {
+        let g = sys::igGetCurrentContext();
+        (0..(*g).Windows.Size).any(|k| {
+            let w = *(*g).Windows.Data.add(k as usize);
+            (*w).Active && std::ffi::CStr::from_ptr((*w).Name).to_string_lossy().starts_with("##Tooltip")
+        })
+    }
+}
+
+/// An ImGui window's rectangle (x, y, width, height), by name.
+fn window_rect(name: &std::ffi::CStr) -> [f32; 4] {
+    use dear_imgui_rs::sys;
+    // SAFETY: as `tooltip_up`
+    unsafe {
+        let w = sys::igFindWindowByName(name.as_ptr());
+        assert!(!w.is_null(), "window {name:?} is drawn");
+        [(*w).Pos.x, (*w).Pos.y, (*w).Size.x, (*w).Size.y]
+    }
+}
+
+/// Hovers `at` for a few frames and says whether a tooltip is up.
+fn tip_at(host: &Host, bridge: &Bridge, context: &mut Context, at: [f32; 2]) -> bool {
+    context.io_mut().add_mouse_pos_event(at);
+    frames(host, bridge, context, 3);
+    tooltip_up()
+}
+
+#[test]
+fn a3_frames_mod_shows_an_effects_tip_only_while_the_pointer_is_on_an_effect() {
+    fixture();
+    let mut context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon()).unwrap();
+    let buffs: String = host
+        .lua
+        .load("local b, e = eqoa.effects.buffs(); return b and (#b .. ' removable=' .. tostring(b[1].removable)) or ('none ' .. tostring(e and e.code))")
+        .eval()
+        .unwrap();
+    assert!(buffs.starts_with("2 removable=true"), "the fixture gives the mod two effects: {buffs}");
+    // the pointer is nowhere: no tip, though the first effect can be taken off (the owner's report: the tip was always
+    // over the cursor while the window was up, and over another mod's window)
+    frames(&host, &bridge, &mut context, 4);
+    assert!(!tooltip_up(), "no tip with the pointer away");
+    let [x, y, w, h] = window_rect(c"Effects");
+    // the pointer over a different window of this mod (Casting, Target): still no tip
+    for name in [c"Casting", c"Target"] {
+        let [ox, oy, ow, oh] = window_rect(name);
+        assert!(ox + ow > x + w || oy > y + h || ox > x + w, "{name:?} is a window of its own");
+        assert!(!tip_at(&host, &bridge, &mut context, [ox + ow / 2.0, oy + oh / 2.0]), "no tip over {name:?}");
+    }
+    // the pointer over the Effects window's lines: a tip over the effect rows
+    let mut found = None;
+    let mut dy = 22.0;
+    while dy < h && found.is_none() {
+        if tip_at(&host, &bridge, &mut context, [x + 25.0, y + dy]) {
+            found = Some(dy);
+        }
+        dy += 6.0;
+    }
+    let diag = unsafe {
+        use dear_imgui_rs::sys;
+        let g = sys::igGetCurrentContext();
+        let hw = (*g).HoveredWindow;
+        let name = if hw.is_null() { "none".to_string() } else { std::ffi::CStr::from_ptr((*hw).Name).to_string_lossy().into_owned() };
+        format!("mouse {:?} hovered window {name} hoveredId {} wantCaptureMouse {}", (*g).IO.MousePos, (*g).HoveredId, (*g).IO.WantCaptureMouse)
+    };
+    assert!(found.is_some(), "a tip shows while the pointer is on an effect (window {x},{y} {w}x{h}); {diag}");
+    // and it goes when the pointer leaves
+    assert!(!tip_at(&host, &bridge, &mut context, [900.0, 700.0]), "the tip goes with the pointer");
     assert!(host.drain_logs().unwrap().is_empty());
 }

@@ -58,6 +58,16 @@ fn target_json(play: &Play) -> Json {
     })
 }
 
+/// What the player's own ability list says an effect does: the description of the ability with the effect's name
+/// (the effect's name is cut at 31 characters, `autocast::effect_is`). None where the player has no such ability
+/// (an effect of someone else's spell) or it has no description.
+fn ability_description(play: &Play, effect: &str) -> Option<String> {
+    play.abilities
+        .values()
+        .find(|a| !a.desc.is_empty() && crate::autocast::effect_is(effect, &a.name))
+        .map(|a| a.desc.clone())
+}
+
 fn raid_roles(play: &Play) -> Vec<RaidRole> {
     play.group
         .raid
@@ -94,6 +104,7 @@ pub(super) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
                 id: l.id,
                 icon: l.icon,
                 removable: l.removable,
+                description: ability_description(play, &l.name),
                 name: l.name.clone(),
                 ends_tick: (l.left_ms != net::buffs::NO_END).then(|| now + ends(l.left_ms)),
             })
@@ -146,17 +157,36 @@ pub(super) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         }
     });
     a3::set_raid(raid_hash, || raid_roles(play));
+    a3::set_watched(play.target);
     a3::expire_casts(
         |id| !play.entities.slots.iter().flatten().any(|e| e.id == id),
         play.death.is_some(),
     );
 }
 
-/// A game event on its way into `Play`: a cast the server announces (0x00B1) is reported as `cast.started`.
+/// Whether `effect` is one of the melee swings' effects (`Attack1`..`Attack4`, `Range1`..`Range4`: what
+/// `vi::swing::swing_effect` names for each swing). The server announces a melee round with a 0x00B1 as it does a
+/// spell; the client plays the swing's effect for it, so the effect id is what tells a swing from a cast.
+pub(crate) fn is_melee_swing(effect: u32) -> bool {
+    effect != 0 && (0..=11).any(|k| vi::swing::swing_effect(k) == effect)
+}
+
+/// A game event on its way into `Play`: a cast the server announces (0x00B1) is reported as `cast.started`. A melee
+/// round comes in the same packet (its time is the swing's delay, 3 to 6 seconds) and is not a cast: it starts no cast
+/// bar and no event. The target's (and the player's own) casts and ignored rounds are written to eqoa.log.
 pub(super) fn note_event(play: &Play, event: &net::session::Event) {
     let net::session::Event::Opcode { op: 0x00B1, data } = event else { return };
     let Some(c) = crate::spells::cast_of(0x00B1, data) else { return };
     let own = Some(c.caster) == play.self_id32();
+    if is_melee_swing(c.effect) {
+        if own || c.caster == play.target {
+            eprintln!(
+                "frames: melee round, not a cast: caster={:#x} target={:#x} effect={:#010x} time={}ms own={own} src=0x00B1",
+                c.caster, c.target, c.effect, c.time
+            );
+        }
+        return;
+    }
     a3::cast_started(c.caster, c.target, c.targets, c.effect, u32::try_from(c.time.max(0)).unwrap_or(0), own);
 }
 
