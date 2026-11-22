@@ -13,6 +13,7 @@
 use super::Play;
 use crate::startmenu::LabelRow;
 use net::raid::{Choice, Command, RULE_FREE_FOR_ALL, RULE_MASTER_LOOTER, RULE_NEED_BEFORE_GREED, Roll, State};
+#[path = "fork_ext/win_raid.rs"] pub(super) mod fork_win;
 
 /// The start menu's Raid entries' messages (`DoAction`'s ids: none of the
 /// game's), each a command's op in its second byte and an argument in its
@@ -452,6 +453,7 @@ impl Play {
     /// keyboard's arrows and Enter as those) are theirs and the chat box's
     /// scroll waits. True when the key was theirs.
     pub(super) fn roll_key(&mut self, key: i32, down: bool) -> bool {
+        if let Some(handled) = fork_win::roll_key(self, key, down) { return handled; }
         // the ready check's strip first: right gives it the d-pad while it is up
         let ready = &mut self.raid.ready;
         if ready.focused() || down && matches!(key, 137 | 18) && !self.raid.rolls.focused() && ready.is_open() {
@@ -506,6 +508,7 @@ impl Play {
 
     /// A roll's strip is up (the keyboard's right, with C held, reaches it).
     pub fn rolls_up(&self) -> bool {
+        if let Some(up) = fork_win::rolls_up(self) { return up; }
         self.raid.rolls.is_open() || self.raid.ready.is_open()
     }
 
@@ -517,6 +520,7 @@ impl Play {
     /// The rolls' strips are where frame point `f` is: a click there is
     /// theirs, a choice on one made. False when it is not on a strip.
     pub(super) fn roll_point(&mut self, f: [f32; 2]) -> bool {
+        if let Some(handled) = fork_win::roll_point(self, f) { return handled; }
         if matches!(self.mode, 0 | 33 | 38) && self.raid.ready.covers(f) {
             if let Some((id, yes)) = self.raid.ready.point(f) {
                 self.cues.push(crate::sound::Cue::Ui(13));
@@ -547,6 +551,7 @@ impl Play {
         let now = self.session.now() as i64;
         self.raid.rolls.expire(now);
         self.raid.ready.expire(now);
+        if fork_win::run_strips(self, vui, r, now) { return; }
         self.raid.rolls.skip = self.raid.ready.is_open() as usize;
         if matches!(self.mode, 0 | 33 | 38) {
             self.raid.ready.draw(vui, r, now);
