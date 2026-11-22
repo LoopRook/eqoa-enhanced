@@ -147,7 +147,7 @@ pub(crate) fn tick(play: &mut Play) {
     // the same test mod keys use (`addon_input_available`): a mod window is over plain play, never over a game window
     let plain = !away && play.addon_input_available();
     window_sessions::set_env(Env { plain, dead, away });
-    if !window_sessions::is_active() && !confirm::is_open() && !window_takeover::has_activity() {
+    if !window_sessions::is_active() && !confirm::has_work() && !window_takeover::has_activity() {
         return;
     }
     window_sessions::sync_held([

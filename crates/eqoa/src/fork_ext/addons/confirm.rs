@@ -116,6 +116,14 @@ pub(crate) fn is_open() -> bool {
     STATE.with(|s| s.borrow().current.is_some())
 }
 
+/// A question is up, or a Yes waits for the client to carry it out: the per-step work has something to do.
+pub(crate) fn has_work() -> bool {
+    STATE.with(|s| {
+        let s = s.borrow();
+        s.current.is_some() || !s.answered.is_empty()
+    })
+}
+
 /// The question `vm` has up, if any.
 pub(crate) fn current_for(vm: u64) -> Option<Pending> {
     STATE.with(|s| s.borrow().current.clone().filter(|p| p.vm == vm))

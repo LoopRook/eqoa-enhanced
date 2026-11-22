@@ -311,7 +311,7 @@ fn a1_the_question_is_asked_only_to_a_living_player_in_the_world_and_ends_with_t
     // over a game window it is modal, not refused (the control: it was refused only for the two states above)
     ws::set_env(ws::Env { plain: false, ..ws::Env::default() });
     assert!(confirm::open(1, "a", None, act(), "x".into(), 0).is_ok());
-    confirm::cancel_all("test");
+    confirm::cancel_for_vm(1);
     ws::set_env(ws::Env::default());
     let h = host(SESSION_CAPS);
     h.execute("s = assert(eqoa.windows.open_session('inventory'))").unwrap();

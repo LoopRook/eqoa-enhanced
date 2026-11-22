@@ -497,7 +497,7 @@ fn round7c_every_refusing_member_reports_its_status_through_its_call() {
             let paths: String = host.lua.globals().get("round7c_refusing_paths").unwrap();
             eprintln!("round7c refusing members checked through their call: {checked}");
             let expected: Vec<&str> = EXPECTED_REFUSING_CALLABLES.split_whitespace().collect();
-            assert_eq!(expected.len(), 91, "the pinned list holds every refusing callable");
+            assert_eq!(expected.len(), 89, "the pinned list holds every refusing callable");
             assert_eq!(paths.split_whitespace().collect::<Vec<_>>(), expected, "refusing callables by name");
             assert_eq!(checked as usize, expected.len(), "refusing callables by count");
         });
@@ -512,7 +512,7 @@ fn round7c_refusal_checker_detects_wrong_codes_and_missing_values() {
             host.execute(
                 r#"
                 local issues = inspect_refusals(function(path, fn)
-                    if path == 'eqoa.actions.destroy' then
+                    if path == 'eqoa.actions.move' then
                         local _, second = fn()
                         return true, nil, {code='permission_denied', message=second.message}
                     end
