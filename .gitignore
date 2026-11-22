@@ -17,3 +17,5 @@ __pycache__/
 /.superpowers/
 *.stackdump
 *.[eE][qQ][rR][eE][cC]
+# The maintainer's private notes for Claude Code (the committed CLAUDE.md is the public guide).
+CLAUDE.local.md

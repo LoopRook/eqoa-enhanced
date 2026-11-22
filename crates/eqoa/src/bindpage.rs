@@ -1,5 +1,5 @@
-//! The Options window's Controls page: the client's own (F3 20261021: jib's
-//! rebinding, dab's keyboard legend), laid out and driven as the window's
+//! The Options window's Controls page: the client's own (F3 20261021: a player's
+//! rebinding, another's keyboard legend), laid out and driven as the window's
 //! other pages are. Each row of the default layout (`binds::ROWS`) with what
 //! it does in play, its key and its button; the selected row's help below
 //! (what the key and the button are in a window), and a line that answers
@@ -510,7 +510,7 @@ mod tests {
         w
     }
 
-    /// The windows' keys line answers dab's player: □ is Q, so a trade is
+    /// The windows' keys line answers a player: □ is Q, so a trade is
     /// confirmed with Q; moving Talk's Q onto 7 says 7.
     #[test]
     fn the_windows_keys_say_which_key_is_which_glyph() {
@@ -597,7 +597,7 @@ mod tests {
         let l3 = binds::bit_index(crate::input::bit::L3).unwrap();
         b.set_trigger(0, None, vec![Input::Key("y".into())]).unwrap();
         b.set_trigger(2, None, vec![Input::Key("y".into()), Input::Button(l3)]).unwrap();
-        b.set_trigger(3, None, vec![Input::Key("u".into())]).unwrap();
+        b.set_trigger(3, None, vec![Input::Key("b".into())]).unwrap();
         b.set_trigger(4, None, vec![Input::Button(binds::bit_index(crate::input::bit::R3).unwrap())]).unwrap();
         settings::set_binds(b);
         let mut page = ControlsPage::default();
@@ -622,7 +622,7 @@ mod tests {
         page.row = defaults();
         page.key(key::CROSS, true, 0, &mut cues);
         let b = settings::binds();
-        assert_eq!(b.macros[3].triggers, vec![vec![Input::Key("u".into())]]);
+        assert_eq!(b.macros[3].triggers, vec![vec![Input::Key("b".into())]]);
         assert_eq!(b.controls_defaults(), b, "every key and button back");
         testing::reset(false);
     }

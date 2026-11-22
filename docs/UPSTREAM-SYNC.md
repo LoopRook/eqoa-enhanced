@@ -480,3 +480,13 @@ increase is options.rs, measured at +20/-12.
 
 See [the sync report](plans/sync-2026-11-18-report.md) for the resolutions,
 upstream instructions, Round 6.5 interactions, validation, and play-test list.
+
+## Sync 2026-11-21 (29 commits, 35e2a43b..2d4c8449)
+
+Merged from sync/2026-11-21 (head 3c9c7f39). Five files needed hand
+resolution: .gitignore, hud.rs, play.rs, pregame/station/api.rs and
+viewer.rs. Upstream's crash upload is blocked in this fork through
+fork_ext/report_no_upload.rs (reports stay local). Hydrogen review:
+accept with fixes; the one MEDIUM was fixed in 3c9c7f39 (Utility Bars
+clicks gated on hud_menu_visible). U is now Quest Helper upstream, so
+mod-key tests use 9.

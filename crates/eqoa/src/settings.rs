@@ -377,7 +377,7 @@ pub fn save_auto_cast_file(text: &str) -> bool {
 
 // ---- the account's options (petition 1621) --------------------------------------------
 
-/// The options are the ACCOUNT's (the GM Jibrish's petition 1621, "account
+/// The options are the ACCOUNT's (a GM's petition 1621, "account
 /// bound, not just character bound"): once a login names one
 /// (`set_account`: the server and the login name, the pregame's STATION),
 /// the Options window's settings (game.opt's), the Extended rows (client.opt's
@@ -819,7 +819,7 @@ impl Focus {
     }
 }
 
-/// The Profanity Filter's tier (Options > Interface; the GM Jibrish's
+/// The Profanity Filter's tier (Options > Interface; a GM's
 /// petition 1625): the server's filter of what the player hears.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Profanity {
@@ -942,7 +942,7 @@ pub struct ClientOptions {
     pub screen_shake: bool,
     /// Controller Focus, each window's by its place (`focus`)
     pub controller: [Focus; crate::multibox::PLACES],
-    /// Slow When Not Focused (the GM Jibrish's petition 1634), each window's
+    /// Slow When Not Focused (a GM's petition 1634), each window's
     /// by its place as Controller Focus is: on, a window the system reports
     /// covered or minimised takes its frames at the game's 30 a second
     /// (`viewer`'s `HIDDEN_GAP`); off, the default, at its Frame Rate as in
@@ -989,14 +989,14 @@ pub struct ClientOptions {
     /// under its bar, where the server sends them (`Session::agree_pet_effects`);
     /// off, none, as the game shows them nowhere. On by default.
     pub pet_effects: bool,
-    /// Buff Window (`buffwnd`; the GM Jibrish's petition 1761): on a server that
+    /// Buff Window (`buffwnd`; a GM's petition 1761): on a server that
     /// offers it (`Session::agree_buffs`), the player's effects in two rows and
     /// its pet's in a third, each with its name and time left and a beneficial
     /// one taken off by a click or the pad; off, or on any other server, the
     /// game's strip (`influence`). On by default.
     pub buff_window: bool,
-    /// Quest Markers over the heads (Extended > UI > Name Plates; the GM
-    /// Jibrish's petition 1813): on a server that sends them
+    /// Quest Markers over the heads (Extended > UI > Name Plates;
+    /// a GM's petition 1813): on a server that sends them
     /// (`Session::agree_head_marks`), a yellow "!" over an NPC with a quest
     /// the player may take now and a "?" over one where a quest can be moved
     /// on now, above its name; off, or on any other server, none. On by
@@ -1017,6 +1017,15 @@ pub struct ClientOptions {
     /// power, which the roster has always carried). Off, or on a server that
     /// sends none, the game's bars. On by default.
     pub power_bars: bool,
+    /// Health Numbers (Extended > UI > Group & Raid; Live petition 5393,
+    /// Spoony: "add the option to overlay health as a number, or percentage,
+    /// over party bars. Including pets."): each group member's, the pet's and
+    /// the target's health as a percentage over its gauge, and in the raid
+    /// list's rows at the right of the name (`hud::health_percent`). A share
+    /// of 255 is all the client knows of another's health, so a percentage, no
+    /// invented points; a member whose health is not known shows none. Off by
+    /// default; a server that turns Power Bars off turns this off with it.
+    pub health_numbers: bool,
     /// Raid Mercenaries (Extended > UI > Group & Raid; the owner, 2026-11-13:
     /// "lets hide mercs from raid group display"): false, Hidden (the
     /// default), the raid list draws its players' rows alone; true, Shown, the
@@ -1024,7 +1033,7 @@ pub struct ClientOptions {
     /// go-eqoa-server's roster sends them (0x7E1A's kind byte). Either way a
     /// merc is targeted in the world and by L1's group cycle.
     pub raid_mercs: bool,
-    /// Loading Tips (`tips`; the GM Jibrish's petition 1778): a tip
+    /// Loading Tips (`tips`; a GM's petition 1778): a tip
     /// line on every loading screen. On by default.
     pub loading_tips: bool,
     /// Number Colors (`numcolor`; the server owner's of 2026-11-09: "we can add
@@ -1045,7 +1054,7 @@ pub struct ClientOptions {
     /// DPS Meter Shows: the fight (under way, or the last) or Overall, every
     /// fight since the login; a click on the panel's title or `/dps` turns it.
     pub dps_view: crate::dpsmeter::View,
-    /// Item Links (`itemlink`; the GM Jibrish's petition 1463: "This should be
+    /// Item Links (`itemlink`; a GM's petition 1463: "This should be
     /// off by default for ps2 players and a toggle option. If toggled off for
     /// players, they should just see a plain text item name if linked"): links
     /// made from the inventory, drawn and opened in the chat box, on a server
@@ -1062,12 +1071,12 @@ pub struct ClientOptions {
     /// target or a dead one, the nearest creature fighting the player (else
     /// its pet or group) targeted. Off by default.
     pub auto_target: bool,
-    /// Weapon Swap Back (jibrish, 2026-11-16, work board 1581): a weapon set
+    /// Weapon Swap Back (a GM, 2026-11-16, work board 1581): a weapon set
     /// used from the HUD asks the server to put back what it took off when
     /// pressed again (0x0022's swap-back byte, `gear::use_message`). Off by
     /// default.
     pub weapon_swap_back: bool,
-    /// Chat Always Shown (Jibwiz's ticket 1914: "allows your chat box to stay
+    /// Chat Always Shown (a player's ticket 1914: "allows your chat box to stay
     /// fully visible without auto collapse"): the chat box open at its five
     /// rows with the last lines in it, never sliding away (`chat::WndChat::
     /// always`). Off by default, the game's box.
@@ -1079,19 +1088,32 @@ pub struct ClientOptions {
     /// Guild) instead of walking the item links (`Play::chat_channel_step`).
     /// Off by default, the game's R2.
     pub r2_channels: bool,
-    /// Stacked Spell Bars (Jibwiz's ticket 1913): on a computer, the first two
-    /// ability bars drawn as two rows of five stacked above the chat box at
-    /// 95%, with no name bar, each slot a key of its own on the Controls page
+    /// Stacked Spell Bars (a player's ticket 1913): on a computer, the ability
+    /// bars shown (two, or Ability Bars' three or four) drawn as rows of five
+    /// above the chat box at 95%, as Spell Bar Layout stands them, with no
+    /// name bar, each slot a key of its own on the Controls page
     /// (`hudmenu::Stacked`, `binds`' bar rows). Off by default, the game's
     /// carousel; a controller or a touch screen keeps the carousel.
     pub stacked_bars: bool,
-    /// Spell Bar Opacity (Jibwiz's ticket 1953: "the horizontal spell bars need
+    /// Spell Bar Opacity (a player's ticket 1953: "the horizontal spell bars need
     /// opacity as a setting for the non spell icon portion of the bar"): the
     /// stacked bars' cell frames drawn at this percent (0 to 100 in tens), the
     /// icons always whole (`hudmenu::HudMenus::draw_stacked`). 100 by default,
     /// the frames as before.
     pub spell_bar_opacity: u8,
-    /// Chat Tabs (Jibwiz's ticket 1951): which of the chat box's tabs each
+    /// Spell Bar Layout (the server owner, 2026-11-18: "When players turn on
+    /// 4 they need to be able to stack 4 spell bars, or 2 columns of 2, side
+    /// by side"): with Ability Bars at 3 or 4, the stacked bars in one column
+    /// (Stacked, the default) or columns of two side by side
+    /// (`hudmenu::Layout`, `hudmenu::HudMenus::draw_stacked`).
+    pub spell_bar_layout: crate::hudmenu::Layout,
+    /// Utility Bar Layout (the server owner, 2026-11-18: "They can go in the
+    /// upper left, side by side vertical, or down below and the player
+    /// decides"): where the item quick slots and the weapon sets stand while
+    /// the spell bars are stacked, Upper Left (the default) or Below
+    /// (`hudmenu::UtilityLayout`, `hudmenu::HudMenus::draw_utility`).
+    pub utility_layout: crate::hudmenu::UtilityLayout,
+    /// Chat Tabs (a player's ticket 1951): which of the chat box's tabs each
     /// kind of line goes to (`chat::Kind`, by its index): 0 the box's own,
     /// Main; 1 to 3 a tab of its own, which exists while a kind goes to it and
     /// whose lines Main no longer shows. Every kind Main's by default: no tabs.
@@ -1112,19 +1134,19 @@ pub struct ClientOptions {
     /// world gives the account its menus once. Off by default, the game's:
     /// each character its own, as the server keeps them.
     pub shared_shortcuts: bool,
-    /// Auto Save Options (Waldorf's ticket 2002: "A toggle that autosaves
+    /// Auto Save Options (a player's ticket 2002: "A toggle that autosaves
     /// changes to your options instead of having to go back to the 'Save
     /// Changes'"): every step back in the Options window keeps what was
     /// changed as Save Changes keeps it, and Triangle on its menu saves
     /// instead of putting the settings back (`options::WndOptions::keep`).
     /// Off by default, the game's: only Save Changes keeps them.
     pub auto_save: bool,
-    /// Profanity Filter (the GM Jibrish's petition 1490: "Under options then
+    /// Profanity Filter (a GM's petition 1490: "Under options then
     /// interface add an option to turn the profanity filter on or off"): the
     /// server's filter of what this player hears, told to a server that asks
     /// for it (`Session::agree_profanity_filter`, go-eqoa-server's 0x7E60);
     /// High by default, as the game has it at every login. Options >
-    /// Interface. Three tiers since the GM Jibrish's petition 1625: Off,
+    /// Interface. Three tiers since a GM's petition 1625: Off,
     /// Medium (only racial slurs) and High (every word, the old On).
     pub profanity_filter: Profanity,
     /// Map (the user, 2026-11-09: "also add the map and quest helper we had
@@ -1177,7 +1199,7 @@ pub struct ClientOptions {
     /// take, a "?" where a step is to be done) and the quest tracker on the
     /// HUD, from a server that sends them (`net::session::OP_QUEST_MARKERS`,
     /// `OP_QUEST_PROGRESS`: go-eqoa-server), else the client's own guide's
-    /// (`questguide`: Sandstorm sends no such thing); off, none, the server
+    /// (`questguide`: the reference server sends no such thing); off, none, the server
     /// asked for none and the guide not run, as the game has none.
     pub quest_helper: bool,
     /// Quest Markers (under the Quest Helper, on by default): the map's and
@@ -1323,7 +1345,7 @@ pub struct ClientOptions {
     /// was, `TOUCH_SIZE_MIN` to `TOUCH_SIZE_MAX` in `TOUCH_SIZE_STEP`s, drawn
     /// larger than it was only as far as the window has room (a player,
     /// 2026-11-02: "Is there a way to make the on screen controller size
-    /// adjustable?"; Jibrish's petition 1386, 2026-11-09: "Mobile clients and
+    /// adjustable?"; a GM's petition 1386, 2026-11-09: "Mobile clients and
     /// mobile browser need the ability to adjust the on screen controler
     /// size"). They took over Touch Pad Size, the whole pad's 50 to 100,
     /// which an older client.opt's `touch_size` gives both.
@@ -1344,7 +1366,7 @@ pub struct ClientOptions {
     /// pad display"). Kept the moment a drag or a pinch ends.
     pub touch_moves: [[i16; 2]; 3],
     /// Button Layout: Bottom (Select and Start low between the sticks,
-    /// `touch::Opts::low_start`; the GM Jibcrotwo's petition 2084), or Classic.
+    /// `touch::Opts::low_start`; a GM's petition 2084), or Classic.
     pub touch_low_start: bool,
     /// Texture Packs, natively (the user, 2026-11-08: PCSX2's replacement
     /// packs read as they are, "an Extended page row turns packs on and
@@ -1519,6 +1541,7 @@ impl Default for ClientOptions {
             head_marks: true,
             target_level: true,
             power_bars: true,
+            health_numbers: false,
             raid_mercs: false,
             loading_tips: true,
             number_colors: crate::numcolor::DEFAULTS,
@@ -1532,6 +1555,8 @@ impl Default for ClientOptions {
             r2_channels: false,
             stacked_bars: false,
             spell_bar_opacity: 100,
+            spell_bar_layout: crate::hudmenu::Layout::Stacked,
+            utility_layout: crate::hudmenu::UtilityLayout::UpperLeft,
             chat_tabs: [0; crate::chat::KINDS],
             chat_tab_names: [['\0'; crate::chat::TAB_NAME_MOST]; crate::chat::TABS],
             pets_pass: true,
@@ -1664,6 +1689,10 @@ impl ClientOptions {
         if !self.power_bars {
             s.push_str("power_bars=off\n");
         }
+        // Health Numbers only when on
+        if self.health_numbers {
+            s.push_str("health_numbers=on\n");
+        }
         // Raid Mercenaries only when Shown
         if self.raid_mercs {
             s.push_str("raid_mercs=shown\n");
@@ -1711,6 +1740,14 @@ impl ClientOptions {
         }
         if self.spell_bar_opacity != 100 {
             s.push_str(&format!("spell_bar_opacity={}\n", self.spell_bar_opacity));
+        }
+        // Spell Bar Layout only when not Stacked
+        if self.spell_bar_layout != crate::hudmenu::Layout::Stacked {
+            s.push_str(&format!("spell_bar_layout={}\n", self.spell_bar_layout.opt()));
+        }
+        // Utility Bar Layout only when not Upper Left
+        if self.utility_layout != crate::hudmenu::UtilityLayout::UpperLeft {
+            s.push_str(&format!("utility_bars={}\n", self.utility_layout.opt()));
         }
         for (k, &t) in self.chat_tabs.iter().enumerate() {
             if t != 0 {
@@ -1943,6 +1980,8 @@ impl ClientOptions {
                 ("target_level", "off") => c.target_level = false,
                 ("power_bars", "on") => c.power_bars = true,
                 ("power_bars", "off") => c.power_bars = false,
+                ("health_numbers", "on") => c.health_numbers = true,
+                ("health_numbers", "off") => c.health_numbers = false,
                 ("raid_mercs", "shown") => c.raid_mercs = true,
                 ("raid_mercs", "hidden") => c.raid_mercs = false,
                 ("loading_tips", "on") => c.loading_tips = true,
@@ -1968,6 +2007,16 @@ impl ClientOptions {
                 ("spell_bar_opacity", v) => {
                     if let Some(o) = v.parse::<u8>().ok().filter(|o| *o <= 100 && o % 10 == 0) {
                         c.spell_bar_opacity = o;
+                    }
+                }
+                ("spell_bar_layout", v) => {
+                    if let Some(l) = crate::hudmenu::Layout::from_opt(v) {
+                        c.spell_bar_layout = l;
+                    }
+                }
+                ("utility_bars", v) => {
+                    if let Some(l) = crate::hudmenu::UtilityLayout::from_opt(v) {
+                        c.utility_layout = l;
                     }
                 }
                 ("pets_pass", "on") => c.pets_pass = true,
@@ -2286,7 +2335,8 @@ pub mod qol {
     /// Character > Summary's stat caps ("346/435"): the value alone and the
     /// game's column widths (`trainer`).
     pub const STAT_CAPS: u32 = 1 << 5;
-    /// Others' power under their health (Power Bars).
+    /// Others' power under their health (Power Bars), and the health numbers
+    /// over the bars (Health Numbers).
     pub const POWER_BARS: u32 = 1 << 6;
     /// The buff window: the game's effects strip.
     pub const BUFF_WINDOW: u32 = 1 << 7;
@@ -2314,6 +2364,13 @@ pub mod qol {
     /// No touch in the world (an [OG] account's): the touch pad is not drawn
     /// and a finger does nothing there (`viewer`).
     pub const NO_TOUCH: u32 = 1 << 14;
+    /// Follow takes group members only, as CLIENT's `ToggleFollow` does
+    /// (word 1195 else): go-eqoa-server's `world.follow_any_player` false,
+    /// `QoLFollowGroupOnly`, sent to every session there (Live petition 5400,
+    /// Innoruuk: "Auto follow currently allowing to auto follow people not in
+    /// group"; the owner 2026-11-21: group only on Live). A server that never
+    /// sends it keeps any player followable (the owner, 2026-11-11).
+    pub const FOLLOW_GROUP_ONLY: u32 = 1 << 15;
 
     thread_local! {
         static OFF: Cell<u32> = const { Cell::new(0) };
@@ -2337,11 +2394,11 @@ pub mod qol {
             44 | 45 | 85 => QUEST_HELPER,
             70..=72 => DPS_METER,
             64..=69 | 80 | 81 => NUMBER_COLORS,
-            86 => POWER_BARS,
+            86 | crate::options::HEALTH_NUMBERS => POWER_BARS,
             83 => BUFF_WINDOW,
             58 => PET_EFFECTS,
             78 | 79 => AUTO_CAST,
-            22 | 90 => SPELL_BARS,
+            22 | 90 | crate::options::SPELL_BAR_LAYOUT | crate::options::UTILITY_LAYOUT => SPELL_BARS,
             _ => return None,
         })
     }
@@ -2382,7 +2439,7 @@ pub mod qol {
             c.number_colors = [0; crate::numcolor::ROWS];
         }
         if off(POWER_BARS) {
-            c.power_bars = false;
+            (c.power_bars, c.health_numbers) = (false, false);
         }
         if off(BUFF_WINDOW) {
             c.buff_window = false;
@@ -2397,7 +2454,7 @@ pub mod qol {
             c.item_links = c.item_links_here && !off(LOCKED);
         }
         if off(SPELL_BARS) {
-            (c.ability_bars, c.stacked_bars) = (super::ABILITY_BARS_GAME, false);
+            (c.ability_bars, c.stacked_bars, c.spell_bar_layout, c.utility_layout) = (super::ABILITY_BARS_GAME, false, crate::hudmenu::Layout::Stacked, crate::hudmenu::UtilityLayout::UpperLeft);
         }
         c
     }
@@ -2424,7 +2481,7 @@ pub mod qol {
             v.number_colors = kept.number_colors;
         }
         if off(POWER_BARS) {
-            v.power_bars = kept.power_bars;
+            (v.power_bars, v.health_numbers) = (kept.power_bars, kept.health_numbers);
         }
         if off(BUFF_WINDOW) {
             v.buff_window = kept.buff_window;
@@ -2440,7 +2497,7 @@ pub mod qol {
             v.item_links = kept.item_links;
         }
         if off(SPELL_BARS) {
-            (v.ability_bars, v.stacked_bars) = (kept.ability_bars, kept.stacked_bars);
+            (v.ability_bars, v.stacked_bars, v.spell_bar_layout, v.utility_layout) = (kept.ability_bars, kept.stacked_bars, kept.spell_bar_layout, kept.utility_layout);
         }
         v
     }
@@ -2601,6 +2658,12 @@ pub fn power_bars() -> bool {
     client().power_bars
 }
 
+/// Health Numbers: the health as a percentage over the group's, the pet's
+/// and the target's bars and in the raid list's rows (`hud`, `raidlist`).
+pub fn health_numbers() -> bool {
+    client().health_numbers
+}
+
 /// Raid Mercenaries: the raid list draws the raid's mercs' rows (Shown) or
 /// its players' alone (Hidden, the default).
 pub fn raid_mercs() -> bool {
@@ -2677,6 +2740,16 @@ pub fn account_known() -> bool {
 /// Stacked Spell Bars (Extended > UI > HUD; ticket 1913).
 pub fn stacked_bars() -> bool {
     client().stacked_bars
+}
+
+/// Spell Bar Layout (Extended > UI > HUD Layout; 2026-11-18).
+pub fn spell_bar_layout() -> crate::hudmenu::Layout {
+    client().spell_bar_layout
+}
+
+/// Utility Bar Layout (Extended > UI > HUD Layout; 2026-11-18).
+pub fn utility_layout() -> crate::hudmenu::UtilityLayout {
+    client().utility_layout
 }
 
 /// Profanity Filter (Options > Interface).
@@ -2848,6 +2921,25 @@ pub fn set_minimap(on: bool) -> Result<(), String> {
     c.minimap = on;
     set_client(c);
     save_client()
+}
+
+/// Quest Helper turned (its key, U: `binds`' "quest_helper", the owner's of
+/// 2026-11-21: "can players hide the quest helper with a button"), and kept at
+/// once, as the minimap's key keeps its own.
+pub fn set_quest_helper(on: bool) -> Result<(), String> {
+    let mut c = client();
+    c.quest_helper = on;
+    set_client(c);
+    save_client()
+}
+
+/// U: the Quest Helper shown or hidden, kept (Extended's Quest Helper).
+pub fn toggle_quest_helper() {
+    let on = !client().quest_helper;
+    if let Err(e) = set_quest_helper(on) {
+        crate::say(&format!("quest helper {}, not kept: {e}", if on { "shown" } else { "hidden" }));
+    }
+    crate::say(&format!("quest helper {}", if on { "shown" } else { "hidden" }));
 }
 
 /// Whether the game asks to restart into a newer build (Update Notices).
@@ -3864,7 +3956,7 @@ mod tests {
     #[test]
     fn the_server_turns_additions_off_and_the_choices_stay() {
         testing::reset(false);
-        let chosen = ClientOptions { dps_meter: true, auto_target: true, number_colors: [3; crate::numcolor::ROWS], ability_bars: 4, stacked_bars: true, ..Default::default() };
+        let chosen = ClientOptions { dps_meter: true, auto_target: true, health_numbers: true, number_colors: [3; crate::numcolor::ROWS], ability_bars: 4, stacked_bars: true, spell_bar_layout: crate::hudmenu::Layout::Columns, utility_layout: crate::hudmenu::UtilityLayout::Below, ..Default::default() };
         set_client(chosen);
         assert_eq!(client(), chosen, "nothing off: as kept");
         let all = qol::MAP | qol::QUEST_HELPER | qol::TARGET_LEVEL | qol::DPS_METER | qol::NUMBER_COLORS | qol::STAT_CAPS | qol::POWER_BARS | qol::BUFF_WINDOW | qol::PET_EFFECTS | qol::AUTO_CAST | qol::ITEM_LINKS | qol::SPELL_BARS;
@@ -3874,9 +3966,9 @@ mod tests {
         assert!(!(c.map || c.minimap || map() || minimap()), "the map, off by default");
         assert!(c.map_markers, "its markers the player's, with it");
         assert!(!(c.quest_helper || c.quest_markers || c.quest_tracker || c.head_marks || quest_helper() || quest_markers() || quest_tracker()), "the quest helper");
-        assert!(!(c.target_level || c.dps_meter || c.power_bars || c.buff_window || c.pet_effects || c.auto_cast || c.auto_target), "the rest");
+        assert!(!(c.target_level || c.dps_meter || c.power_bars || c.health_numbers || health_numbers() || c.buff_window || c.pet_effects || c.auto_cast || c.auto_target), "the rest");
         assert_eq!(c.number_colors, [0; crate::numcolor::ROWS], "every number the game's colour");
-        assert!(!c.item_links && (c.ability_bars, c.stacked_bars) == (ABILITY_BARS_GAME, false), "item links off by default, the game's two bars");
+        assert!(!c.item_links && (c.ability_bars, c.stacked_bars, c.spell_bar_layout, c.utility_layout) == (ABILITY_BARS_GAME, false, crate::hudmenu::Layout::Stacked, crate::hudmenu::UtilityLayout::UpperLeft), "item links off by default, the game's two bars");
         let d = ClientOptions::default();
         assert!((c.raid_list, c.overlapping_names, c.loading_tips, c.flora) == (d.raid_list, d.overlapping_names, d.loading_tips, d.flora), "what is not an addition stays");
         // a change to another row while they are off (Extended's, or a key's)
@@ -4058,6 +4150,18 @@ mod tests {
     }
 
     #[test]
+    fn health_numbers_are_kept_only_when_on() {
+        assert!(!ClientOptions::default().health_numbers, "off by default");
+        assert!(!ClientOptions::default().to_text().contains("health_numbers"), "the default writes nothing");
+        let t = ClientOptions { health_numbers: true, ..Default::default() }.to_text();
+        assert!(t.contains("health_numbers=on\n"), "{t}");
+        assert!(ClientOptions::from_text(&t).health_numbers, "read back");
+        assert!(!ClientOptions::from_text("health_numbers=off").health_numbers);
+        assert!(!ClientOptions::from_text("health_numbers=maybe").health_numbers, "the default");
+        assert!(!ClientOptions::from_text("power_bars=on").health_numbers, "the control: Power Bars' key is not this");
+    }
+
+    #[test]
     fn raid_mercs_are_kept_only_when_shown() {
         assert!(!ClientOptions::default().raid_mercs, "Hidden by default");
         assert!(!ClientOptions::default().to_text().contains("raid_mercs"), "the default writes nothing");
@@ -4207,6 +4311,41 @@ mod tests {
         assert!(back.chat_always && back.stacked_bars, "round trip");
         assert!(!ClientOptions::from_text("chat_always=off").chat_always);
         assert!(!ClientOptions::from_text("stacked_bars=maybe").stacked_bars, "the default");
+    }
+
+    /// Spell Bar Layout (2026-11-18): Stacked by default and then not
+    /// written; 2 Columns kept and read back; a word it does not know leaves
+    /// the default; its row off where the server keeps the game's two bars.
+    #[test]
+    fn spell_bar_layout_is_kept_only_when_columns() {
+        use crate::hudmenu::Layout;
+        let d = ClientOptions::default();
+        assert_eq!(d.spell_bar_layout, Layout::Stacked, "stacked by default");
+        assert!(!d.to_text().contains("spell_bar_layout"));
+        let t = ClientOptions { spell_bar_layout: Layout::Columns, ..Default::default() }.to_text();
+        assert!(t.contains("spell_bar_layout=columns\n"), "{t}");
+        assert_eq!(ClientOptions::from_text(&t).spell_bar_layout, Layout::Columns, "round trip");
+        assert_eq!(ClientOptions::from_text("spell_bar_layout=stacked").spell_bar_layout, Layout::Stacked);
+        assert_eq!(ClientOptions::from_text("spell_bar_layout=sideways").spell_bar_layout, Layout::Stacked, "the default");
+        assert_eq!(qol::of_item(crate::options::SPELL_BAR_LAYOUT), Some(qol::SPELL_BARS), "off where the game's two bars are");
+    }
+
+    /// Utility Bar Layout (2026-11-18): Upper Left by default and then not
+    /// written; Below kept and read back; a word it does not know leaves the
+    /// default; its row off with the stacked bars where the server keeps the
+    /// game's bars.
+    #[test]
+    fn utility_layout_is_kept_only_when_below() {
+        use crate::hudmenu::UtilityLayout;
+        let d = ClientOptions::default();
+        assert_eq!(d.utility_layout, UtilityLayout::UpperLeft, "upper left by default");
+        assert!(!d.to_text().contains("utility_bars"));
+        let t = ClientOptions { utility_layout: UtilityLayout::Below, ..Default::default() }.to_text();
+        assert!(t.contains("utility_bars=below\n"), "{t}");
+        assert_eq!(ClientOptions::from_text(&t).utility_layout, UtilityLayout::Below, "round trip");
+        assert_eq!(ClientOptions::from_text("utility_bars=upper_left").utility_layout, UtilityLayout::UpperLeft);
+        assert_eq!(ClientOptions::from_text("utility_bars=middle").utility_layout, UtilityLayout::UpperLeft, "the default");
+        assert_eq!(qol::of_item(crate::options::UTILITY_LAYOUT), Some(qol::SPELL_BARS));
     }
 
     #[test]

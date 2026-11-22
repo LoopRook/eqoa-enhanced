@@ -605,5 +605,9 @@ contract rules and the four defects are settled.
 3. Irreversible steps: lead's recommendation is that a confirmation always happens but a replacement mod may
    draw it (the prompt is readable and answerable); a mod cannot skip it. Owner agreed 2026-11-19 ("keeping
    the confirm, we could skin it"). Destroy stays unsupported.
+   **Correction 2026-11-22 (owner):** the owner did not agree to keep destroy out ("why would we limit a function?
+   a UI replacement needs all functions"). Destroy is supported like every other irreversible step: a typed action
+   that always goes through the confirm (the game's, or one the replacement mod draws), never skipped. It lands with
+   the A1 confirm contract, after the round 8 upstream PR. The "Destroy stays unsupported" lines above are superseded.
 4. Before the world (login, character select, creation): left to the game. Mods only act once in the world.
 5. Name plates and damage numbers (A12): wanted.

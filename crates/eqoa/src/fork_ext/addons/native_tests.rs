@@ -946,7 +946,7 @@ fn round_3_stage_a_actions_assist_and_summary_api() {
         assert(ok2 == nil and err2.code == 'not_in_world', "summary not in world")
         local ok3, err3 = eqoa.windows.open("unsupported_window")
         assert(ok3 == nil and err3.code == 'invalid_argument', "unsupported window")
-        eqoa.input.bind({ id = "assist_go", label = "Assist Go", default_key = "u" }, function()
+        eqoa.input.bind({ id = "assist_go", label = "Assist Go", default_key = "9" }, function()
             last_req, last_err = eqoa.actions.assist()
         end)
     "#,
@@ -956,7 +956,7 @@ fn round_3_stage_a_actions_assist_and_summary_api() {
         CORE.with(|c| {
             c.borrow_mut().emit(
                 "input.key",
-                serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
+                serde_json::json!({"key":"9","down":true,"repeat":false,"synthetic":false,"text":""}),
             )
         });
         super::native_events::dispatch(&h).unwrap();
@@ -1183,11 +1183,11 @@ fn round_3_stage_a_controls_page_rebind_and_negative_control() {
     assert!(crate::fork_ext::bindpage::set_key(
         "mod_test",
         "custom_key",
-        "u"
+        "9"
     ));
     assert_eq!(
         crate::fork_ext::bindpage::get_key("mod_test", "custom_key"),
-        Some("u".into())
+        Some("9".into())
     );
     assert_eq!(
         crate::fork_ext::bindpage::dispatch_keypress("y"),
@@ -1195,7 +1195,7 @@ fn round_3_stage_a_controls_page_rebind_and_negative_control() {
         "old key does not fire"
     );
     assert_eq!(
-        crate::fork_ext::bindpage::dispatch_keypress("u"),
+        crate::fork_ext::bindpage::dispatch_keypress("9"),
         Some(("mod_test".into(), "custom_key".into())),
         "new key fires"
     );
@@ -1441,7 +1441,7 @@ fn option_and_bind_names_never_redirect_caller_identity() {
     super::options::reset_in_memory();
     crate::fork_ext::bindpage::reset_in_memory();
     // each has its own key: a default never takes a key another mod has (round 7)
-    for (id, key) in [("test", "b"), ("mod", "u"), ("third_party", "y")] {
+    for (id, key) in [("test", "b"), ("mod", "9"), ("third_party", "y")] {
         let host = option_test_host(id);
         host.execute(
             &r#"

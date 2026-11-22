@@ -167,15 +167,15 @@ fn round7h_low_input_bind_twice_runs_one_callback_per_press() {
     host.execute(
         r#"
         first, second = 0, 0
-        assert(eqoa.input.bind({id = 'go', label = 'Go', default_key = 'u'}, function() first = first + 1 end))
-        assert(eqoa.input.bind({id = 'go', label = 'Go', default_key = 'u'}, function() second = second + 1 end))
+        assert(eqoa.input.bind({id = 'go', label = 'Go', default_key = '9'}, function() first = first + 1 end))
+        assert(eqoa.input.bind({id = 'go', label = 'Go', default_key = '9'}, function() second = second + 1 end))
     "#,
     )
     .unwrap();
     CORE.with(|c| {
         c.borrow_mut().emit(
             "input.key",
-            serde_json::json!({"key":"u","down":true,"repeat":false,"synthetic":false,"text":""}),
+            serde_json::json!({"key":"9","down":true,"repeat":false,"synthetic":false,"text":""}),
         )
     });
     native_events::dispatch(&host).unwrap();

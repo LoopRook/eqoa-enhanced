@@ -144,7 +144,7 @@ pub const OP_RACE_LOOKS: u16 = 0x7E24;
 /// session's first character list; this client answers 1 at once: it reads
 /// the live CLIENT's entity channel ([`crate::entity::LIVE_STATE_SIZE`]
 /// bytes, a colour per held item, armour slot and robe) and its 0x002C
-/// record ([`LIVE_GEAR_SIZE`] raw bytes). A PS2 ignores the offer; Sandstorm
+/// record ([`LIVE_GEAR_SIZE`] raw bytes). A PS2 ignores the offer; the reference server
 /// never makes one, so its channels and lists stay the disc's.
 pub const OP_LIVE_LOOK: u16 = 0x7E0C;
 /// The server's answer to [`OP_LIVE_LOOK`], a u32: the look in force from it
@@ -160,7 +160,7 @@ pub const OP_LIVE_LOOK_IN_FORCE: u16 = 0x7E0D;
 pub const LIVE_LOOK_MANY_CHARS: u32 = 2;
 /// Bit 2 of this client's answer to [`OP_LIVE_LOOK`]: it draws
 /// go-eqoa-server's armour, set 9 (the ornate plate CHAR.ESF holds, which
-/// Sandstorm's S2 adds) and the trim colours after the live game's channel
+/// the reference server's S2 adds) and the trim colours after the live game's channel
 /// ([`crate::entity::ARMOR_STATE_SIZE`]) and record ([`ARMOR_GEAR_SIZE`]). The
 /// look in force's third u32 says it is granted ([`Session::armor_look`]); a
 /// server that knows no such bit sends none, and set 9 as set 4.
@@ -218,7 +218,7 @@ pub const CHAR_SLOTS_MOST: u32 = 64;
 /// server takes (go-eqoa-server's since 2026-11-08: 2,047): the form holds
 /// that many, up to [`PETITION_TEXT_MOST`] ([`Session::petition_text`]),
 /// else a PS2's [`PETITION_TEXT_DISC`]. A PS2 ignores the offer; a server
-/// that never makes one (Sandstorm's, eqoa.live's) gets no key and no note.
+/// that never makes one (the reference server's, eqoa.live's) gets no key and no note.
 pub const OP_BUG_REPORTS: u16 = 0x7E0E;
 /// This client's note for the petition it files next, to a server that
 /// offered [`OP_BUG_REPORTS`]: a u32 version (1), then a u32 byte count and
@@ -230,7 +230,7 @@ pub const OP_BUG_NOTE: u16 = 0x7E0F;
 /// the world: a u32 version (1), then a u32, the most bytes of a report's text
 /// it takes ([`Session::crash_offer`]); this client then sends each it kept
 /// ([`OP_CRASH_REPORT`]). A PS2 ignores the offer; a server that never makes
-/// one (Sandstorm's, eqoa.live's) is sent none.
+/// one (the reference server's, eqoa.live's) is sent none.
 pub const OP_CRASH_OFFER: u16 = 0x7E64;
 /// A crash report, client to server: a u32 version (1), a u32 number of this
 /// client's for it, a u32 byte count and that many bytes of UTF-8 text, at
@@ -252,11 +252,13 @@ pub const OP_SELECT_INFO: u16 = 0x7E67;
 /// rows its Customize re-chooses (`selectinfo::read`), by server id, the whole
 /// list each time ([`Session::select_info`]).
 pub const OP_SELECT_INFO_DATA: u16 = 0x7E68;
-/// go-eqoa-server's own, no retail message either: Hardcore characters
-/// (`hardcore`), a u32 after the opcode, both ways. The server offers it (1) after
-/// the session's first character list where it has Hardcore; this client answers 1
-/// at once ([`Session::hardcore`]), writes the choice in every creation after it
-/// and is sent [`OP_HARDCORE_CHARS`] after every list. A PS2 ignores the offer.
+/// go-eqoa-server's own, no retail message either: Hardcore and [OG] characters
+/// (`hardcore`), a u32 after the opcode, both ways. The server offers it after
+/// the session's first character list where it has either, its bits
+/// (`hardcore::OFFER_HARDCORE` 1, `hardcore::OFFER_OG` 2; a server of before
+/// sends 1); this client answers the bits it takes at once ([`Session::hardcore`],
+/// [`Session::og`]), writes the choices in every creation after it and is sent
+/// [`OP_HARDCORE_CHARS`] after every list. A PS2 ignores the offer.
 pub const OP_HARDCORE: u16 = 0x7EB0;
 /// Each listed character's plain name and Hardcore standing, fallen with its
 /// death (`hardcore::read_chars`), the whole list each time
@@ -272,9 +274,9 @@ pub const CRASH_REPORT_MOST: usize = 12_000;
 /// invite into it there, a u32 after the opcode (1), from the server once the
 /// player is in the world; no answer. CLIENT lets only the leader invite
 /// (`InviteEntity`, `InviteToGroup`: word 640), and so does this client on a
-/// server that never offers it (Sandstorm's, eqoa.live's).
+/// server that never offers it (the reference server's, eqoa.live's).
 pub const OP_MEMBER_INVITES: u16 = 0x7E17;
-/// go-eqoa-server's own: the mercenaries told apart (the GM Jibrish's
+/// go-eqoa-server's own: the mercenaries told apart (a GM's
 /// petitions 1475 and 1488, 2026-11-11). Both ways: the server's offer once the
 /// player is in the world (a u8, the layout of [`OP_MERCS_DATA`], 1), and this
 /// client's answer at once (a u8, 1). CLIENT has no such case: a PS2 ignores it.
@@ -292,7 +294,7 @@ pub const OP_MERCS_DATA: u16 = 0x7E5B;
 /// The start menu's Group > Dismiss Mercenary, client to server: a u8, 1 (the
 /// server's `/merc dismiss`).
 pub const OP_MERC_DISMISS: u16 = 0x7E5C;
-/// go-eqoa-server's own: the live group search's standing (the GM Jibrish's
+/// go-eqoa-server's own: the live group search's standing (a GM's
 /// petition 1476, 2026-11-11). Both ways, as [`OP_MERCS_OFFER`]: the offer (a u8
 /// layout, 1) and this client's answer (a u8, 1).
 pub const OP_GROUP_REG_OFFER: u16 = 0x7E5D;
@@ -386,10 +388,10 @@ impl GroupReg {
 /// offered the GM's trigger names ([`OP_GM_TRIGGERS`], a GM's client's alone), so
 /// the server need send a client that cannot (a PS2) nothing at all, not even an
 /// offer; the server then says 1 flight is on and 0 it is off. Nothing is said
-/// to a server that made no such offer (Sandstorm's, eqoa.live's), and one that
+/// to a server that made no such offer (the reference server's, eqoa.live's), and one that
 /// never sends it leaves the walk as it was.
 pub const OP_FLY: u16 = 0x7E1B;
-/// go-eqoa-server's own, no retail message: a GM's `/noclip` (the GM Jibrish's
+/// go-eqoa-server's own, no retail message: a GM's `/noclip` (a GM's
 /// petition 1904), server to a client that flies ([`OP_FLY`]'s): a u32, 1 on
 /// and 0 off. On, the walk passes through every wall, floor and ceiling while it
 /// flies (`walker`); it comes with [`OP_FLY`] 1 and goes with its 0, and a
@@ -401,7 +403,7 @@ pub const OP_NOCLIP: u16 = 0x7E7A;
 /// 1 at once and shows Character > Combat Record, which asks for the record
 /// ([`OP_COMBAT_RECORD_DATA`], a u32 1) as its window opens; the server sends it
 /// then and whenever a count changes it. A PS2 ignores the offer; a server that
-/// never makes one (Sandstorm's, eqoa.live's) gets no answer and no entry shows.
+/// never makes one (the reference server's, eqoa.live's) gets no answer and no entry shows.
 pub const OP_COMBAT_RECORD: u16 = 0x7E20;
 /// The record: this client's ask (a u32 1), the server's rows (`record::read`).
 pub const OP_COMBAT_RECORD_DATA: u16 = 0x7E21;
@@ -484,13 +486,13 @@ pub const OP_CAPES_LIST: u16 = 0x7E27;
 /// offer ([`OP_BUG_REPORTS`]), so a PS2 is never sent it; this client answers 1 at
 /// once and jumps from then on, and the server's movement check takes a jump's arc
 /// from it. A 0 from the server (after a restart into one without jumps) ends it.
-/// A server that never offers it (Sandstorm's, eqoa.live's) gets no answer, and the
+/// A server that never offers it (the reference server's, eqoa.live's) gets no answer, and the
 /// walk never leaves the ground there, as the game's never does.
 pub const OP_JUMP: u16 = 0x7E28;
 /// go-eqoa-server's own, no retail message either: a GM's travel by the map. The
 /// server offers it with the GM's channel at world entry, to a GM's client alone,
 /// a u32 after the opcode (1, [`Session::map_travel`]); no answer. A PS2 ignores
-/// the offer; a server that never makes one (Sandstorm's, eqoa.live's) is never
+/// the offer; a server that never makes one (the reference server's, eqoa.live's) is never
 /// asked ([`OP_MAP_TRAVEL_TO`]).
 pub const OP_MAP_TRAVEL: u16 = 0x7E34;
 /// A GM's ask to travel to a spot of its map (`Session::map_travel_to`): u32 the
@@ -552,7 +554,7 @@ pub struct RaidMember {
 }
 
 /// The raw part of a 0x002C record: the disc's, and the live game's
-/// (`CharacterList`, Corsten's 0x012CC018: no robe tint, six ArmorGroup
+/// (`CharacterList`, a retail character's savestate, 0x012CC018: no robe tint, six ArmorGroup
 /// variants where the disc's has tints, then the held items', armour slots'
 /// and robe's colours).
 pub const DISC_GEAR_SIZE: usize = 32;
@@ -721,8 +723,8 @@ fn read_dps_meter(r: &mut Reader) -> Option<DpsMeter> {
     }
     (!r.error).then_some(DpsMeter { fight, over, length_ms, total, count, place, lines })
 }
-/// go-eqoa-server's own, no retail message: a raid's windows (`raid`; the GM
-/// Jibrish's petitions 1448 and 1451: the leader's mark, the loot rolls' pop-up,
+/// go-eqoa-server's own, no retail message: a raid's windows (`raid`; a
+/// GM's petitions 1448 and 1451: the leader's mark, the loot rolls' pop-up,
 /// the master looter's Assign and Abandon). The offer, server to client once the
 /// player is in the world: a u8, 1. CLIENT has no such case, so a PS2 ignores it
 /// and is told the same in chat lines; nothing is asked of a server that made no
@@ -848,7 +850,7 @@ pub const OP_PET_DYES_ANSWER: u16 = 0x7E91;
 pub const OP_PET_DYES: u16 = 0x7E92;
 
 /// go-eqoa-server's own: a monster's name and level, shown when the player
-/// talks to it (□, Q) and it has nothing to say (the GM Jibrish's petition 1459,
+/// talks to it (□, Q) and it has nothing to say (a GM's petition 1459,
 /// 2026-11-10: "press the mob information button on monster ... This should
 /// ONLY show the monsters name and level, nothing else"; the server's
 /// `world.mob_info`). The offer, server to client once the player is in the
@@ -900,7 +902,7 @@ pub const OP_DIALOG_ROOM: u16 = 0x7E71;
 /// (`eqoa::dialog::PAGE`), told a server that offers more ([`OP_DIALOG_ROOM`]).
 pub const DIALOG_ROOM: u32 = 12;
 
-/// go-eqoa-server's own: item links in chat (the GM Jibrish's petition 1463,
+/// go-eqoa-server's own: item links in chat (a GM's petition 1463,
 /// `crate::itemlink`). Both ways: the server's offer at every world entry (a
 /// u8, the layout, `itemlink::LAYOUT`), and the client's answer (a u8, 1 to be
 /// sent [`OP_ITEM_LINK_LINE`] lines and to send [`OP_ITEM_LINK_SAY`], 0 for the
@@ -908,14 +910,14 @@ pub const DIALOG_ROOM: u32 = 12;
 pub const OP_ITEM_LINKS: u16 = 0x7E4F;
 
 /// go-eqoa-server's own: the profanity filter set from the client's Options >
-/// Interface row (the GM Jibrish's petition 1490). Both ways: the server's
+/// Interface row (a GM's petition 1490). Both ways: the server's
 /// offer at every world entry (a u8, the layout, 1), and the client's answer
 /// (a u8: 0 off, 1 High, 2 Medium), at once and whenever the row changes. The
 /// filter is the server's own (retail's 0x0045, on at every login); a PS2
 /// ignores the offer and keeps it on.
 pub const OP_PROFANITY_CHOICE: u16 = 0x7E60;
-/// [`OP_PROFANITY_CHOICE`]'s answers: off, High (every word; before the GM
-/// Jibrish's petition 1625 the only on) and Medium (only racial slurs).
+/// [`OP_PROFANITY_CHOICE`]'s answers: off, High (every word; before a
+/// GM's petition 1625 the only on) and Medium (only racial slurs).
 pub const PROFANITY_OFF: u8 = 0;
 pub const PROFANITY_HIGH: u8 = 1;
 pub const PROFANITY_MEDIUM: u8 = 2;
@@ -1136,6 +1138,10 @@ pub struct NewChar {
     /// the race options, when Some, which [`Session::create_character`] makes it
     /// only for a server that offered it (None, or unchecked, is Some(false)).
     pub hardcore: Option<bool>,
+    /// [OG] chosen (`hardcore::og_block`): written after the Hardcore block,
+    /// before the race options, when Some, which [`Session::create_character`]
+    /// makes it only for a server that offered [OG].
+    pub og: Option<bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -1225,9 +1231,9 @@ pub enum Event {
     /// 0x00F8: the run speed (0 stops).
     Speed(f32),
     /// 0x0010, the target-info reply (`Msg0010`): the disposition (the con
-    /// colour), two more bytes, the title and the guild. Sandstorm's reply
+    /// colour), two more bytes, the title and the guild. The reference server's reply
     /// stops before the trailing token, so it is taken as answered whatever
-    /// the token, as eqoa-port's `VI_HOST_ONLY` does.
+    /// the token, as the decomp's native build's `VI_HOST_ONLY` does.
     TargetInfo { disposition: u8, b: u8, c: u8, title: String, guild: String },
     /// 0x0046: a dialog (an NPC's words), raw (`ShowDialog` expands it).
     Dialog { id: u32, text: Vec<u16> },
@@ -1360,7 +1366,7 @@ pub struct Session {
     pub expansion: u32,
     /// The most entity slots and the farthest view distance the server
     /// offered on this connection ([`OP_ENTITY_VIEW`]); none from one that
-    /// never does (every retail server, Sandstorm's too).
+    /// never does (every retail server, the reference server's too).
     pub entity_view_offer: Option<(u32, u32)>,
     /// The live game's look is in force ([`OP_LIVE_LOOK_IN_FORCE`] said so):
     /// character lists are read as the live CLIENT's, and the entity channels
@@ -1506,6 +1512,9 @@ pub struct Session {
     /// The server offered Hardcore and this client took it ([`OP_HARDCORE`]): a
     /// creation carries the choice (`hardcore::block`).
     pub hardcore: bool,
+    /// The server offered [OG] characters and this client took it (the offer's
+    /// `hardcore::OFFER_OG`): a creation carries the choice (`hardcore::og_block`).
+    pub og: bool,
     /// Each listed character's Hardcore standing, by server id
     /// ([`OP_HARDCORE_CHARS`]); empty from a server that sends none.
     pub hardcore_chars: std::collections::HashMap<i64, crate::hardcore::Char>,
@@ -1639,7 +1648,7 @@ pub struct Session {
 /// most once a connection timeout (a second at most), for as long as the
 /// session lasts; and `Msg0993` answers the token coming back (a DRDP type
 /// 0xF8: a datagram outside any connection) with 0x0791 on the game
-/// connection. No server we know sends 0x0790 (none in Sandstorm's
+/// connection. No server we know sends 0x0790 (none in the reference server's
 /// captures, none in go-eqoa-server).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Probe {
@@ -1762,6 +1771,7 @@ impl Session {
             cape_list: Default::default(),
             select_info: Default::default(),
             hardcore: false,
+            og: false,
             hardcore_chars: Default::default(),
             hardcore_fall: None,
             capes_in_view: Default::default(),
@@ -1912,7 +1922,7 @@ impl Session {
     /// `Msg00B2`'s `SendOpSigned(73, token)`: a move of the server's is done
     /// (`Respawn` has stood the player at the arrival). The PS2's frame stops
     /// in `Respawn` while it loads, so this goes in the same packet as its
-    /// first 0x40 from there; Sandstorm resumes the state channels on it.
+    /// first 0x40 from there; the reference server resumes the state channels on it.
     pub fn answer_teleport(&mut self, token: u32) {
         let mut w = Writer::op(0x0049);
         w.signed(token as i32 as i64);
@@ -1934,7 +1944,7 @@ impl Session {
 
     /// A GM's travel to (`x`, `z`) of world `world` (the map's Ctrl+click), asked
     /// of a server that offered it ([`OP_MAP_TRAVEL`]); false, and nothing sent,
-    /// otherwise (a player's map, Sandstorm's, eqoa.live's).
+    /// otherwise (a player's map, the reference server's, eqoa.live's).
     pub fn map_travel_to(&mut self, world: u32, x: f32, z: f32) -> bool {
         if !self.map_travel {
             return false;
@@ -2391,7 +2401,7 @@ impl Session {
     /// `VIWndCharCreateBlank::Reset` leaves it; the stats go raw.
     pub fn create_character(&mut self, c: &NewChar) {
         // the choice goes only to a server that offered it (`hardcore`)
-        let c = NewChar { hardcore: self.hardcore.then(|| c.hardcore.unwrap_or(false)), ..c.clone() };
+        let c = NewChar { hardcore: self.hardcore.then(|| c.hardcore.unwrap_or(false)), og: self.og.then(|| c.og.unwrap_or(false)), ..c.clone() };
         self.send(&new_char_message(&c));
     }
 
@@ -2730,7 +2740,7 @@ impl Session {
     /// `Msg07E0`: 0x07E1, the game connection's eleven counters as text
     /// (`VINetStats`: "%I: %s\n" each, the count as a signed 64-bit
     /// number), then whatever followed 0x07E0, on the game connection. Both
-    /// Sandstorm and go-eqoa-server send 0x07E0 once a session, and a PS2
+    /// the reference server and go-eqoa-server send 0x07E0 once a session, and a PS2
     /// answers (`pcaps/ps2_sandstorm.pcap`).
     fn msg_07e0(&mut self, rest: &[u8]) {
         let Some(c) = self.conn.filter(|&c| self.drdp.conns.contains(c)) else { return };
@@ -2944,9 +2954,15 @@ impl Session {
             // Hardcore offered: taken (the create pages offer the choice, select
             // shows the fallen: `hardcore`)
             OP_HARDCORE => {
-                if r.u32() != 0 && !r.error {
-                    self.hardcore = true;
-                    self.send_op_int(OP_HARDCORE, 1);
+                let v = r.u32();
+                if v != 0 && !r.error {
+                    // its bits: Hardcore, [OG] (a server of before sends 1)
+                    let took = v & (crate::hardcore::OFFER_HARDCORE | crate::hardcore::OFFER_OG);
+                    self.hardcore = took & crate::hardcore::OFFER_HARDCORE != 0;
+                    self.og = took & crate::hardcore::OFFER_OG != 0;
+                    if took != 0 {
+                        self.send_op_int(OP_HARDCORE, took);
+                    }
                 }
             }
             OP_HARDCORE_CHARS => match crate::hardcore::read_chars(&m.data[2.min(m.data.len())..]) {
@@ -3462,7 +3478,7 @@ impl Session {
                     // and its flush carries it beside the batch above (every
                     // PS2 capture has 0x00CA beside its first 0x40): the
                     // walker as SetLocation leaves it, still, on the floor.
-                    // Sandstorm needs it there: a first 0x40 in a later
+                    // The reference server needs it there: a first 0x40 in a later
                     // packet leaves the player out of its world (its own
                     // entity is all it sends, and it never moves it).
                     let p = &dump_player;
@@ -3712,6 +3728,9 @@ pub fn new_char_message(c: &NewChar) -> Vec<u8> {
     }
     if let Some(h) = c.hardcore {
         w.bytes(&crate::hardcore::block(h));
+    }
+    if let Some(o) = c.og {
+        w.bytes(&crate::hardcore::og_block(o));
     }
     if let Some(b) = crate::raceopts::choices_block(&c.options) {
         w.bytes(&b);
@@ -5568,7 +5587,7 @@ mod tests {
         assert!(s.reset_dps_meter());
         assert_eq!(answers(&mut s), [(251, vec![0x3D, 0x7E, 1])], "the reset");
 
-        // a fight of two lines: Dab's own 1000, Jib's 300 (120 its pet's), gone
+        // a fight of two lines: the player's own 1000, the other's 300 (120 its pet's), gone
         // from the group; over, 1.5 s long, number 0x01020304
         let body = [
             1, 4, 3, 2, 1, 1, 0xDC, 5, 0, 0, 0x14, 5, 0, 0, 2, 0, 1, 0, 2, 1, 3, 0xE8, 3, 0, 0, 0, 0, 0, 0, 3, b'D', b'a', b'b', 2, 10, 0x2C, 1, 0, 0, 0x78, 0, 0, 0, 3, b'J', b'i', b'b',
@@ -5998,7 +6017,7 @@ mod tests {
     // 0x002A carries the race's options re-chosen at Customize (a game race's
     // skin) after its five ints, as 0x002B carries a creation's, to a server
     // that sent the races' options. The controls: none chosen, the five ints
-    // alone; chosen but no options from the server (a PS2's server, Sandstorm),
+    // alone; chosen but no options from the server (a PS2's server, the reference server),
     // the five ints alone.
     #[test]
     fn select_carries_the_options_rechosen() {
@@ -6279,6 +6298,50 @@ mod tests {
         assert_eq!(s.hardcore_fall.as_ref().map(|f| (f.killer.as_str(), f.place.as_str(), f.secs)), Some(("X", "Y", 12)));
     }
 
+    // [OG] (the offer's bit 2, 2026-11-19): the bits taken are answered; a
+    // creation carries 'O', 1, choice after the 'H' block, before 'R', only once
+    // [OG] was offered. The controls: a server of before (1) gets no 'O', and
+    // an [OG]-only offer (2) no 'H'.
+    #[test]
+    fn og_is_answered_and_chosen_at_creation() {
+        let form = NewChar { name: "Brakk".into(), race: 4, class: 0, options: vec![("skin".into(), 2)], hardcore: Some(false), og: Some(true), ..Default::default() };
+        let opts = crate::raceopts::choices_block(&form.options).unwrap();
+        // each case on a session of its own (no acks here: few messages in flight)
+        let case = |offer: u8, form: &NewChar| -> (bool, bool, Vec<Vec<u8>>, Vec<u8>) {
+            let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+            let out = |s: &mut Session, hi: u8| -> Vec<Vec<u8>> {
+                std::thread::sleep(std::time::Duration::from_millis(30));
+                s.flush();
+                let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&hi)).map(|(_, d)| d).collect();
+                sent.borrow_mut().clear();
+                m
+            };
+            out(&mut s, 0x7E);
+            deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xB0, 0x7E, offer, 0, 0, 0]);
+            let answer = out(&mut s, 0x7E);
+            s.create_character(form);
+            (s.hardcore, s.og, answer, out(&mut s, 0x00).pop().unwrap())
+        };
+        // a server of before: Hardcore alone, no 'O'
+        let (hc, og, answer, with) = case(1, &form);
+        assert!(hc && !og);
+        assert_eq!(answer, [vec![0xB0, 0x7E, 1, 0, 0, 0]]);
+        assert!(with.ends_with(&[vec![b'H', 1, 0], opts.clone()].concat()), "no 'O' to a server of before: {with:?}");
+        // both
+        let (hc, og, answer, with) = case(3, &form);
+        assert!(hc && og);
+        assert_eq!(answer, [vec![0xB0, 0x7E, 3, 0, 0, 0]]);
+        assert!(with.ends_with(&[vec![b'H', 1, 0, b'O', 1, 1], opts.clone()].concat()), "'H', 'O', then 'R': {with:?}");
+        // [OG] alone (a shard without Hardcore), unknown bits not answered;
+        // left unchosen it is 0, still written
+        let (hc, og, answer, with) = case(2 | 8, &NewChar { og: None, ..form.clone() });
+        assert!(!hc && og);
+        assert_eq!(answer, [vec![0xB0, 0x7E, 2, 0, 0, 0]]);
+        assert!(with.ends_with(&[vec![b'O', 1, 0], opts].concat()), "unchosen: 0: {with:?}");
+        assert_eq!(with, new_char_message(&NewChar { hardcore: None, og: Some(false), ..form.clone() }), "no 'H'");
+    }
+
     #[test]
     fn the_cape_offer_is_answered_and_its_lists_kept() {
         let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -6462,7 +6525,7 @@ mod tests {
 
     // Msg000D's world entry is ONE datagram, as every PS2 capture's is: 0x0014,
     // GroupChanged's 0x000E with the chat mode kept, 0x00C9 and 0x00CA, and the
-    // first frame's 0x40 at the dump's place. Sandstorm needs the 0x40 there:
+    // first frame's 0x40 at the dump's place. The reference server needs the 0x40 there:
     // sent in a later packet, the player is left out of its world (no entity
     // but its own, and it never moves). The control: a dump cut short sends
     // 0x00C9 and 0x00CA alone (Msg000D's Msg0777 path), and no 0x40.
