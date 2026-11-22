@@ -69,7 +69,8 @@ local function target_window(player, target)
     if not target then ui.TextDisabled("no target") ui.End() return end
     local info = eqoa.target.info()
     local name = target.name
-    if info and info.consider then
+    -- a consider code the client does not know has no colour: draw the name plainly
+    if info and info.consider and info.consider.color then
         local c = info.consider.color
         ui.TextColored(c.r, c.g, c.b, c.a, name)
     else

@@ -10,6 +10,14 @@ use crate::fork_ext::addons::{
 };
 use serde_json::{Value as Json, json};
 use std::cell::Cell;
+use std::hash::{Hash, Hasher};
+
+/// A hash of what a build is made from, taken without allocating: a frame whose source is as it was builds nothing.
+fn hashed(f: impl FnOnce(&mut std::collections::hash_map::DefaultHasher)) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    f(&mut h);
+    h.finish()
+}
 
 thread_local! {
     /// A jump the broker accepted, for the walk to be asked at the next frame (`apply_jump`).
@@ -75,7 +83,7 @@ pub(super) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     let session = &play.session;
 
     let ends = |left_ms: u32| a3::ticks_of_ms(u64::from(left_ms));
-    let buffs_available = play.buff_window_on() && session.buffs_at != 0;
+    let buffs_available = a3::set_arrived(false, play.buff_window_on(), session.buffs_at);
     a3::sync_buffs(buffs_available, session.buffs_at, || {
         // what is left of each line now, as the game's own window counts it (the set may have come frames ago)
         session
@@ -91,7 +99,11 @@ pub(super) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
             })
             .collect()
     });
-    let pet_available = session.pet_effects_offer && crate::settings::pet_effects() && session.pet_effects_at != 0;
+    let pet_available = a3::set_arrived(
+        true,
+        session.pet_effects_offer && crate::settings::pet_effects(),
+        session.pet_effects_at,
+    );
     a3::sync_pet(pet_available, session.pet_effects_at, || {
         let gone = session.now().wrapping_sub(session.pet_effects_at);
         let gone = if (gone as i32) < 0 { 0 } else { gone };
@@ -102,7 +114,15 @@ pub(super) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
             .map(|e| PetLine { icon: e.icon, name: e.name.clone(), ends_tick: now + ends(e.left_ms - gone) })
             .collect()
     });
-    a3::sync_goals(session.quest_progress_offer && crate::settings::quest_tracker(), || {
+    let goals_hash = hashed(|h| {
+        for q in &session.quest_progress {
+            (&q.name, q.ability).hash(h);
+            for g in &q.goals {
+                (&g.text, g.have, g.need).hash(h);
+            }
+        }
+    });
+    a3::sync_goals(session.quest_progress_offer && crate::settings::quest_tracker(), goals_hash, || {
         session
             .quest_progress
             .iter()
@@ -118,8 +138,14 @@ pub(super) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         f64::from(ee::div(play.dump.player.p30 as f32, 255.0)),
         walker.map(|w| w.cam.walk.is_under_liquid()),
     )));
-    a3::set_target(target_json(play));
-    a3::set_raid(raid_roles(play));
+    let target_hash = hashed(|h| (play.target, play.target_info, play.rings.con, &play.target_title, &play.target_guild).hash(h));
+    a3::set_target(target_hash, || target_json(play));
+    let raid_hash = hashed(|h| {
+        for m in &play.group.raid {
+            (m.id, &m.name, m.group, m.class, m.merc, play.raid_marks(m.id)).hash(h);
+        }
+    });
+    a3::set_raid(raid_hash, || raid_roles(play));
     a3::expire_casts(
         |id| !play.entities.slots.iter().flatten().any(|e| e.id == id),
         play.death.is_some(),
@@ -206,7 +232,7 @@ pub(crate) fn dispatch(play: &mut Play, action: &FrameAction) -> DispatchOutcome
                 return refuse("not_ready", "you have no pet");
             }
             if matches!(action, FrameAction::PetAttack) {
-                if play.target == u32::MAX {
+                if matches!(play.target, 0 | u32::MAX) {
                     return refuse("not_ready", "no target for the pet to attack");
                 }
                 if Some(play.target) == play.self_id32() || play.target == play.pet_id {
@@ -246,6 +272,9 @@ pub(crate) fn dispatch(play: &mut Play, action: &FrameAction) -> DispatchOutcome
             };
             if !line.removable {
                 return refuse("not_ready", "the server does not let this effect be taken off");
+            }
+            if !play.buff_window_on() {
+                return refuse("unavailable", "Buff Window is off");
             }
             eprintln!("play: buff {:?} (id {}) asked off by a mod", line.name, line.id);
             if !play.session.send_buff_remove(&line) {

@@ -115,6 +115,15 @@ pub(crate) struct State {
     pub breath: Option<(f64, Option<bool>)>,
     /// the target's description, or null with no target
     pub target: Json,
+    /// what the last build of `goals`, `target` and `raid` was made from: a frame whose source hashes the same
+    /// builds nothing (`sync_goals`, `set_target`, `set_raid`)
+    pub goals_key: Option<Option<u64>>,
+    pub target_key: Option<u64>,
+    pub raid_key: Option<u64>,
+    /// `buffs_at` / `pet_effects_at` as they stood while the server's window was not on: a set has come when
+    /// they differ (the session keeps them across zoning, which clears the sets)
+    pub buffs_baseline: Option<u32>,
+    pub pet_baseline: Option<u32>,
 }
 
 thread_local! {
@@ -207,23 +216,33 @@ pub(crate) fn sync_buffs(available: bool, at: u32, fresh: impl FnOnce() -> Vec<B
     let (now, generation) = tick_and_generation();
     let change = STATE.with(|s| {
         let mut s = s.borrow_mut();
-        let before_json = buffs_json(&s, now, generation);
-        let before = s.buffs.clone();
+        // nothing is cloned or built while the list is as it was: `before` is made only when something changes
+        let mut before_json: Option<Json> = None;
         if !available {
-            s.buffs = None;
+            if s.buffs.is_some() {
+                before_json = Some(buffs_json(&s, now, generation));
+                s.buffs = None;
+            }
             s.buffs_at = 0;
         } else if s.buffs.is_none() || s.buffs_at != at {
-            s.buffs = Some(fresh());
+            let new = Some(fresh());
+            // a re-sent set with the same lines is no change: its end times read straight out of the lines
+            if !same_buffs(&s.buffs, &new) {
+                before_json = Some(buffs_json(&s, now, generation));
+            }
+            s.buffs = new;
             s.buffs_at = at;
         }
-        if let Some(lines) = s.buffs.as_mut() {
-            // a line whose time ran out is gone, as the game's own window drops it
-            lines.retain(|l| l.ends_tick.is_none_or(|t| t > now));
+        // a line whose time ran out is gone, as the game's own window drops it
+        if s.buffs.as_ref().is_some_and(|l| l.iter().any(|x| x.ends_tick.is_some_and(|t| t <= now))) {
+            if before_json.is_none() {
+                before_json = Some(buffs_json(&s, now, generation));
+            }
+            if let Some(lines) = s.buffs.as_mut() {
+                lines.retain(|l| l.ends_tick.is_none_or(|t| t > now));
+            }
         }
-        if same_buffs(&before, &s.buffs) {
-            // the same lines: a re-sent set may carry new end times, which read straight out of the lines
-            return None;
-        }
+        let before_json = before_json?;
         s.buff_revision += 1;
         Some((before_json, buffs_json(&s, now, generation)))
     });
@@ -282,9 +301,15 @@ fn goals_json(goals: &Option<Vec<TrackedQuest>>) -> Json {
 }
 
 /// Takes the tracker's set; fires `quests.goals_changed` when it differs from the one held.
-pub(crate) fn sync_goals(available: bool, fresh: impl FnOnce() -> Vec<TrackedQuest>) {
+/// `hash` stands for the source: a call whose source hashes as the last one's builds nothing.
+pub(crate) fn sync_goals(available: bool, hash: u64, fresh: impl FnOnce() -> Vec<TrackedQuest>) {
     let change = STATE.with(|s| {
         let mut s = s.borrow_mut();
+        let key = available.then_some(hash);
+        if s.goals_key == Some(key) {
+            return None;
+        }
+        s.goals_key = Some(key);
         let new = available.then(fresh);
         if s.goals == new {
             return None;
@@ -308,17 +333,43 @@ pub(crate) fn set_breath(value: Option<(f64, Option<bool>)>) {
     STATE.with(|s| s.borrow_mut().breath = value);
 }
 
-pub(crate) fn set_target(info: Json) {
-    STATE.with(|s| s.borrow_mut().target = info);
-}
-
-pub(crate) fn set_raid(raid: Vec<RaidRole>) {
+/// Builds the target's description only when `hash` of its source is new.
+pub(crate) fn set_target(hash: u64, build: impl FnOnce() -> Json) {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
-        if s.raid != raid {
-            s.raid = raid;
+        if s.target_key != Some(hash) {
+            s.target_key = Some(hash);
+            s.target = build();
         }
     });
+}
+
+/// Builds the raid's roles only when `hash` of its source is new.
+pub(crate) fn set_raid(hash: u64, build: impl FnOnce() -> Vec<RaidRole>) {
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        if s.raid_key != Some(hash) {
+            s.raid_key = Some(hash);
+            s.raid = build();
+        }
+    });
+}
+
+/// Whether the server's buff window (`pet`: the pet's effects) has sent a set in this world. While the window is
+/// not on, `at` is noted; a set has come when `at` differs from it (or, with nothing noted, is not 0).
+pub(crate) fn set_arrived(pet: bool, window_on: bool, at: u32) -> bool {
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        let base = if pet { &mut s.pet_baseline } else { &mut s.buffs_baseline };
+        if !window_on {
+            *base = Some(at);
+            return false;
+        }
+        match *base {
+            Some(b) => at != b,
+            None => at != 0,
+        }
+    })
 }
 
 fn raid_json(raid: &[RaidRole]) -> Json {

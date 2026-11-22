@@ -248,6 +248,81 @@ fn a3_a_set_that_came_earlier_is_counted_from_when_it_came_not_from_when_a_mod_f
     .unwrap();
 }
 
+#[test]
+fn a3_after_zoning_buffs_and_pet_effects_are_unavailable_until_the_new_zones_set_arrives() {
+    let (mut p, h) = world();
+    buffs_on(&mut p, vec![line(0, true, 1, 11, 60_000, "Ward")]);
+    p.session.pet_effects_offer = true;
+    p.session.agree_pet_effects(true);
+    p.session.pet_effects = vec![PetEffect { icon: 21, left_ms: 30_000, name: "Rage".into() }];
+    p.session.pet_effects_at = p.session.now().max(1);
+    frame(&p, &h);
+    h.execute("assert(#eqoa.effects.buffs() == 1 and #eqoa.effects.pet() == 1)").unwrap();
+    // zoning to another server: the session clears the sets and the offers and keeps `buffs_at` and `pet_effects_at`
+    p.session.buffs_offer = false;
+    p.session.buffs.clear();
+    p.session.pet_effects_offer = false;
+    p.session.pet_effects.clear();
+    frame(&p, &h);
+    h.execute("local b, e = eqoa.effects.buffs(); assert(b == nil and e.code == 'unavailable'); local q, e2 = eqoa.effects.pet(); assert(q == nil and e2.code == 'unavailable')").unwrap();
+    // the new server offers the windows again and has not sent a set yet: still unavailable, not an empty list
+    p.session.buffs_offer = true;
+    p.session.pet_effects_offer = true;
+    p.session.agree_pet_effects(false);
+    p.session.agree_pet_effects(true);
+    frame(&p, &h);
+    h.execute("local b, e = eqoa.effects.buffs(); assert(b == nil and e.code == 'unavailable', tostring(b and #b)); local q, e2 = eqoa.effects.pet(); assert(q == nil and e2.code == 'unavailable', tostring(q and #q))").unwrap();
+    // its first set arrives: now there is a list
+    p.session.buffs = vec![line(0, true, 2, 12, 20_000, "New")];
+    p.session.buffs_at = p.session.buffs_at.wrapping_add(7);
+    p.session.pet_effects = vec![PetEffect { icon: 22, left_ms: 10_000, name: "Calm".into() }];
+    p.session.pet_effects_at = p.session.pet_effects_at.wrapping_add(7);
+    frame(&p, &h);
+    h.execute("local b = eqoa.effects.buffs(); assert(#b == 1 and b[1].name == 'New'); local q = eqoa.effects.pet(); assert(#q == 1 and q[1].name == 'Calm')").unwrap();
+}
+
+#[test]
+fn a3_a_frame_where_nothing_changed_builds_and_allocates_nothing() {
+    use crate::fork_ext::addons::perf_alloc::measure;
+    let (mut p, h) = world();
+    p.entities.slots[1] = player_entity(0x2001, "Mira");
+    p.target = 0x2001;
+    p.target_info = Some(4);
+    p.rings.con = Some(1);
+    p.target_title = "Warlord".into();
+    p.target_guild = "Iron Tide".into();
+    buffs_on(&mut p, vec![line(0, true, 1, 11, 600_000, "Ward"), line(1, false, 77, 12, net::buffs::NO_END, "Plague")]);
+    p.session.pet_effects_offer = true;
+    p.session.agree_pet_effects(true);
+    p.session.pet_effects = vec![PetEffect { icon: 21, left_ms: 600_000, name: "Rage".into() }];
+    p.session.pet_effects_at = p.session.now().max(1);
+    p.session.quest_progress_offer = true;
+    p.session.quest_progress =
+        vec![TrackedQuest { name: "Bat Eyes".into(), ability: false, goals: vec![QuestGoal { text: "Bat eyes".into(), have: 1, need: 5 }] }];
+    p.group.raid = vec![RaidMember { id: 11, name: "Tanky".into(), class: 0, group: 1, ..Default::default() }];
+    frame(&p, &h);
+    apply(&p, cast_packet(0x2001, 0x100, 9000, 0xCC));
+    frame(&p, &h);
+    frame(&p, &h);
+    // steady frames: the same buffs, goals, target, raid and a cast running
+    let (_, _, allocations, _) = measure(|| {
+        for _ in 0..20 {
+            a3::refresh(&p, None);
+        }
+    });
+    assert_eq!(allocations, 0, "twenty frames of nothing new allocate nothing");
+    // control: the meter sees the rebuilds when the source changes (the target's title, a goal, a buff set)
+    p.target_title = "Champion".into();
+    let (_, _, rebuilt, _) = measure(|| a3::refresh(&p, None));
+    assert!(rebuilt > 0, "a changed target is rebuilt");
+    p.session.quest_progress[0].goals[0].have = 2;
+    let (_, _, rebuilt, _) = measure(|| a3::refresh(&p, None));
+    assert!(rebuilt > 0, "a changed goal is rebuilt");
+    p.session.buffs_at += 1;
+    let (_, _, rebuilt, _) = measure(|| a3::refresh(&p, None));
+    assert!(rebuilt > 0, "a re-sent set is read again");
+}
+
 // ---- pet effects ------------------------------------------------------------------------------------------------
 
 #[test]
@@ -699,6 +774,28 @@ fn a3_pet_attack_and_back_off_send_the_pet_command_and_refuse_without_a_pet_or_a
     act(&mut p, &h, "eqoa.actions.pet_attack()");
     h.execute("local r = results[#results]; assert(r.state == 'refused' and r.code == 'not_ready')").unwrap();
     assert_eq!(sent_op(&p, 0x0041).len(), 2);
+}
+
+#[test]
+fn a3_pet_attack_refuses_target_zero_and_remove_effect_re_checks_the_buff_window_when_it_runs() {
+    let (mut p, h) = world();
+    p.pet_id = 0x3001;
+    p.target = 0;
+    act(&mut p, &h, "eqoa.actions.pet_attack()");
+    h.execute("local r = results[#results]; assert(r.state == 'refused' and r.code == 'not_ready', tostring(r.code))").unwrap();
+    assert!(sent_op(&p, 0x0041).is_empty());
+
+    buffs_on(&mut p, vec![line(0, true, 9304, 11, 60_000, "Dark Ward")]);
+    frame(&p, &h);
+    h.execute("req = eqoa.actions.remove_effect(eqoa.effects.buffs()[1].ref); assert(req ~= nil)").unwrap();
+    // Buff Window is turned off before the game step that would send it
+    let mut c = crate::settings::client();
+    c.buff_window = false;
+    crate::settings::set_client(c);
+    super::super::begin_iteration(&mut p, true);
+    native_events::dispatch(&h).unwrap();
+    h.execute("local r = results[#results]; assert(r.state == 'refused' and r.code == 'unavailable', tostring(r.code))").unwrap();
+    assert!(sent_op(&p, net::buffs::OP_BUFF_REMOVE).is_empty(), "nothing was sent");
 }
 
 #[test]

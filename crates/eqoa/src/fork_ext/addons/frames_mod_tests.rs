@@ -86,7 +86,7 @@ fn fixture() {
         ]
     });
     native_a3::sync_pet(true, 5, || vec![PetLine { icon: 21, name: "Rage".into(), ends_tick: 900 }]);
-    native_a3::set_target(json!({"id": 8193, "title": "Warlord", "guild": "Iron Tide", "consider": {
+    native_a3::set_target(1, || json!({"id": 8193, "title": "Warlord", "guild": "Iron Tide", "consider": {
         "code": 3, "name": "blue", "color": {"r": 0.0, "g": 0.0, "b": 1.0, "a": 1.0}}}));
     native_a3::cast_started(256, 8193, vec![], 0xAA, 2500, true);
     native_a3::cast_started(8193, 256, vec![], 0xBB, 4000, false);
@@ -169,12 +169,31 @@ fn a3_frames_mod_loads_draws_and_raises_no_diagnostic_and_a_mod_that_is_not_run_
 }
 
 #[test]
+fn a3_frames_mod_draws_a_target_whose_consider_code_the_client_does_not_know() {
+    fixture();
+    // the server's second byte is outside the six colours: `consider` has a code and no name or colour
+    native_a3::set_target(0xA3, || json!({"id": 8193, "title": null, "guild": null, "consider": {"code": 9}}));
+    let mut context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon()).unwrap();
+    assert!(frames(&host, &bridge, &mut context, 3) > 0);
+    let logs = host.drain_logs().unwrap();
+    assert!(logs.is_empty(), "the Target window did not fail: {logs:?}");
+    // control: the colour is there for a known code and the same mod draws it
+    native_a3::set_target(0xA4, || json!({"id": 8193, "consider": {"code": 3, "name": "blue",
+        "color": {"r": 0.0, "g": 0.0, "b": 1.0, "a": 1.0}}}));
+    assert!(frames(&host, &bridge, &mut context, 2) > 0);
+    assert!(host.drain_logs().unwrap().is_empty());
+}
+
+#[test]
 fn a3_frames_mod_keeps_drawing_when_the_server_sends_no_buff_window_and_when_nothing_is_targeted() {
     fixture();
     // no buff window, no pet strip, no target, no pet
     native_a3::sync_buffs(false, 0, Vec::new);
     native_a3::sync_pet(false, 0, Vec::new);
-    native_a3::set_target(serde_json::Value::Null);
+    native_a3::set_target(2, || serde_json::Value::Null);
     CORE.with(|c| {
         let mut c = c.borrow_mut();
         c.view.player["target_id"] = serde_json::Value::Null;
