@@ -1216,7 +1216,7 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_b
     bv_r6_png(&rm_pixels(&bv.gpu, &stopped_tex), bv.win, "r6-junk-stopped.png");
     let (res, ok) = bv.result_text().unwrap();
     assert_eq!(ok, Some(false));
-    assert_eq!(res, "Sold 1 of 4: stopped");
+    assert_eq!(res, "Sold 1 junk item for 20 tunar; Sell junk stopped after 1 of 4: stopped"); // fix round 2: the real final line
 
     // Start batch for remaining 3 junk items, confirm step 1, then close merchant -> stops cleanly!
     let (bx, by, lbl2) = bv.action_hit("Sell junk (").unwrap();
@@ -1231,7 +1231,7 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_b
     bv.frames(2);
     let (res, ok) = bv.result_text().unwrap();
     assert_eq!(ok, Some(false));
-    assert_eq!(res, "Sold 1 of 3: merchant closed");
+    assert_eq!(res, "Sold 1 junk item for 20 tunar; Sell junk stopped after 1 of 3: merchant closed");
 
     // Remaining 2 junk items: start batch, confirm step 1, then zone -> stops cleanly without replay!
     bv.play.bags_open_merchant(44);
@@ -1248,7 +1248,7 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_b
     bv.frames(2);
     let (res, ok) = bv.result_text().unwrap();
     assert_eq!(ok, Some(false));
-    assert!(res.starts_with("Sold 1 of 2: zone"), "{res}");
+    assert!(res.contains("Sell junk stopped after 1 of 2: zone"), "{res}");
 
     // Corpse open: mark Rat Pelt (id 2001) as junk, switch to Corpse tab, capture r6-junk-corpse.png.
     bv.play.bags_target_corpse(5001, "a decaying skeleton");
@@ -2558,7 +2558,7 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     assert!(bv.play.bags_shop_pending(), "sell step sent silently");
     bv.play.bags_sell_confirm(7, 1);
     bv.frames(2);
-    assert_eq!(bv.result_text(), Some(("Sold 1 of 1".into(), Some(true))));
+    assert_eq!(bv.result_text(), Some(("Sold 1 junk item for 9 tunar".into(), Some(true)))); // fix round 2: the window says the tunar total
     assert!(bv.eval::<bool>("not eqoa.windows.taken('merchant')"), "Bag Viewer must release merchant takeover when batch ends");
 
     // 5. Deposit near Banker (native bank closed): click item -> Deposit -> talks & deposits silently (mode stays 0).

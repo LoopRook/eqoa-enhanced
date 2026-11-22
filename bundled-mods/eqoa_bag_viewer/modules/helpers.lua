@@ -263,7 +263,7 @@ function H.restock_plan(merch, inv)
     for _, ware in ipairs(merch.items or {}) do
         local k = mark_key(ware)
         local keep = H.keep[k]
-        if keep and not plan.limit then
+        if keep then
             plan.sells = plan.sells + 1
             local need = keep - (owned[k] or 0)
             if need > 0 then
@@ -286,8 +286,11 @@ function H.restock_plan(merch, inv)
                             cost = (eqoa.merchant.price(ware.ref, "buy", chunk) or ((unit or 0) * chunk))}
                         left = left - chunk
                     end
-                    n = n - left
-                    if left > 0 then why = why or "that is a lot to buy at once; ask again" end
+                    if left > 0 then
+                        n = n - left
+                        cost = eqoa.merchant.price(ware.ref, "buy", n) or ((unit or 0) * n)
+                        why = why or "that is a lot to buy at once; ask again"
+                    end
                     money = money - cost
                     owned[k] = (owned[k] or 0) + n
                     local used = math.min(n, room[k] or 0)
@@ -327,6 +330,7 @@ function H.restock_plan_cached()
 end
 
 function H.start_restock()
+    if B.batch_id then return false end -- before any talk: a hidden session nothing would close
     local merch = eqoa.merchant.get()
     if not merch then
         if B.nearby_npc("merchant") ~= nil then
@@ -411,6 +415,7 @@ function H.bank_count()
 end
 
 function H.start_bank()
+    if B.batch_id then return false end -- before any talk: a hidden session nothing would close
     local bank = eqoa.bank.get()
     if not (bank and bank.open) then
         if B.nearby_npc("bank") ~= nil then
@@ -445,8 +450,23 @@ end
 
 -- ---------------------------------------------------------------- the end of a batch: the line the player reads
 
--- the lines a batch ends with are said in chat; the Bag Viewer's result line keeps what bags.lua set for the batch
-local function batch_say(text, ok) return H.say(text, ok, true) end
+-- The lines a batch ends with go to the log (and chat when the client has it); the window's result line gets them all,
+-- joined into one short line, in the not-ok colour if any of them is a problem.
+local final_lines
+local function batch_say(text, ok)
+    if final_lines then final_lines[#final_lines + 1] = {text = text, ok = ok ~= false} end
+    return H.say(text, ok, true)
+end
+local function result_from(lines)
+    if #lines == 0 then return end
+    local parts, ok = {}, true
+    for _, l in ipairs(lines) do
+        parts[#parts + 1] = l.text
+        if not l.ok then ok = false end
+    end
+    B.result = {text = table.concat(parts, "; "), ok = ok}
+    B.dirty()
+end
 
 local function junk_line(done, d, quotes, skipped)
     local gained = 0
@@ -466,6 +486,14 @@ end
 -- Called by bags.lua when a helper's batch ends (`kind` is "sell", "restock" or "bank"; `d` the batch result). The Bag
 -- Viewer's own result line is set here too, so it says the same as chat.
 function H.batch_done(kind, d)
+    final_lines = {}
+    local ok_, err_ = pcall(H.batch_done_lines, kind, d)
+    local lines = final_lines
+    final_lines = nil
+    result_from(lines)
+    if not ok_ then error(err_, 0) end
+end
+function H.batch_done_lines(kind, d)
     local done = d.completed or 0
     if kind == "sell" then
         junk_line(done, d, B.batch_quotes or {}, B.batch_skipped)

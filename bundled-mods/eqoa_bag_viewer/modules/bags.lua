@@ -784,6 +784,15 @@ function M.open_talk_npc(talk_kind, verb, after_fn)
     return req, nil
 end
 
+-- The Bag Viewer closed: an unanswered talk to a merchant or banker is forgotten (its late reply neither opens the game's
+-- window nor runs the step); a corpse open is left to the caller's own rule.
+function M.drop_pending_npc_open()
+    local p = M.pending_open
+    if not p or p.kind == "loot" then return end
+    M.pending_open = nil
+    if p.req then pcall(eqoa.actions.cancel, p.req) end
+end
+
 function M.start_loot_button()
     local l = eqoa.loot.get()
     if l and l.open then
@@ -796,6 +805,8 @@ function M.start_loot_button()
 end
 
 function M.start_sell_junk()
+    -- another batch owns the merchant/bank session: refuse before anything here can release it
+    if M.batch_id then return false end
     local merch = eqoa.merchant.get()
     if not merch then
         if M.nearby_npc("merchant") ~= nil then

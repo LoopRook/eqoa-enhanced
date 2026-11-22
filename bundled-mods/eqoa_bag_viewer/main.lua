@@ -27,6 +27,7 @@ local function close()
     for _, token in ipairs(tokens) do eqoa.events.off(token) end
     tokens = {}
     if escape then eqoa.input.release(escape); escape = nil end
+    B.drop_pending_npc_open()
     if eqoa.windows and eqoa.windows.release then
         eqoa.windows.release("merchant")
         eqoa.windows.release("bank")

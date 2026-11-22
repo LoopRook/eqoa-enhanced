@@ -180,6 +180,13 @@ fn line1_sell_junk_sells_everything_marked_gear_included_except_what_is_worn_and
     run(&lua, "batch_ends(5)");
     assert_eq!(string(&lua, "said('Sold') "), "Sold 5 junk items for 67 tunar", "12 + 20 + 25 + 5 + 5 tunar, the game's quote");
     assert_eq!(string(&lua, "said('Kept')"), "Kept 1 junk item: you are wearing it");
+    // the window's result line (what the player reads: `eqoa/1` has no chat line) carries the real final line, not "Sold 5 of 5"
+    assert_eq!(
+        string(&lua, "B.result.text"),
+        "Sold 5 junk items for 67 tunar; Kept 1 junk item: you are wearing it",
+        "fix round 2: the result line says the tunar total and the kept worn item"
+    );
+    assert!(boolean(&lua, "B.result.ok == true"));
     assert!(boolean(&lua, "RELEASED[#RELEASED] == 'merchant'"), "the hidden session ends with the batch");
     // the button counts what will really be sold
     assert_eq!(int(&lua, "select(2, B.junk_sell_list())"), 5);
@@ -191,6 +198,11 @@ fn line1_sell_junk_sells_everything_marked_gear_included_except_what_is_worn_and
     run(&bad, JUNK_PACK);
     run(&bad, "B.start_sell_junk(); open_merchant({})");
     assert_eq!(int(&bad, "#steps_of(1)"), 6, "negative control: the worn ring would be sold");
+    // negative control (fix round 2): with the result line left as bags.lua set it, the player reads "Sold 5 of 5" only
+    let bad = mutated(&[("B.result = {text = table.concat(parts, \"; \"), ok = ok}", "local _unused = 0")]);
+    run(&bad, JUNK_PACK);
+    run(&bad, "B.start_sell_junk(); open_merchant({}); batch_ends(5)");
+    assert_eq!(string(&bad, "B.result.text"), "Sold 5 of 5", "negative control: the old line stays on the window");
     // negative control: the old rule (leave quick-slotted, no-trade and non-Misc items) sells only two of them
     let old = mutated(&[("if M.is_junk(it) then
             if it.equipped then", "if M.is_junk(it) and M.sell_risk(it) == nil then
@@ -521,4 +533,165 @@ fn the_automatic_helpers_do_not_listen_to_the_world_unless_one_is_on() {
     run(&lua, "H.set_auto('bank', false)");
     assert!(!boolean(&lua, "H.any_auto()"), "turning it off again leaves nothing on");
     assert_eq!(string(&lua, "FILES['helpers.cfg']"), "", "and nothing saved");
+}
+
+const RESTOCK_SETUP: &str = r#"
+    set_pack({item(10, "Healing Potion", {q = 5, max = 20}), item(11, "Bread", {q = 12}), item(12, "Rat Pelt", {q = 1})})
+    H.keep["10"] = 20
+    BUYP.w10 = 10
+    put_npcs(3.0, nil)
+    WARES = {ware(10, "Healing Potion", 20)}
+"#;
+
+const DROP_RESULT: (&str, &str) = ("B.result = {text = table.concat(parts, \"; \"), ok = ok}", "local _unused = 0");
+
+#[test]
+fn fix2_item1_a_partial_restock_or_a_full_bank_shows_its_reason_on_the_result_line_not_a_green_bought() {
+    let lua = world();
+    run(&lua, RESTOCK_SETUP);
+    run(&lua, "MONEY = 60; H.start_restock(); open_merchant(); batch_ends(1)");
+    let text = string(&lua, "B.result.text");
+    assert!(text.contains("out of money") && text.contains("Healing Potion"), "{text}");
+    assert!(boolean(&lua, "B.result.ok == false"), "the not-ok colour, never a green 'Bought 1 of 1'");
+    // the bank
+    let lua = world();
+    run(
+        &lua,
+        r#"
+        set_pack({item(20, "Moonstone", {q = 4}), item(23, "Silk", {q = 9})})
+        H.bank["20"], H.bank["23"] = true, true
+        put_npcs(nil, 4.0)
+        BANK.items, BANK.used, BANK.remaining = {}, 0, 1
+        H.start_bank(); open_bank(); batch_ends(1)
+    "#,
+    );
+    assert_eq!(string(&lua, "B.result.text"), "Banked 1 item; The bank is full: 1 item left in your bags");
+    assert!(boolean(&lua, "B.result.ok == false"));
+    // negative control: without the joined line the window keeps "Bought 1 of 1" in green
+    let bad = mutated(&[DROP_RESULT]);
+    run(&bad, RESTOCK_SETUP);
+    run(&bad, "MONEY = 60; H.start_restock(); open_merchant(); batch_ends(1)");
+    assert_eq!(string(&bad, "B.result.text"), "Bought 1 of 1");
+    assert!(boolean(&bad, "B.result.ok == true"), "negative control: green, with the reason missing");
+}
+
+#[test]
+fn fix2_item2a_sell_junk_during_another_batch_refuses_and_leaves_that_batchs_session_alone() {
+    let run_it = |lua: &Lua| {
+        run(lua, JUNK_PACK);
+        run(lua, "B.start_sell_junk(); open_merchant({})"); // a Sell junk batch is running (merchant session held)
+        run(lua, "N_RELEASED, N_BATCHES = #RELEASED, #BATCHES; RESULT = B.start_sell_junk()");
+    };
+    let lua = world();
+    run_it(&lua);
+    assert!(!boolean(&lua, "RESULT"), "the second click is refused");
+    assert_eq!(int(&lua, "#RELEASED - N_RELEASED"), 0, "the running batch's merchant session is not released");
+    assert_eq!(int(&lua, "#BATCHES - N_BATCHES"), 0, "no second batch");
+    assert!(boolean(&lua, "TAKEN.merchant == true"));
+    // negative control: without the guard the second click starts another batch over the running one
+    let bad = mutated(&[(
+        "    if M.batch_id then return false end\n    local merch = eqoa.merchant.get()",
+        "    local merch = eqoa.merchant.get()",
+    )]);
+    run_it(&bad);
+    assert_eq!(int(&bad, "#BATCHES - N_BATCHES"), 1, "negative control: a second batch is started");
+}
+
+#[test]
+fn fix2_item2b_restock_and_bank_marked_during_another_batch_never_talk_or_open_a_hidden_session() {
+    let setup = r#"
+        set_pack({item(10, "Healing Potion", {q = 5}), item(20, "Moonstone")})
+        H.keep["10"] = 20; H.bank["20"] = true
+        put_npcs(3.0, 4.0)
+        B.batch_id, B.batch_kind = "loot-batch", "loot"
+    "#;
+    let lua = world();
+    run(&lua, setup);
+    run(&lua, "RES = {H.start_restock(), H.start_bank()}");
+    assert!(!boolean(&lua, "RES[1] or RES[2]"));
+    assert_eq!(int(&lua, "#TALKS + #TAKEOVERS"), 0, "nothing is talked to or held while the other batch runs");
+    assert!(boolean(&lua, "B.pending_open == nil"));
+    // negative control: with the checks after the talk, both talk and hold a session nothing would close
+    let bad = mutated(&[
+        (
+            "    if B.batch_id then return false end -- before any talk: a hidden session nothing would close\n    local merch",
+            "    local merch",
+        ),
+        (
+            "    if B.batch_id then return false end -- before any talk: a hidden session nothing would close\n    local bank",
+            "    local bank",
+        ),
+    ]);
+    run(&bad, setup);
+    run(&bad, "H.start_restock(); B.pending_open = nil; H.start_bank()");
+    assert_eq!(int(&bad, "#TALKS"), 2, "negative control: both talk");
+}
+
+#[test]
+fn fix2_item2c_closing_the_bag_viewer_forgets_a_pending_talk_so_a_late_reply_does_nothing() {
+    let main = source("eqoa_bag_viewer/main.lua");
+    let drop_at = main.find("B.drop_pending_npc_open()").expect("close() drops the pending talk");
+    let release_at = main.find("eqoa.windows.release(\"merchant\")").unwrap();
+    assert!(drop_at < release_at, "the pending talk is cleared before the sessions are released");
+    let flow = r#"
+        set_pack({item(10, "Healing Potion", {q = 5}), item(20, "Moonstone")})
+        H.keep["10"] = 20
+        put_npcs(3.0, nil)
+        H.start_restock()                    -- talk sent, the reply not here yet
+        PENDING_BEFORE = B.pending_open ~= nil
+        B.drop_pending_npc_open()            -- what close() does first
+        eqoa.windows.release("merchant")
+        open_merchant({ware(10, "Healing Potion", 20)}) -- the late reply
+    "#;
+    let lua = world();
+    run(&lua, flow);
+    assert!(boolean(&lua, "PENDING_BEFORE"));
+    assert!(boolean(&lua, "B.pending_open == nil"));
+    assert_eq!(int(&lua, "#BATCHES"), 0, "the late reply does not run the restock step");
+    // negative control: without the clearing the late reply runs the step
+    let bad = mutated(&[("if not p or p.kind == \"loot\" then return end", "do return end")]);
+    run(&bad, flow);
+    assert_eq!(int(&bad, "#BATCHES"), 1, "negative control: the step runs after the window was closed");
+}
+
+#[test]
+fn fix2_item3_one_ware_that_cannot_be_bought_does_not_stop_the_others_and_a_cut_plan_costs_what_it_buys() {
+    let setup = r#"
+        set_pack({item(12, "Rat Pelt", {q = 1})})
+        H.keep["10"], H.keep["11"] = 20, 5
+        BUYP.w10, BUYP.w11 = 100, 10          -- potions cost more than the money; bread does not
+        MONEY = 60
+        WARES = {ware(10, "Healing Potion", 20), ware(11, "Bread", 20)}
+        PLAN = H.restock_plan({items = WARES}, eqoa.inventory.get())
+    "#;
+    let lua = world();
+    run(&lua, setup);
+    assert_eq!(int(&lua, "#PLAN.steps"), 1, "the bread is still planned");
+    assert_eq!(string(&lua, "PLAN.steps[1].item"), "w11");
+    assert_eq!(string(&lua, "table.concat(PLAN.short, ',')"), "Healing Potion");
+    assert_eq!(string(&lua, "PLAN.limit"), "out of money");
+    // negative control: stopping at the first limit drops the bread
+    let bad = mutated(&[("        if keep then\n", "        if keep and not plan.limit then\n")]);
+    run(&bad, setup);
+    assert_eq!(int(&bad, "#PLAN.steps"), 0, "negative control: the later ware is never planned");
+
+    // a plan cut at 64 steps is costed for the 64 it keeps
+    let cut = r#"
+        set_pack({item(12, "Rat Pelt", {q = 1})})
+        CAPACITY, MONEY = 500, 100000
+        H.keep["10"] = 70
+        BUYP.w10 = 10
+        PLAN = H.restock_plan({items = {ware(10, "Arrow", 1)}}, eqoa.inventory.get())
+    "#;
+    let lua = world();
+    run(&lua, cut);
+    assert_eq!(int(&lua, "#PLAN.steps"), 64);
+    assert_eq!(int(&lua, "PLAN.total"), 64);
+    assert_eq!(int(&lua, "PLAN.cost"), 640, "64 arrows at 10, not 70");
+    let bad = mutated(&[(
+        "                        cost = eqoa.merchant.price(ware.ref, \"buy\", n) or ((unit or 0) * n)\n",
+        "",
+    )]);
+    run(&bad, cut);
+    assert_eq!(int(&bad, "PLAN.cost"), 700, "negative control: the unclipped cost");
 }
