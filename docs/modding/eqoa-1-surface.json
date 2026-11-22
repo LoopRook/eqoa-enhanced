@@ -1870,9 +1870,11 @@
         "eqoa.actions.equip",
         "eqoa.actions.follow",
         "eqoa.actions.group_invite",
+        "eqoa.actions.hide_look",
         "eqoa.actions.input_text",
         "eqoa.actions.interact",
         "eqoa.actions.jump",
+        "eqoa.actions.link_item",
         "eqoa.actions.look",
         "eqoa.actions.loot",
         "eqoa.actions.loot_abandon",
@@ -2311,10 +2313,10 @@
     {
       "children": [],
       "path": "eqoa.actions.destroy",
-      "reason": "excluded until after the upstream PR by the mod API plan",
-      "revision": 0,
-      "round": null,
-      "status": "unsupported"
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
     },
     {
       "children": [],
@@ -2327,10 +2329,10 @@
     {
       "children": [],
       "path": "eqoa.actions.drop_quest",
-      "reason": "the game asks the player to confirm this step; a mod cannot take it until the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer",
-      "revision": 0,
+      "reason": null,
+      "revision": 1,
       "round": 6,
-      "status": "not_yet"
+      "status": "supported"
     },
     {
       "children": [],
@@ -2366,6 +2368,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.actions.hide_look",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.actions.input_text",
       "reason": null,
       "revision": 1,
@@ -2386,6 +2396,14 @@
       "reason": null,
       "revision": 1,
       "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.link_item",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
       "status": "supported"
     },
     {
@@ -4847,6 +4865,54 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.confirm.closed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.confirm.closed.data.answer",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.confirm.closed.data.confirm",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.confirm.closed.data.detail",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.confirm.closed.data.kind",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.confirm.closed.data.owner",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.cooldown.ended",
       "reason": null,
       "revision": 1,
@@ -6019,6 +6085,118 @@
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.windows.key",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.windows.key.data.down",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.windows.key.data.key",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.windows.key.data.owner",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.windows.key.data.ref",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.windows.session",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.windows.session.data.kind",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.windows.session.data.opened_from",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.windows.session.data.origin",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.windows.session.data.owner",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.windows.session.data.phase",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.windows.session.data.reason",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.windows.session.data.ref",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.windows.session.data.revision",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -13228,17 +13406,26 @@
     {
       "children": [
         "eqoa.windows.ButtonHint",
+        "eqoa.windows.Confirm",
         "eqoa.windows.Dialog",
         "eqoa.windows.MenuRow",
+        "eqoa.windows.Session",
         "eqoa.windows.Window",
         "eqoa.windows.Windows",
+        "eqoa.windows.close_session",
+        "eqoa.windows.confirm",
         "eqoa.windows.find",
+        "eqoa.windows.focus",
         "eqoa.windows.format_hint",
         "eqoa.windows.get",
         "eqoa.windows.get_window",
         "eqoa.windows.open",
+        "eqoa.windows.open_session",
         "eqoa.windows.parse_hint",
+        "eqoa.windows.pass",
         "eqoa.windows.release",
+        "eqoa.windows.release_focus",
+        "eqoa.windows.session",
         "eqoa.windows.taken",
         "eqoa.windows.takeover"
       ],
@@ -13273,6 +13460,42 @@
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.windows.Confirm.id",
+        "eqoa.windows.Confirm.kind",
+        "eqoa.windows.Confirm.text"
+      ],
+      "path": "eqoa.windows.Confirm",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.Confirm.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.Confirm.kind",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.Confirm.text",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -13435,6 +13658,78 @@
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.windows.Session.focused",
+        "eqoa.windows.Session.kind",
+        "eqoa.windows.Session.opened_from",
+        "eqoa.windows.Session.origin",
+        "eqoa.windows.Session.ref",
+        "eqoa.windows.Session.revision",
+        "eqoa.windows.Session.title"
+      ],
+      "path": "eqoa.windows.Session",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.Session.focused",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.Session.kind",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.Session.opened_from",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.Session.origin",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.Session.ref",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.Session.revision",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.Session.title",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -13628,10 +13923,34 @@
     },
     {
       "children": [],
+      "path": "eqoa.windows.close_session",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.confirm",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.windows.find",
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.focus",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
       "status": "supported"
     },
     {
@@ -13668,6 +13987,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.windows.open_session",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.windows.parse_hint",
       "reason": null,
       "revision": 1,
@@ -13676,10 +14003,34 @@
     },
     {
       "children": [],
+      "path": "eqoa.windows.pass",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.windows.release",
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.release_focus",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.session",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
       "status": "supported"
     },
     {
