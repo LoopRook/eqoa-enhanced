@@ -371,6 +371,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Chan
             item_cause: None,
         };
     }
+    a3::note_event(play, event);
     let kind = updates::kind(play, event);
     let before = updates::fingerprint(play, kind);
     CORE.with(|c| {
@@ -482,6 +483,11 @@ pub(super) mod updates;
 pub(super) mod items;
 #[path = "r6a_capture.rs"]
 pub(super) mod r6a;
+#[path = "a3_capture.rs"]
+pub(crate) mod a3;
+#[cfg(test)]
+#[path = "a3_tests.rs"]
+mod a3_tests;
 #[cfg(test)]
 #[path = "items_tests.rs"]
 mod items_tests;

@@ -211,6 +211,9 @@ Every event is an `Event = {name:string, seq:uint, time:number, tick:uint, frame
 | `abilities.changed`, `hotbar.changed` | `{before, after, changed}` with lists of `Ability` / `Hotbar` | |
 | `cooldown.started`, `cooldown.updated`, `cooldown.ended` | `{ability:AbilityRef?, ability_id:Id?, display_key:uint, lockout:number}` | An ability's lockout went from zero to a value, changed value, or returned to zero. |
 | `effects.changed` | `{before:Effect[]?, after:Effect[]?, changed:{"records"}}` | |
+| `buffs.changed` | `{before:Buff[]?, after:Buff[]?, changed:{"records"}}` | The buff window's set came, lost or gained a line, or a line's time ran out (section 4, "Frames"). A re-sent set with the same lines is not a change. |
+| `cast.started`, `cast.ended` | `{caster_id:uint, caster:EntityRef?, target_id:uint?, targets:uint[], effect:uint, duration:number, own:bool}`; `cast.ended` adds `reason:string` | A cast was announced; it ended (section 4, "Frames"). |
+| `quests.goals_changed` | `{before:QuestGoals[]?, after:QuestGoals[]?, changed:{"records"}}` | The quest tracker's goals changed (section 4, "Frames"). |
 | `chat.message` | a `ChatMessage` (§4) | A line arrived in chat. |
 | `chat.history_scroll` | `{active:bool, steps:int}` | The player pressed the chat-history keys while the game's own chat window is hidden; a mod that draws chat scrolls by `steps`. |
 | `combat.hit` | a `CombatHit` (§4) | |
@@ -312,6 +315,33 @@ These functions read the client's own state. They need no capability. Unless a r
 `Hotbar = {index:uint, kind:string, selected:bool, selected_slot:uint?, slots:HotbarSlot[]}`; `kind` is `"abilities"`, `"items"` or `"weapon_sets"`. `HotbarSlot = {index:uint, kind:string, ability:AbilityRef?, item:ItemRef?, weapon_set:uint?, ui_icon:uint?}`; `kind` is `"empty"`, `"ability"`, `"item"`, `"weapon_set"` or `"command"`. `index` values are 1-based. (`HotbarSlot.command` and `HotbarSlot.icon` are declared `unsupported`: the game's bars do not expose a command's text; use `ui_icon` or the ability's or item's own icon.)
 
 `Effect = {index:uint, icon:uint?, name:string}`. `index` is the 1-based slot and changes when effects shift. The server sends no duration, caster or stack count.
+
+### Frames: effects with time left, casts, goals and more (round A3)
+
+What a unit-frame mod needs and the client already holds. Everything here is read-only, needs no capability and, unless a row says otherwise, answers `not_in_world` outside the world. Times are seconds counted on the game's 30 Hz clock (`Client.tick`), never on frames drawn.
+
+| Function | Returns |
+|---|---|
+| `eqoa.effects.buffs()` | `Buff[]`: the buff window's set, the player's effects first and then the pet's, each with its time left. `unavailable` when the server sends no buff window, when **Buff Window** is off in the player's Options, and before the first set has arrived. An empty list means no effects. The game's own effects strip is `eqoa.effects.list()`, which has no times. |
+| `eqoa.effects.pet()` | `PetEffect[]`: the pet's effects strip, from servers that send it (**Pet Effects** on in Options). `unavailable` otherwise. With the buff window on, the pet's effects are also lines of `eqoa.effects.buffs()`. |
+| `eqoa.casts.list()` | `Cast[]`: the casts in progress that the server announced, yours, other players' and monsters'. |
+| `eqoa.casts.get(who)` | The `Cast` of that caster (an `EntityRef` or an entity id), or `nil, nil` when it is not casting. |
+| `eqoa.quests.goals()` | `QuestGoals[]`: the quest tracker's goals. `unavailable` unless the server sends them and **Quest Tracker** is on in Options. |
+| `eqoa.player.training()` | `Training`: your training points. |
+| `eqoa.player.breath()` | `Breath`: the breath gauge. |
+| `eqoa.target.info()` | `TargetInfo` for the current target, or `nil, nil` with no target. |
+| `eqoa.group.raid_roles()` | `RaidRole[]`: every member of the raid list with its group, role and marks. Empty outside a raid. |
+
+- `Buff = {index:uint, whose:string, name:string, icon:uint, spell_id:uint?, time_left:number?, removable:bool, ref:BuffRef}`. `whose` is `"player"` or `"pet"`. `time_left` is nil where the server keeps no end for the effect. `removable` is the server's word that the player may take it off (it only allows beneficial effects). `spell_id` is nil where the server names no spell. A `BuffRef` goes stale when the list changes (a line comes, goes, or its time runs out) and with the world; `eqoa.actions.remove_effect` takes one (section 8).
+- `PetEffect = {index:uint, name:string, icon:uint, time_left:number}`.
+- `Cast = {caster_id:uint, caster:EntityRef?, target_id:uint?, targets:uint[], effect:uint, duration:number, remaining:number, fraction:number, own:bool}`. `effect` is the game's effect id; `duration` and `remaining` are seconds, `fraction` is how much of it has passed (0..1). `own` is true for the player's own cast. **What the client is told**: a cast's start and its length. It is not told when a cast is interrupted, resisted or lands, and it does not tell the cast's ability from the effect. So a cast ends in the client's records when its time is up, when the caster begins another, when the caster leaves view, or when the player dies; `fraction` is a clock, not a result. A cast with no time (`duration` 0) is announced and not listed.
+- `QuestGoals = {title:string, ability:bool, quest:QuestRef?, goals:QuestGoal[]}` and `QuestGoal = {text:string, have:uint, need:uint, done:bool}`. `need` is 0 for a thing to do with nothing to count (`done` is then false). `quest` is the journal's entry with the same title, or nil. The journal itself (`eqoa.quests.list`) still holds titles only.
+- `Training = {points:int, stat_cap:int}`: the points the Character Summary's trainer spends, and the cap it holds each stat under. Zero points is a real value.
+- `Breath = {fraction:number, underwater:bool?}`: the server's breath value as 0..1 (the game draws the gauge only under water). `underwater` is nil when the client has no body to ask.
+- `TargetInfo = {id:uint, title:string?, guild:string?, consider:Consider?}` and `Consider = {code:int, name:string?, color:Color?}`. The title and guild are the server's words for a player target and come with the server's description of the target (nil before it arrives, and for targets that have none). `consider` is the colour the game's own target ring takes: `name` is `"red"`, `"yellow"`, `"grey"`, `"blue"`, `"light_blue"` or `"green"` for codes 0 to 5 (`name` and `color` are nil for a code the client does not know), and nil entirely before the server has described the target. Where the colours fall on levels is the server's decision.
+- `RaidRole = {id:uint, name:string, group:uint?, role:string, class_id:int, leader:bool, helper:bool, main_assist:bool, merc:bool}`. `group` is the member's group in the raid from 1, nil where the server sends none. `role` is `"tank"` (Warrior, Paladin, Shadow Knight), `"healer"` (Druid, Shaman, Cleric), `"damage"` (every other class) or `"merc"` for a mercenary, as the raid list's icons name them. The three flags are the raid's marks and need a server that sends the raid's state (all false otherwise). This is a read only; the raid's commands are not part of `eqoa/1` yet.
+
+`cast.started` and `cast.ended` carry the fields of a `Cast` that are known then (`ended` adds `reason`: `"elapsed"`, `"replaced"`, `"gone"` or `"dead"`). A caster that begins a second cast first produces `cast.ended` with `"replaced"` for the old one. `buffs.changed` and `quests.goals_changed` carry whole lists as the other `changed` events do.
 
 ### Chat and combat
 
@@ -603,7 +633,7 @@ When `loot.changed` reports a corpse window going (`cause = "close"`) it also ca
 | `eqoa.quests.list()` | `Quest[]`: the journal's titles in the game's order, at most eight (the game's journal holds eight; were the client ever to hold more, the list stops at eight and the Forge quest log reports itself unavailable). `Quest = {ref:QuestRef, index:uint, title:string}`. |
 | `eqoa.quests.get(ref:QuestRef)` | That `Quest`, or `stale_handle`. |
 
-The server sends titles only: there are no objective or progress fields. Every `QuestRef` goes stale when the journal changes. `quests.changed` carries `{before:Quest[]?, after:Quest[]?, changed:{"records"}}`.
+The journal holds titles only: there are no objective or progress fields in `Quest`. Where the server sends the quest tracker, `eqoa.quests.goals()` (section 4, "Frames") has the goals with how many the player has. Every `QuestRef` goes stale when the journal changes. `quests.changed` carries `{before:Quest[]?, after:Quest[]?, changed:{"records"}}`.
 
 ### Class Mastery
 
@@ -890,6 +920,13 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 | `eqoa.actions.dialog_answer(window, option:uint)` | Answers a dialog: the 1-based position in `Dialog.options` for a text dialog (1 for its single Done), or 1 or 2 for a confirm (§7 `Dialog`). Accepting a game Yes/No box is allowed only for the prompts listed below ("The game's confirmations cannot be skipped"); declining always is. |
 | `eqoa.actions.menu_command(window, command:string)` | Runs a command that an enabled row of that window offers (`MenuRow.command`, for example `"loot.take_all"`). Any other string is `unsupported`. |
 | `eqoa.actions.input_text(window, text:string, submit:bool=false)` | Types into the game's open text box; see "Text boxes" below. |
+| `eqoa.actions.group_invite()` | Invites the current target to your group, as the start menu's Invite does. The game's own checks come first and refuse with `not_ready` (no target, the target is not a player or cannot be invited, only the leader may invite, already a member), `not_found` (not in view) or `invalid_argument` (yourself). |
+| `eqoa.actions.pet_attack()`, `eqoa.actions.pet_back_off()` | Send your pet in on your target, or call it off, as the start menu's Pet Attack and Pet Backoff do. `not_ready` without a pet; attacking also needs a target other than yourself or the pet. The game has further pet commands and a dismissal; they are not part of `eqoa/1` yet. |
+| `eqoa.actions.emote(name:string)` | One of the game's four emotes, by name: `"wave"`, `"bow"`, `"point"` or `"cheer"` (any letter case); anything else is `invalid_argument` at the call. `completed` once the emote was sent; `detail.emote` names it. |
+| `eqoa.actions.jump()` | Asks the walk for a jump, as the jump key does. `unsupported` on a server that does not offer jumping (the reference server's does not). The walk takes the jump at the first game step that allows one within about a third of a second (on the ground, not swimming or flying) and otherwise lets the request go; a mod that wants to know reads `Player.velocity`. |
+| `eqoa.actions.remove_effect(buff:BuffRef)` | Takes one of your removable effects off, as a long press on it does in the game's buff window. `buff` comes from `eqoa.effects.buffs()`; one that is not removable is `not_ready` at the call and a reference that went stale is `stale_handle`. |
+
+The A3 actions above report what the client did, never what happened next: `completed` with `detail.sent = true` and `detail.confirmed = false` (for `jump`, `detail.asked = true`) means the request was sent; the other player's answer to an invitation, the pet's response, the server's resent buff list (`buffs.changed`) and the take-off are separate facts a mod watches for (`group.changed`, `entity.changed`, `buffs.changed`). `remove_effect` re-checks the line when it runs and refuses with `stale_handle` when the effect is gone by then. Like every action they need the character alive and the game in plain play.
 
 **Not available:**
 
@@ -1100,9 +1137,10 @@ Two older Enhanced extensions are kept as permanent aliases, with their old shap
 | 5 | Items: `eqoa.inventory`, `eqoa.bank`, `eqoa.loot`, `eqoa.merchant`, `eqoa.items`, `eqoa.gems` and their events. |
 | 6 | Actions and the rest of the game's state: `eqoa.actions` and batches, `eqoa.quests`, `eqoa.mastery`, `eqoa.camera`, `eqoa.windows` and window takeover, class and disposition icons. (Round 6.5, counted as 6: declared capabilities for acting, takeover scopes, `open_loot`, `talk`, `Entity.npc_flags`.) |
 | 7 | The finish before the freeze: `eqoa.files.list`, the player's waypoint (`eqoa.map.set_waypoint`, `eqoa.map.clear_waypoint`, `eqoa.map.waypoint`), the `combo` field of `input.key` and the key rules of §10, the manifest's `replaces` and the labels shown to the player, the rule that a slash line needs `eqoa.actions.command`, and the generated support table. |
+| 8 | The A rounds of the UI plan. A3 (frame data): effects with time left (`eqoa.effects.buffs`, `pet`), casts (`eqoa.casts`, `cast.started`, `cast.ended`), quest goals, training points, breath, target title and consider colour, raid roles; the actions `group_invite`, `pet_attack`, `pet_back_off`, `emote`, `jump`, `remove_effect`. |
 
 ## 13. What the client cannot give
 
-The client can only report what the server sends it. There is no list of everything in a zone, only what is in view; no health, disposition or target for entities it has not been told about; no duration, stack count or caster for effects; no quest objectives or progress, only titles; no exact time remaining on a cooldown, only the lockout and the client's own estimate. Such things are nil, never guessed.
+The client can only report what the server sends it. There is no list of everything in a zone, only what is in view; no health, disposition or target for entities it has not been told about; no stack count or caster for effects, and a duration only where the server sends the buff window or the pet's effects; no quest objectives or progress except through the quest tracker where the server sends it (the journal holds titles); no word of a cast being interrupted or landing; no exact time remaining on a cooldown, only the lockout and the client's own estimate. Such things are nil, never guessed.
 
 There is no access to the game's memory, no FFI, no packet API. Mods do not run in the browser build. Automation is allowed, but there is no route-finding: a mod that wants to navigate has only positions and, once built, the movement controls of §8.
