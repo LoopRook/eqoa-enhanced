@@ -1866,10 +1866,13 @@
         "eqoa.actions.destroy",
         "eqoa.actions.dialog_answer",
         "eqoa.actions.drop_quest",
+        "eqoa.actions.emote",
         "eqoa.actions.equip",
         "eqoa.actions.follow",
+        "eqoa.actions.group_invite",
         "eqoa.actions.input_text",
         "eqoa.actions.interact",
+        "eqoa.actions.jump",
         "eqoa.actions.look",
         "eqoa.actions.loot",
         "eqoa.actions.loot_all",
@@ -1881,8 +1884,11 @@
         "eqoa.actions.move",
         "eqoa.actions.open_loot",
         "eqoa.actions.open_window",
+        "eqoa.actions.pet_attack",
+        "eqoa.actions.pet_back_off",
         "eqoa.actions.prepare_weapon_set",
         "eqoa.actions.quick_slot",
+        "eqoa.actions.remove_effect",
         "eqoa.actions.select_row",
         "eqoa.actions.sell",
         "eqoa.actions.status",
@@ -2324,6 +2330,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.actions.emote",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.actions.equip",
       "reason": null,
       "revision": 1,
@@ -2340,6 +2354,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.actions.group_invite",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.actions.input_text",
       "reason": null,
       "revision": 1,
@@ -2352,6 +2374,14 @@
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.jump",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -2444,6 +2474,22 @@
     },
     {
       "children": [],
+      "path": "eqoa.actions.pet_attack",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.pet_back_off",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.actions.prepare_weapon_set",
       "reason": null,
       "revision": 1,
@@ -2456,6 +2502,14 @@
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.remove_effect",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -2811,6 +2865,124 @@
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.casts.Cast",
+        "eqoa.casts.get",
+        "eqoa.casts.list"
+      ],
+      "path": "eqoa.casts",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.casts.Cast.caster",
+        "eqoa.casts.Cast.caster_id",
+        "eqoa.casts.Cast.duration",
+        "eqoa.casts.Cast.effect",
+        "eqoa.casts.Cast.fraction",
+        "eqoa.casts.Cast.own",
+        "eqoa.casts.Cast.remaining",
+        "eqoa.casts.Cast.target_id",
+        "eqoa.casts.Cast.targets"
+      ],
+      "path": "eqoa.casts.Cast",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.casts.Cast.caster",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.casts.Cast.caster_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.casts.Cast.duration",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.casts.Cast.effect",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.casts.Cast.fraction",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.casts.Cast.own",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.casts.Cast.remaining",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.casts.Cast.target_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.casts.Cast.targets",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.casts.get",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.casts.list",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -3271,13 +3443,98 @@
     },
     {
       "children": [
+        "eqoa.effects.Buff",
         "eqoa.effects.Effect",
-        "eqoa.effects.list"
+        "eqoa.effects.PetEffect",
+        "eqoa.effects.buffs",
+        "eqoa.effects.list",
+        "eqoa.effects.pet"
       ],
       "path": "eqoa.effects",
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.effects.Buff.icon",
+        "eqoa.effects.Buff.index",
+        "eqoa.effects.Buff.name",
+        "eqoa.effects.Buff.ref",
+        "eqoa.effects.Buff.removable",
+        "eqoa.effects.Buff.spell_id",
+        "eqoa.effects.Buff.time_left",
+        "eqoa.effects.Buff.whose"
+      ],
+      "path": "eqoa.effects.Buff",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.Buff.icon",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.Buff.index",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.Buff.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.Buff.ref",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.Buff.removable",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.Buff.spell_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.Buff.time_left",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.Buff.whose",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -3317,11 +3574,72 @@
       "status": "supported"
     },
     {
+      "children": [
+        "eqoa.effects.PetEffect.icon",
+        "eqoa.effects.PetEffect.index",
+        "eqoa.effects.PetEffect.name",
+        "eqoa.effects.PetEffect.time_left"
+      ],
+      "path": "eqoa.effects.PetEffect",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.PetEffect.icon",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.PetEffect.index",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.PetEffect.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.PetEffect.time_left",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.buffs",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
       "children": [],
       "path": "eqoa.effects.list",
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.effects.pet",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -4117,6 +4435,38 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.buffs.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.buffs.changed.data.after",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.buffs.changed.data.before",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.buffs.changed.data.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.camera.changed",
       "reason": null,
       "revision": 1,
@@ -4145,6 +4495,142 @@
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.ended",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.ended.data.caster",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.ended.data.caster_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.ended.data.duration",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.ended.data.effect",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.ended.data.own",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.ended.data.reason",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.ended.data.target_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.ended.data.targets",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.started",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.started.data.caster",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.started.data.caster_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.started.data.duration",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.started.data.effect",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.started.data.own",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.started.data.target_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.cast.started.data.targets",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -5221,6 +5707,38 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.quests.goals_changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.quests.goals_changed.data.after",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.quests.goals_changed.data.before",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.quests.goals_changed.data.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.render",
       "reason": null,
       "revision": 1,
@@ -5795,7 +6313,9 @@
         "eqoa.group.Invite",
         "eqoa.group.Member",
         "eqoa.group.RaidMember",
-        "eqoa.group.get"
+        "eqoa.group.RaidRole",
+        "eqoa.group.get",
+        "eqoa.group.raid_roles"
       ],
       "path": "eqoa.group",
       "reason": null,
@@ -6011,11 +6531,109 @@
       "status": "supported"
     },
     {
+      "children": [
+        "eqoa.group.RaidRole.class_id",
+        "eqoa.group.RaidRole.group",
+        "eqoa.group.RaidRole.helper",
+        "eqoa.group.RaidRole.id",
+        "eqoa.group.RaidRole.leader",
+        "eqoa.group.RaidRole.main_assist",
+        "eqoa.group.RaidRole.merc",
+        "eqoa.group.RaidRole.name",
+        "eqoa.group.RaidRole.role"
+      ],
+      "path": "eqoa.group.RaidRole",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.group.RaidRole.class_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.group.RaidRole.group",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.group.RaidRole.helper",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.group.RaidRole.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.group.RaidRole.leader",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.group.RaidRole.main_assist",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.group.RaidRole.merc",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.group.RaidRole.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.group.RaidRole.role",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
       "children": [],
       "path": "eqoa.group.get",
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.group.raid_roles",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -10511,16 +11129,20 @@
     {
       "children": [
         "eqoa.player.Attributes",
+        "eqoa.player.Breath",
         "eqoa.player.Location",
         "eqoa.player.Player",
         "eqoa.player.Resists",
         "eqoa.player.SevenStats",
         "eqoa.player.StatItem",
         "eqoa.player.Stats",
+        "eqoa.player.Training",
         "eqoa.player.Vital",
+        "eqoa.player.breath",
         "eqoa.player.experience_for_level",
         "eqoa.player.get",
-        "eqoa.player.stats"
+        "eqoa.player.stats",
+        "eqoa.player.training"
       ],
       "path": "eqoa.player",
       "reason": null,
@@ -10553,6 +11175,33 @@
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.player.Breath.fraction",
+        "eqoa.player.Breath.underwater"
+      ],
+      "path": "eqoa.player.Breath",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.player.Breath.fraction",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.player.Breath.underwater",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -11358,6 +12007,33 @@
     },
     {
       "children": [
+        "eqoa.player.Training.points",
+        "eqoa.player.Training.stat_cap"
+      ],
+      "path": "eqoa.player.Training",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.player.Training.points",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.player.Training.stat_cap",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
         "eqoa.player.Vital.base",
         "eqoa.player.Vital.current",
         "eqoa.player.Vital.maximum"
@@ -11394,6 +12070,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.player.breath",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.player.experience_for_level",
       "reason": null,
       "revision": 1,
@@ -11417,9 +12101,20 @@
       "status": "supported"
     },
     {
+      "children": [],
+      "path": "eqoa.player.training",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
       "children": [
         "eqoa.quests.Quest",
+        "eqoa.quests.QuestGoal",
+        "eqoa.quests.QuestGoals",
         "eqoa.quests.get",
+        "eqoa.quests.goals",
         "eqoa.quests.list"
       ],
       "path": "eqoa.quests",
@@ -11465,11 +12160,109 @@
       "status": "supported"
     },
     {
+      "children": [
+        "eqoa.quests.QuestGoal.done",
+        "eqoa.quests.QuestGoal.have",
+        "eqoa.quests.QuestGoal.need",
+        "eqoa.quests.QuestGoal.text"
+      ],
+      "path": "eqoa.quests.QuestGoal",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.quests.QuestGoal.done",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.quests.QuestGoal.have",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.quests.QuestGoal.need",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.quests.QuestGoal.text",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.quests.QuestGoals.ability",
+        "eqoa.quests.QuestGoals.goals",
+        "eqoa.quests.QuestGoals.quest",
+        "eqoa.quests.QuestGoals.title"
+      ],
+      "path": "eqoa.quests.QuestGoals",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.quests.QuestGoals.ability",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.quests.QuestGoals.goals",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.quests.QuestGoals.quest",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.quests.QuestGoals.title",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
       "children": [],
       "path": "eqoa.quests.get",
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.quests.goals",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -11598,7 +12391,10 @@
     },
     {
       "children": [
-        "eqoa.target.get"
+        "eqoa.target.Consider",
+        "eqoa.target.TargetInfo",
+        "eqoa.target.get",
+        "eqoa.target.info"
       ],
       "path": "eqoa.target",
       "reason": null,
@@ -11607,11 +12403,100 @@
       "status": "supported"
     },
     {
+      "children": [
+        "eqoa.target.Consider.code",
+        "eqoa.target.Consider.color",
+        "eqoa.target.Consider.name"
+      ],
+      "path": "eqoa.target.Consider",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.target.Consider.code",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.target.Consider.color",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.target.Consider.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.target.TargetInfo.consider",
+        "eqoa.target.TargetInfo.guild",
+        "eqoa.target.TargetInfo.id",
+        "eqoa.target.TargetInfo.title"
+      ],
+      "path": "eqoa.target.TargetInfo",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.target.TargetInfo.consider",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.target.TargetInfo.guild",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.target.TargetInfo.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.target.TargetInfo.title",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
       "children": [],
       "path": "eqoa.target.get",
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.target.info",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -15659,9 +16544,9 @@
     }
   ],
   "metadata": {
-    "client_version": "0.6.0",
+    "client_version": "0.7.0",
     "commit": "unstamped local build",
-    "generated_utc": "2026-11-21",
+    "generated_utc": "2026-11-22",
     "platform": "windows-x86_64"
   },
   "schema_version": 1

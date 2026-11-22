@@ -14,7 +14,8 @@ use net::buffs::Line;
 use net::session::{Event, PetEffect, QuestGoal, RaidMember, TrackedQuest};
 use net::stream::Writer;
 
-fn world_with(caps: &[&str]) -> (Play, Host) {
+/// The game's side alone: no mod, nothing subscribed.
+fn game() -> Play {
     crate::settings::testing::reset(false);
     CORE.with(|c| *c.borrow_mut() = Core::default());
     native_core::fixture_demand(true);
@@ -29,6 +30,11 @@ fn world_with(caps: &[&str]) -> (Play, Host) {
     ));
     // what the client sends is kept in `record`, message by message
     p.session.record = Some(Vec::new());
+    p
+}
+
+fn world_with(caps: &[&str]) -> (Play, Host) {
+    let p = game();
     let host = Host::with_test_capabilities(caps).unwrap();
     host.execute(
         r#"
@@ -493,6 +499,36 @@ fn a3_reads_say_not_in_world_outside_the_world_and_nothing_of_an_earlier_world_s
         "#,
     )
     .unwrap();
+}
+
+#[test]
+fn a3_nothing_is_captured_or_sent_while_no_mod_is_enabled() {
+    // control: with a mod wanting the state, the buffs and a cast are taken
+    {
+        let (mut p, h) = world();
+        buffs_on(&mut p, vec![line(0, true, 1, 11, 60_000, "Ward")]);
+        frame(&p, &h);
+        apply(&p, cast_packet(0x100, 0, 2500, 0xAA));
+        frame(&p, &h);
+        assert!(native_a3::STATE.with(|s| s.borrow().buffs.is_some() && s.borrow().casts.len() == 1));
+    }
+
+    // no mod enabled: the same game state and the same packet leave nothing in the mods' state and send nothing
+    let mut p = game();
+    native_core::fixture_demand(false);
+    buffs_on(&mut p, vec![line(0, true, 1, 11, 60_000, "Ward")]);
+    let before = sent(&p).len();
+    p.forge_snapshot(None);
+    apply(&p, cast_packet(0x100, 0, 2500, 0xAA));
+    native_a3::STATE.with(|s| assert!(s.borrow().casts.is_empty(), "a cast is not kept for nobody"));
+    p.forge_snapshot(None);
+    native_a3::STATE.with(|s| {
+        let s = s.borrow();
+        assert!(s.buffs.is_none() && s.pet.is_none() && s.goals.is_none() && s.casts.is_empty() && s.raid.is_empty());
+    });
+    assert_eq!(sent(&p).len(), before, "the frames code sends nothing of its own");
+    assert!(!a3::jump_pending());
+    native_core::fixture_demand(true);
 }
 
 // ---- the actions ------------------------------------------------------------------------------------------------

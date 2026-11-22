@@ -96,7 +96,13 @@ fn frames(host: &Host, bridge: &Bridge, context: &mut Context, n: usize) -> usiz
     let mut vertices = 0;
     for _ in 0..n {
         context.frame();
-        bridge.invoke(|| native_events::dispatch(host)).unwrap();
+        // the events of the frame, then the `render` event a once-mode mod draws in
+        bridge
+            .invoke(|| {
+                native_events::dispatch(host)?;
+                native_events::render(host)
+            })
+            .unwrap();
         vertices = context.render_legacy().draw_data().total_vtx_count();
     }
     vertices
@@ -152,8 +158,13 @@ fn a3_frames_mod_loads_draws_and_raises_no_diagnostic_and_a_mod_that_is_not_run_
 
     host.run_addon(&addon()).unwrap();
     let vertices = frames(&host, &bridge, &mut context, 4);
-    assert!(vertices > 0, "the Effects, Casting and Target windows are drawn");
     let logs = host.drain_logs().unwrap();
+    let probe: String = host
+        .lua
+        .load("local p, e = eqoa.player.get(); local t, e2 = eqoa.target.get(); return tostring(p) .. ' ' .. tostring(e and e.code) .. ' / ' .. tostring(t) .. ' ' .. tostring(e2 and e2.code)")
+        .eval()
+        .unwrap();
+    assert!(vertices > 0, "the Effects, Casting and Target windows are drawn: logs {logs:?}, state {probe}");
     assert!(logs.is_empty(), "no diagnostic, no log: {logs:?}");
 }
 
