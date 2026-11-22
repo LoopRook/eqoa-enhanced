@@ -733,6 +733,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.cooldowns.Cooldown.lockout` | supported | 2 |  |
 | `eqoa.cooldowns.Cooldown.started_at` | supported | 2 |  |
 | `eqoa.effects.Buff` | supported | 8 |  |
+| `eqoa.effects.Buff.description` | supported | 8 |  |
 | `eqoa.effects.Buff.icon` | supported | 8 |  |
 | `eqoa.effects.Buff.index` | supported | 8 |  |
 | `eqoa.effects.Buff.name` | supported | 8 |  |

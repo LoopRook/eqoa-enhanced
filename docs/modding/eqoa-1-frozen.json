@@ -351,6 +351,7 @@
   "eqoa.cooldowns.get",
   "eqoa.effects",
   "eqoa.effects.Buff",
+  "eqoa.effects.Buff.description",
   "eqoa.effects.Buff.icon",
   "eqoa.effects.Buff.index",
   "eqoa.effects.Buff.name",
