@@ -327,9 +327,9 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
 - **Status:** Idea. When auto-loot leaves items on a corpse because the bags are full, offer to make room, as some WoW
   bag addons do (the owner remembers OneForAll-style UIs prompting to delete things): e.g. a small prompt listing the
   cheapest junk items with "Destroy" so the loot fits. Owner answers 2026-11-22: the game has no drop, only destroy;
-  keep the game's "are you sure?" (a mod may draw it, never skip it). Blocker: `destroy` is unsupported in `eqoa/1`
-  (ui-coverage-audit.md, owner-agreed 2026-11-19 "Destroy stays unsupported"), so this needs the owner to lift that,
-  as a typed destroy action that always goes through the confirm. Earliest slot: with or after A1 (the "mod draws the
+  keep the game's "are you sure?" (a mod may draw it, never skip it). Needs a destroy action in `eqoa/1` (not there
+  today); owner 2026-11-22: destroy is supported like any irreversible step, always through the confirm
+  (ui-coverage-audit.md correction). Earliest slot: with or after A1 (the "mod draws the
   confirm" contract), i.e. after the round 8 upstream PR. Builds on the 2026-11-22 auto-loot rule: items left because
   the bags were full are taken as soon as space frees up while the player is still in reach.
 
