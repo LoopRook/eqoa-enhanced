@@ -62,7 +62,14 @@ pub(crate) fn dispatch(play: &mut Play, action: &A1Action) -> DispatchOutcome {
                 Ok(i) => i,
                 Err(e) => return e,
             };
-            play.item_outs(vec![crate::itemmenu::ItemOut::Link(idx as i32)]);
+            // the game's own Link Item: the item's link goes into the chat line (opened if it is not). It goes
+            // nowhere where the server offers no links, the line is full or already holds four
+            if !play.link_item(0, idx as i32) {
+                return refuse(
+                    "not_ready",
+                    "the item could not be linked: this server offers no item links, or the chat line has no room",
+                );
+            }
             DispatchOutcome::Completed { detail: Some(json!({"sent": true})) }
         }
         A1Action::HideLook { item, hide } => {
@@ -70,10 +77,16 @@ pub(crate) fn dispatch(play: &mut Play, action: &A1Action) -> DispatchOutcome {
                 Ok(i) => i,
                 Err(e) => return e,
             };
-            if play.dump.inventory.items[idx].equip_slot == -1 {
+            let equip_slot = play.dump.inventory.items[idx].equip_slot;
+            if equip_slot == -1 {
                 return refuse("not_ready", "only a worn item has a look to hide");
             }
-            play.item_outs(vec![crate::itemmenu::ItemOut::HideLook(idx as i32, *hide)]);
+            let slot = i32::try_from(equip_slot).unwrap_or(-1);
+            // the game's own Hide Look / Show Look: only where the server offers it and the slot has a look
+            if !(play.session.hide_look.offered && crate::hidelook::shown(slot)) {
+                return refuse("unsupported", "this server does not offer Hide Look for that item");
+            }
+            play.session.hide_look(slot, *hide);
             DispatchOutcome::Completed { detail: Some(json!({"sent": true, "hide": hide})) }
         }
     }

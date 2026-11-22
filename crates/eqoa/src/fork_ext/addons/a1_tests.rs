@@ -447,17 +447,3 @@ fn a1_the_new_bindings_leave_the_lua_ceiling_far_away() {
     eprintln!("A1 base host Lua memory: {used} bytes of {}", 8 * 1024 * 1024);
     assert!(used < 6 * 1024 * 1024, "the base host already uses {used} bytes");
 }
-
-#[test]
-fn a1_zz_probe_memory_scenario() {
-    let host = Host::new().unwrap();
-    eprintln!("PROBE start {}", host.lua.used_memory());
-    let first = host.execute("x = string.rep('x', 32 * 1024 * 1024)");
-    eprintln!("PROBE after failed rep {} err={:?}", host.lua.used_memory(), first.as_ref().err().map(|e| e.to_string()));
-    let second = host.execute("assert(package.loadlib == nil)");
-    eprintln!("PROBE assert-only {:?} mem {}", second.as_ref().err().map(|e| e.to_string()), host.lua.used_memory());
-    let third = host.execute("local u = require('frontiers_forge.util')");
-    eprintln!("PROBE require {:?} mem {}", third.as_ref().err().map(|e| e.to_string()), host.lua.used_memory());
-    let fourth = host.execute("assert(require('frontiers_forge.util').IsInGame() == 0)");
-    eprintln!("PROBE isingame {:?} mem {}", fourth.as_ref().err().map(|e| e.to_string()), host.lua.used_memory());
-}

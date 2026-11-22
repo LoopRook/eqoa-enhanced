@@ -219,8 +219,13 @@ fn a1_a_worn_item_says_so_in_the_question() {
 #[test]
 fn a1_link_item_and_hide_look_use_the_games_own_item_menu_steps() {
     let (mut p, host) = rig();
-    // hide look on a worn item: the game's own message
+    // where the server offers no Hide Look, nothing is sent (the control for the line below)
     let sent = p.session.sends_lost;
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.hide_look(inv.items[1].ref, true)");
+    host.execute("assert(results[1].ok == false and results[1].code == 'unsupported', tostring(results[1] and results[1].code))").unwrap();
+    assert_eq!(p.session.sends_lost, sent);
+    // offered: hide look on a worn item sends the game's own message
+    p.session.hide_look.offered = true;
     ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.hide_look(inv.items[1].ref, true)");
     host.execute("assert(results[1].ok == true, tostring(last_err and last_err.message) .. tostring(results[1] and results[1].reason))").unwrap();
     assert!(p.session.sends_lost > sent, "hide look went out");
@@ -229,16 +234,21 @@ fn a1_link_item_and_hide_look_use_the_games_own_item_menu_steps() {
     ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.hide_look(inv.items[2].ref, true)");
     host.execute("assert(results[1].ok == false and results[1].code == 'not_ready')").unwrap();
     assert_eq!(p.session.sends_lost, sent);
-    // link item puts the item's link in the chat line, as the item menu's Link Item does
+    // link item: refused where the server offers no item links (the control), done where it does
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.link_item(inv.items[2].ref)");
+    host.execute("assert(results[1].ok == false and results[1].code == 'not_ready', tostring(results[1] and results[1].code))").unwrap();
+    assert_ne!(p.mode, 2, "the chat line was not opened");
+    p.session.item_links_offer = true;
     ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.link_item(inv.items[2].ref)");
     host.execute("assert(results[1].ok == true, tostring(results[1] and results[1].reason))").unwrap();
+    assert_eq!(p.mode, 2, "the item's link is in the chat line, which the game opened");
 }
 
 #[test]
 fn a1_the_question_ends_as_no_on_death_zoning_and_leaving_the_world() {
     for (what, end) in [
         ("death", Box::new(|p: &mut Play| p.death = Some(crate::death::DeathCam::new([0.; 3], [0., 0., 1.], [0.; 3]))) as Box<dyn Fn(&mut Play)>),
-        ("left_world", Box::new(|p: &mut Play| { CORE.with(|c| c.borrow_mut().view.in_world = false); p.session.conn = None; })),
+        ("left_world", Box::new(|p: &mut Play| p.quit = true)),
     ] {
         let (mut p, host) = rig();
         ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.destroy(inv.items[2].ref)");
