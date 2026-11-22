@@ -1560,7 +1560,8 @@ impl BrokerState {
                             .and_then(|v| v.queued.pop_front())
                             .expect("front queued");
 
-                        let _vm_guard = DispatchVmGuard::enter(vm_id);
+                        let _vm_guard =
+                            DispatchVmGuard::enter(vm_id, self.vms.get(&vm_id).map(|v| v.addon_id.clone()));
                         match dispatch(&popped.kind) {
                             DispatchOutcome::Completed { detail } => {
                                 let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
@@ -1732,7 +1733,8 @@ impl BrokerState {
                         self.next_id = self.next_id.wrapping_add(1).max(1);
                         DISPATCH_CLAIMS.with(|c| c.set([false; 3]));
                         let outcome = {
-                            let _vm_guard = DispatchVmGuard::enter(vm_id);
+                            let _vm_guard =
+                                DispatchVmGuard::enter(vm_id, self.vms.get(&vm_id).map(|v| v.addon_id.clone()));
                             dispatch(&step_kind)
                         };
                         let used = DISPATCH_CLAIMS.with(|c| c.replace([false; 3]));
@@ -2076,20 +2078,25 @@ thread_local! {
     static CURRENT_CORPSE_TARGET: Cell<Option<u32>> = const { Cell::new(None) };
     static EXPIRED_LOOT_TIMEOUT: Cell<bool> = const { Cell::new(false) };
     static DISPATCHING_VM: Cell<Option<u64>> = const { Cell::new(None) };
+    static DISPATCHING_ADDON: RefCell<Option<String>> = const { RefCell::new(None) };
     /// Claims the action being dispatched armed (indexed by `TakeoverKind`), read back by a batch step.
     static DISPATCH_CLAIMS: Cell<[bool; 3]> = const { Cell::new([false; 3]) };
 }
 
-struct DispatchVmGuard(Option<u64>);
+struct DispatchVmGuard(Option<u64>, Option<String>);
 impl DispatchVmGuard {
-    fn enter(vm: u64) -> Self {
+    /// `addon` is the mod's id, taken by the caller from the broker it holds (the dispatch runs inside the broker's
+    /// own borrow, so nothing in it may ask the broker again).
+    fn enter(vm: u64, addon: Option<String>) -> Self {
         let prev = DISPATCHING_VM.with(|d| d.replace(Some(vm)));
-        Self(prev)
+        let prev_addon = DISPATCHING_ADDON.with(|a| a.replace(addon));
+        Self(prev, prev_addon)
     }
 }
 impl Drop for DispatchVmGuard {
     fn drop(&mut self) {
         DISPATCHING_VM.with(|d| d.set(self.0));
+        DISPATCHING_ADDON.with(|a| *a.borrow_mut() = self.1.take());
     }
 }
 
@@ -2108,8 +2115,7 @@ pub(crate) fn current_dispatch_vm() -> Option<u64> {
 
 /// The add-on id of the mod whose action is being dispatched (what a question it asks names it by).
 pub(crate) fn dispatch_addon() -> Option<String> {
-    let vm = current_dispatch_vm()?;
-    BROKER.with(|b| b.borrow().vms.get(&vm).map(|v| v.addon_id.clone()))
+    DISPATCHING_ADDON.with(|a| a.borrow().clone())
 }
 
 pub(crate) fn set_corpse_target_id(id: Option<u32>) {

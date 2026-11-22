@@ -301,11 +301,17 @@ fn a1_a_second_question_waits_and_time_running_out_is_no() {
 }
 
 #[test]
-fn a1_the_question_is_asked_only_in_plain_play_and_ends_with_the_mod_window() {
+fn a1_the_question_is_asked_only_to_a_living_player_in_the_world_and_ends_with_the_mod_window() {
     fresh();
     let act = || confirm::Act::Destroy { inv_index: 1, name: "Rock".into(), count: 1 };
-    ws::set_env(ws::Env { plain: false, ..ws::Env::default() });
+    ws::set_env(ws::Env { dead: true, ..ws::Env::default() });
     assert_eq!(confirm::open(1, "a", None, act(), "x".into(), 0).unwrap_err().0, "not_ready");
+    ws::set_env(ws::Env { away: true, ..ws::Env::default() });
+    assert_eq!(confirm::open(1, "a", None, act(), "x".into(), 0).unwrap_err().0, "not_ready");
+    // over a game window it is modal, not refused (the control: it was refused only for the two states above)
+    ws::set_env(ws::Env { plain: false, ..ws::Env::default() });
+    assert!(confirm::open(1, "a", None, act(), "x".into(), 0).is_ok());
+    confirm::cancel_all("test");
     ws::set_env(ws::Env::default());
     let h = host(SESSION_CAPS);
     h.execute("s = assert(eqoa.windows.open_session('inventory'))").unwrap();

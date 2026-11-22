@@ -8,7 +8,8 @@
 //! there is no function a mod can call to answer, to move the choice or to extend the time; a mod's synthetic input
 //! is not delivered here (`Runtime::route_key` skips synthetic key events, a click is the window system's pointer
 //! event on the client's own button). Escape, No, the time running out (`TIMEOUT`), the mod's window closing, zoning,
-//! death and the mod going away all end it as No. One question at a time; a second is refused `busy`.
+//! death and the mod going away all end it as No. One question at a time; a second is refused `busy`. It is modal:
+//! it comes over a game window too, and never to a character who is dead or out of the world.
 //!
 //! What a Yes does is the client's own, at the next step (`fork_ext/a1_play.rs`), re-checking that the item or quest
 //! is still what the question named.
@@ -83,9 +84,11 @@ pub(crate) fn open(
     text: String,
     ask_tick: u64,
 ) -> std::result::Result<u64, (&'static str, String)> {
+    // modal over whatever is up (a game window under it keeps its own keys until the player answers): never to a
+    // character who is dead or out of the world
     let env = super::window_sessions::env();
-    if env.dead || env.away || !env.plain {
-        return Err(("not_ready", "the question can only be asked in plain play".into()));
+    if env.dead || env.away {
+        return Err(("not_ready", "the question cannot be asked while dead or out of the world".into()));
     }
     STATE.with(|s| {
         let mut s = s.borrow_mut();
