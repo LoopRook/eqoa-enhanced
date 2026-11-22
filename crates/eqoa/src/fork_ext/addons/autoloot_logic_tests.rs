@@ -19,10 +19,12 @@ os.clock = function() return NOW end
 LOG, OPENS, LOOTALLS, BATCHES, RELEASED = {}, {}, {}, {}, {}
 PL = {id = 77, position = {x = 0, y = 0, z = 0}, fighting = false, auto_attacking = false, target_id = nil}
 ENT, LIST, LOOT, OPEN_FAILS, NATIVE_MODE, TAKEN = {}, {}, nil, nil, 0, false
+INV = {remaining = 5, capacity = 40, used = 35}
 eqoa = {
   player = {get = function() return PL end},
   entities = {find = function(id) return ENT[id] end, list = function() return LIST end},
   group = {get = function() return nil end},
+  inventory = {get = function() return INV end},
   loot = {get = function() return LOOT end},
   windows = {
     get = function() return {native_mode = NATIVE_MODE} end,
@@ -405,4 +407,94 @@ fn autoloot_fix1_a_corpse_the_player_opened_is_guarded_again_when_the_mod_reopen
     run(&lua, "B.on_action_result({request_id = 'all1', ok = true, state = 'completed', phase = 'server', kind = 'loot_all'}); LOOT = nil; NATIVE_MODE = 0");
     run(&lua, "later(11); poll(); corpse_list(2); open_answered('keep_target'); NATIVE_MODE = 1; later(0.3); poll()");
     assert!(boolean(&lua, "logged('SHOWN')"), "the mod's own take is guarded: a window showing now is the mod's fault");
+}
+
+// ---- Auto-loot, bags full (owner decision 2026-11-22) -----------------------------------------------------------------
+
+/// The take ended with items left and the pack has `free` free slots.
+fn take_ends_with_items_left(lua: &Lua, free: usize) {
+    run(lua, &format!("INV.remaining = {free}"));
+    take_all_ends(lua, 2);
+}
+
+#[test]
+fn autoloot_bags_full_waits_for_free_space_not_for_a_timer() {
+    let lua = world();
+    run(&lua, "kill(9300); poll()");
+    take_ends_with_items_left(&lua, 0);
+    assert!(boolean(&lua, "logged('free bag space')"), "said in the log");
+    assert!(boolean(&lua, "B.auto_more == nil or B.auto_more[9300] == nil"), "not on the short-retry budget");
+    // however long it takes, with full bags nothing is asked
+    run(&lua, "later(300); poll(); later(300); poll()");
+    assert_eq!(int(&lua, "#OPENS"), 1, "no timer");
+    // space is freed (sold junk, dropped an item): it goes back
+    run(&lua, "INV.remaining = 1; poll()");
+    assert_eq!(int(&lua, "#OPENS"), 2, "the rest is taken when there is room");
+}
+
+#[test]
+fn autoloot_other_causes_keep_the_short_timer_with_free_bags() {
+    // negative control: the same early end with free bag space is not a bags-full case
+    let lua = world();
+    run(&lua, "kill(9300); poll()");
+    take_ends_with_items_left(&lua, 5);
+    assert!(!boolean(&lua, "logged('free bag space')"));
+    run(&lua, "later(6); poll()");
+    assert_eq!(int(&lua, "#OPENS"), 2, "asked again after a few seconds");
+}
+
+#[test]
+fn autoloot_bags_full_has_no_try_limit() {
+    let lua = world();
+    run(&lua, "kill(9300); poll()");
+    for round in 1..=5 {
+        take_ends_with_items_left(&lua, 0);
+        run(&lua, "INV.remaining = 1; later(1); poll()");
+        assert_eq!(int(&lua, "#OPENS"), round + 1, "round {round}: back again when there is room");
+    }
+}
+
+#[test]
+fn autoloot_bags_full_does_not_chase_a_player_who_walked_away() {
+    let lua = world();
+    run(&lua, "kill(9300); poll()");
+    take_ends_with_items_left(&lua, 0);
+    run(&lua, "PL.position = {x = 30, y = 0, z = 0}; later(1); poll()");
+    assert!(boolean(&lua, "logged('you left reach')"));
+    // coming back with free space changes nothing: it was dropped
+    run(&lua, "PL.position = {x = 0, y = 0, z = 0}; INV.remaining = 3; later(1); kill(9300); poll(); later(10); poll()");
+    assert_eq!(int(&lua, "#OPENS"), 1, "dropped, not chased");
+    // control: still in reach with free space it goes back (the test above)
+}
+
+#[test]
+fn autoloot_bags_full_corpse_that_vanished_is_forgotten() {
+    let lua = world();
+    run(&lua, "kill(9300); poll()");
+    take_ends_with_items_left(&lua, 0);
+    run(&lua, "ENT[9300] = nil; later(1); poll()");
+    assert!(boolean(&lua, "B.auto_bags[9300] == nil"));
+}
+
+#[test]
+fn autoloot_a_batch_that_stops_on_a_full_pack_waits_for_space_too() {
+    let lua = world();
+    run(&lua, "B.auto_mode = 'non_junk'; kill(9300); poll(); corpse_list(2); B.junk_ids['3002'] = true; open_answered('keep_target'); INV.remaining = 0");
+    run(&lua, "B.on_batch_result({batch_id = B.batch_id, ok = false, state = 'refused', code = 'not_ready', reason = 'inventory is full', completed = 0, total = 1}); LOOT = nil");
+    assert!(boolean(&lua, "logged('free bag space')"));
+    run(&lua, "later(100); poll()");
+    assert_eq!(int(&lua, "#OPENS"), 1);
+    run(&lua, "INV.remaining = 2; poll()");
+    assert_eq!(int(&lua, "#OPENS"), 2);
+}
+
+#[test]
+fn autoloot_a_corpse_the_player_closed_is_left_alone_even_with_full_bags() {
+    let lua = world();
+    run(&lua, "B.auto_mode = 'non_junk'; kill(9300); poll(); corpse_list(2); B.junk_ids['3002'] = true; open_answered('keep_target'); INV.remaining = 0");
+    run(&lua, "B.note_loot_closed({before = {source = {entity_id = 9300}}, after = nil, closed_by = 'player'})");
+    run(&lua, "B.on_batch_result({batch_id = B.batch_id, ok = false, state = 'refused', code = 'not_ready', reason = 'inventory is full', completed = 0, total = 1}); LOOT = nil");
+    assert!(boolean(&lua, "logged('you closed it')"));
+    run(&lua, "INV.remaining = 5; later(100); kill(9300); poll()");
+    assert_eq!(int(&lua, "#OPENS"), 1);
 }

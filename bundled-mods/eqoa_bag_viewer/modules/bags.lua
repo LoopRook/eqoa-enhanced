@@ -910,7 +910,8 @@ function M.on_batch_result(d)
         M.result = {text = string.format("%s %d of %d: %s", verb, done, total, reason), ok = false}
         if kind == "loot" then
             M.auto_done_line(string.format("stopped after %d of %d items: %s", done, total, reason),
-                d.code ~= "not_found" and d.code ~= "permission_denied" and tostring(reason) or nil)
+                d.code ~= "not_found" and d.code ~= "permission_denied" and tostring(reason) or nil,
+                tostring(reason) == "inventory is full")
         end
     end
     if kind == "loot" and M.tab == 7 then
@@ -1334,9 +1335,32 @@ function M.count_more_attempt(id)
     if m and m.left > 0 then m.left = m.left - 1 end
 end
 
+-- Free stack slots in the pack: `remaining` of the inventory container (`eqoa.inventory.get()`, capacity minus used), nil
+-- when the client does not say.
+local function bag_free()
+    local inv = eqoa.inventory and eqoa.inventory.get and eqoa.inventory.get()
+    if not inv then return nil end
+    if inv.remaining ~= nil then return inv.remaining end
+    if inv.capacity ~= nil and inv.used ~= nil then return math.max(inv.capacity - inv.used, 0) end
+    return nil
+end
+M.bag_free = bag_free
+
 -- A take that ended without getting everything it should: asked again (see AUTO_MORE_TRIES), unless the player closed
--- or stopped it (theirs), or it has been asked enough times.
-function M.auto_unfinished(id, text, why)
+-- or stopped it (theirs), or it has been asked enough times. `bags_full`: the rest did not fit the bags: not on the timer
+-- (and not counted): it goes back when there is more free space than there was when it failed (see `tick_auto_loot`).
+function M.auto_unfinished(id, text, why, bags_full)
+    if bags_full then
+        M.auto_bags = M.auto_bags or {}
+        M.auto_bags[id] = {free = bag_free() or 0}
+        if M.auto_looted then M.auto_looted[id] = nil end
+        M.alog_forget(id, "closer")
+        M.alog_forget(id, "bagswait")
+        M.alog(id, "bagsfull", string.format(
+            "%s; unfinished (%s): will go back for the rest when you have free bag space, if you are still within reach",
+            text, tostring(why)))
+        return
+    end
     M.auto_more = M.auto_more or {}
     local m = M.auto_more[id] or {left = M.AUTO_MORE_TRIES}
     m.at = os.clock()
@@ -1362,14 +1386,14 @@ end
 
 -- What Auto-loot took from its corpse (or why nothing), said once the take is over. `unfinished` (a reason) marks a take
 -- that left something it should have taken.
-function M.auto_done_line(text, unfinished)
+function M.auto_done_line(text, unfinished, bags_full)
     local id = M.auto_take
     if not id then return end
     M.auto_take = nil
     -- the game's own window was the player's for this corpse only until the take ended
     if M.auto_player_open == id then M.auto_player_open = nil end
     if unfinished and not M.player_closed_recently(id) then
-        M.auto_unfinished(id, text, unfinished)
+        M.auto_unfinished(id, text, unfinished, bags_full)
         return
     end
     M.auto_done = M.auto_done or {}
@@ -1476,6 +1500,7 @@ function M.auto_poll(force)
             if not (e and e.corpse) then
                 M.eligible_corpses[id] = nil
                 if M.auto_retry then M.auto_retry[id] = nil end
+                if M.auto_bags then M.auto_bags[id] = nil end
             else
                 M.eligible_corpses[id] = e
             end
@@ -1514,9 +1539,11 @@ end
 M.AUTO_TRIES, M.AUTO_CLOSER, M.AUTO_RETRY_SECS = 3, 2.0, 5.0
 -- "not ready"/"busy" (casting, a game window up) is asked again this soon, never counted as a try
 M.AUTO_NOTREADY_SECS = 0.5
--- A take that did not finish (bags full, the window went away, the server was not ready) is asked again, when you are
--- within reach and AUTO_MORE_SECS after it ended, at most AUTO_MORE_TRIES more times for each corpse.
-M.AUTO_MORE_TRIES, M.AUTO_MORE_SECS = 2, 10.0
+-- A take that did not finish (the window went away, the server was not ready) is asked again, when you are within reach
+-- and AUTO_MORE_SECS after it ended, at most AUTO_MORE_TRIES more times for each corpse. A take that left items behind
+-- because the bags were full is not on that timer: it waits until you have free bag space (`bag_free`), then goes back
+-- if you are still within reach and the corpse is still there, with no limit on how often; walking out of reach drops it.
+M.AUTO_MORE_TRIES, M.AUTO_MORE_SECS = 2, 5.0
 -- how the client opens a corpse for Auto-loot, learned from the first open's result: nil (not known yet: by id is
 -- tried), "keep_target" (your target and auto-attack are left alone) or "retarget" (the old way: it retargets, which
 -- ends the auto-attack, so Auto-loot waits for the end of a fight)
@@ -1605,7 +1632,23 @@ function M.tick_auto_loot(pl)
             -- a take that did not finish is asked again once it has been a moment and you are within reach
             local more = M.auto_more and M.auto_more[id]
             if more and now - more.at < M.AUTO_MORE_SECS then ready = false end
-            if dist ~= nil and dist > reach then
+            local bw = M.auto_bags and M.auto_bags[id]
+            if bw and dist ~= nil and dist > reach then
+                -- the bags were full and you walked away: not chased
+                M.auto_bags[id] = nil
+                M.eligible_corpses[id] = nil
+                M.auto_done = M.auto_done or {}
+                M.auto_done[id] = true
+                M.alog(id, "bagsdrop", string.format("you left reach (%.0f units) with items still on it: left alone", dist))
+            elseif bw then
+                -- waiting for free bag space (strictly more than there was when the take failed)
+                local free = bag_free()
+                if free ~= nil and free > bw.free then
+                    if not best or (d2 or 0) < (best_d2 or 0) then best, best_d2 = e, d2 or 0 end
+                else
+                    M.alog(id, "bagswait", "waiting: the bags are still full; going back for the rest once you have free bag space")
+                end
+            elseif dist ~= nil and dist > reach then
                 M.alog(id, "closer", string.format("waiting: walk closer (%.0f units; server reach ~%.0f units)", dist,
                     reach))
             elseif ready and (not best or (d2 or 0) < (best_d2 or 0)) then
@@ -1700,8 +1743,11 @@ function M.on_action_result(d)
     elseif d.ok == true then
         M.result = {text = label .. ": ok", ok = true}
         local left = M.auto_take and corpse_items_left() or 0
+        -- items left with no free stack slot: the bags were full; with free slots left something else kept them
+        local full = left > 0 and bag_free() == 0
         M.auto_done_line(string.format("done: %s ok (%d items)", label, M.auto_take_n or 0),
-            left > 0 and string.format("%d items still on the corpse (the bags took what fit)", left) or nil)
+            left > 0 and string.format("%d items still on the corpse (%s)", left,
+                full and "the bags are full" or "the bags took what fit") or nil, full)
         M.last_req = nil
         if M.held_for_req then
             local k = M.held_for_req

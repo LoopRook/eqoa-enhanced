@@ -35,9 +35,12 @@ answers (it starts at 7 units; "Out of range." only means walk closer). A corpse
 yourself (the attack key on a dead target loots it) is taken from that window. A corpse the
 server does not answer is asked again 2 units closer or after 5 seconds, three tries in all (half
 a second when the game could not open it just then, as while you cast). A take that ends early
-(bags full, the window went away, the server was not ready) is asked again when you are within reach
-and ten seconds on, at most two more times; a corpse you closed or stopped yourself, and junk
-left on purpose, are never asked for again. With Auto-loot on the mod looks around four times a
+(the window went away, the server was not ready) is asked again when you are within reach and five
+seconds on, at most two more times (only real reopens of the corpse count). A take that left items
+because your bags were full waits until you have free bag space (`eqoa.inventory.get().remaining`),
+then goes back for the rest if you are still within reach and the corpse is still there, as often as
+needed; if you walk out of reach it is dropped, not chased. A corpse you closed or stopped yourself,
+and junk left on purpose, are never asked for again. With Auto-loot on the mod looks around four times a
 second, ten times a second while a creature you hit is being followed, not on every creature update.
 Every decision is a line in the game's log (`eqoa.log`), starting
 `addon eqoa_bag_viewer: [info] auto-loot:` with the corpse id and the reason.
