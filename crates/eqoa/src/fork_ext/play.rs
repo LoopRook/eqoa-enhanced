@@ -740,7 +740,17 @@ fn retry_open_the_old_way(play: &mut Play, fb: crate::fork_ext::loot_by_id::Fall
         .flatten()
         .any(|e| e.id == fb.corpse && play.in_scene(e) && (e.p18 & 1 != 0) && (e.p18 & 2 != 0));
     if !valid || !matches!(play.mode, 0 | 38) || play.is_dead() || play.control_client().casting {
-        tlog!("takeover: by-id fallback for corpse {:#x}: the corpse or the player is not ready; the open ends as unanswered", fb.corpse);
+        // nothing can be sent: the mod's open ends now with the reason, and nothing was tried the old way, so the method is
+        // undecided again instead of left on a fallback nobody tried
+        tlog!("takeover: by-id fallback for corpse {:#x}: the corpse or the player is not ready; the open is refused", fb.corpse);
+        crate::fork_ext::loot_by_id::abandon_fallback(fb.corpse);
+        window_takeover::clear_pending_open(window_takeover::TakeoverKind::Loot);
+        let (code, reason) = if valid {
+            ("not_ready", "cannot open corpse right now")
+        } else {
+            ("not_found", "the corpse is no longer in the scene")
+        };
+        action_broker::resolve_server_open_loot_refused(code, reason);
         return;
     }
     // the first request's late answer, if any, still names this corpse; nothing is waiting but this one

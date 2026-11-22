@@ -226,6 +226,22 @@ pub(crate) fn poll_timeout(still_waiting: impl Fn(u64, u32) -> bool) -> Option<F
     })
 }
 
+/// The fallback could not be sent (another window is up, the player is dead or casting, the corpse is gone): nothing was
+/// tried the old way, so it proves nothing and the choice is undecided again.
+pub(crate) fn abandon_fallback(corpse: u32) {
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        if s.method == Method::Retarget && s.provisional {
+            s.method = Method::Unknown;
+            s.provisional = false;
+            s.probe = None;
+            say(format!(
+                "takeover: loot open method: UNDECIDED again. The old way could not be tried for corpse {corpse:#x} (the player or the corpse was not ready), so by id is tried again"
+            ));
+        }
+    });
+}
+
 /// The mod's open is no longer waiting for the corpse (cancelled, ended): its probe is dropped.
 pub(crate) fn drop_probe() {
     STATE.with(|s| s.borrow_mut().probe = None);
