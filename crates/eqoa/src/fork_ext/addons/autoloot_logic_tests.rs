@@ -38,7 +38,11 @@ eqoa = {
       if OPEN_FAILS then return nil, OPEN_FAILS end
       return "open" .. #OPENS
     end,
-    loot_all = function() LOOTALLS[#LOOTALLS + 1] = true return "all" .. #LOOTALLS end,
+    loot_all = function()
+      if LOOTALL_ERR then return nil, LOOTALL_ERR end
+      LOOTALLS[#LOOTALLS + 1] = true
+      return "all" .. #LOOTALLS
+    end,
     batch = function(spec) BATCHES[#BATCHES + 1] = spec return "batch" .. #BATCHES end,
     cancel = function() end,
     stop_batch = function() return true end,
@@ -497,4 +501,110 @@ fn autoloot_a_corpse_the_player_closed_is_left_alone_even_with_full_bags() {
     assert!(boolean(&lua, "logged('you closed it')"));
     run(&lua, "INV.remaining = 5; later(100); kill(9300); poll()");
     assert_eq!(int(&lua, "#OPENS"), 1);
+}
+
+// ---- Auto-loot fix round 2 (2026-11-22) ------------------------------------------------------------------------------
+
+/// The pack is already full when Take all runs: the server cannot move anything, and the client's answer to the take is
+/// "did not change the corpse" (`ok = nil`), a refusal (`ok = false`) or the take refused at once.
+#[test]
+fn autoloot_fix2_bags_already_full_before_take_all_wait_for_space_not_for_a_timer() {
+    for (how, result) in [
+        ("did not change the corpse", "ok = nil, state = 'unknown', code = 'unknown', reason = 'loot_all did not change corpse state'"),
+        ("refused by the server", "ok = false, state = 'refused', code = 'refused', reason = 'You cannot loot that corpse.'"),
+    ] {
+        let lua = world();
+        run(&lua, "kill(9300); poll(); INV.remaining = 0; corpse_list(2); open_answered('keep_target')");
+        run(
+            &lua,
+            &format!("B.on_action_result({{request_id = 'all1', {result}, phase = 'server', kind = 'loot_all'}}); LOOT = nil"),
+        );
+        assert!(boolean(&lua, "logged('free bag space')"), "{how}: the bags-full wait");
+        assert!(boolean(&lua, "B.auto_bags ~= nil and B.auto_bags[9300] ~= nil"), "{how}");
+        assert!(boolean(&lua, "B.auto_more == nil or B.auto_more[9300] == nil"), "{how}: not the short retries");
+        run(&lua, "later(60); poll()");
+        assert_eq!(int(&lua, "#OPENS"), 1, "{how}: no timer");
+        run(&lua, "INV.remaining = 2; poll()");
+        assert_eq!(int(&lua, "#OPENS"), 2, "{how}: back when there is room");
+    }
+    // control: with free bag space the same answer is an ordinary unfinished take (the short retries)
+    let lua = world();
+    run(&lua, "kill(9300); poll(); INV.remaining = 5; corpse_list(2); open_answered('keep_target')");
+    run(
+        &lua,
+        "B.on_action_result({request_id = 'all1', ok = nil, state = 'unknown', code = 'unknown', reason = 'loot_all did not change corpse state', phase = 'server', kind = 'loot_all'}); LOOT = nil",
+    );
+    assert!(!boolean(&lua, "logged('free bag space')"));
+    assert!(boolean(&lua, "B.auto_more[9300] ~= nil"));
+}
+
+#[test]
+fn autoloot_fix2_take_all_refused_and_batches_with_full_bags_wait_for_space() {
+    // Take all refused at once (the game busy) with a full pack
+    let lua = world();
+    run(&lua, "kill(9300); poll(); INV.remaining = 0; LOOTALL_ERR = {code = 'busy', message = 'loot transaction already pending'}; corpse_list(2); open_answered('keep_target')");
+    assert!(boolean(&lua, "logged('free bag space')"), "the refused Take all with full bags");
+    // a batch cut short (window gone) while the pack is full and non-junk items are left
+    let lua = world();
+    run(&lua, "B.auto_mode = 'non_junk'; kill(9300); poll(); corpse_list(3); B.junk_ids['3003'] = true; open_answered('keep_target'); INV.remaining = 0");
+    run(&lua, "B.on_batch_result({batch_id = B.batch_id, ok = false, state = 'refused', code = 'window_closed', reason = 'corpse window closed', completed = 1, total = 2}); ");
+    assert!(boolean(&lua, "logged('free bag space')"), "the batch cut short with full bags");
+    // control: free bag space, the same batch end: the short retries
+    let lua = world();
+    run(&lua, "B.auto_mode = 'non_junk'; kill(9300); poll(); corpse_list(3); B.junk_ids['3003'] = true; open_answered('keep_target'); INV.remaining = 5");
+    run(&lua, "B.on_batch_result({batch_id = B.batch_id, ok = false, state = 'refused', code = 'window_closed', reason = 'corpse window closed', completed = 1, total = 2}); ");
+    assert!(!boolean(&lua, "logged('free bag space')"));
+    assert!(boolean(&lua, "B.auto_more[9300] ~= nil"));
+}
+
+#[test]
+fn autoloot_fix2_the_zone_the_window_and_the_disconnect_forget_what_was_waiting() {
+    // a corpse waiting for bag space and one on the short retries, then the world changes: a new creature that gets the
+    // same entity id is a new corpse
+    let lua = world();
+    run(&lua, "kill(9300); poll(); INV.remaining = 0; corpse_list(2); open_answered('keep_target'); B.on_action_result({request_id = 'all1', ok = true, state = 'completed', phase = 'server', kind = 'loot_all'}); LOOT = nil");
+    run(&lua, "B.auto_more = {[9301] = {left = 0, at = NOW}}; B.last_close = {by = 'player', at = NOW}; B.auto_player_open = 9300");
+    run(&lua, "B.clear_corpse_hold()");
+    assert!(boolean(&lua, "next(B.auto_bags or {}) == nil and next(B.auto_more or {}) == nil"), "nothing waits for bag space or retries");
+    assert!(boolean(&lua, "B.last_close == nil and B.auto_player_open == nil"));
+    // the new creature with the same id dies out of reach: it is waited for, not dropped as the old corpse was
+    run(&lua, "ENT[9300] = nil; INV.remaining = 0; PL.position = {x = 20, y = 0, z = 0}; kill(9300, 2); later(1); poll()");
+    assert!(!boolean(&lua, "logged('you left reach')"));
+    assert!(boolean(&lua, "B.auto_done == nil or B.auto_done[9300] == nil"));
+}
+
+#[test]
+fn autoloot_fix2_a_refused_reopen_of_a_corpse_waiting_for_bag_space_follows_the_open_cooldowns() {
+    let lua = world();
+    run(&lua, "kill(9300); poll(); INV.remaining = 0; corpse_list(2); open_answered('keep_target'); B.on_action_result({request_id = 'all1', ok = true, state = 'completed', phase = 'server', kind = 'loot_all'}); LOOT = nil");
+    // still full over many polls: the wait is said once
+    run(&lua, "for i = 1, 20 do later(0.1); poll() end");
+    assert_eq!(int(&lua, "count_logged('bags are still full')"), 1, "said once per wait, not every poll");
+    // space is freed while the player is casting: the game cannot open it
+    run(&lua, "INV.remaining = 1; OPEN_FAILS = {code = 'not_ready', message = 'cannot open corpse right now'}; poll()");
+    assert_eq!(int(&lua, "#OPENS"), 2, "one ask");
+    run(&lua, "later(0.1); poll(); later(0.1); poll(); later(0.1); poll()");
+    assert_eq!(int(&lua, "#OPENS"), 2, "not again every poll");
+    run(&lua, "later(0.5); poll()");
+    assert_eq!(int(&lua, "#OPENS"), 3, "again after the not-ready wait");
+}
+
+#[test]
+fn autoloot_fix2_a_corpse_the_player_opens_while_bags_are_full_is_not_taken_until_there_is_room() {
+    let lua = world();
+    run(&lua, "kill(9300); poll(); INV.remaining = 0; corpse_list(2); open_answered('keep_target'); B.on_action_result({request_id = 'all1', ok = true, state = 'completed', phase = 'server', kind = 'loot_all'}); LOOT = nil");
+    let before = int(&lua, "#LOOTALLS");
+    // the player opens it themselves, bags still full
+    run(&lua, "corpse_list(2); later(1); poll()");
+    assert_eq!(int(&lua, "#LOOTALLS"), before, "no take while the bags are full");
+    // control: room again, the same open is taken from
+    run(&lua, "INV.remaining = 3; later(1); poll()");
+    assert_eq!(int(&lua, "#LOOTALLS"), before + 1);
+}
+
+#[test]
+fn autoloot_fix2_a_disconnect_forgets_which_way_corpses_were_opened() {
+    let lua = world();
+    run(&lua, "B.loot_method = 'retarget'; B.keep_req = 'open9'; B.on_disconnect()");
+    assert!(boolean(&lua, "B.loot_method == nil and B.keep_req == nil"));
 }

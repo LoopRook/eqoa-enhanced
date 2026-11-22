@@ -4903,3 +4903,35 @@ fn autoloot_e2e_loots_a_kill_in_the_middle_of_a_fight_without_moving_the_target_
         super::super::action_broker::reset_all_for_test();
     }
 }
+
+// ---- Auto-loot fix round 2 (2026-11-22) ------------------------------------------------------------------------------
+
+/// A disconnect (another server may answer differently) makes Bag Viewer forget which way the client opened corpses;
+/// a zone change (the same server) does not.
+#[test]
+fn autoloot_fix2_world_leaving_by_disconnect_resets_the_method_but_a_zone_does_not() {
+    big_stack(autoloot_fix2_world_leaving_by_disconnect_resets_the_method_but_a_zone_does_not_body)
+}
+fn autoloot_fix2_world_leaving_by_disconnect_resets_the_method_but_a_zone_does_not_body() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else {
+        eprintln!("SKIP autoloot fix2 disconnect: no GPU adapter");
+        return;
+    };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    bv.frames(3);
+    assert!(bv.eval::<bool>("(function() require('bags').loot_method = 'retarget' return true end)()"));
+    crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow_mut().reset("zone"));
+    bv.frames(2);
+    assert_eq!(bv.eval::<String>("tostring(require('bags').loot_method)"), "retarget", "a zone change: the same server");
+    crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow_mut().reset("disconnect"));
+    bv.frames(2);
+    assert_eq!(bv.eval::<String>("tostring(require('bags').loot_method)"), "nil", "a disconnect: decided again");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
