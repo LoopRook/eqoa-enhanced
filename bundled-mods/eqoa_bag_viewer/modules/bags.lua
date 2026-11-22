@@ -1339,6 +1339,8 @@ end
 function M.count_more_attempt(id)
     local m = M.auto_more and M.auto_more[id]
     if m and m.left > 0 then m.left = m.left - 1 end
+    -- the corpse really opened: it no longer waits for bag space (a take that ends full again waits again)
+    if M.auto_bags then M.auto_bags[id] = nil end
 end
 
 -- Free stack slots in the pack: `remaining` of the inventory container (`eqoa.inventory.get()`, capacity minus used), nil
@@ -1661,7 +1663,8 @@ function M.tick_auto_loot(pl)
                 -- waiting for free bag space (strictly more than there was when the take failed)
                 local free = bag_free()
                 if free ~= nil and free > bw.free then
-                    if not best or (d2 or 0) < (best_d2 or 0) then best, best_d2 = e, d2 or 0 end
+                    -- room again: asked like any other open (a not-ready or refused ask waits its own time)
+                    if ready and (not best or (d2 or 0) < (best_d2 or 0)) then best, best_d2 = e, d2 or 0 end
                 else
                     M.alog(id, "bagswait", "waiting: the bags are still full; going back for the rest once you have free bag space")
                 end
