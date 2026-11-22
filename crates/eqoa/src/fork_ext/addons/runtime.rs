@@ -944,7 +944,17 @@ fn replacement_labels(replaces: &[String], can_takeover: bool) -> [Option<String
     let (mut now, mut later, mut hud) = (Vec::new(), Vec::new(), Vec::new());
     for kind in replaces {
         if super::visibility::is_hud_disclosure(kind) {
-            let label = if kind == "hud.target" { "Target frame" } else { kind };
+            let label = match kind.as_str() {
+                "hud.target" => "Target frame",
+                "hud.player" => "Character frame",
+                "hud.raid_list" => "Raid list",
+                "hud.quest_tracker" => "Quest Tracker",
+                "hud.dps_meter" => "DPS Meter",
+                "hud.breath" => "Breath gauge",
+                "hud.spell_bars" => "Spell Bars",
+                "hud.utility_bars" => "Utility Bars",
+                _ => kind.as_str(),
+            };
             let list = if can_takeover { &mut now } else { &mut hud };
             if !list.contains(&label) {
                 list.push(label);
