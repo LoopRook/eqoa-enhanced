@@ -44,6 +44,9 @@ pub(crate) struct BuffLine {
     pub name: String,
     /// the game step the line runs out; none where the server keeps no end for it
     pub ends_tick: Option<u64>,
+    /// what the client's own ability list says the effect does (an ability of the player's with the effect's
+    /// name); none for an effect of someone else's spell the player does not have. Not part of what changes a line.
+    pub description: Option<String>,
 }
 
 impl BuffLine {
@@ -182,6 +185,7 @@ fn buff_json(line: &BuffLine, index: usize, now: u64, generation: u64, revision:
         "name": line.name,
         "icon": line.icon,
         "spell_id": (line.id != 0).then_some(line.id),
+        "description": line.description,
         "time_left": line.ends_tick.map(|t| seconds_of(t.saturating_sub(now))),
         "removable": line.removable,
         "ref": {"$ref": "buff", "key": index.to_string(), "generation": generation, "incarnation": revision},
@@ -419,7 +423,38 @@ fn cast_json(c: &Cast, now: u64) -> Json {
     })
 }
 
+thread_local! {
+    /// The entity the player has targeted (0: none), whose casts are written to eqoa.log (`set_watched`).
+    static WATCHED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// The entity whose casts are logged: the player's target. Set each frame from the capture.
+pub(crate) fn set_watched(id: u32) {
+    WATCHED.with(|w| w.set(if id == u32::MAX { 0 } else { id }));
+}
+
+/// The log line for a cast event on the watched target (or the player's own): the source packet and its fields,
+/// so a log can tell a real cast from anything else the server sent. `src` is the packet.
+pub(crate) fn cast_log_line(name: &str, c: &Cast, reason: Option<&str>) -> String {
+    let mut line = format!(
+        "frames: {name} caster={:#x} target={:#x} targets={} effect={:#010x} time={}ms own={} src=0x00B1",
+        c.caster,
+        c.target,
+        c.targets.len(),
+        c.effect,
+        c.duration_ms,
+        c.own
+    );
+    if let Some(reason) = reason {
+        line.push_str(&format!(" reason={reason}"));
+    }
+    line
+}
+
 fn cast_event(name: &str, c: &Cast, reason: Option<&str>) {
+    if c.own || (c.caster != 0 && WATCHED.with(|w| w.get()) == c.caster) {
+        eprintln!("{}", cast_log_line(name, c, reason));
+    }
     let mut data = json!({
         "caster_id": c.caster,
         "caster": entity_ref(c.caster),
@@ -745,7 +780,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     )?;
 
     for (path, fields) in [
-        ("eqoa.effects.Buff", "index whose name icon spell_id time_left removable ref"),
+        ("eqoa.effects.Buff", "index whose name icon spell_id description time_left removable ref"),
         ("eqoa.effects.PetEffect", "index name icon time_left"),
         (
             "eqoa.casts.Cast",
