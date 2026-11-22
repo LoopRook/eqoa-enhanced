@@ -11,6 +11,10 @@ local W, PAD, SLOT, GAP, LINE = 318, 8, 36, 2, 12
 local LOG_LINES, LOG_LINES_HELPERS = 3, 2
 local log_shown = LOG_LINES
 local wmemo, wmemo_k, wmemo_n = {}, nil, 0
+-- Round A1: the window is a session ("inventory") the client ends for us (zoning, death, "Use the game's windows", the
+-- mod being turned off), and it may hold the controller's d-pad, confirm and back while it is up.
+local session
+local pad = {on = false, idx = 1, msel = 1}
 local tokens, escape, tab_hits, slot_hits, menu_hits, action_hits, log_rect, grid_rect = {}, nil, {}, {}, {}, {}, nil, nil
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
@@ -22,10 +26,12 @@ local function listen(name, fn)
 end
 
 local draw
-local function close()
+local function close(from_client)
     if not B.open then return end
     for _, token in ipairs(tokens) do eqoa.events.off(token) end
     tokens = {}
+    if session and not from_client then eqoa.windows.close_session(session.ref) end
+    session, pad.on = nil, false
     if escape then eqoa.input.release(escape); escape = nil end
     B.drop_pending_npc_open()
     if eqoa.windows and eqoa.windows.release then
@@ -43,10 +49,55 @@ local function close()
     B.tab_hits, B.slot_hits, B.menu_hits, B.action_hits = tab_hits, slot_hits, menu_hits, action_hits
 end
 
+local function pad_key(key)
+    -- the controller: d-pad moves, confirm presses, back backs out (the menu first, then the window)
+    local grid = B.grid
+    if B.menu then
+        local n = #B.menu.rows
+        if key == "up" then pad.msel = (pad.msel - 2) % n + 1
+        elseif key == "down" then pad.msel = pad.msel % n + 1
+        elseif key == "confirm" then
+            local shown = B.menu
+            B.trigger_menu(shown.rows[pad.msel])
+            if B.menu == shown then B.menu, B.menu_rect = nil, nil end
+            pad.msel = 1
+        elseif key == "back" or key == "left" then B.menu, B.menu_rect = nil, nil end
+        return
+    end
+    if key == "back" then close(); return end
+    if not grid then return end
+    local cols, rows = B.COLUMNS, grid.rows
+    local col, row = (pad.idx - 1) % cols, math.floor((pad.idx - 1) / cols)
+    if key == "left" then col = math.max(0, col - 1)
+    elseif key == "right" then col = math.min(cols - 1, col + 1)
+    elseif key == "up" then
+        if row == 0 then B.scroll_grid(-1) else row = row - 1 end
+    elseif key == "down" then
+        if row >= rows - 1 then B.scroll_grid(1) else row = row + 1 end
+    elseif key == "confirm" then
+        local entry = grid.items[B.grid_scroll * cols + pad.idx]
+        if entry then
+            B.build_menu(entry.item, PAD + col * (SLOT + GAP), 46 + row * (SLOT + GAP))
+            pad.msel = 1
+        end
+        return
+    end
+    pad.idx = row * cols + col + 1
+end
+
 local function open()
     if B.open then return end
+    local s, err = eqoa.windows.open_session("inventory", {opened_from = "key"})
+    if not s then
+        -- the client says why (the player is using the game's windows, dead, out of the world)
+        eqoa.log.write("Bag viewer did not open: " .. tostring(err and err.message))
+        return
+    end
+    session = s
     if not B.junk_loaded then B.load_junk() end
     B.open, B.grid, B.menu = true, nil, nil
+    pad.idx, pad.msel = 1, 1
+    pad.on = eqoa.windows.focus(s.ref) == true
     if B.char_dirty then B.sync_character() end
     B.scan_reset()
     listen("render", draw)
@@ -58,6 +109,19 @@ local function open()
     listen("action.result", function(e) B.on_action_result(e.data) end)
     listen("batch.progress", function(e) B.on_batch_progress(e.data) end)
     listen("batch.result", function(e) B.on_batch_result(e.data) end)
+    -- what the player answered to the destroy question the client put to them
+    listen("confirm.closed", function(e) B.on_confirm_closed(e.data) end)
+    listen("windows.session", function(e)
+        local d = e.data
+        if session and d.ref == session.ref then
+            if d.phase == "closed" then close(true)
+            elseif d.phase == "changed" then pad.on = false end -- the system took the focus: the pad is the game's
+        end
+    end)
+    listen("windows.key", function(e)
+        local d = e.data
+        if session and d.ref == session.ref and d.down then pad_key(d.key) end
+    end)
     listen("input.key", function(e)
         if e.data.down and not e.data["repeat"] and e.data.key:lower() == "escape" then
             if B.menu then B.menu, B.menu_rect = nil, nil else close() end
@@ -105,7 +169,7 @@ local function open()
     escape = eqoa.input.claim("Escape", true)
 end
 
-eqoa.input.bind({id = "open", label = "Bag viewer", default_key = ""}, function()
+eqoa.input.bind({id = "open", label = "Bag viewer", default_key = "b"}, function()
     if B.open then close() else open() end
 end)
 -- The loot log is the one thing kept while the window is closed, from events only.
@@ -302,6 +366,7 @@ function draw()
         dl:AddRectFilled(p0, p1, c.raised)
         local entry = grid.items[slot]
         local border = c.border
+        if pad.on and not B.menu and idx == pad.idx then border = c.white end
         if entry then
             local it = entry.item
             if entry.texture then
@@ -533,7 +598,7 @@ function draw()
         for i, r in ipairs(m.rows) do
             local ry = my + 18 + (i - 1) * rh
             local hr = {x = x0 + (mx + 2) * k, y = y0 + ry * k, w = (mw - 4) * k, h = rh * k, row = r}
-            if r.enabled and p and p.inside_window and inside(p.x, p.y, hr) then
+            if (r.enabled and p and p.inside_window and inside(p.x, p.y, hr)) or (pad.on and i == pad.msel) then
                 fill(mx + 2, ry, mw - 4, rh, c.menu_hl)
             end
             local label = r.enabled and (r.text or r.label) or (r.label .. " (" .. (r.reason or "disabled") .. ")")

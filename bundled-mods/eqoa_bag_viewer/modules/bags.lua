@@ -975,7 +975,8 @@ function M.on_batch_result(d)
     if not (session == "bank" and M.tab == 6) then release_takeover(session) end
 end
 
--- Build the click menu for one stack (never includes Destroy; refused entries carry the game's reason).
+-- Build the click menu for one stack (Destroy only asks: the client puts its own "are you sure?" to the player, starting
+-- on No, and the Yes is theirs; refused entries carry the game's reason).
 function M.build_menu(it, fx, fy)
     local rows = {}
     local function add(label, enabled, reason, run, local_only, far_kind, confirm)
@@ -1107,6 +1108,17 @@ function M.build_menu(it, fx, fy)
             end
         end
     end
+    if it.list == "inventory" then
+        add("Link in chat", true, nil, function() return eqoa.actions.link_item(it.ref) end)
+        if it.equipped then
+            add("Hide look", true, nil, function() return eqoa.actions.hide_look(it.ref, true) end)
+            add("Show look", true, nil, function() return eqoa.actions.hide_look(it.ref, false) end)
+        end
+        -- local_only: it runs at once, and what it runs is only a question (`run_asking`)
+        add("Destroy...", true, nil, function()
+            M.run_asking("Destroy", function() return eqoa.actions.destroy(it.ref) end)
+        end, true)
+    end
     if M.junk_ids[tostring(it.id)] then
         add("Unmark", true, nil, function() M.set_junk(it, false) end, true)
     else
@@ -1121,6 +1133,35 @@ function M.build_menu(it, fx, fy)
     if H and it.list == "inventory" then H.menu_rows(it, add) end
     M.menu = {title = it.name, ref = it.ref, rows = rows, fx = fx or 8, fy = fy or 46}
     return M.menu
+end
+
+-- Destroy: the call only puts the client's own question to the player (nothing is destroyed until their Yes). Its
+-- result says the question is up; the answer arrives as `confirm.closed` (`on_confirm_closed`).
+function M.run_asking(label, fn)
+    local req, err = fn()
+    if not req then
+        M.result = {text = label .. ": " .. (err and (err.message or err.code) or "refused"), ok = false}
+        M.ask_req = nil
+    else
+        M.ask_req = req
+        M.result = {text = label .. ": answer the question on the screen", ok = nil}
+    end
+    M.dirty()
+    return req, err
+end
+
+function M.on_confirm_closed(d)
+    if not d or d.kind ~= "destroy" then return end
+    if d.answer == "yes" then
+        local sent = d.detail and d.detail.sent
+        M.result = {text = sent and "Destroy: sent" or ("Destroy: not done (" .. tostring(d.detail and d.detail.reason) .. ")"),
+            ok = sent == true}
+    elseif d.answer == "no" then
+        M.result = {text = "Destroy: kept", ok = true}
+    else
+        M.result = {text = "Destroy: kept (" .. tostring(d.answer) .. ")", ok = true}
+    end
+    M.dirty()
 end
 
 function M.run_single(label, fn)
@@ -1826,6 +1867,13 @@ end
 
 function M.on_action_result(d)
     if not d then return end
+    -- the destroy call's own result: the question is up, or the call was refused (the answer is `confirm.closed`)
+    if M.ask_req and d.request_id == M.ask_req and d.ok ~= nil then
+        M.ask_req = nil
+        if d.ok == false then M.result = {text = "Destroy: " .. (d.reason or d.code or "refused"), ok = false} end
+        M.dirty()
+        return
+    end
     -- the open's own result says how the client opened the corpse; the corpse's list (loot.changed) may have ended the
     -- pending open before it arrives
     if M.keep_req and d.request_id == M.keep_req and d.ok ~= nil and d.phase ~= "dispatch" then

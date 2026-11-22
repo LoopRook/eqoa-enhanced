@@ -7,6 +7,14 @@
   "entry": "main.lua",
   "entryMode": "once",
   "enabled": false,
+  "provides": [
+    "Bags window (B)"
+  ],
+  "replaces": [
+    "loot",
+    "merchant",
+    "bank"
+  ],
   "capabilities": [
     "eqoa.inventory.get",
     "eqoa.bank.get",
@@ -42,6 +50,11 @@
     "eqoa.input.claim_pointer",
     "eqoa.events.on",
     "eqoa.imgui",
-    "large_data"
+    "large_data",
+    "eqoa.windows.session",
+    "eqoa.windows.focus",
+    "eqoa.actions.destroy",
+    "eqoa.actions.link_item",
+    "eqoa.actions.hide_look"
   ]
 }
