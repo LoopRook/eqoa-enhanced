@@ -26,6 +26,7 @@
     "crates/eqoa/src/report_policy.rs",
     "crates/eqoa/src/report_policy_transport_tests.rs",
     "crates/esf/tests/terrain_alone.rs",
+    "tools/release-files/**",
     "tools/build-map-preview.ps1",
     "tools/gen_map_markers.py",
     "tools/gen_quest_guide.py",

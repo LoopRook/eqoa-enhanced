@@ -44,7 +44,11 @@ from the commit compiled into the running build.
 ## Assets
 
 - EQOA-Enhanced-<version>-Windows-x64.zip: player download, with eqoa.exe, catalog,
-  required license notices, short README and provenance manifest. No BAT, source,
+  required license notices, short README and provenance manifest, plus the
+  `Start EQOA (performance log).bat` launcher (sets `EQOA_PERF=1` for that run; tracked in
+  tools/release-files/). `build_player_release.py --no-perf-launcher` leaves it out
+  (Stable may drop it later with that one flag in the workflow; verification accepts both,
+  and rejects a launcher that differs from the tracked file). No other BAT, source,
   developer tools, profile/account files or game disc data.
 - eqoa-enhanced-windows-x86_64.exe: raw updater payload, identical to the ZIP's EXE.
 - update.txt: three lines: semantic version, source commit, and the payload's
