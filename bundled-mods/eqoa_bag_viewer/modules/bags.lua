@@ -1568,6 +1568,13 @@ M.AUTO_MORE_TRIES, M.AUTO_MORE_SECS = 2, 5.0
 -- ends the auto-attack, so Auto-loot waits for the end of a fight)
 M.loot_method = nil
 
+-- The connection ended (`world.leaving` with reason "disconnect"): another server may not take a corpse open that names the
+-- corpse, so how the client opens corpses is learned again from the next open's result.
+function M.on_disconnect()
+    M.loot_method = nil
+    M.keep_req = nil
+end
+
 function M.note_loot_method(d)
     local m = d and d.detail and d.detail.method or "retarget"
     if m ~= "keep_target" then m = "retarget" end
@@ -1611,7 +1618,11 @@ function M.tick_auto_loot(pl)
     local open = eqoa.loot and eqoa.loot.get and eqoa.loot.get()
     if open then
         local src = open.source and open.source.entity_id
-        if src and M.eligible_corpses[src] and not (M.auto_looted and M.auto_looted[src]) then
+        local bw = src and M.auto_bags and M.auto_bags[src]
+        if bw and not (bag_free() ~= nil and bag_free() > bw.free) then
+            -- the player opened a corpse that waits for bag space: not taken from while the bags are still full
+            M.alog(src, "bagswait", "waiting: the bags are still full; going back for the rest once you have free bag space")
+        elseif src and M.eligible_corpses[src] and not (M.auto_looted and M.auto_looted[src]) then
             M.auto_looted = M.auto_looted or {}
             M.auto_looted[src] = true
             M.auto_take = src

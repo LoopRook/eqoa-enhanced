@@ -143,6 +143,9 @@ end)
 eqoa.events.on("batch.result", function(e)
     if not B.open then B.on_batch_result(e.data) end
 end)
+eqoa.events.on("world.leaving", function(e)
+    if e.data and e.data.reason == "disconnect" then B.on_disconnect() end
+end)
 eqoa.events.on("state.reset", function() B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); B.char_dirty = true; B.dirty() end)
 -- the character is read once the world is up (and again after a new world or login): the Auto-loot choice is per character
 eqoa.events.on("player.changed", function(e)
