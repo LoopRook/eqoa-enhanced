@@ -1101,6 +1101,12 @@ fn round6c_bag_viewer_junk_marks_and_auto_loot_choice_persist_across_reload_and_
     assert!(men);
     bv.click((mx, my));
     bv.frames(2);
+    // Fix round 1: Odd Thing is equipment, so the first click asks "Mark Odd Thing as junk?" and marks nothing; Yes marks it
+    assert!(!bv.eval::<bool>("require('bags').junk_ids['900008'] == true"), "the question comes first");
+    let (yx, yy, yen, _, _) = bv.menu_row("Mark as junk").expect("the question's Yes row");
+    assert!(yen);
+    bv.click((yx, yy));
+    bv.frames(2);
     assert!(bv.eval::<bool>("require('bags').junk_ids['900008'] == true"));
     assert!(!bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "an unmarked misc item is never junk: only the marks decide");
     bv.click(s8);
