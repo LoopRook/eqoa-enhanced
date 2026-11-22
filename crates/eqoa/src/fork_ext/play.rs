@@ -331,7 +331,7 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
         }
         Some(BrokerReply::OpenLootRefused { code, reason }) => {
             tlog!("takeover: the server refused the corpse open: {reason}");
-            let _ = crate::fork_ext::loot_by_id::note_refusal(crate::fork_ext::loot_by_id::Refusal::OutOfRange);
+            let _ = crate::fork_ext::loot_by_id::note_refusal(crate::fork_ext::loot_by_id::Refusal::OutOfRange, open_waits);
             crate::fork_ext::addons::window_takeover::clear_pending_open(
                 crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
             );
@@ -354,7 +354,7 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
             );
         }
         Some(BrokerReply::LootOpen { .. }) => {
-            crate::fork_ext::loot_by_id::note_list_reply();
+            crate::fork_ext::loot_by_id::note_list_reply(api_capture::items::loot_source_named(), open_waits);
             crate::fork_ext::addons::window_takeover::touch_hidden_session(
                 crate::fork_ext::addons::window_takeover::TakeoverKind::Loot,
             );
@@ -400,7 +400,7 @@ pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
                 2 => Refusal::Understood,
                 _ => Refusal::Unclear,
             };
-            if crate::fork_ext::loot_by_id::note_refusal(kind) {
+            if crate::fork_ext::loot_by_id::note_refusal(kind, open_waits) {
                 // the by-id open was refused without a reason: the old request goes out at the next step and the
                 // mod's open stays in flight (it ends with that request's answer)
                 tlog!("takeover: the server refused the by-id corpse open without a reason ({reason}); asking the old way");
@@ -711,6 +711,12 @@ fn sync_hidden_sessions(play: &mut Play) {
             }
         }
     }
+}
+
+/// Whether the mod's `open_loot` for `corpse` is still waiting for the server (what a by-id probe may be judged by).
+#[cfg(not(target_arch = "wasm32"))]
+fn open_waits(vm: u64, corpse: u32) -> bool {
+    crate::fork_ext::addons::action_broker::open_loot_waiting(vm, corpse)
 }
 
 /// The loot request (0x0015) for `corpse_id` itself, with no target set first: what `Play::attack_press` sends for a

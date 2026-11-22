@@ -133,11 +133,28 @@ fn fall_back(s: &mut State, probe: Probe, why: &str) -> Fallback {
     Fallback { vm: probe.vm, corpse: probe.corpse }
 }
 
-/// A corpse list (0x0018) arrived while a probe was waiting.
-pub(crate) fn note_list_reply() {
+/// A corpse list (0x0018) arrived while a probe was waiting. `opened` is the corpse the client's own request named for it
+/// (`None` when two requests overlapped and the reply cannot be told apart); `still_waiting(vm, corpse)` says whether the
+/// mod still waits for the open. The list confirms the method only when it is the probe's own corpse and the mod still
+/// waits: a list for a corpse the player asked for settles nothing (the probe goes on waiting), an ambiguous one or one
+/// for a request nobody waits for any more drops the probe without a verdict.
+pub(crate) fn note_list_reply(opened: Option<u32>, still_waiting: impl Fn(u64, u32) -> bool) {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
-        let Some(p) = s.probe.take() else { return };
+        let Some(p) = s.probe else { return };
+        if !still_waiting(p.vm, p.corpse) {
+            s.probe = None;
+            return;
+        }
+        match opened {
+            Some(id) if id != p.corpse => return,
+            None => {
+                s.probe = None;
+                return;
+            }
+            Some(_) => {}
+        }
+        s.probe = None;
         if p.by_id && p.real_test && s.method == Method::Unknown {
             s.method = Method::ById;
             say(format!(
@@ -155,11 +172,15 @@ pub(crate) fn note_list_reply() {
 }
 
 /// The server refused the waiting open. True when this settles the method as a fallback: the old request is queued
-/// (`take_retry`) and the mod's open must stay in flight, not end as refused.
-pub(crate) fn note_refusal(kind: Refusal) -> bool {
+/// (`take_retry`) and the mod's open must stay in flight, not end as refused. A refusal when the mod no longer waits for
+/// the open (`still_waiting`) settles nothing.
+pub(crate) fn note_refusal(kind: Refusal, still_waiting: impl Fn(u64, u32) -> bool) -> bool {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         let Some(p) = s.probe.take() else { return false };
+        if !still_waiting(p.vm, p.corpse) {
+            return false;
+        }
         if kind == Refusal::Unclear && p.by_id && p.real_test && s.method == Method::Unknown {
             let fb = fall_back(&mut s, p, "the server refused it without saying why");
             s.retry = Some(fb);
@@ -292,7 +313,7 @@ mod tests {
     fn a_list_for_a_request_that_did_not_target_the_corpse_proves_by_id() {
         fresh();
         note_sent_by_id(1, 0x20, 0x99);
-        note_list_reply();
+        note_list_reply(Some(0x20), |_, _| true);
         assert_eq!(method(), Method::ById);
         assert!(use_by_id());
         let log = crate::fork_ext::addons::window_takeover::take_log_for_test().join("\n");
@@ -308,7 +329,7 @@ mod tests {
         assert!(poll_timeout(|_, _| true).is_none(), "silence for the old request is not the by-id method's fault");
         assert_eq!(method(), Method::Unknown);
         note_sent_by_id(1, 0x20, 0x20);
-        note_list_reply();
+        note_list_reply(Some(0x20), |_, _| true);
         assert_eq!(method(), Method::Unknown, "an answer to it proves nothing");
     }
 
@@ -341,13 +362,13 @@ mod tests {
     fn an_unexplained_refusal_falls_back_but_a_reasoned_one_does_not() {
         fresh();
         note_sent_by_id(7, 0x20, 0x99);
-        assert!(!note_refusal(Refusal::OutOfRange));
+        assert!(!note_refusal(Refusal::OutOfRange, |_, _| true));
         note_sent_by_id(7, 0x20, 0x99);
-        assert!(!note_refusal(Refusal::Understood));
+        assert!(!note_refusal(Refusal::Understood, |_, _| true));
         assert_eq!(method(), Method::Unknown, "the server said why: nothing learned about the method");
         assert!(take_retry().is_none());
         note_sent_by_id(7, 0x20, 0x99);
-        assert!(note_refusal(Refusal::Unclear));
+        assert!(note_refusal(Refusal::Unclear, |_, _| true));
         assert_eq!(method(), Method::Retarget);
         assert_eq!(take_retry(), Some(Fallback { vm: 7, corpse: 0x20 }));
         assert!(take_retry().is_none(), "sent once");
@@ -357,9 +378,9 @@ mod tests {
     fn a_proven_method_never_falls_back() {
         fresh();
         note_sent_by_id(7, 0x20, 0x99);
-        note_list_reply();
+        note_list_reply(Some(0x20), |_, _| true);
         note_sent_by_id(7, 0x21, 0x99);
-        assert!(!note_refusal(Refusal::Unclear));
+        assert!(!note_refusal(Refusal::Unclear, |_, _| true));
         note_sent_by_id(7, 0x21, 0x99);
         advance_for_test(REPLY_TICKS + 1);
         assert!(poll_timeout(|_, _| true).is_none());
@@ -385,12 +406,53 @@ mod tests {
         advance_for_test(REPLY_TICKS);
         let fb = poll_timeout(|_, _| true).expect("fell back");
         note_sent_retarget(fb.vm, fb.corpse);
-        note_list_reply();
+        note_list_reply(Some(0x20), |_, _| true);
         assert_eq!(method(), Method::Retarget);
         note_sent_by_id(7, 0x21, 0x99); // never sent in a fallen-back session, but a stray probe changes nothing
         advance_for_test(REPLY_TICKS + 1);
         assert!(poll_timeout(|_, _| true).is_none());
         assert_eq!(method(), Method::Retarget);
+    }
+
+    #[test]
+    fn a_list_for_another_corpse_or_for_a_request_nobody_waits_for_confirms_nothing() {
+        fresh();
+        // the player's own corpse opens first: the probe keeps waiting for its own
+        note_sent_by_id(1, 0x20, 0x99);
+        note_list_reply(Some(0x30), |_, _| true);
+        assert_eq!(method(), Method::Unknown);
+        note_list_reply(Some(0x20), |_, _| true);
+        assert_eq!(method(), Method::ById, "its own list confirms");
+        // an ambiguous list (two requests overlapped) drops the probe without a verdict
+        fresh();
+        note_sent_by_id(1, 0x20, 0x99);
+        note_list_reply(None, |_, _| true);
+        assert_eq!(method(), Method::Unknown);
+        advance_for_test(REPLY_TICKS + 1);
+        assert!(poll_timeout(|_, _| true).is_none(), "and nothing is left to time out");
+        // the mod's request is gone
+        fresh();
+        note_sent_by_id(1, 0x20, 0x99);
+        note_list_reply(Some(0x20), |_, _| false);
+        assert_eq!(method(), Method::Unknown);
+        fresh();
+        note_sent_by_id(1, 0x20, 0x99);
+        assert!(!note_refusal(Refusal::Unclear, |_, _| false));
+        assert_eq!(method(), Method::Unknown, "a refusal for a request nobody waits for falls back to nothing");
+    }
+
+    #[test]
+    fn a_disconnect_forgets_the_method_and_a_zone_change_keeps_it() {
+        fresh();
+        note_sent_by_id(1, 0x20, 0x99);
+        note_list_reply(Some(0x20), |_, _| true);
+        note_sent_by_id(1, 0x21, 0x99);
+        clear();
+        assert_eq!(method(), Method::ById, "same server");
+        advance_for_test(REPLY_TICKS + 1);
+        assert!(poll_timeout(|_, _| true).is_none(), "the waiting request is forgotten");
+        reset_session();
+        assert_eq!(method(), Method::Unknown, "another server decides again");
     }
 
     #[test]

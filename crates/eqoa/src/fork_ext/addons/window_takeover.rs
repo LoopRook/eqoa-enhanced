@@ -513,10 +513,12 @@ pub(crate) fn by_id_corpse() -> Option<u32> {
     }
     with_state(|s| {
         let idx = TakeoverKind::Loot as usize;
-        if s.holders[idx].is_some() && s.hidden[idx].active && s.hidden[idx].by_id {
+        // a corpse the player asked for themselves meanwhile (a pending open another loot request overlapped, a session
+        // the player's own request interrupted) is the player's: never the mod's source, never the mod's to loot or close
+        if s.holders[idx].is_some() && s.hidden[idx].active && s.hidden[idx].by_id && !s.hidden[idx].player_asked {
             return Some(s.hidden[idx].target_id);
         }
-        s.pending_opens[idx].filter(|p| p.by_id).map(|p| p.target_id)
+        s.pending_opens[idx].filter(|p| p.by_id && !p.foreign).map(|p| p.target_id)
     })
 }
 
@@ -775,7 +777,8 @@ pub(crate) fn end_session_for_vm(vm: u64, kind: TakeoverKind) {
                 s.grace_loot = Some(ListGrace {
                     target_id: s.hidden[idx].target_id,
                     until: Instant::now() + LIST_GRACE,
-                    player_asked: false,
+                    // a request the player sent while the session was up is still theirs when the grace begins
+                    player_asked: s.hidden[idx].player_asked,
                     by_id: s.hidden[idx].by_id,
                 });
             }
