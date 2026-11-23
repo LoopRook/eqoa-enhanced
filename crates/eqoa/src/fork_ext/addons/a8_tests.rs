@@ -76,6 +76,8 @@ fn context() -> Context {
 fn frames(host: &Host, bridge: &Bridge, context: &mut Context, n: usize) -> usize {
     let mut vertices = 0;
     for _ in 0..n {
+        // the client's frame counter, which the pointer claims' per-frame quota counts by
+        CORE.with(|c| c.borrow_mut().frame += 1);
         context.frame();
         bridge
             .invoke(|| {

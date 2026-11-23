@@ -599,6 +599,8 @@ mod e2e {
     impl Rig {
         fn frames(&mut self, n: usize) {
             for _ in 0..n {
+                // the client's frame counter, which the pointer claims' per-frame quota counts by
+                CORE.with(|c| c.borrow_mut().frame += 1);
                 self.context.frame();
                 self.bridge
                     .invoke(|| {
