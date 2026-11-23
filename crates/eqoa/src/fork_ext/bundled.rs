@@ -39,6 +39,8 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_target_frame_demo",
     "eqoa_spellbook",
     "eqoa_quest_journal",
+    "eqoa_dialogs",
+    "eqoa_turnin",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -216,6 +218,41 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_quest_journal/README.md",
         package: "eqoa_quest_journal",
         data: include_bytes!("../../../../bundled-mods/eqoa_quest_journal/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_dialogs/mod.json",
+        package: "eqoa_dialogs",
+        data: include_bytes!("../../../../bundled-mods/eqoa_dialogs/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_dialogs/main.lua",
+        package: "eqoa_dialogs",
+        data: include_bytes!("../../../../bundled-mods/eqoa_dialogs/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_dialogs/README.md",
+        package: "eqoa_dialogs",
+        data: include_bytes!("../../../../bundled-mods/eqoa_dialogs/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_turnin/mod.json",
+        package: "eqoa_turnin",
+        data: include_bytes!("../../../../bundled-mods/eqoa_turnin/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_turnin/main.lua",
+        package: "eqoa_turnin",
+        data: include_bytes!("../../../../bundled-mods/eqoa_turnin/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_turnin/modules/match.lua",
+        package: "eqoa_turnin",
+        data: include_bytes!("../../../../bundled-mods/eqoa_turnin/modules/match.lua"),
+    },
+    BundledFile {
+        path: "eqoa_turnin/README.md",
+        package: "eqoa_turnin",
+        data: include_bytes!("../../../../bundled-mods/eqoa_turnin/README.md"),
     },
     BundledFile {
         path: "eqoa_example_hearts/mod.json",
@@ -1203,7 +1240,9 @@ mod tests {
                 "eqoa_frames",
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
-                "eqoa_quest_journal"
+                "eqoa_quest_journal",
+                "eqoa_dialogs",
+                "eqoa_turnin"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1500,7 +1539,9 @@ mod tests {
                 "eqoa_frames",
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
-                "eqoa_quest_journal"
+                "eqoa_quest_journal",
+                "eqoa_dialogs",
+                "eqoa_turnin"
             ]
         );
 
@@ -1550,7 +1591,9 @@ mod tests {
                 "eqoa_frames",
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
-                "eqoa_quest_journal"
+                "eqoa_quest_journal",
+                "eqoa_dialogs",
+                "eqoa_turnin"
             ]
         );
 
@@ -1574,7 +1617,9 @@ mod tests {
                 "eqoa_frames",
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
-                "eqoa_quest_journal"
+                "eqoa_quest_journal",
+                "eqoa_dialogs",
+                "eqoa_turnin"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1664,7 +1709,9 @@ mod tests {
                 "eqoa_frames",
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
-                "eqoa_quest_journal"
+                "eqoa_quest_journal",
+                "eqoa_dialogs",
+                "eqoa_turnin"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );

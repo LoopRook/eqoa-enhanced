@@ -19,6 +19,8 @@
     "eqoa.windows.session",
     "eqoa.actions.dialog_answer",
     "eqoa.quests.list",
+    "eqoa.options.toggle",
+    "eqoa.options.get",
     "eqoa.log.write",
     "eqoa.hud.frame",
     "eqoa.input.claim",

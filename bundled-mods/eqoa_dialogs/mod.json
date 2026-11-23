@@ -21,6 +21,8 @@
     "eqoa.windows.takeover",
     "eqoa.windows.session",
     "eqoa.actions.dialog_answer",
+    "eqoa.options.toggle",
+    "eqoa.options.get",
     "eqoa.log.write",
     "eqoa.hud.frame",
     "eqoa.input.claim",
