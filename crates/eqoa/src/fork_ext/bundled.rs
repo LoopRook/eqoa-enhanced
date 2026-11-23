@@ -39,6 +39,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_target_frame_demo",
     "eqoa_spellbook",
     "eqoa_quest_journal",
+    "eqoa_character",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -216,6 +217,26 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_quest_journal/README.md",
         package: "eqoa_quest_journal",
         data: include_bytes!("../../../../bundled-mods/eqoa_quest_journal/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_character/mod.json",
+        package: "eqoa_character",
+        data: include_bytes!("../../../../bundled-mods/eqoa_character/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_character/main.lua",
+        package: "eqoa_character",
+        data: include_bytes!("../../../../bundled-mods/eqoa_character/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_character/modules/character.lua",
+        package: "eqoa_character",
+        data: include_bytes!("../../../../bundled-mods/eqoa_character/modules/character.lua"),
+    },
+    BundledFile {
+        path: "eqoa_character/README.md",
+        package: "eqoa_character",
+        data: include_bytes!("../../../../bundled-mods/eqoa_character/README.md"),
     },
     BundledFile {
         path: "eqoa_example_hearts/mod.json",
@@ -1203,7 +1224,8 @@ mod tests {
                 "eqoa_frames",
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
-                "eqoa_quest_journal"
+                "eqoa_quest_journal",
+                "eqoa_character"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1500,7 +1522,8 @@ mod tests {
                 "eqoa_frames",
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
-                "eqoa_quest_journal"
+                "eqoa_quest_journal",
+                "eqoa_character"
             ]
         );
 
@@ -1550,7 +1573,8 @@ mod tests {
                 "eqoa_frames",
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
-                "eqoa_quest_journal"
+                "eqoa_quest_journal",
+                "eqoa_character"
             ]
         );
 
@@ -1574,7 +1598,8 @@ mod tests {
                 "eqoa_frames",
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
-                "eqoa_quest_journal"
+                "eqoa_quest_journal",
+                "eqoa_character"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1664,7 +1689,8 @@ mod tests {
                 "eqoa_frames",
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
-                "eqoa_quest_journal"
+                "eqoa_quest_journal",
+                "eqoa_character"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );

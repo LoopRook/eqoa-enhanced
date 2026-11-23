@@ -403,6 +403,7 @@ pub(crate) fn inactive() {
     super::items::forget();
     super::r6a::forget();
     crate::fork_ext::addons::native_a3::forget();
+    crate::fork_ext::addons::native_a5::forget();
     SNAPSHOT.with(|s| *s.borrow_mut() = None);
     native_core::discard_deferred();
 }
@@ -450,6 +451,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         KEY.with(|k| k.set(Some(key(play, walker))));
         MAP_KEY.with(|k| k.set(None));
         super::a3::refresh(play, walker);
+        super::a5::refresh(play);
         super::items::note(play);
         dirty();
         return;
@@ -462,6 +464,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     super::items::refresh(play);
     super::r6a::refresh(play, walker);
     super::a3::refresh(play, walker);
+    super::a5::refresh(play);
     native_core::flush_deferred();
     CORE.with(|c| {
         let mut c = c.borrow_mut();

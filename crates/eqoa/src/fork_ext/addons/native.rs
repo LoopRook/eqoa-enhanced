@@ -976,6 +976,10 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ("player", "training breath", 8),
         ("quests", "goals", 8),
         ("target", "info", 8),
+        // round A5
+        ("factions", "list", 8),
+        ("combat", "record", 8),
+        ("actions", "train_stats request_factions request_combat_record", 8),
     ] {
         let module_path = format!("eqoa.{module}");
         let backing = match modules.get::<Value>(module)? {
@@ -1118,6 +1122,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_r6a::install(host)?;
     super::native_a3::install(host)?;
     super::native_a1::install(host)?;
+    super::native_a5::install(host)?;
     super::frame_actions::install(host)?;
     super::raid_strips::install(host)?;
     super::map_views::install(host)?;
@@ -1221,6 +1226,9 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.group.Group", "raid") => Some("eqoa.group.RaidMember"),
         ("eqoa.group.Group", "invites") => Some("eqoa.group.Invite"),
         ("eqoa.quests.QuestGoals", "goals") => Some("eqoa.quests.QuestGoal"),
+        ("eqoa.player.Training", "caps") => Some("eqoa.player.SevenStats"),
+        ("eqoa.factions.FactionPage", "entries") => Some("eqoa.factions.Faction"),
+        ("eqoa.combat.CombatRecord", "rows") => Some("eqoa.combat.CombatRow"),
         ("eqoa.target.TargetInfo", "consider") => Some("eqoa.target.Consider"),
         ("eqoa.target.Consider", "color") => Some("eqoa.Color"),
         ("eqoa.items.Container", "items") => Some("eqoa.items.Item"),

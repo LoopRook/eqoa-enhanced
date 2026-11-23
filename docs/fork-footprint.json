@@ -570,6 +570,12 @@
     },
     {
       "path": "crates/eqoa/src/play.rs",
+      "name": "A5 mastery node kept",
+      "pattern": "fork_hooks::mastery_node_kept\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/play.rs",
       "name": "session recorder drop",
       "pattern": "fork_hooks::dropped[(]self[)]",
       "count": 1

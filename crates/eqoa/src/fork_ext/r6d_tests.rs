@@ -12,6 +12,7 @@ fn ready() -> Play {
     CORE.with(|c| *c.borrow_mut() = Core::default());
     native_core::fixture_demand(true);
     action_broker::reset_all_for_test();
+    crate::fork_ext::addons::window_sessions::reset_for_test();
     r6a::forget();
     let mut p = super::super::tests::play();
     let _ = p.loading.wait.take();
@@ -29,14 +30,20 @@ fn rig() -> (Play, Host) {
     rig_with_capabilities(&["eqoa.actions.*"])
 }
 
-/// `rig` with `drop_quest`, `mastery_buy` and `mastery_refund` bound as built (round 7H made them `not_yet` for
-/// mods until the confirm contract; their dispatch stays covered here for that day).
+/// `rig` for the steps the game confirms: `drop_quest`, `mastery_buy` and `mastery_refund` all ask the player first
+/// (round A1 for the quest, round A5 for the two Class Mastery steps).
 fn rig_confirm_gated() -> (Play, Host) {
-    use crate::fork_ext::addons::window_actions::BIND_CONFIRM_GATED_FOR_TEST;
-    BIND_CONFIRM_GATED_FOR_TEST.with(|b| b.set(true));
-    let rig = rig();
-    BIND_CONFIRM_GATED_FOR_TEST.with(|b| b.set(false));
-    rig
+    rig()
+}
+
+/// The player's own Yes to the question that is up (Right, then Enter), and the game step that carries it out.
+fn player_says_yes(p: &mut Play) {
+    use crate::fork_ext::addons::confirm;
+    use winit::keyboard::{Key, NamedKey};
+    assert!(confirm::is_open(), "a question is up");
+    assert!(confirm::key(&Key::Named(NamedKey::ArrowRight)));
+    assert!(confirm::key(&Key::Named(NamedKey::Enter)));
+    super::super::begin_iteration(p, true);
 }
 
 fn rig_with_capabilities(caps: &[&str]) -> (Play, Host) {
@@ -175,6 +182,8 @@ fn round6d_mastery_actions_use_native_requests_and_gates() {
     expect_code(&host, "not_ready");
     gesture(&mut p, &host, "return eqoa.actions.mastery_buy(100)");
     assert!(last_ok(&host));
+    assert_eq!(p.cm.pending, 0, "round A5: the call only asks; nothing is sent before the player's Yes");
+    player_says_yes(&mut p);
     assert_eq!(p.cm.pending, 2, "Part::send02 is the purchase");
     p.cm.pending = 0;
     p.cm.skills[0].on = true;
@@ -183,6 +192,8 @@ fn round6d_mastery_actions_use_native_requests_and_gates() {
     expect_code(&host, "not_ready");
     gesture(&mut p, &host, "return eqoa.actions.mastery_refund(100)");
     assert!(last_ok(&host));
+    assert_eq!(p.cm.pending, 0, "round A5: the call only asks");
+    player_says_yes(&mut p);
     assert_eq!(p.cm.pending, 3, "Part::send03 is the refund");
 }
 
@@ -336,6 +347,8 @@ fn round6d_review_d_mastery_buy_refund_use_the_live_skill_list() {
     assert_eq!(p.cm.pending, 0, "no duplicate purchase request");
     gesture(&mut p, &host, "return eqoa.actions.mastery_refund(100)");
     assert!(last_ok(&host));
+    assert_eq!(p.cm.pending, 0, "round A5: the call only asks");
+    player_says_yes(&mut p);
     assert_eq!(p.cm.pending, 3);
 }
 
@@ -468,10 +481,10 @@ fn round6d_capabilities_are_supported_for_what_is_wired() {
             local c = eqoa.capabilities.get("eqoa.actions." .. n)
             assert(c and c.status == "supported", n)
         end
-        -- round 7H: the mastery steps the game confirms wait for the character-summary round
-        for _, n in ipairs({"mastery_buy","mastery_refund"}) do
+        -- round A5: the mastery steps the game confirms are supported: each asks the player first
+        for _, n in ipairs({"mastery_buy","mastery_refund","train_stats","request_factions","request_combat_record"}) do
             local c = eqoa.capabilities.get("eqoa.actions." .. n)
-            assert(c and c.status == "not_yet", n)
+            assert(c and c.status == "supported", n)
         end
         local b = eqoa.capabilities.get("eqoa.actions.buttons")
         assert(b and b.status ~= "supported")

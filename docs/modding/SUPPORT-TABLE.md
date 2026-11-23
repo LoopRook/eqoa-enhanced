@@ -71,8 +71,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.loot_assign` | supported | 7 |  |
 | `eqoa.actions.loot_roll` | supported | 7 |  |
 | `eqoa.actions.mastery_browse` | supported | 6 |  |
-| `eqoa.actions.mastery_buy` | not_yet | 6 | the game asks the player to confirm this step; a mod cannot take it until the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer |
-| `eqoa.actions.mastery_refund` | not_yet | 6 | the game asks the player to confirm this step; a mod cannot take it until the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer |
+| `eqoa.actions.mastery_buy` | supported | 6 |  |
+| `eqoa.actions.mastery_refund` | supported | 6 |  |
 | `eqoa.actions.mastery_share` | supported | 6 |  |
 | `eqoa.actions.menu_command` | supported | 6 |  |
 | `eqoa.actions.move` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 8) |
@@ -84,6 +84,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.quick_slot` | supported | 6 |  |
 | `eqoa.actions.ready_check_answer` | supported | 7 |  |
 | `eqoa.actions.remove_effect` | supported | 8 |  |
+| `eqoa.actions.request_combat_record` | supported | 8 |  |
+| `eqoa.actions.request_factions` | supported | 8 |  |
 | `eqoa.actions.select_row` | supported | 6 |  |
 | `eqoa.actions.sell` | supported | 6 |  |
 | `eqoa.actions.status` | supported | 6 |  |
@@ -94,6 +96,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.target` | supported | 6 |  |
 | `eqoa.actions.target_target` | supported | 3 |  |
 | `eqoa.actions.toggle_stats_box` | supported | 3 |  |
+| `eqoa.actions.train_stats` | supported | 8 |  |
 | `eqoa.actions.unmemorize_ability` | supported | 6 |  |
 | `eqoa.actions.unmemorize_all` | supported | 6 |  |
 | `eqoa.actions.use_hotbar` | supported | 6 |  |
@@ -169,6 +172,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 |---|---|---|---|
 | `eqoa.combat` | supported | 2 |  |
 | `eqoa.combat.get_counters` | supported | 2 |  |
+| `eqoa.combat.record` | supported | 8 |  |
 
 ## eqoa.cooldowns
 
@@ -212,6 +216,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.off` | supported | 2 |  |
 | `eqoa.events.on` | supported | 2 |  |
 | `eqoa.events.once` | supported | 2 |  |
+
+## eqoa.factions
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.factions` | supported | 8 |  |
+| `eqoa.factions.list` | supported | 8 |  |
 
 ## eqoa.files
 
@@ -750,6 +761,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.combat.CombatHit.kind` | supported | 2 |  |
 | `eqoa.combat.CombatHit.outgoing` | supported | 2 |  |
 | `eqoa.combat.CombatHit.to_pet` | supported | 2 |  |
+| `eqoa.combat.CombatRecord` | supported | 8 |  |
+| `eqoa.combat.CombatRecord.name` | supported | 8 |  |
+| `eqoa.combat.CombatRecord.rows` | supported | 8 |  |
+| `eqoa.combat.CombatRow` | supported | 8 |  |
+| `eqoa.combat.CombatRow.heading` | supported | 8 |  |
+| `eqoa.combat.CombatRow.label` | supported | 8 |  |
+| `eqoa.combat.CombatRow.value` | supported | 8 |  |
 | `eqoa.combat.Counters` | supported | 2 |  |
 | `eqoa.combat.Counters.dropped` | supported | 2 |  |
 | `eqoa.combat.Counters.received` | supported | 2 |  |
@@ -1019,6 +1037,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.world.entered.data.world_id` | supported | 2 |  |
 | `eqoa.events.world.leaving.data.reason` | supported | 2 |  |
 | `eqoa.events.world.leaving.data.world_id` | supported | 2 |  |
+| `eqoa.factions.Faction` | supported | 8 |  |
+| `eqoa.factions.Faction.name` | supported | 8 |  |
+| `eqoa.factions.Faction.standing` | supported | 8 |  |
+| `eqoa.factions.FactionPage` | supported | 8 |  |
+| `eqoa.factions.FactionPage.entries` | supported | 8 |  |
+| `eqoa.factions.FactionPage.page` | supported | 8 |  |
+| `eqoa.factions.FactionPage.pages` | supported | 8 |  |
 | `eqoa.files.FileEntry` | supported | 7 |  |
 | `eqoa.files.FileEntry.kind` | supported | 7 |  |
 | `eqoa.files.FileEntry.path` | supported | 7 |  |
@@ -1407,6 +1432,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.player.Stats.strength` | supported | 3 |  |
 | `eqoa.player.Stats.wisdom` | supported | 3 |  |
 | `eqoa.player.Training` | supported | 8 |  |
+| `eqoa.player.Training.caps` | supported | 8 |  |
 | `eqoa.player.Training.points` | supported | 8 |  |
 | `eqoa.player.Training.stat_cap` | supported | 8 |  |
 | `eqoa.player.Vital` | supported | 2 |  |

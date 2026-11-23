@@ -15,15 +15,15 @@ use dear_imgui_rs::Context;
 use serde_json::json;
 use std::path::PathBuf;
 
-fn root(id: &str) -> PathBuf {
+pub(super) fn root(id: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods").join(id).canonicalize().unwrap()
 }
 
-fn manifest(id: &str) -> serde_json::Value {
+pub(super) fn manifest(id: &str) -> serde_json::Value {
     serde_json::from_str(&std::fs::read_to_string(root(id).join("mod.json")).unwrap()).unwrap()
 }
 
-fn addon(id: &str) -> DiscoveredAddon {
+pub(super) fn addon(id: &str) -> DiscoveredAddon {
     let m = manifest(id);
     DiscoveredAddon {
         id: id.into(),
@@ -43,7 +43,7 @@ fn addon(id: &str) -> DiscoveredAddon {
     }
 }
 
-fn context() -> Context {
+pub(super) fn context() -> Context {
     let mut context = Context::create();
     context.set_ini_filename::<PathBuf>(None).unwrap();
     context.io_mut().set_display_size([1024.0, 768.0]);
@@ -52,7 +52,7 @@ fn context() -> Context {
     context
 }
 
-fn fixture() {
+pub(super) fn fixture() {
     CORE.with(|c| *c.borrow_mut() = Core::default());
     action_broker::reset_all_for_test();
     ws::reset_for_test();
@@ -70,7 +70,7 @@ fn fixture() {
     });
 }
 
-fn frames(host: &Host, bridge: &Bridge, context: &mut Context, n: usize) -> usize {
+pub(super) fn frames(host: &Host, bridge: &Bridge, context: &mut Context, n: usize) -> usize {
     let mut vertices = 0;
     for _ in 0..n {
         context.frame();
@@ -85,7 +85,7 @@ fn frames(host: &Host, bridge: &Bridge, context: &mut Context, n: usize) -> usiz
     vertices
 }
 
-fn press(host: &Host, key: &str, combo: &str) {
+pub(super) fn press(host: &Host, key: &str, combo: &str) {
     CORE.with(|c| {
         c.borrow_mut().emit(
             "input.key",
@@ -97,7 +97,14 @@ fn press(host: &Host, key: &str, combo: &str) {
 
 /// Every `eqoa.<module>.<name>` the script calls that needs a declaration is declared.
 fn declared_covers_used(id: &str) {
-    let src = std::fs::read_to_string(root(id).join("main.lua")).unwrap();
+    let mut src = std::fs::read_to_string(root(id).join("main.lua")).unwrap();
+    // a mod may keep its code in modules (round A5: the Character mod): what they call counts as the mod's
+    if let Ok(dir) = std::fs::read_dir(root(id).join("modules")) {
+        for entry in dir.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "lua")) {
+            src.push('\n');
+            src.push_str(&std::fs::read_to_string(entry.path()).unwrap());
+        }
+    }
     let declared: Vec<String> =
         manifest(id)["capabilities"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()).collect();
     let used = |prefix: &str| -> Vec<String> {
@@ -121,12 +128,13 @@ fn declared_covers_used(id: &str) {
         assert!(used("eqoa.actions.").iter().any(|u| u == name), "{id} declares {cap} and never calls it");
     }
     for name in used("eqoa.windows.") {
-        assert!(matches!(name.as_str(), "open_session" | "close_session"), "{id} uses eqoa.windows.{name}");
+        // `confirm` only reads whether the client's own question is up (round A5: a mod leaves Escape to it)
+        assert!(matches!(name.as_str(), "open_session" | "close_session" | "confirm"), "{id} uses eqoa.windows.{name}");
         assert!(declared.contains(&"eqoa.windows.session".to_string()), "{id} must declare eqoa.windows.session");
     }
 }
 
-fn run(id: &str, key: &str, combo: &str, title_kind: &str) {
+pub(super) fn run(id: &str, key: &str, combo: &str, title_kind: &str) {
     fixture();
     let manifest = manifest(id);
     assert_eq!(manifest["enabled"], false, "ships off");
@@ -459,7 +467,7 @@ fn a1_owner_fix_a_key_that_cannot_open_a_window_logs_a_note_not_a_mod_error() {
     }
 }
 
-fn click(host: &Host, x: f64, y: f64, button: &str) {
+pub(super) fn click(host: &Host, x: f64, y: f64, button: &str) {
     CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": x, "y": y, "inside_window": true, "button": button})));
     native_events::dispatch(host).unwrap();
 }

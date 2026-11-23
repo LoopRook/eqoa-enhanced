@@ -485,6 +485,8 @@ pub(super) mod items;
 pub(super) mod r6a;
 #[path = "a3_capture.rs"]
 pub(crate) mod a3;
+#[path = "a5_capture.rs"]
+pub(crate) mod a5;
 #[cfg(test)]
 #[path = "a3_tests.rs"]
 mod a3_tests;
@@ -503,3 +505,6 @@ mod round7h_play_tests;
 #[cfg(test)]
 #[path = "a1_play_tests.rs"]
 mod a1_play_tests;
+#[cfg(test)]
+#[path = "a5_tests.rs"]
+mod a5_tests;
