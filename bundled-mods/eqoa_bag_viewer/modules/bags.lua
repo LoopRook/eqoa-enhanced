@@ -541,12 +541,20 @@ function M.blockers(it)
     return set
 end
 
--- The grid draws an item's icon dim when this is true. Kept on the entry, and read again when the character's
--- level changes (the stamp), not once per frame.
+-- Gear: an item with a wear slot (the game's own test, `wear_slot != -1`; the server's 0xFFFFFFFF is "none").
+function M.is_gear(it)
+    return it.wear_slot ~= nil and it.wear_slot ~= 4294967295
+end
+
+-- The grid draws an item's icon dim when this is true: gear the character cannot use, and only gear. The game
+-- itself consults the class, race and level rules (`VIPlayer::CanUse`) only for an item with a wear slot (its
+-- bank, duel and pack pages badge only those); crafting, misc, junk and sellable items have no class or race
+-- rule to meet (their masks do not name the character), so `can_use` says no for some of them: they are never dimmed. Kept on the entry, and read again when the
+-- character's level changes (the stamp), not once per frame.
 function M.icon_dimmed(entry, stamp)
     if entry.dim_stamp ~= stamp then
         entry.dim_stamp = stamp
-        entry.dim = entry.item ~= nil and M.blockers(entry.item) ~= nil
+        entry.dim = entry.item ~= nil and M.is_gear(entry.item) and M.blockers(entry.item) ~= nil
     end
     return entry.dim
 end

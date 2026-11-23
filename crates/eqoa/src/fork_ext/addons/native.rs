@@ -1343,7 +1343,7 @@ fn install_fields(lua: &Lua) {
         ("eqoa.group.Invite", "id name"),
         (
             "eqoa.abilities.Ability",
-            "ref id name description display_key spellbook_slot usable level range cast_time power_cost icon_background icon_foreground scope cooldown equipment_mask lockout",
+            "ref id name description display_key spellbook_slot usable learned level range cast_time power_cost icon_background icon_foreground scope cooldown equipment_mask lockout",
         ),
         ("eqoa.abilities.RangeResult", "in_range distance"),
         (
@@ -1420,6 +1420,8 @@ fn install_fields(lua: &Lua) {
                 Some(6)
             } else if (path, field) == ("eqoa.hotbar.HotbarSlot", "item") {
                 Some(5)
+            } else if (path, field) == ("eqoa.abilities.Ability", "learned") {
+                Some(8)
             } else if matches!(
                 (path, field),
                 ("eqoa.entities.Entity", "power") | ("eqoa.group.Member", "power")
