@@ -65,10 +65,13 @@ impl Session {
             "revision": self.revision,
             "focused": focused,
         });
-        if !self.data.is_null() {
-            out["data"] = self.data.clone();
-        }
+        out["data"] = self.data_json();
         out
+    }
+
+    /// `data` is always a table: the dialog's or offer's own fields, empty for every other window.
+    pub(crate) fn data_json(&self) -> serde_json::Value {
+        if self.data.is_null() { json!({}) } else { self.data.clone() }
     }
 }
 
@@ -159,6 +162,7 @@ fn emit_closed(s: &Session, reason: &str) {
         "opened_from": s.opened_from,
         "revision": s.revision,
         "reason": reason,
+        "data": s.data_json(),
     });
     super::window_sessions::queue_event("windows.session", event);
 }
@@ -173,7 +177,7 @@ fn emit_opened(s: &Session) {
         "opened_from": s.opened_from,
         "revision": s.revision,
         "reason": serde_json::Value::Null,
-        "data": s.data.clone(),
+        "data": s.data_json(),
     });
     super::window_sessions::queue_event("windows.session", event);
 }
