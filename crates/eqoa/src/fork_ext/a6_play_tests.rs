@@ -355,6 +355,8 @@ fn a6_the_enter_key_opens_the_mods_chat_line_and_only_for_chat() {
     p.mode = 0;
     p.edit.clear();
     let h = host();
+    // (a step with the line shut: the line open before the claim must not count as opened since)
+    super::super::begin_iteration(&mut p, true);
     let vm = hold(&h, TakeoverKind::ChatEntry);
     p.channel = 4;
     p.chat_key("", true);
