@@ -171,6 +171,31 @@ fn round7h_6_a_dispatched_result_has_no_ok_until_the_outcome_is_known() {
     done(&host);
 }
 
+/// Owner test 2026-11-23: `Ability.valid` (the API's `usable`) is "on a slot", so an ability learned and not yet
+/// memorized has it 0. `assign_ability` follows the Abilities page's Memorize (`SpellBook::popup_message`): refuses one
+/// already on a slot and one not learned (`p14` 0), and sends the rest. (Before, it refused every ability not
+/// memorized, so a real Memorize never went out.)
+#[test]
+fn round7h_assign_ability_memorizes_a_learned_ability_and_refuses_one_on_a_slot_or_not_learned() {
+    let (mut p, host) = rig();
+    let ab = |id: i64, index: i64, valid: i64, slot: i64, p14: i64| {
+        net::dump::Ability { id, display_index: index, valid, slot, p14, name: format!("Spell {id}"), ..Default::default() }
+    };
+    p.abilities.insert(601, ab(601, 3, 0, -1, 1)); // learned, not memorized (Return Home)
+    p.abilities.insert(602, ab(602, 4, 1, 2, 1)); // memorized in slot 3
+    p.abilities.insert(603, ab(603, 5, 0, -1, 0)); // not learned
+    gesture(&mut p, &host, "return eqoa.actions.assign_ability(7, 601)");
+    host.execute("assert(last_req ~= nil and results[#results].state == 'dispatched', tostring(last_err and last_err.message) .. ' / ' .. tostring(results[#results] and results[#results].reason))").unwrap();
+    for (id, why) in [(602, "already memorized"), (603, "not learned")] {
+        gesture(&mut p, &host, &format!("return eqoa.actions.assign_ability(7, {id})"));
+        host.execute(&format!(
+            "local r = results[#results]; assert(r and r.ok == false and r.code == 'not_ready' and r.reason:find('{why}'), tostring(r and r.code) .. ' ' .. tostring(r and r.reason))"
+        ))
+        .unwrap();
+    }
+    done(&host);
+}
+
 /// Item 7: the game asks Yes/No before dropping a quest (`questlog.rs`, word 574) and before buying or
 /// refunding a Class Mastery skill (`classmastery.rs`, words 1663/1664 and 1665/1666). Until a mod-drawn
 /// confirmation can be tied to the player's own answer, these three are `not_yet` for native mods and send
