@@ -180,7 +180,7 @@ fn a8_arguments_are_checked_before_anything_is_queued() {
         ("eqoa.actions.craft_combine(1)", "invalid_argument"),
         ("eqoa.actions.craft_tray_clear(1)", "invalid_argument"),
     ] {
-        h.execute(&format!("local r, e = {call}; assert(r == nil and e ~= nil and e.code == '{code}', '{call}: ' .. tostring(e and e.code))")).unwrap();
+        h.execute(&format!("local r, e = {call}; assert(r == nil and e ~= nil and e.code == '{code}', [=[{call}: ]=] .. tostring(e and e.code))")).unwrap();
     }
     assert!(action_broker::queued_kinds_for_test().is_empty(), "nothing was queued by a bad call");
     // the controls: well-formed calls queue, each under its own name

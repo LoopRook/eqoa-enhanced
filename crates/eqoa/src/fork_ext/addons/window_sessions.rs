@@ -21,8 +21,10 @@ use crate::input::bit;
 use serde_json::json;
 use std::cell::{Cell, RefCell};
 
-/// The windows a mod may open for itself in A1 (a view: the game's window of that name stays where it is).
-pub(crate) const OWN_KINDS: [&str; 3] = ["inventory", "spellbook", "quest_log"];
+/// The windows a mod may open for itself (a view: the game's window of that name stays where it is). Round A8 adds
+/// the crafting book and the experiment: while a mod holds one, the client reads the server's crafting replies
+/// (`native_a8`, `fork_ext/a8_play.rs`).
+pub(crate) const OWN_KINDS: [&str; 5] = ["inventory", "spellbook", "quest_log", "recipe_book", "experiment"];
 /// Most sessions one mod may hold at once.
 const MAX_PER_VM: usize = 8;
 
