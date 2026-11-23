@@ -562,15 +562,15 @@
     {
       "children": [],
       "path": "ImGui.GetMouseDragDelta",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
-      "revision": 0,
-      "round": null,
-      "status": "unsupported"
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
     },
     {
       "children": [],
       "path": "ImGui.GetMousePos",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -578,7 +578,7 @@
     {
       "children": [],
       "path": "ImGui.GetMousePosOnOpeningCurrentPopup",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -586,7 +586,7 @@
     {
       "children": [],
       "path": "ImGui.GetMouseWheel",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -714,7 +714,7 @@
     {
       "children": [],
       "path": "ImGui.IsMouseClicked",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -722,7 +722,7 @@
     {
       "children": [],
       "path": "ImGui.IsMouseDoubleClicked",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -730,10 +730,10 @@
     {
       "children": [],
       "path": "ImGui.IsMouseDown",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
-      "revision": 0,
-      "round": null,
-      "status": "unsupported"
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
     },
     {
       "children": [],
@@ -754,7 +754,7 @@
     {
       "children": [],
       "path": "ImGui.IsMousePosValid",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -762,10 +762,10 @@
     {
       "children": [],
       "path": "ImGui.IsMouseReleased",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
-      "revision": 0,
-      "round": null,
-      "status": "unsupported"
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
     },
     {
       "children": [],
@@ -930,7 +930,7 @@
     {
       "children": [],
       "path": "ImGui.ResetMouseDragDelta",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -986,7 +986,7 @@
     {
       "children": [],
       "path": "ImGui.SetMouseCursor",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -994,7 +994,7 @@
     {
       "children": [],
       "path": "ImGui.SetMousePos",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -8063,15 +8063,15 @@
     {
       "children": [],
       "path": "eqoa.imgui.GetMouseDragDelta",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
-      "revision": 0,
-      "round": null,
-      "status": "unsupported"
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
     },
     {
       "children": [],
       "path": "eqoa.imgui.GetMousePos",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -8079,7 +8079,7 @@
     {
       "children": [],
       "path": "eqoa.imgui.GetMousePosOnOpeningCurrentPopup",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -8087,7 +8087,7 @@
     {
       "children": [],
       "path": "eqoa.imgui.GetMouseWheel",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -8215,7 +8215,7 @@
     {
       "children": [],
       "path": "eqoa.imgui.IsMouseClicked",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -8223,7 +8223,7 @@
     {
       "children": [],
       "path": "eqoa.imgui.IsMouseDoubleClicked",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -8231,10 +8231,10 @@
     {
       "children": [],
       "path": "eqoa.imgui.IsMouseDown",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
-      "revision": 0,
-      "round": null,
-      "status": "unsupported"
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
     },
     {
       "children": [],
@@ -8255,7 +8255,7 @@
     {
       "children": [],
       "path": "eqoa.imgui.IsMousePosValid",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -8263,10 +8263,10 @@
     {
       "children": [],
       "path": "eqoa.imgui.IsMouseReleased",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
-      "revision": 0,
-      "round": null,
-      "status": "unsupported"
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
     },
     {
       "children": [],
@@ -8431,7 +8431,7 @@
     {
       "children": [],
       "path": "eqoa.imgui.ResetMouseDragDelta",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -8487,7 +8487,7 @@
     {
       "children": [],
       "path": "eqoa.imgui.SetMouseCursor",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -8495,7 +8495,7 @@
     {
       "children": [],
       "path": "eqoa.imgui.SetMousePos",
-      "reason": "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events",
+      "reason": "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events",
       "revision": 0,
       "round": null,
       "status": "unsupported"
