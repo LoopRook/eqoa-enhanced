@@ -357,6 +357,9 @@ fn a1_fix1_leaving_the_world_ends_every_mod_window_the_question_and_the_controll
             "quit" => p.quit = true,
             _ => p.disconnected = Some(3),
         }
+        // control: a Play dropped without leaving (no quit, no lost connection) ends nothing
+        drop(super::super::tests::play());
+        assert!(confirm::is_open() && ws::is_active() && !ws::env().away, "{how}: a Play dropped for another reason changes nothing");
         // the viewer goes back to the pregame with no further step: the world is simply let go
         drop(p);
         assert!(!confirm::is_open(), "{how}: the question is over (as No), nothing is left to expire over the pregame");

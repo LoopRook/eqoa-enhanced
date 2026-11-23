@@ -151,10 +151,14 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
     }
 }
 
-/// The world is let go (a logout, a lost connection, the character left): every mod window, a question and the
-/// controller end now, not at a step that will never run, so nothing stays drawn or masked over the game's own
-/// screens (`Play`'s drop calls this).
-pub(crate) fn play_dropped() {
+/// The world is let go (`Play`'s drop calls this): after a logout or a lost connection (`leaving`: the viewer goes
+/// back to the game's own screens with no further step) every mod window, a question and the controller end now,
+/// not at a step that will never run, so nothing stays drawn or masked over the pregame. A `Play` dropped for any
+/// other reason is not a leaving and changes nothing here.
+pub(crate) fn play_dropped(leaving: bool) {
+    if !leaving {
+        return;
+    }
     window_sessions::set_env(Env { plain: false, dead: false, away: true, passable: false });
     window_sessions::mods_stopped("left_world");
 }

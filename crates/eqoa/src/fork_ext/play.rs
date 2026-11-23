@@ -1020,7 +1020,7 @@ pub(super) fn dropped(_play: &mut Play) {
     drain_released_waypoints(_play);
     // round A1: no mod window, question or controller focus outlives the world
     #[cfg(not(target_arch = "wasm32"))]
-    a1_play::play_dropped();
+    a1_play::play_dropped(_play.quit || _play.disconnected.is_some());
 }
 
 /// Clears the pins disabled mods still own, once the map has read the window's pins; until then the
