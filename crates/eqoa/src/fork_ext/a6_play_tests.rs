@@ -628,3 +628,26 @@ fn a6_a_holder_whose_handler_fails_gives_the_keys_back_to_the_game_at_once() {
         // the negative control is the same press with the handler healthy: it stays the mod's (the tests above)
     }
 }
+
+/// Owner decision 2026-11-23: `eqoa.chat.get_channel` named group and shout the wrong way round (the game's `/g` is
+/// channel 2, `/s` channel 3). It reports the channel the line really goes to, as the new session data and
+/// `set_channel` always did. Negative control: the old table answered "shout" for 2 and "group" for 3.
+#[test]
+fn a6_get_channel_names_the_channel_the_line_goes_to() {
+    let mut p = ready();
+    let host = Host::with_test_capabilities(&["eqoa.chat.get_channel"]).unwrap();
+    for (code, name) in [(0u8, "say"), (2, "group"), (3, "shout"), (4, "guild"), (7, "other")] {
+        p.channel = code;
+        host.snapshot.set(p.forge_snapshot(None));
+        host.execute(&format!("local c = eqoa.chat.get_channel(); assert(c == '{name}', 'channel {code}: ' .. tostring(c))")).unwrap();
+    }
+    // the path that follows the player each frame (`api_updates`) uses the same table, not a copy of the old one
+    for file in ["api_capture.rs", "api_updates.rs"] {
+        let src = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/fork_ext").join(file)).unwrap();
+        assert!(!src.contains("2 => \"shout\""), "{file} still names channel 2 shout");
+    }
+    // the line's own channels: what `set_channel` sets is what is read back
+    for (name, code) in [("group", 2u8), ("shout", 3)] {
+        assert_eq!(native_a6::channel_name(code), Some(name));
+    }
+}

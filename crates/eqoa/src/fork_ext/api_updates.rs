@@ -515,13 +515,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
                 after["horizontal_speed"] = json!(ee::sqrt(xz));
                 after["location"] = play.native_location(walker);
             }
-            c.view.channel = match play.channel {
-                0 => "say",
-                2 => "shout",
-                3 => "group",
-                4 => "guild",
-                _ => "other",
-            };
+            c.view.channel = crate::fork_ext::addons::native_a6::channel_name(play.channel).unwrap_or("other");
             patch_player(&mut c, after);
         });
         dirty();

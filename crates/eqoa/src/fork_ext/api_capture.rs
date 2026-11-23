@@ -277,13 +277,8 @@ impl Play {
             camera_compass: None,
             camera_orbit_x: None,
             windows_state: crate::fork_ext::addons::native_core::none_windows_json(),
-            channel: match self.channel {
-                0 => "say",
-                2 => "shout",
-                3 => "group",
-                4 => "guild",
-                _ => "other",
-            },
+            // the channel the line goes to: the game's own numbering (`/g` is 2, `/s` is 3)
+            channel: crate::fork_ext::addons::native_a6::channel_name(self.channel).unwrap_or("other"),
         };
         r6a::populate_view(self, walker, &mut view);
         view
