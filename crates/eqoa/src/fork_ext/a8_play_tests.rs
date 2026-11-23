@@ -715,10 +715,25 @@ mod e2e {
                 .load("local out = {}; for _, r in ipairs(results or {}) do out[#out + 1] = tostring(r.kind) .. ':' .. tostring(r.ok) .. ':' .. tostring(r.code) .. ':' .. tostring(r.reason) end return table.concat(out, ' | ')")
                 .eval()
                 .unwrap_or_else(|e| format!("(no results: {e})"));
-            format!("queued {:?}; results [{results}]; logs {:?}; mode {}; pending {}", action_broker::queued_kinds_for_test(), self.host.drain_logs(), self.p.mode, self.p.craft.pending)
+            let frame: String = self.host.lua.load("local f = eqoa.hud.frame(); return string.format('%g %g %g %g', f.scale_x, f.scale_y, f.offset_x, f.offset_y)").eval().unwrap_or_default();
+            format!("snapshot {}; hud frame [{frame}] vs geometry k {} x0 {} y0 {}; queued {:?}; results [{results}]; logs {:?}; mode {}; pending {}", native_a8::current().is_some(), self.k, self.x0, self.y0, action_broker::queued_kinds_for_test(), self.host.drain_logs(), self.p.mode, self.p.craft.pending)
+        }
+
+        /// The window's place as main.lua puts it now (the HUD frame can move between steps).
+        fn relayout(&mut self) {
+            let (k, sx, sy, ox, oy): (f64, f64, f64, f64, f64) = self
+                .host
+                .lua
+                .load("local f = eqoa.hud.frame(); return math.min(f.scale_x, f.scale_y), f.scale_x, f.scale_y, f.offset_x, f.offset_y")
+                .eval()
+                .unwrap();
+            self.k = k;
+            self.x0 = (1024.0 - W * k).min(ox + (640.0 - W) / 2.0 * sx).max(0.0);
+            self.y0 = (768.0 - H * k).min(oy + (448.0 - H) / 2.0 * sy).max(0.0);
         }
 
         fn tap(&mut self, x: f64, y: f64) {
+            self.relayout();
             let (px, py) = (self.x0 + x * self.k, self.y0 + y * self.k);
             CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": px, "y": py, "inside_window": true, "button": "left"})));
             native_events::dispatch(&self.host).unwrap();
