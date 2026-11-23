@@ -452,6 +452,10 @@ fn a1_owner_fix_a_key_that_cannot_open_a_window_logs_a_note_not_a_mod_error() {
         window_takeover::set_use_game_windows(false);
         assert!(!logs.contains("invalid_argument"), "{id}: no mod error when the window cannot open: {logs}");
         assert!(logs.contains("did not open"), "{id}: says why it did not open: {logs}");
+        // owner test 2026-11-23: the note is "info" (the game's log keeps it, and the Mods & Addons diagnostics, which
+        // is where a player sees a mod's warning, do not): the player's own setting is not a fault
+        assert!(logs.contains("eqoa/1 [info] "), "{id}: the note is info level: {logs}");
+        assert!(!logs.contains("[warn]") && !logs.contains("[error]"), "{id}: no warn or error note: {logs}");
     }
 }
 
@@ -462,13 +466,15 @@ fn click(host: &Host, x: f64, y: f64, button: &str) {
 
 fn ability(n: i64, slot: Option<i64>) -> serde_json::Value {
     json!({"ref": {"$ref": "ability", "key": n.to_string(), "generation": 0, "incarnation": 1}, "id": n,
-        "name": format!("Skill {n:02}"), "description": "", "display_key": n, "spellbook_slot": slot, "usable": true,
+        "name": format!("Skill {n:02}"), "description": "", "display_key": n, "spellbook_slot": slot,
+        // as the client fills them: `usable` is "on a slot", `learned` is "the character has it"
+        "usable": slot.is_some(), "learned": true,
         "level": n, "range": 5.0, "cast_time": 1.0, "power_cost": 3, "scope": 0, "cooldown": 0.0, "equipment_mask": 0, "lockout": 0.0})
 }
 
 /// Owner test 2026-11-23: the Spellbook's scroll bar takes a click (it only drew before) and Memorize is a button,
 /// with the game's refusal (an ability already memorized) said and nothing sent. The window's geometry is the
-/// mod's (HUD pixels: list at y 24, 13 rows of 13; slots from y 201; buttons at y 342).
+/// mod's (HUD pixels: list at y 24, 13 rows of 13; slots from y 225; buttons at y 392; the window is 416 high).
 #[test]
 fn a1_owner_fix_spellbook_scrollbar_click_and_memorize_button() {
     let id = "eqoa_spellbook";
@@ -486,7 +492,7 @@ fn a1_owner_fix_spellbook_scrollbar_click_and_memorize_button() {
         .load("local f = eqoa.hud.frame(); return math.min(f.scale_x, f.scale_y), f.offset_x, f.offset_y")
         .eval()
         .unwrap();
-    let (w, h) = (332.0, 370.0);
+    let (w, h) = (332.0, 416.0);
     let x0 = (1024.0 - w * k).min(ox + (640.0 - w) / 2.0 * k).max(0.0);
     let y0 = (768.0 - h * k).min(oy + (448.0 - h) / 2.0 * k).max(0.0);
     let at = |x: f64, y: f64| (x0 + x * k, y0 + y * k);
@@ -497,13 +503,160 @@ fn a1_owner_fix_spellbook_scrollbar_click_and_memorize_button() {
     };
     // the first row is Skill 01, memorized in slot 1: chosen, Memorize is refused (no button) and so is a slot click
     tap(60.0, 30.0, "left");
-    tap(14.0, 350.0, "left");
-    tap(8.0 + 2.0 * 32.0 + 5.0, 201.0 + 5.0, "left"); // slot 3
+    tap(14.0, 400.0, "left");
+    tap(8.0 + 2.0 * 32.0 + 5.0, 225.0 + 5.0, "left"); // slot 3
     assert!(action_broker::queued_kinds_for_test().is_empty(), "a memorized ability is not memorized again");
     // a click near the foot of the scroll bar (x 325..331, y 24..193) jumps the list down: Skill 08 is first now
     tap(328.0, 24.0 + 169.0 * 0.95, "left");
     tap(60.0, 30.0, "left");
-    tap(14.0, 350.0, "left"); // the Memorize button
+    tap(14.0, 400.0, "left"); // the Memorize button
     assert_eq!(action_broker::queued_kinds_for_test(), vec!["assign_ability"], "the scrolled-to ability is memorized");
     assert_eq!(host.drain_logs().unwrap().len(), 0);
+}
+
+/// Owner test 2026-11-23 (Return Home, level 1, free slot 7: "cannot be memorized yet"). The ability record's
+/// `usable` is the game's "on a slot" flag, false for every ability not yet memorized, so it cannot be the test.
+/// The game's own rule (`SpellBook::popup_message`): memorized refuses, not learned refuses, else it goes on the
+/// slot: here the first free one.
+#[test]
+fn a1_owner_fix_spellbook_memorizes_a_learned_unmemorized_ability_into_the_first_free_slot() {
+    let id = "eqoa_spellbook";
+    fixture();
+    // slots 1, 2 and 4 are taken; Skill 03 is learned and not memorized; Skill 05 is not learned at all
+    CORE.with(|c| {
+        c.borrow_mut().view.abilities = vec![
+            ability(1, Some(1)),
+            ability(2, Some(2)),
+            ability(3, None),
+            ability(4, Some(4)),
+            {
+                let mut a = ability(5, None);
+                a["learned"] = json!(false);
+                a
+            },
+        ]
+    });
+    let mut context = context();
+    let host = Host::for_addon(&addon(id)).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon(id)).unwrap();
+    press(&host, "k", "shift+k");
+    frames(&host, &bridge, &mut context, 3);
+    let (k, ox, oy): (f64, f64, f64) = host
+        .lua
+        .load("local f = eqoa.hud.frame(); return math.min(f.scale_x, f.scale_y), f.offset_x, f.offset_y")
+        .eval()
+        .unwrap();
+    let (w, h) = (332.0, 416.0);
+    let x0 = (1024.0 - w * k).min(ox + (640.0 - w) / 2.0 * k).max(0.0);
+    let y0 = (768.0 - h * k).min(oy + (448.0 - h) / 2.0 * k).max(0.0);
+    let mut tap = |x: f64, y: f64| {
+        click(&host, x0 + x * k, y0 + y * k, "left");
+        frames(&host, &bridge, &mut context, 2);
+    };
+    // the ability not learned is not listed: its would-be row (the fourth listed, y 24 + 3 * 13) selects nothing, so
+    // the Memorize button (shown off) sends nothing
+    tap(60.0, 24.0 + 3.0 * 13.0 + 5.0);
+    tap(14.0, 400.0);
+    assert!(action_broker::queued_kinds_for_test().is_empty(), "nothing chosen, nothing memorized");
+    // Skill 03 (the third row): chosen, then the Memorize button: it goes onto slot 3, the first free one
+    tap(60.0, 24.0 + 2.0 * 13.0 + 5.0);
+    tap(14.0, 400.0);
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["assign_ability"], "the learned ability is memorized");
+    // (the broker counts slots from 0: 2 is the third)
+    assert_eq!(action_broker::queued_assign_slots_for_test(), vec![2], "into the first free slot, the third");
+    assert_eq!(host.drain_logs().unwrap().len(), 0);
+}
+
+/// Every vertex the Spellbook's layer drew in the frame just rendered, as (x, y, colour).
+fn spellbook_vertices() -> Vec<(f32, f32, u32)> {
+    unsafe {
+        let d = dear_imgui_rs::sys::igGetDrawData();
+        let lists = &(*d).CmdLists;
+        let mut out = Vec::new();
+        for i in 0..lists.Size as usize {
+            let l = *lists.Data.add(i);
+            if !std::ffi::CStr::from_ptr((*l)._OwnerName).to_string_lossy().starts_with("eqoa_spellbook_layer") {
+                continue;
+            }
+            for j in 0..(*l).VtxBuffer.Size as usize {
+                let v = *(*l).VtxBuffer.Data.add(j);
+                out.push((v.pos.x, v.pos.y, v.col));
+            }
+        }
+        out
+    }
+}
+
+/// Owner test 2026-11-23: the Spellbook's header, red status line and "Shift+K or Esc" hint ran off or behind the
+/// window's X. Drawn headless at the default size with a long name, a long description and a long refusal: nothing is
+/// drawn outside the window, the mod says it cut no text, and the hint ends before the X.
+#[test]
+fn a1_owner_fix_spellbook_text_stays_inside_its_window() {
+    let id = "eqoa_spellbook";
+    fixture();
+    CORE.with(|c| {
+        let mut one = ability(1, Some(1));
+        one["name"] = json!("Anthem of Conquest and Valor");
+        one["description"] = json!(
+            "Sings a rousing anthem that raises the strength and the courage of every ally who can hear the bard, \
+             lasting a long while, and does so again each time the bard finishes the verse before it fades away \
+             completely, which is a great deal more than the three lines that the book can show for one ability"
+        );
+        c.borrow_mut().view.abilities = vec![one, ability(2, None)];
+    });
+    let mut context = context();
+    let host = Host::for_addon(&addon(id)).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon(id)).unwrap();
+    press(&host, "k", "shift+k");
+    frames(&host, &bridge, &mut context, 3);
+    let (k, ox, oy): (f64, f64, f64) = host
+        .lua
+        .load("local f = eqoa.hud.frame(); return math.min(f.scale_x, f.scale_y), f.offset_x, f.offset_y")
+        .eval()
+        .unwrap();
+    let (w, h) = (332.0, 416.0);
+    // The window is the rectangle its surface fill (0xF5111111) draws; everything but that fill and the 1 px border
+    // (0x404040, anti-aliased, its fringe reaching past the edge) is text or a control and must lie inside it.
+    let inside = |label: &str, vertices: &[(f32, f32, u32)]| -> (f64, f64) {
+        let fill: Vec<_> = vertices.iter().filter(|v| v.2 == 0xF511_1111).collect();
+        assert!(fill.len() >= 4, "{label}: the window's surface was drawn");
+        let lo = |f: fn(&&(f32, f32, u32)) -> f32| fill.iter().map(f).fold(f32::MAX, f32::min) as f64;
+        let hi = |f: fn(&&(f32, f32, u32)) -> f32| fill.iter().map(f).fold(f32::MIN, f32::max) as f64;
+        let (left, top, right, bottom) = (lo(|v| v.0), lo(|v| v.1), hi(|v| v.0), hi(|v| v.1));
+        assert!((right - left - w * k).abs() < 2.0 && (bottom - top - h * k).abs() < 2.0, "{label}: the window is {}x{}, expected {}x{}", right - left, bottom - top, w * k, h * k);
+        let eps = 1.0;
+        assert!(vertices.len() > 100, "{label}: the window drew ({} vertices)", vertices.len());
+        for &(x, y, col) in vertices.iter().filter(|v| v.2 != 0xF511_1111 && v.2 & 0x00FF_FFFF != 0x0040_4040) {
+            assert!(
+                f64::from(x) >= left - eps && f64::from(x) <= right + eps && f64::from(y) >= top - eps && f64::from(y) <= bottom + eps,
+                "{label}: a vertex at ({x}, {y}) colour {col:#010x} is outside the window ({left}, {top})-({right}, {bottom})"
+            );
+        }
+        (left, top)
+    };
+    let (x0, y0) = inside("nothing chosen", &spellbook_vertices());
+    // the hint ("Shift+K or Esc", the muted grey, 0xFF999999) is in the title row and ends before the X (at W - 18)
+    let hint_right = spellbook_vertices()
+        .iter()
+        .filter(|v| v.2 == 0xFF99_9999 && f64::from(v.1) < y0 + 18.0 * k)
+        .map(|v| f64::from(v.0))
+        .fold(f64::MIN, f64::max);
+    assert!(hint_right > x0 + 200.0 * k, "the hint was found in the title row ({hint_right})");
+    assert!(hint_right <= x0 + (w - 18.0) * k, "the hint ends {hint_right} but the X begins at {}", x0 + (w - 18.0) * k);
+    // choose the long-named memorized ability, then click a free slot: it is already memorized, a long refusal
+    let mut tap = |x: f64, y: f64| {
+        click(&host, x0 + x * k, y0 + y * k, "left");
+        frames(&host, &bridge, &mut context, 2);
+    };
+    tap(60.0, 30.0);
+    tap(8.0 + 2.0 * 32.0 + 5.0, 225.0 + 5.0);
+    inside("long name, long description and a long refusal", &spellbook_vertices());
+    // and the texts came out whole: no text was cut to fit (the mod says so in the game's log when it must)
+    let logs = format!("{:?}", host.drain_logs().unwrap());
+    assert!(!logs.contains("cut a text"), "nothing was cut: {logs}");
+    // the red status line is drawn (the warning colour) and sits above the buttons (y 392), below the description
+    let red = spellbook_vertices().iter().filter(|v| v.2 == 0xFF4D_4DFF).map(|v| f64::from(v.1)).fold(f64::MAX, f64::min);
+    assert!(red >= y0 + 364.0 * k - 1.0, "the status starts under the description: {red}");
 }

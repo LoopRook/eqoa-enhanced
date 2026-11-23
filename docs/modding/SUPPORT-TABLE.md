@@ -710,6 +710,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.abilities.Ability.icon_background` | supported | 2 |  |
 | `eqoa.abilities.Ability.icon_foreground` | supported | 2 |  |
 | `eqoa.abilities.Ability.id` | supported | 2 |  |
+| `eqoa.abilities.Ability.learned` | supported | 8 |  |
 | `eqoa.abilities.Ability.level` | supported | 2 |  |
 | `eqoa.abilities.Ability.lockout` | supported | 2 |  |
 | `eqoa.abilities.Ability.name` | supported | 2 |  |

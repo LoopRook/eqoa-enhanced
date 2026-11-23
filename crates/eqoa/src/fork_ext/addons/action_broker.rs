@@ -4896,6 +4896,21 @@ pub(crate) fn queued_kinds_for_test() -> Vec<&'static str> {
 }
 
 #[cfg(test)]
+pub(crate) fn queued_assign_slots_for_test() -> Vec<i64> {
+    BROKER.with(|b| {
+        b.borrow()
+            .vms
+            .values()
+            .flat_map(|v| v.queued.iter())
+            .filter_map(|q| match &q.kind {
+                ActionKind::AssignAbility { slot, .. } => Some(*slot),
+                _ => None,
+            })
+            .collect()
+    })
+}
+
+#[cfg(test)]
 pub(crate) fn dispatch_all_for_test() -> Vec<&'static str> {
     let snap = NativeSnapshot {
         in_world: true,
