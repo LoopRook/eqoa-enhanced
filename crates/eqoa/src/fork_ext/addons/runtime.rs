@@ -959,6 +959,10 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
                 "input_text" => continue,
                 // round A1 / A7: these never act on their own: the player's Yes is asked first (`asks_first_label`)
                 "destroy" | "drop_quest" | "guild_kick" | "friend_accept" | "guild_accept" => continue,
+                // round A5: the same for spending training points and the two Class Mastery steps
+                "train_stats" | "mastery_buy" | "mastery_refund" => continue,
+                "request_factions" => "ask for faction standings",
+                "request_combat_record" => "ask for the combat record",
                 _ => kind,
             };
             if !label.is_empty() && !kinds.contains(&label) {
@@ -1057,6 +1061,9 @@ pub(crate) fn asks_first_label(caps: &[String]) -> Option<String> {
         ("guild_kick", "kick a guild member"),
         ("friend_accept", "accept a friend request"),
         ("guild_accept", "accept a guild invitation"),
+        ("train_stats", "spend training points"),
+        ("mastery_buy", "buy a Class Mastery skill"),
+        ("mastery_refund", "refund a Class Mastery skill"),
     ] {
         if super::native::capability_grants(caps, &format!("eqoa.actions.{name}")) {
             steps.push(words);

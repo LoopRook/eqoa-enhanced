@@ -197,12 +197,13 @@ fn round7h_assign_ability_memorizes_a_learned_ability_and_refuses_one_on_a_slot_
 }
 
 /// Item 7: the game asks Yes/No before dropping a quest (`questlog.rs`, word 574) and before buying or
-/// refunding a Class Mastery skill (`classmastery.rs`, words 1663/1664 and 1665/1666). Until a mod-drawn
-/// confirmation can be tied to the player's own answer, these three are `not_yet` for native mods and send
-/// nothing. The game never asks before Unmemorize All (`spellbook.rs`, the menu's 0x0809_0000), so
-/// `unmemorize_all` stays supported.
+/// refunding a Class Mastery skill (`classmastery.rs`, words 1663/1664 and 1665/1666). Round 7H made these
+/// `not_yet` for native mods until the player's own answer could be asked for; since rounds A1 and A5 each asks the
+/// player first (the client's own question, `confirm.rs`), so they are supported and send nothing on their own.
+/// The game never asks before Unmemorize All (`spellbook.rs`, the menu's 0x0809_0000), so `unmemorize_all` stays
+/// supported.
 #[test]
-fn round7h_7_steps_the_game_confirms_are_not_yet_for_mods() {
+fn round7h_7_steps_the_game_confirms_never_send_on_their_own() {
     let (mut p, host) = rig();
     p.quests.titles = ["Bat Eyes", "The Militia"].iter().map(|t| crate::ui::wide(t)).collect();
     p.quests.stamp = 7;
@@ -218,13 +219,15 @@ fn round7h_7_steps_the_game_confirms_are_not_yet_for_mods() {
         gesture(&mut p, &host, &format!("return {call}"));
         host.execute(&format!(
             r#"
-            assert(eqoa.capabilities.get('eqoa.actions.{name}').status == 'not_yet', '{name} is ' .. eqoa.capabilities.get('eqoa.actions.{name}').status)
-            assert(last_req == nil and last_err and last_err.code == 'not_yet', '{name}: ' .. tostring(last_err and last_err.code))
-            assert(last_err.message:find('confirm', 1, true), last_err.message)
+            assert(eqoa.capabilities.get('eqoa.actions.{name}').status == 'supported', '{name} is ' .. eqoa.capabilities.get('eqoa.actions.{name}').status)
+            -- mode 22 is the quest journal: no Class Mastery window is open, so there is nothing to buy from
+            local c = (last_err and last_err.code) or (results[1] and results[1].code)
+            assert(c == 'not_ready', '{name}: ' .. tostring(c))
         "#
         ))
         .unwrap();
         assert_eq!(p.session.sends_lost, sent, "{name} sent something");
+        assert!(!crate::fork_ext::addons::confirm::is_open(), "{name} asked with no window to buy from");
     }
     assert_eq!(p.quests.titles.len(), 2);
     host.execute("assert(eqoa.capabilities.get('eqoa.actions.unmemorize_all').status == 'supported')").unwrap();

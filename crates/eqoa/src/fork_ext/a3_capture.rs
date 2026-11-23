@@ -144,7 +144,11 @@ pub(super) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
             })
             .collect()
     });
-    a3::set_training(Some((play.dump.player.p40, play.dump.player.p44)));
+    a3::set_training(Some((
+        play.dump.player.p40,
+        play.dump.player.p44,
+        std::array::from_fn(|i| i64::from(crate::trainer::stat_cap(play.dump.player.p44 as i32, &play.cm.m.bonuses, i as i32))),
+    )));
     a3::set_breath(Some((
         f64::from(ee::div(play.dump.player.p30 as f32, 255.0)),
         walker.map(|w| w.cam.walk.is_under_liquid()),

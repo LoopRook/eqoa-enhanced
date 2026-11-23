@@ -40,6 +40,11 @@ pub(crate) enum Act {
     GuildKick { member_id: i32, name: String },
     FriendAccept { request_id: u32, name: String },
     GuildAccept { inviter_id: u32, inviter: String, guild: String },
+    /// Round A5: spend training points, by stat in the game's order (`native_a5::STAT_NAMES`).
+    TrainStats { points: [i32; 7] },
+    /// Round A5: buy (`refund` false) or switch off (`refund` true) a Class Mastery skill. `class` and `parent` are
+    /// the inspected skill's category and rank below, which the Master Class rule is judged by again at the Yes.
+    Mastery { skill_id: i32, name: String, refund: bool, class: u8, parent: i32 },
 }
 
 impl Act {
@@ -50,6 +55,9 @@ impl Act {
             Self::GuildKick { .. } => "guild_kick",
             Self::FriendAccept { .. } => "friend_accept",
             Self::GuildAccept { .. } => "guild_accept",
+            Self::TrainStats { .. } => "train_stats",
+            Self::Mastery { refund: false, .. } => "mastery_buy",
+            Self::Mastery { refund: true, .. } => "mastery_refund",
         }
     }
 }
@@ -312,6 +320,32 @@ pub(crate) fn friend_accept_text(name: &str) -> String {
 
 pub(crate) fn guild_accept_text(inviter: &str, guild: &str) -> String {
     format!("Join the guild \"{guild}\" (invited by \"{inviter}\")?")
+}
+
+/// The question for spending training points: how many, and on which stats.
+pub(crate) fn train_text(points: &[i32; 7]) -> String {
+    let total: i32 = points.iter().sum();
+    let parts: Vec<String> = points
+        .iter()
+        .zip(super::native_a5::STAT_NAMES)
+        .filter(|(p, _)| **p > 0)
+        .map(|(p, name)| format!("{name} +{p}"))
+        .collect();
+    let noun = if total == 1 { "point" } else { "points" };
+    format!("Spend {total} training {noun} ({})? They cannot be taken back.", parts.join(", "))
+}
+
+/// The question for a Class Mastery skill: buying it (with its cost), or switching it off.
+pub(crate) fn mastery_text(name: &str, cost: i32, refund: bool, master_class: bool) -> String {
+    if refund {
+        return format!("Switch off the Class Mastery skill \"{name}\"? The server decides what comes back, and the client cannot undo it.");
+    }
+    let noun = if cost == 1 { "point" } else { "points" };
+    let mut text = format!("Buy the Class Mastery skill \"{name}\" for {cost} {noun}? It cannot be undone.");
+    if master_class {
+        text.push_str(" It is a Master Class: only one can be owned.");
+    }
+    text
 }
 
 #[cfg(test)]

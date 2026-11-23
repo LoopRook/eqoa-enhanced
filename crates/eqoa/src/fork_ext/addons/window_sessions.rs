@@ -22,10 +22,12 @@ use serde_json::json;
 use std::cell::{Cell, RefCell};
 
 /// The windows a mod may open for itself (views: the game's window of that name stays where it is).
-pub(crate) const OWN_KINDS: [&str; 8] = [
+pub(crate) const OWN_KINDS: [&str; 10] = [
     "inventory",
     "spellbook",
     "quest_log",
+    "trainer",
+    "mastery",
     "buddy_list",
     "ignore_list",
     "guild",
@@ -245,6 +247,14 @@ pub(crate) fn get(vm: u64, kind: &str) -> Option<Session> {
         return None;
     }
     with(|s| s.sessions.iter().find(|x| x.vm == vm && x.kind == kind).cloned())
+}
+
+/// Some mod holds a session of `kind` (a window it opened for itself, or a held corpse, merchant or bank).
+pub(crate) fn any_open(kind: &str) -> bool {
+    if !is_active() {
+        return false;
+    }
+    with(|s| s.sessions.iter().any(|x| x.kind == kind))
 }
 
 pub(crate) fn find(vm: u64, id: &str) -> Option<Session> {

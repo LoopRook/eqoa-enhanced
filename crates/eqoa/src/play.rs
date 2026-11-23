@@ -8044,7 +8044,7 @@ impl Play {
                     self.show_dialog_b(&vi::ui::wide(&text), false);
                 }
                 // ShowNode < 0: the node cleared
-                Some(crate::classmastery::PartUp::Node) if !self.cm_wnd.show_node(vui, r, &self.cm, self.mode == 40) => self.cm.node = None,
+                Some(crate::classmastery::PartUp::Node) if !self.cm_wnd.show_node(vui, r, &self.cm, self.mode == 40) && !fork_hooks::mastery_node_kept(self) => self.cm.node = None,
                 // Recv05, Recv06: `m_owner->SetSpeed(m_speed)`
                 Some(crate::classmastery::PartUp::Speed(v)) => self.set_speed(v),
                 _ => {}

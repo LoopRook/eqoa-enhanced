@@ -170,6 +170,8 @@ pub(crate) enum ActionKind {
     A1(super::native_a1::A1Action),
     /// Round A7: friends, ignore, guild, who, group search.
     A7(super::native_a7::A7Action),
+    /// Round A5: spend training points (asks the player first), ask for a faction page or the combat record.
+    A5(super::native_a5::A5Action),
     /// `eqoa.actions.ready_check_answer`: answer an open raid ready check.
     ReadyCheckAnswer { id: u32, ready: bool },
     /// `eqoa.actions.loot_roll`: answer an open raid loot roll (0=pass, 1=need, 2=greed).
@@ -231,6 +233,7 @@ impl ActionKind {
             Self::Frame(action) => action.name(),
             Self::A1(action) => action.name(),
             Self::A7(action) => action.name(),
+            Self::A5(action) => action.name(),
             Self::ReadyCheckAnswer { .. } => "ready_check_answer",
             Self::LootRoll { .. } => "loot_roll",
             Self::LootAssign { .. } => "loot_assign",
@@ -288,6 +291,7 @@ impl ActionKind {
             | Self::Frame(_)
             | Self::A1(_)
             | Self::A7(_)
+            | Self::A5(_)
             | Self::ReadyCheckAnswer { .. }
             | Self::LootRoll { .. } => None,
         }
@@ -4895,6 +4899,12 @@ pub(crate) fn queued_kinds_for_test() -> Vec<&'static str> {
     })
 }
 
+/// The queued actions themselves (a test that needs what a mod asked for, not only its name).
+#[cfg(test)]
+pub(crate) fn queued_actions_for_test() -> Vec<ActionKind> {
+    BROKER.with(|b| b.borrow().vms.values().flat_map(|v| v.queued.iter().map(|q| q.kind.clone())).collect())
+}
+
 #[cfg(test)]
 pub(crate) fn queued_assign_slots_for_test() -> Vec<i64> {
     BROKER.with(|b| {
@@ -4908,6 +4918,47 @@ pub(crate) fn queued_assign_slots_for_test() -> Vec<i64> {
             })
             .collect()
     })
+}
+
+/// The queued memorize and unmemorize requests in order, as "assign slot N id I" / "unmemorize slot N" (slots 1-based,
+/// as the mod says them; the broker counts from 0).
+#[cfg(test)]
+pub(crate) fn queued_ability_steps_for_test() -> Vec<String> {
+    BROKER.with(|b| {
+        b.borrow()
+            .vms
+            .values()
+            .flat_map(|v| v.queued.iter())
+            .filter_map(|q| match &q.kind {
+                ActionKind::AssignAbility { slot, ability } => {
+                    Some(format!("assign slot {} id {}", slot + 1, ability.id.unwrap_or(-1)))
+                }
+                ActionKind::UnmemorizeAbility { slot: Some(slot), .. } => {
+                    Some(format!("unmemorize slot {}", slot + 1))
+                }
+                ActionKind::UnmemorizeAbility { ability: Some(ability), .. } => {
+                    Some(format!("unmemorize id {}", ability.id.unwrap_or(-1)))
+                }
+                _ => None,
+            })
+            .collect()
+    })
+}
+
+/// Every queued request is answered by the server's refusal (the first step of a move is refused).
+#[cfg(test)]
+pub(crate) fn refuse_all_for_test() {
+    let snap = NativeSnapshot {
+        in_world: true,
+        mode: 0,
+        ..Default::default()
+    };
+    BROKER.with(|b| {
+        b.borrow_mut().step_tick(snap, |_| DispatchOutcome::Refused {
+            code: "not_ready",
+            reason: "ability is not learned".into(),
+        });
+    });
 }
 
 #[cfg(test)]

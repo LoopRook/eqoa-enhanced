@@ -114,7 +114,7 @@ pub(crate) struct State {
     pub goals: Option<Vec<TrackedQuest>>,
     pub casts: Vec<Cast>,
     pub raid: Vec<RaidRole>,
-    pub training: Option<(i64, i64)>,
+    pub training: Option<(i64, i64, [i64; 7])>,
     pub breath: Option<(f64, Option<bool>)>,
     /// the target's description, or null with no target
     pub target: Json,
@@ -329,7 +329,8 @@ pub(crate) fn sync_goals(available: bool, hash: u64, fresh: impl FnOnce() -> Vec
 
 // ---- the small reads --------------------------------------------------------------------------------------------
 
-pub(crate) fn set_training(points: Option<(i64, i64)>) {
+/// The training points, the cap the level sets, and each trainable stat's cap with the masteries' bonus.
+pub(crate) fn set_training(points: Option<(i64, i64, [i64; 7])>) {
     STATE.with(|s| s.borrow_mut().training = points);
 }
 
@@ -748,7 +749,12 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         lua.create_function(|lua, ()| {
             let value = STATE
                 .with(|s| s.borrow().training)
-                .map(|(points, cap)| json!({"points": points, "stat_cap": cap}));
+                .map(|(points, cap, caps)| {
+                    json!({"points": points, "stat_cap": cap, "caps": {
+                        "strength": caps[0], "stamina": caps[1], "agility": caps[2], "dexterity": caps[3],
+                        "wisdom": caps[4], "intelligence": caps[5], "charisma": caps[6],
+                    }})
+                });
             answer(lua, "eqoa.player.training", "eqoa.player.Training", value, "the client has no training points yet")
         })?,
     )?;
@@ -788,7 +794,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ),
         ("eqoa.quests.QuestGoals", "title ability quest goals"),
         ("eqoa.quests.QuestGoal", "text have need done"),
-        ("eqoa.player.Training", "points stat_cap"),
+        ("eqoa.player.Training", "points stat_cap caps"),
         ("eqoa.player.Breath", "fraction underwater"),
         ("eqoa.target.TargetInfo", "id title guild consider"),
         ("eqoa.target.Consider", "code name color"),
