@@ -709,6 +709,15 @@ eqoa.input.bind({ id = "guild", label = "Social (Guild)", default_key = "shift+g
     open_window("guild", "key")
 end)
 
+-- Another mod (the Start menu) asks for a page: friends, ignore, guild, who or lfg
+eqoa.events.on("mod.command", function(e)
+    if e.data.command ~= "open" then return end
+    local page = type(e.data.args) == "table" and e.data.args.page or "friends"
+    if page ~= "friends" and page ~= "ignore" and page ~= "guild" and page ~= "who" and page ~= "lfg" then page = "friends" end
+    if state.open and state.tab == page then return end
+    open_window(page, "mod")
+end)
+
 -- Event wiring
 eqoa.events.on("render", draw)
 eqoa.events.on("world.entered", function()

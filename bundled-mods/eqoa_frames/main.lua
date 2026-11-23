@@ -38,22 +38,26 @@ local function effects_window()
     ui.SetNextWindowPos(60, 60, FIRST_USE)
     if not ui.Begin("Effects") then ui.End() return end
     local buffs = has("eqoa.effects.buffs") and eqoa.effects.buffs() or nil
-    -- the pet's effects come in the buff list when the server has one; the separate Pet section is for a server
-    -- without it, so each pet effect is shown once
-    local pet_in_buffs = false
+    -- the player's own effects are buttons; the pet's effects are never buttons: they are the lines of the dimmer
+    -- Pet section below, each once, from the buff list when the server has one, else from eqoa.effects.pet
+    local pet_lines = {}
     if buffs then
-        if #buffs == 0 then ui.TextDisabled("no effects") end
+        local own = 0
         for _, b in ipairs(buffs) do
-            if b.whose == "pet" then pet_in_buffs = true end
-            local label = string.format("%s  %s##buff%d", b.name, clock(b.time_left), b.index)
-            if b.whose == "pet" then label = "Pet: " .. label end
-            if ui.Button(label) and b.removable then
-                local req, err = eqoa.actions.remove_effect(b.ref)
-                if not req then eqoa.log.write("info", "frames: " .. tostring(err and err.code)) end
+            if b.whose == "pet" then
+                pet_lines[#pet_lines + 1] = { name = b.name, time_left = b.time_left }
+            else
+                own = own + 1
+                local label = string.format("%s  %s##buff%d", b.name, clock(b.time_left), b.index)
+                if ui.Button(label) and b.removable then
+                    local req, err = eqoa.actions.remove_effect(b.ref)
+                    if not req then eqoa.log.write("info", "frames: " .. tostring(err and err.code)) end
+                end
+                -- a tooltip only while the pointer is on this effect (SetTooltip draws at once, wherever it is called)
+                if ui.IsItemHovered() then ui.SetTooltip(effect_tip(b)) end
             end
-            -- a tooltip only while the pointer is on this effect (SetTooltip draws at once, wherever it is called)
-            if ui.IsItemHovered() then ui.SetTooltip(effect_tip(b)) end
         end
+        if own == 0 then ui.TextDisabled("no effects") end
     else
         -- no buff window from this server: the game's own strip has names and no times
         local list = has("eqoa.effects.list") and eqoa.effects.list() or nil
@@ -63,10 +67,15 @@ local function effects_window()
             ui.TextDisabled("no effects")
         end
     end
-    local pet = has("eqoa.effects.pet") and eqoa.effects.pet() or nil
-    if pet and #pet > 0 and not pet_in_buffs then
+    if #pet_lines == 0 then
+        local pet = has("eqoa.effects.pet") and eqoa.effects.pet() or nil
+        for _, e in ipairs(pet or {}) do pet_lines[#pet_lines + 1] = e end
+    end
+    if #pet_lines > 0 then
         ui.Separator()
-        for _, e in ipairs(pet) do ui.Text(string.format("Pet: %s  %s", e.name, clock(e.time_left))) end
+        for _, e in ipairs(pet_lines) do
+            ui.TextDisabled(string.format("Pet: %s  %s", e.name, clock(e.time_left)))
+        end
     end
     ui.End()
 end

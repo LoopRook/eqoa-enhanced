@@ -12,6 +12,12 @@ spell book, ...) return to this one.
 - Click an entry, or move with the arrow keys (the controller's d-pad) and press Enter (the controller's cross). An
   entry with `>` opens a sub-menu; **Esc** (the controller's triangle) goes up one menu, and closes the menu at the top.
   The **x** closes it too, and so does pressing the Start key again.
+- **Entries that an EQOA mod does the job of open that mod's window** when the mod is on: Summary, Class Mastery,
+  Factions and Combat Record open **EQOA Character**; Quest Journal opens **EQOA Quest Journal**; Tradeskills and Recipe
+  Book open **EQOA Crafting**; Spell Book opens **EQOA Spellbook**; Friends, Ignore, Guild, Who and Group Search open
+  **EQOA Social** on that page; Bags and Inventory open **Bag Viewer**. With the mod off, the game's own window opens, as
+  before. The menu asks the mod with `eqoa.mods.send` (the command `open`, which each of those mods now accepts); it
+  can ask for nothing but "open your window".
 - **Items** opens the game's own Start menu so you can use its item page (the bag windows have no copy here).
 - The menu closes when you run an entry, zoom, die, turn the mod off or switch on **Use the game's windows**. Your
   character can keep walking while it is up; the controller's sticks do not move the character while it holds the pad.

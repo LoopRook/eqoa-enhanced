@@ -57,5 +57,8 @@
     "eqoa.actions.destroy_many",
     "eqoa.actions.link_item",
     "eqoa.actions.hide_look"
+  ],
+  "commands": [
+    "open"
   ]
 }
