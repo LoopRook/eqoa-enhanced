@@ -35,6 +35,37 @@ fn ready() -> Play {
     p
 }
 
+/// A Play on a session that records what it sends (the connection of `ready()` is gone: nothing is kept), so the
+/// bytes of a mod's action can be compared with the game's own control on the same state.
+fn recording() -> Play {
+    struct Nowhere;
+    impl net::session::Datagrams for Nowhere {
+        fn send_to(&mut self, _: &[u8], _: [u8; 4], _: u16) {}
+        fn recv_from(&mut self) -> Option<(Vec<u8>, [u8; 4], u16)> {
+            None
+        }
+    }
+    CORE.with(|c| *c.borrow_mut() = Core::default());
+    native_core::fixture_demand(true);
+    action_broker::reset_all_for_test();
+    ws::reset_for_test();
+    native_a6::reset_for_test();
+    window_takeover::reset_all_for_test();
+    let mut s = net::session::Session::connect_with(Box::new(Nowhere), ([127, 0, 0, 1], 5000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+    s.self_id = Some(0x100);
+    s.record = Some(Vec::new());
+    s.item_links_offer = true;
+    let mut p = Play::new(s, net::session::Player::default(), Box::<net::dump::MemoryDump>::default());
+    p.agree_item_links();
+    p.hud = Some((
+        crate::ui::Vui::new(Default::default(), Default::default(), vec![]),
+        Default::default(),
+        crate::hud::Hud::new(),
+    ));
+    CORE.with(|c| c.borrow_mut().view.in_world = true);
+    p
+}
+
 /// The start menu as a server's tables make it: a sub-menu with one entry, Items, and Quit.
 fn with_menus(p: &mut Play) {
     use crate::client_image::{Label, Menu, MenuEntry};
@@ -227,12 +258,12 @@ fn a6_the_menu_stays_the_games_when_the_player_uses_the_games_windows_or_is_dead
     with_menus(&mut p);
     let h = host();
     hold(&h, TakeoverKind::StartMenu);
-    ws::set_env(ws::Env { dead: true, ..ws::Env::default() });
+    p.death = Some(crate::death::DeathCam::new([0.; 3], [0., 0., 1.], [0.; 3]));
     p.open_start_menu(true);
     step(&mut p, &h);
     assert_eq!(p.mode, 13, "dead: the game's");
     p.close_start_menu(0);
-    ws::set_env(ws::Env::default());
+    p.death = None;
     window_takeover::set_use_game_windows(true);
     p.open_start_menu(true);
     super::super::begin_iteration(&mut p, true);
@@ -369,12 +400,10 @@ fn a6_the_enter_key_opens_the_mods_chat_line_and_only_for_chat() {
 
 #[test]
 fn a6_a_chat_line_goes_as_the_games_own_line_does() {
-    let (mut mine, mut native) = (ready(), ready());
+    let (mut mine, mut native) = (recording(), recording());
     let h = host();
     for p in [&mut mine, &mut native] {
         p.reply_name = "Dab".into();
-        p.session.item_links_offer = true;
-        p.agree_item_links();
         p.dump.inventory.items = vec![item("Rusty Sword", 11)];
         sent(p);
     }
@@ -419,7 +448,7 @@ fn a6_a_chat_line_goes_as_the_games_own_line_does() {
 
 #[test]
 fn a6_set_channel_is_the_games_chat_mode() {
-    let (mut mine, mut native) = (ready(), ready());
+    let (mut mine, mut native) = (recording(), recording());
     let h = host();
     h.execute("req, err = eqoa.actions.set_channel('shout'); assert(req ~= nil, err and err.message)").unwrap();
     step(&mut mine, &h);
@@ -466,9 +495,7 @@ fn a6_link_item_goes_to_the_mods_line_when_it_holds_the_chat_and_to_the_games_ot
 
 #[test]
 fn a6_a_link_in_a_chat_line_opens_the_games_item_card() {
-    let mut p = ready();
-    p.session.item_links_offer = true;
-    p.agree_item_links();
+    let (mut p, mut native) = (recording(), recording());
     let h = host();
     // the line's links come with the event before it
     native_a6::stash_links(&[(10, 11, 4242)]);
@@ -485,5 +512,9 @@ fn a6_a_link_in_a_chat_line_opens_the_games_item_card() {
     assert!(!p.links.is_open());
     step(&mut p, &h);
     assert!(p.links.is_open(), "the game's own card for the link is open");
-    assert!(!sent(&mut p).is_empty(), "and the server was asked for the item");
+    // the game's own click on the link: the same card, the same question to the server
+    native.open_link(4242, "Rusty Sword");
+    let (a, b) = (sent(&mut p), sent(&mut native));
+    assert!(!a.is_empty(), "the server was asked for the item");
+    assert_eq!(a, b, "as a click on the link asks it");
 }

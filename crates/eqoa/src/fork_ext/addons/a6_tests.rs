@@ -195,7 +195,8 @@ fn a6_chat_line_checks_its_arguments_and_needs_only_the_chat_capability() {
         bad('invalid_argument', 'tell', 'hi')
         bad('invalid_argument', 'tell', 'hi', {to = 'two words'})
         bad('invalid_argument', 'say', 'hi', {to = 'Dab'})
-        bad('permission_denied', 'say', 'hello /bug')
+        bad('invalid_argument', 'say', '/bug it broke')
+        bad('invalid_argument', 'tell', '#bug it broke', {to = 'Dab'})
         bad('out_of_range', 'say', string.rep('x', 126))
         bad('out_of_range', 'say', 'abcdefgh', {links = {{start = 5, len = 9, list = 'inventory', key = 1}}})
         bad('out_of_range', 'say', 'abcdefghij', {links = {
@@ -337,12 +338,15 @@ fn declared_covers_used(id: &str) {
         }
         found
     };
-    for name in used("eqoa.actions.") {
+    // `chat_line` is an ordinary chat line: it needs `eqoa.actions.chat`
+    let need = |name: &str| if name == "chat_line" { "chat".to_string() } else { name.to_string() };
+    let calls: Vec<String> = used("eqoa.actions.").iter().map(|n| need(n)).collect();
+    for name in &calls {
         assert!(declared.contains(&format!("eqoa.actions.{name}")), "{id} calls eqoa.actions.{name} and must declare it");
     }
     for cap in declared.iter().filter(|c| c.starts_with("eqoa.actions.")) {
         let name = cap.trim_start_matches("eqoa.actions.");
-        assert!(used("eqoa.actions.").iter().any(|u| u == name), "{id} declares {cap} and never calls it");
+        assert!(calls.iter().any(|u| u == name), "{id} declares {cap} and never calls it");
     }
     assert!(used("eqoa.windows.").iter().any(|n| n == "takeover"), "{id} holds its window");
     assert!(declared.contains(&"eqoa.windows.takeover".to_string()));
@@ -392,6 +396,12 @@ fn a6_start_menu_mod_shows_the_session_and_runs_a_command_on_the_keys() {
     key(&host, "return", "");
     key(&host, "return", "");
     assert_eq!(action_broker::queued_kinds_for_test(), vec!["menu_command"], "logs {:?}", host.drain_logs());
+    // the client ends the menu when the game's entry runs (`a6_play`)
+    let id = ws::get(vm, "start_menu").unwrap().id;
+    ws::close(vm, &id, "command").unwrap();
+    native_core::flush_deferred();
+    frames(&host, &bridge, &mut context, 2);
+    assert_eq!(frames(&host, &bridge, &mut context, 2), 0, "the mod drew nothing once it was told");
     // Escape goes up a menu and then closes it, ending the session
     action_broker::reset_all_for_test();
     ws::open_client(vm, "eqoa_start_menu", "start_menu", "key", json!({"entries": [{"text": "Character", "enabled": true, "entries": [{"text": "A", "enabled": true, "command": "0x1:0"}]}]}));

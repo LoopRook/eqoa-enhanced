@@ -18,6 +18,7 @@ mod api_capture;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "a1_play.rs"]
 mod a1_play;
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "a6_play.rs"]
 mod a6_play;
 
