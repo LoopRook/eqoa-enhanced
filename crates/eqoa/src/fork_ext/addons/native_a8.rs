@@ -13,7 +13,7 @@ use super::{
     host::Host,
     native::{bind, describe, error, record_cached, require_capability},
 };
-use mlua::{Lua, Result, Value};
+use mlua::{Result, Value};
 use serde_json::{Value as Json, json};
 use std::cell::{Cell, RefCell};
 

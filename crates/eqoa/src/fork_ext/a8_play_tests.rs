@@ -523,6 +523,19 @@ fn a8_dead_or_out_of_the_world_nothing_is_sent() {
     assert!(native_a8::current().is_none());
 }
 
+#[test]
+fn a8_the_one_line_in_play_rs_offers_the_reply_to_the_mod_before_the_games_own_arm() {
+    // the arm is not reachable without a whole game loop, so the wiring is checked in the source: the fork's guard
+    // arm comes first, upstream's arm is unchanged after it, and nothing else mentions the hook. Without the guard
+    // line the mod's session would miss every reply (the first test above shows what the game's arm alone does).
+    let src = include_str!("../play.rs").replace("\r\n", "\n");
+    let hook = "Event::Opcode { op: 0x1102, data } if fork_hooks::craft_reply(self, &data) => {}";
+    let games = "Event::Opcode { op: 0x1102, data } => {\n                    let modes = crate::craft::Modes { recipe: self.mode == 6, experiment: self.mode == 37 };";
+    let (h, g) = (src.find(hook).expect("the hook arm is in play.rs"), src.find(games).expect("the game's own arm is unchanged"));
+    assert!(h < g, "the hook arm comes before the game's own");
+    assert_eq!(src.matches("fork_hooks::craft_reply").count(), 1, "one line");
+}
+
 // ---- the bundled mod, driven by clicks against the real game state ----
 
 mod e2e {
