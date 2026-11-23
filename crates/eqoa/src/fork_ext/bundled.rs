@@ -39,6 +39,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_target_frame_demo",
     "eqoa_spellbook",
     "eqoa_quest_journal",
+    "eqoa_crafting",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -216,6 +217,21 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_quest_journal/README.md",
         package: "eqoa_quest_journal",
         data: include_bytes!("../../../../bundled-mods/eqoa_quest_journal/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_crafting/mod.json",
+        package: "eqoa_crafting",
+        data: include_bytes!("../../../../bundled-mods/eqoa_crafting/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_crafting/main.lua",
+        package: "eqoa_crafting",
+        data: include_bytes!("../../../../bundled-mods/eqoa_crafting/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_crafting/README.md",
+        package: "eqoa_crafting",
+        data: include_bytes!("../../../../bundled-mods/eqoa_crafting/README.md"),
     },
     BundledFile {
         path: "eqoa_example_hearts/mod.json",
