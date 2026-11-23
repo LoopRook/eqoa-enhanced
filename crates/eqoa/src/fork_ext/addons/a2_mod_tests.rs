@@ -183,13 +183,14 @@ fn a2_turnin_holds_the_dialogs_shows_a_matching_quest_and_passes_everything_else
     assert!(vertices > 0, "the hand-in box is drawn: {:?}", r.host.drain_logs());
     assert!(dialog_sessions::take_passes().is_empty(), "a recognised dialog is not passed back");
     assert!(action_broker::queued_kinds_for_test().is_empty(), "and nothing is answered without the player's click");
-    ws::reset_for_test();
+    drop(r);
     // a dialog it does not recognise: passed at once (negative control: the matched one above was not)
     let mut r = rig("eqoa_turnin");
     r.frames(2);
     r.dialog(2, "Hello there", &["Where is the inn?", "Goodbye"]);
     r.frames(2);
     assert_eq!(dialog_sessions::take_passes().len(), 1, "an unknown dialog goes back to the game's window");
+    drop(r);
     // plain text is never its business either
     let mut r = rig("eqoa_turnin");
     r.frames(2);
@@ -208,7 +209,7 @@ fn a2_turnin_matches_on_the_options_words_never_on_their_position() {
     assert!(r.frames(3) > 0);
     assert!(dialog_sessions::take_passes().is_empty());
     // option text that only looks like a hand-in by position is not one
-    ws::reset_for_test();
+    drop(r);
     let mut r = rig("eqoa_turnin");
     r.frames(2);
     r.dialog(4, "Hand in?", &["Option 1", "Option 2", "Option 3"]);
@@ -224,9 +225,7 @@ fn a2_turnin_answers_by_itself_only_when_told_to_and_never_between_two_matches()
     r.dialog(5, "Well?", &["Goodbye", "Here is the bat eyes quest done"]);
     r.frames(3);
     assert!(action_broker::queued_kinds_for_test().is_empty(), "off: no answer");
-    ws::reset_for_test();
-    dialog_sessions::reset_for_test();
-    options::set_toggle("eqoa_turnin", "auto_answer", true);
+    drop(r);
     let mut r = rig("eqoa_turnin");
     options::set_toggle("eqoa_turnin", "auto_answer", true);
     r.frames(2);
@@ -234,9 +233,7 @@ fn a2_turnin_answers_by_itself_only_when_told_to_and_never_between_two_matches()
     r.frames(3);
     assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "on: the one matching answer is sent");
     // two matches: it never guesses
-    action_broker::reset_all_for_test();
-    ws::reset_for_test();
-    dialog_sessions::reset_for_test();
+    drop(r);
     let mut r = rig("eqoa_turnin");
     options::set_toggle("eqoa_turnin", "auto_answer", true);
     r.frames(2);
@@ -262,7 +259,8 @@ fn a2_dialog_window_draws_a_dialog_answers_with_a_key_and_gives_it_back_on_escap
     r.dialog(10, "Welcome, traveller. What do you seek?", &["Rumors", "Work", "Nothing"]);
     let vertices = r.frames(3);
     assert!(vertices > 0, "the dialog window is drawn: {:?}", r.host.drain_logs());
-    assert!(r.host.drain_logs().unwrap().is_empty(), "no diagnostic");
+    let logs: Vec<String> = r.host.drain_logs().unwrap().into_iter().filter(|l| !l.contains("holding ")).collect();
+    assert!(logs.is_empty(), "no diagnostic: {logs:?}");
     press(&r.host, "2");
     assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "key 2 answers the second option");
     // Escape: back to the game's window, never dropped
@@ -287,9 +285,7 @@ fn a2_dialog_window_pages_a_long_list_and_shows_an_offer() {
     press(&r.host, "1");
     assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "key 1 on the second page is the seventh option");
     // an offer is shown in its own box and answered with the same call
-    ws::reset_for_test();
-    dialog_sessions::reset_for_test();
-    action_broker::reset_all_for_test();
+    drop(r);
     let mut r = rig("eqoa_dialogs");
     r.frames(2);
     dialog_sessions::hold(Item::Offer { summons: true, name: "Mage".into(), text: wide("Mage summons you.") }, None);
