@@ -7,7 +7,7 @@ use super::{
     action_broker,
     bridge::Bridge,
     dialog_sessions::{self, Item},
-    discovery::{DiscoveredAddon, EntryMode},
+    discovery::DiscoveredAddon,
     host::Host,
     native_core::{CORE, Core},
     native_events, options, window_sessions as ws, window_takeover,
@@ -24,24 +24,10 @@ fn manifest(id: &str) -> serde_json::Value {
     serde_json::from_str(&std::fs::read_to_string(root(id).join("mod.json")).unwrap()).unwrap()
 }
 
+/// The mod as discovery reads it (so its `replaces` and `provides` are the manifest's).
 fn addon(id: &str) -> DiscoveredAddon {
-    let m = manifest(id);
-    DiscoveredAddon {
-        id: id.into(),
-        name: id.into(),
-        entry: root(id).join("main.lua"),
-        script_root: root(id),
-        package_root: root(id),
-        module_dirs: std::iter::once(root(id)).chain(root(id).join("modules").canonicalize().ok()).collect(),
-        resource_dirs: vec![root(id)],
-        api: Some("eqoa/1".into()),
-        entry_mode: EntryMode::Once,
-        capabilities_declared: true,
-        requested_capabilities: m["capabilities"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()).collect(),
-        extensions: Default::default(),
-        initially_enabled: false,
-        mods_root: None,
-    }
+    let found = super::discovery::discover(root(id).parent().unwrap());
+    found.addons.into_iter().find(|a| a.id == id).unwrap_or_else(|| panic!("{id} is bundled"))
 }
 
 fn context() -> Context {
