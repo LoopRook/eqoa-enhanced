@@ -872,8 +872,11 @@ fn cm_fingerprint(play: &Play, generation: u64) -> CmFingerprint {
 }
 
 fn update_mastery_flags(play: &Play, prev: Option<&CmFingerprint>, now: &CmFingerprint, c: &mut Core) {
+    // a list reply (sub-op 8) seen now: even an empty list is a list that came
+    let mut list_came = false;
     if play.cm_msgs.is_empty() && c.cm_pending_ops != 0 {
         let bits = std::mem::take(&mut c.cm_pending_ops);
+        list_came = bits & (1u16 << 8) != 0;
         for op in 1u8..=10 {
             if (bits & (1u16 << op)) != 0 {
                 c.mastery_flags.apply_subop(op);
@@ -917,6 +920,10 @@ fn update_mastery_flags(play: &Play, prev: Option<&CmFingerprint>, now: &CmFinge
             }
             if now.skills_len > 0 {
                 c.mastery_flags.skills = true;
+            } else if !list_came {
+                // no previous reading to compare (the world generation moved since the last one) and no list: the
+                // list is not held, so it is not "available" (round A5 fix: `cm.close()` after a mod's session)
+                c.mastery_flags.skills = false;
             }
         }
     }

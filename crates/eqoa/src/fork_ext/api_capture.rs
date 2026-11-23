@@ -204,7 +204,7 @@ impl Play {
         let group = json!({"in_group":self.group.in_group,"self_leader":self.group.in_group.then(||self.group.members.first().is_some_and(|m|Some(m.id)==id)),"members":members,"raid":self.group.raid.iter().map(|m|json!({"id":m.id,"name":m.name,"hp_fraction":ee::div(m.hp as f32,255.0),"power_fraction":ee::div(m.power as f32,255.0)})).collect::<Vec<_>>(),"invites":self.group.invites.iter().map(|i|json!({"id":i.id,"name":i.name})).collect::<Vec<_>>()});
         // Surface hashes are signed protocol words; only -1 is absent.
         // Preserve high-bit IDs exactly as the legacy Forge snapshot does.
-        let abilities=self.abilities.values().map(|a|json!({"id":a.id.to_string(),"name":a.name,"description":a.desc,"display_key":a.display_index,"spellbook_slot":(a.slot>=0).then(||a.slot+1),"usable":a.valid!=0,"level":a.level,"range":a.range,"cast_time":a.cast_time,"power_cost":a.power_cost,"icon_background":(a.icon_back != -1).then_some(a.icon_back as u32),"icon_foreground":(a.icon_front != -1).then_some(a.icon_front as u32),"scope":a.scope,"cooldown":a.cooldown,"equipment_mask":a.equip_req,"lockout":ee::div(a.lockout as f32,1000.0)})).collect();
+        let abilities=self.abilities.values().map(|a|json!({"id":a.id.to_string(),"name":a.name,"description":a.desc,"display_key":a.display_index,"spellbook_slot":(a.slot>=0).then(||a.slot+1),"usable":a.valid!=0,"learned":a.p14!=0,"level":a.level,"range":a.range,"cast_time":a.cast_time,"power_cost":a.power_cost,"icon_background":(a.icon_back != -1).then_some(a.icon_back as u32),"icon_foreground":(a.icon_front != -1).then_some(a.icon_front as u32),"scope":a.scope,"cooldown":a.cooldown,"equipment_mask":a.equip_req,"lockout":ee::div(a.lockout as f32,1000.0)})).collect();
         let bars = self.hud_bars();
         let hotbar=[0,1,4,5,2,3].into_iter().filter(|k|match *k {0|2=>true,1=>bars.abilities>=2,3=>bars.gear,4=>bars.abilities>=3,5=>bars.abilities>=4,_=>false}).enumerate().map(|(index,k)|{
             let def=&self.hud_menus.defs[k];let menu=&self.hud_menus.menus[k];
@@ -485,6 +485,8 @@ pub(super) mod items;
 pub(super) mod r6a;
 #[path = "a3_capture.rs"]
 pub(crate) mod a3;
+#[path = "a5_capture.rs"]
+pub(crate) mod a5;
 #[cfg(test)]
 #[path = "a3_tests.rs"]
 mod a3_tests;
@@ -506,3 +508,5 @@ mod a1_play_tests;
 #[cfg(test)]
 #[path = "a2_play_tests.rs"]
 mod a2_play_tests;
+#[path = "a5_tests.rs"]
+mod a5_tests;

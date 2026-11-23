@@ -309,7 +309,7 @@ fn patch_entity(c: &mut Core, slot: usize, entity: Option<EntityData>) {
     }
 }
 fn ability_value(a: &net::dump::Ability) -> Json {
-    json!({"id":a.id.to_string(),"name":a.name,"description":a.desc,"display_key":a.display_index,"spellbook_slot":(a.slot>=0).then(||a.slot+1),"usable":a.valid!=0,"level":a.level,"range":a.range,"cast_time":a.cast_time,"power_cost":a.power_cost,"icon_background":(a.icon_back != -1).then_some(a.icon_back as u32),"icon_foreground":(a.icon_front != -1).then_some(a.icon_front as u32),"scope":a.scope,"cooldown":a.cooldown,"equipment_mask":a.equip_req,"lockout":ee::div(a.lockout as f32,1000.)})
+    json!({"id":a.id.to_string(),"name":a.name,"description":a.desc,"display_key":a.display_index,"spellbook_slot":(a.slot>=0).then(||a.slot+1),"usable":a.valid!=0,"learned":a.p14!=0,"level":a.level,"range":a.range,"cast_time":a.cast_time,"power_cost":a.power_cost,"icon_background":(a.icon_back != -1).then_some(a.icon_back as u32),"icon_foreground":(a.icon_front != -1).then_some(a.icon_front as u32),"scope":a.scope,"cooldown":a.cooldown,"equipment_mask":a.equip_req,"lockout":ee::div(a.lockout as f32,1000.)})
 }
 fn group_value(
     group: &crate::group::Group,
@@ -403,6 +403,7 @@ pub(crate) fn inactive() {
     super::items::forget();
     super::r6a::forget();
     crate::fork_ext::addons::native_a3::forget();
+    crate::fork_ext::addons::native_a5::forget();
     SNAPSHOT.with(|s| *s.borrow_mut() = None);
     native_core::discard_deferred();
 }
@@ -450,6 +451,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         KEY.with(|k| k.set(Some(key(play, walker))));
         MAP_KEY.with(|k| k.set(None));
         super::a3::refresh(play, walker);
+        super::a5::refresh(play);
         super::items::note(play);
         dirty();
         return;
@@ -462,6 +464,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     super::items::refresh(play);
     super::r6a::refresh(play, walker);
     super::a3::refresh(play, walker);
+    super::a5::refresh(play);
     native_core::flush_deferred();
     CORE.with(|c| {
         let mut c = c.borrow_mut();
@@ -686,7 +689,7 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
             let records = play
                 .abilities
                 .values()
-                .map(|a| (a.id, a.display_index, a.slot, a.valid))
+                .map(|a| (a.id, a.display_index, a.slot, a.valid, a.p14))
                 .collect::<Vec<_>>();
             native_core::defer(records.len() * 32, move |c| {
                 let before = interested("abilities.changed").then(|| c.view.abilities.clone());
@@ -697,13 +700,14 @@ pub(crate) fn capture(play: &Play, event: &Kind, cooldown: Option<(i64, f64)>) {
                 });
                 c.ability_versions
                     .retain(|id, _| records.iter().any(|r| id.parse::<i64>().ok() == Some(r.0)));
-                for (id, key, slot, valid) in records {
+                for (id, key, slot, valid, p14) in records {
                     if let Some(a) = c.view.abilities.iter_mut().find(|a| {
                         a["id"].as_str().and_then(|id| id.parse::<i64>().ok()) == Some(id)
                     }) {
                         a["display_key"] = json!(key);
                         a["spellbook_slot"] = json!((slot >= 0).then_some(slot + 1));
                         a["usable"] = json!(valid != 0);
+                        a["learned"] = json!(p14 != 0);
                     }
                 }
                 if let Some(before) = before {

@@ -59,6 +59,13 @@ pub(super) fn window_flags(value: i32) -> Result<()> {
 fn size(x: f32, y: f32) -> Result<sys::ImVec2_c> {
     Ok(Vec2(finite(x)?, finite(y)?).raw())
 }
+/// A mouse button argument: 0 to 4, left by default.
+fn mouse_button(button: Option<i32>) -> Result<i32> {
+    match button.unwrap_or(0) {
+        b @ 0..=4 => Ok(b),
+        _ => Err(mlua::Error::runtime("mouse button must be 0 to 4")),
+    }
+}
 fn returns(open: Option<bool>, draw: bool) -> MultiValue {
     MultiValue::from_vec(match open {
         Some(open) => vec![Value::Boolean(open), Value::Boolean(draw)],
@@ -972,6 +979,38 @@ pub(super) fn install(lua: &Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>) -> R
         lua.create_function(move |_, (button, threshold): (Option<i32>, Option<f32>)| {
             f.borrow_mut().check()?;
             Ok(unsafe { sys::igIsMouseDragging(button.unwrap_or(0), threshold.unwrap_or(-1.0)) })
+        })?,
+    )?;
+    // Button state, for a mod that follows a press to its release (a drag). ImGui's mouse buttons are 0 left,
+    // 1 right, 2 middle (3 and 4 are the extra buttons); anything else is an argument error, because ImGui indexes
+    // its button arrays with it.
+    let f = frame.clone();
+    imgui.set(
+        "IsMouseDown",
+        lua.create_function(move |_, button: Option<i32>| {
+            let button = mouse_button(button)?;
+            f.borrow_mut().check()?;
+            Ok(unsafe { sys::igIsMouseDown_Nil(button) })
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "IsMouseReleased",
+        lua.create_function(move |_, button: Option<i32>| {
+            let button = mouse_button(button)?;
+            f.borrow_mut().check()?;
+            Ok(unsafe { sys::igIsMouseReleased_Nil(button) })
+        })?,
+    )?;
+    let f = frame.clone();
+    imgui.set(
+        "GetMouseDragDelta",
+        lua.create_function(move |_, (button, threshold): (Option<i32>, Option<f32>)| {
+            let button = mouse_button(button)?;
+            let threshold = finite(threshold.unwrap_or(-1.0))?;
+            f.borrow_mut().check()?;
+            let delta = unsafe { sys::igGetMouseDragDelta(button, threshold) };
+            Ok((delta.x, delta.y))
         })?,
     )?;
     let f = frame.clone();

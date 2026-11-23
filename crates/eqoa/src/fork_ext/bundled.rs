@@ -39,6 +39,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_target_frame_demo",
     "eqoa_spellbook",
     "eqoa_quest_journal",
+    "eqoa_character",
     "eqoa_dialogs",
     "eqoa_turnin",
 ];
@@ -218,6 +219,26 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_quest_journal/README.md",
         package: "eqoa_quest_journal",
         data: include_bytes!("../../../../bundled-mods/eqoa_quest_journal/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_character/mod.json",
+        package: "eqoa_character",
+        data: include_bytes!("../../../../bundled-mods/eqoa_character/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_character/main.lua",
+        package: "eqoa_character",
+        data: include_bytes!("../../../../bundled-mods/eqoa_character/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_character/modules/character.lua",
+        package: "eqoa_character",
+        data: include_bytes!("../../../../bundled-mods/eqoa_character/modules/character.lua"),
+    },
+    BundledFile {
+        path: "eqoa_character/README.md",
+        package: "eqoa_character",
+        data: include_bytes!("../../../../bundled-mods/eqoa_character/README.md"),
     },
     BundledFile {
         path: "eqoa_dialogs/mod.json",
@@ -1241,6 +1262,7 @@ mod tests {
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
                 "eqoa_quest_journal",
+                "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin"
             ]
@@ -1540,6 +1562,7 @@ mod tests {
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
                 "eqoa_quest_journal",
+                "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin"
             ]
@@ -1592,6 +1615,7 @@ mod tests {
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
                 "eqoa_quest_journal",
+                "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin"
             ]
@@ -1618,6 +1642,7 @@ mod tests {
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
                 "eqoa_quest_journal",
+                "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin"
             ],
@@ -1710,6 +1735,7 @@ mod tests {
                 "eqoa_target_frame_demo",
                 "eqoa_spellbook",
                 "eqoa_quest_journal",
+                "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin"
             ],

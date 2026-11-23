@@ -73,7 +73,7 @@ fn a1_open_session_refuses_what_it_should_and_says_why() {
         local function code(kind) local s, e = eqoa.windows.open_session(kind); assert(s == nil); return e.code end
         assert(code('merchant') == 'invalid_argument', 'a server window is held with takeover, not opened')
         assert(code('no_such_window') == 'invalid_argument')
-        assert(code('trainer') == 'unsupported', 'a real window this version cannot show for a mod')
+        assert(code('factions') == 'unsupported', 'a real window this version cannot show for a mod')
         local s, e = eqoa.windows.open_session('spellbook', {opened_from = 'elsewhere'})
         assert(s == nil and e.code == 'invalid_argument')
     "#,

@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 # Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 """Unit tests for update_bundled_manifest.py."""
+import contextlib
 import hashlib
+import io
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+
+CRLF = bytes([13, 10])
+LF = bytes([10])
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -24,6 +29,10 @@ class TestUpdateBundledManifest(unittest.TestCase):
         repo_root = Path(__file__).resolve().parent.parent
 
         shutil.copytree(repo_root / "bundled-mods", self.root / "bundled-mods")
+        # bundled-mods is stored byte for byte (-text): start the fixture all-LF so a test's own CR bytes are the only ones
+        for path in (self.root / "bundled-mods").rglob("*"):
+            if path.is_file() and path.suffix.lower() in {".json", ".lua", ".md", ".txt"}:
+                path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n"))
         (self.root / "tools").mkdir()
         shutil.copy2(repo_root / "tools" / "build_player_release.py", self.root / "tools" / "build_player_release.py")
         shutil.copy2(repo_root / "tools" / "test_player_release.py", self.root / "tools" / "test_player_release.py")
@@ -32,6 +41,8 @@ class TestUpdateBundledManifest(unittest.TestCase):
         subprocess.run(["git", "init", "-q"], cwd=str(self.root), check=True)
         subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@test.local", "add", "."], cwd=str(self.root), check=True)
         subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@test.local", "commit", "-qm", "initial"], cwd=str(self.root), check=True)
+        # refresh the manifests for the all-LF fixture, so a test starts from a clean check
+        update_bundled_manifest.update_bundled_manifests(root=self.root, check=False)
 
     def test_clean_branch_check_passes_and_byte_identical(self):
         source_before = (self.root / "bundled-mods" / "SOURCE.txt").read_bytes()
@@ -113,7 +124,7 @@ class TestUpdateBundledManifest(unittest.TestCase):
         # Create stray files that should NOT be added
         (self.root / "bundled-mods" / "arpg_ui" / "notes.tmp").write_text("temporary note\n")
         (self.root / "bundled-mods" / "arpg_ui" / "editor.lua~").write_text("backup\n")
-        (self.root / "bundled-mods" / "root_stray.txt").write_text("stray in root\n")
+        (self.root / "bundled-mods" / "root_stray.txt").write_bytes(b"stray in root\n")
 
         exit_code = update_bundled_manifest.update_bundled_manifests(root=self.root, check=True)
         # Should be 0 because stray files are ignored and no valid mod files changed
@@ -156,6 +167,31 @@ class TestUpdateBundledManifest(unittest.TestCase):
         source_path.write_bytes(crlf_bytes)
         update_bundled_manifest.update_bundled_manifests(root=self.root, check=False)
         self.assertEqual(source_path.read_bytes(), crlf_bytes)
+
+    def test_check_fails_and_names_a_text_file_saved_with_cr_bytes(self):
+        readme = self.root / "bundled-mods" / "eqoa_frames" / "README.md"
+        vendor = self.root / "bundled-mods" / "arpg_ui" / "README.md"
+        lf_bytes = readme.read_bytes().replace(b"\r\n", b"\n")
+        crlf_bytes = lf_bytes.replace(b"\n", b"\r\n")
+        # the manifests are refreshed for the CRLF bytes, so only the CR itself is wrong
+        readme.write_bytes(crlf_bytes)
+        update_bundled_manifest.update_bundled_manifests(root=self.root, check=False)
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            exit_code = update_bundled_manifest.update_bundled_manifests(root=self.root, check=True)
+        self.assertEqual(exit_code, 1, "a CR byte in a shipped text file fails --check")
+        self.assertIn("bundled-mods/eqoa_frames/README.md", out.getvalue(), "the check names the file")
+
+        # control: the same file saved LF passes; a PNG's CR bytes are not text; a vendored mod stays CRLF as shipped
+        readme.write_bytes(lf_bytes)
+        vendor.write_bytes(vendor.read_bytes().replace(CRLF, LF).replace(LF, CRLF))
+        (self.root / "bundled-mods" / "arpg_ui" / "resources" / "BlankSlot.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        update_bundled_manifest.update_bundled_manifests(root=self.root, check=False)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            exit_code = update_bundled_manifest.update_bundled_manifests(root=self.root, check=True)
+        self.assertEqual(exit_code, 0, f"LF text passes: {out.getvalue()}")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@
     "eqoa.player.breath",
     "eqoa.target.get",
     "eqoa.target.info",
+    "eqoa.group.get",
     "eqoa.entities.find",
     "eqoa.effects.list",
     "eqoa.effects.buffs",

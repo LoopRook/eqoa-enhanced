@@ -524,6 +524,46 @@ fn a_bag_viewer_tooltip_body() {
     bv.clean();
 }
 
+/// Owner test 2026-11-23: a mix of crafting and misc items was dimmed. The class, race and level rules (`can_use`)
+/// are the game's for gear only (`wear_slot != -1`); so only gear the character cannot use is dimmed.
+#[test]
+fn a_bag_viewer_dims_only_gear_the_character_cannot_use_never_crafting_or_misc_items() {
+    big_stack(a_bag_viewer_dims_only_gear_body)
+}
+fn a_bag_viewer_dims_only_gear_body() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    bv.open();
+    bv.play.bags_set(&serde_json::json!({
+        "pack": [
+            {"name":"Rusty Sword","id":900001,"key":11,"wear":12,"equip":0,"icon":4001},
+            {"name":"Mage Robe","id":900004,"key":14,"wear":2,"class_mask":32,"icon":4004},
+            {"name":"Hero Helm","id":900006,"key":16,"wear":1,"level":55,"icon":4006},
+            {"name":"Bone Chip","id":900010,"key":20,"qty":4,"max_stack":100,"class_mask":0,"race_mask":0,"icon":4010},
+            {"name":"Spider Silk","id":900011,"key":21,"qty":2,"max_stack":100,"class_mask":0,"icon":4011},
+            {"name":"Cracked Fang","id":900012,"key":22,"level":60,"icon":4012},
+            {"name":"Plain Bead","id":900009,"key":19,"icon":4009}
+        ],
+        "tunar": 10
+    }));
+    bv.frames(3);
+    assert_eq!(bv.names(), ["Rusty Sword", "Mage Robe", "Hero Helm", "Bone Chip", "Spider Silk", "Cracked Fang", "Plain Bead"]);
+    // `can_use` says no to the three misc items below as well as to the robe and helm (that is the trap)
+    let allowed: Vec<bool> = bv.eval(
+        "(function() local t = {} for i, e in ipairs(require('bags').grid.items) do t[i] = eqoa.items.can_use(e.item.ref).allowed end return t end)()",
+    );
+    assert_eq!(allowed, [true, false, false, false, false, false, true]);
+    let dim: Vec<bool> = bv.eval(
+        "(function() local b = require('bags') local t = {} for i, e in ipairs(b.grid.items) do t[i] = b.icon_dimmed(e, 's') end return t end)()",
+    );
+    // dim: the robe (wrong class) and the helm (level); not the usable sword, and not the crafting or misc items
+    assert_eq!(dim, [false, true, true, false, false, false, false]);
+    // the card's red line is unchanged: a misc item the character "cannot use" still says so
+    let chip = bv.hover(4);
+    assert!(chip.contains(&"You can't use this|red".to_string()), "{chip:?}");
+    bv.clean();
+}
+
 #[test]
 fn a_bag_viewer_grid_marks_items_set_to_bank_or_keep_with_a_corner_letter_and_unmarking_removes_it() {
     big_stack(a_bag_viewer_marks_body)

@@ -113,14 +113,12 @@ pub fn lit(
         // a server's regional weather (`weather_zones`, board entry #1550):
         // the storms' fog, never farther than the fog it replaces, its colour
         // moved to by the weather's intensity, the sun dimmed; under a roof
-        // nearer fog is kept off and the far is four times; none in a liquid
-        let storm = weather.as_deref().filter(|_| flags & 0xF == 0).and_then(|w| crate::weather_zones::fog(&w.regional, hour_now).map(|f| (f, w.roof)));
+        // nearer fog is kept off and the far is four times, eased in and out
+        // (`weather_zones::roofed`); none in a liquid (a leaf missed is none:
+        // `weather_zones::in_liquid`)
+        let storm = weather.as_deref().filter(|_| !crate::weather_zones::in_liquid(flags)).and_then(|w| crate::weather_zones::fog(&w.regional, hour_now).map(|f| (f, w.roof_share)));
         if let Some((f, roof)) = storm {
-            let (mut near, mut far) = (f.near, f.far);
-            if roof {
-                near = near.max(6.0);
-                far *= 4.0;
-            }
+            let (near, far) = crate::weather_zones::roofed(f.near, f.far, roof);
             let wc = Vec3::from(f.color);
             v.fog = Some(match v.fog {
                 Some((n, fa, c)) => (n.min(near), fa.min(far), c.lerp(wc, f.intensity)),
@@ -717,6 +715,10 @@ pub fn shot_with(
                             eprintln!("mouse {step}: the chat box's history");
                             continue;
                         }
+                        (Some("wheel"), Some(n), _) if p.roll_wheel(mouse.cursor, (w, h), n as f32) => {
+                            eprintln!("mouse {step}: the loot rolls' strips");
+                            continue;
+                        }
                         _ => {}
                     }
                 }
@@ -803,7 +805,7 @@ pub fn shot_with(
                 (client.jumps, client.stood_sent) = (true, true);
             }
             if jump_at.iter().any(|&ms| t - frame_ms < ms && ms <= t) {
-                walker.ask_jump();
+                walker.ask_jump_as(crate::walker::JumpArc::of(play.as_ref().map_or(0, |p| p.dump.player.race)));
             }
             // a stick that ran runs until it comes back well under the
             // threshold (`input::RunHold`), as the window's
@@ -2448,8 +2450,9 @@ struct App {
     /// Where the sky's models start in `Gfx::models`.
     sky_at: Option<usize>,
     /// A world change under way: the world's file, the arrival, and its
-    /// reads (`stream::open_world`), entered once they are in.
-    entering: Option<(String, Spawn, crate::stream::Arrival)>,
+    /// reads (`stream::open_world`), entered once they are in, and their
+    /// clock (`loading::Reads`: begun again, then given up).
+    entering: Option<(String, Spawn, crate::stream::Arrival, crate::loading::Reads)>,
     /// The world off the other art's disc (F9, `swap_world_art`): its file
     /// and its reads, put in place of the world drawn once they are in.
     swapping: Option<(String, crate::stream::Arrival)>,
@@ -2610,6 +2613,9 @@ enum Finger {
     OfferList,
     /// Move HUD's (`hudlayout`): a piece it picked up, dragged, or the bar's button
     Hud,
+    /// the loot rolls' strips' (`rollwnd`, entry 1757): a drag scrolls them, a
+    /// tap is a click there; the window pixels' y it was last at
+    Rolls(i32),
 }
 
 pub fn run(lib: Library, source: Source) -> Result<(), Error> {
@@ -3609,7 +3615,15 @@ impl App {
                 crate::editbox::screen_touched();
                 // Move HUD: a finger on a piece takes it (`hudlayout`)
                 let hud = self.play.as_mut().is_some_and(|pl| pl.hud_press(at, size));
-                let w = if hud { Some(Finger::Hud) } else { self.finger_on(p) };
+                // on the loot rolls' strips: theirs (a drag scrolls them)
+                let rolls = !hud && self.walker.is_some() && self.play.as_ref().is_some_and(|pl| pl.rolls_cover(at, size));
+                let w = if hud {
+                    Some(Finger::Hud)
+                } else if rolls {
+                    Some(Finger::Rolls(at[1].round() as i32))
+                } else {
+                    self.finger_on(p)
+                };
                 self.fingers.retain(|f| f.0 != id);
                 if let Some(w) = w {
                     self.fingers.push((id, w));
@@ -3653,6 +3667,21 @@ impl App {
             Finger::Pointer => {
                 if let Some(down) = self.taps.touch(id, phase, at, size) {
                     self.tap(down, size);
+                }
+            }
+            Finger::Rolls(was) => {
+                if let Some(down) = self.taps.touch(id, phase, at, size) {
+                    // a tap: a click where it came down (a choice, a count)
+                    self.click(crate::mouse::Click::Target(down[0] as f64, down[1] as f64), true);
+                } else if phase == Phase::Moved {
+                    let lines = crate::touch::drag_lines(at[1].round() - was as f32, size);
+                    let cur = (at[0] as f64, at[1] as f64);
+                    if let Some(pl) = self.play.as_mut() {
+                        pl.roll_wheel(cur, size, lines);
+                    }
+                    if let Some(f) = self.fingers.iter_mut().find(|f| f.0 == id) {
+                        f.1 = Finger::Rolls(at[1].round() as i32);
+                    }
                 }
             }
             Finger::OfferList => {
@@ -6328,7 +6357,7 @@ impl App {
                     let took = match (self.play.as_mut(), self.gfx.as_ref()) {
                         (Some(p), Some(g)) => {
                             let size = (g.config.width, g.config.height);
-                            p.chat_wheel(self.cursor, size, d) || p.raid_wheel(self.cursor, size, d) || p.meter_wheel(self.cursor, size, d) || p.book_wheel(self.cursor, size, d)
+                            p.chat_wheel(self.cursor, size, d) || p.roll_wheel(self.cursor, size, d) || p.raid_wheel(self.cursor, size, d) || p.meter_wheel(self.cursor, size, d) || p.book_wheel(self.cursor, size, d)
                         }
                         _ => false,
                     };
@@ -6513,7 +6542,8 @@ impl App {
                 // screen), and the walk begun again there once they are in.
                 if let Some((file, at)) = self.play.as_mut().and_then(|p| p.take_world_change()) {
                     let reads = stream::open_world(&file, at.pos[0], at.pos[2]);
-                    self.entering = Some((file, at, reads));
+                    let now = self.clock.elapsed().as_millis() as i64;
+                    self.entering = Some((file, at, reads, crate::loading::Reads::begun(now)));
                     // the world being left is not swapped any more
                     self.swapping = None;
                 }
@@ -6526,8 +6556,26 @@ impl App {
                         crate::web::problem("world", &format!("The world could not be swapped for the other art's: {e}"));
                     }
                 }
-                if let Some(r) = self.entering.as_ref().and_then(|e| e.2.borrow_mut().take()) {
-                    let (file, at, _) = self.entering.take().unwrap();
+                // Reads that never answer (a page's): begun once more, then
+                // given up as a failed world change (logged out where the
+                // server has the player), never waited on under the loading
+                // screen for good
+                let mut gave_up = None;
+                if let Some(e) = self.entering.as_mut().filter(|e| e.2.borrow().is_none()) {
+                    let now = self.clock.elapsed().as_millis() as i64;
+                    match e.3.due(now) {
+                        crate::loading::ReadsDue::Wait => {}
+                        crate::loading::ReadsDue::Again => {
+                            crate::say(&format!("world change to {}: no reads after {} ms: begun again", e.0, crate::loading::READS_TRY_MS));
+                            e.2 = stream::open_world(&e.0, e.1.pos[0], e.1.pos[2]);
+                        }
+                        crate::loading::ReadsDue::GiveUp => {
+                            gave_up = Some(Err(format!("its files were not read in {} seconds", e.3.waited(now) / 1000)));
+                        }
+                    }
+                }
+                if let Some(r) = gave_up.or_else(|| self.entering.as_ref().and_then(|e| e.2.borrow_mut().take())) {
+                    let (file, at, _, _) = self.entering.take().unwrap();
                     match r.map_err(Error::from).and_then(|o| self.enter_world(&file, o, at)) {
                         Ok(()) => {
                             crate::say(&format!("entered {file} at {:?}", at.pos));
@@ -6539,6 +6587,11 @@ impl App {
                             crate::say(&format!("world change to {file}: {e}"));
                             #[cfg(target_arch = "wasm32")]
                             crate::web::problem("world", &format!("The world change to {file} failed: {e}"));
+                            // never left on the loading screen (entry 1323): logged
+                            // out cleanly, back to the game's screens
+                            if let Some(p) = self.play.as_mut() {
+                                p.world_change_failed(&file, &e.to_string());
+                            }
                         }
                     }
                     if let (Some(p), Some(w)) = (self.play.as_mut(), self.walker.as_mut()) {

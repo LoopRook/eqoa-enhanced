@@ -11,7 +11,8 @@ Three draggable windows:
 - **Casting**: a bar for your own cast and one for your target's. Melee rounds are not casts and show no bar. The client
   is told when a cast starts and how long it takes; it is not told when one is interrupted or lands, so a bar that fills is a clock, not a result.
 - **Target**: the target's name in its consider colour, its title and guild where the server sends them, and buttons to
-  invite it to your group, send your pet in and call it back off.
+  invite it to your group, send your pet in and call it back off. **Invite to group** shows only for another player who
+  is not already in your group: not for a monster, an NPC or yourself.
 
 It declares only the reads and the four actions it uses (`group_invite`, `pet_attack`, `pet_back_off`, `remove_effect`), so
 Mods & Addons shows them. It is meant to be read and copied: see `docs/modding/EQOA-API-SPEC.md`, section 4 ("Frames").
