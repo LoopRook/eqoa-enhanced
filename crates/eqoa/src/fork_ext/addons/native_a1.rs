@@ -27,6 +27,9 @@ pub(crate) enum A1Action {
     Destroy { item: ResolvedItemSpec, count: Option<i64> },
     LinkItem { item: ResolvedItemSpec },
     HideLook { item: ResolvedItemSpec, hide: bool },
+    /// Round A2: `dialog_answer(ref, option)` (`Some`, 1-based) or `close_window(ref)` (`None`) on a dialog or offer
+    /// session. Carried out by `fork_ext/a2_play.rs` with the game's own keys.
+    SessionAnswer { session: String, option: Option<usize> },
 }
 
 impl A1Action {
@@ -35,6 +38,8 @@ impl A1Action {
             Self::Destroy { .. } => "destroy",
             Self::LinkItem { .. } => "link_item",
             Self::HideLook { .. } => "hide_look",
+            Self::SessionAnswer { option: Some(_), .. } => "dialog_answer",
+            Self::SessionAnswer { option: None, .. } => "close_window",
         }
     }
 }
@@ -62,7 +67,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
     // the record shapes
     for (path, fields) in [
-        ("eqoa.windows.Session", "ref kind title origin opened_from revision focused"),
+        ("eqoa.windows.Session", "ref kind title origin opened_from revision focused data"),
         ("eqoa.windows.Confirm", "id kind text"),
     ] {
         describe(lua, path, "supported", Some(ROUND), "");

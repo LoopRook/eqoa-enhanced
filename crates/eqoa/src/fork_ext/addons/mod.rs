@@ -124,8 +124,10 @@ mod a1_tests;
 #[cfg(test)]
 mod a1_mod_tests;
 #[cfg(test)]
+mod a2_mod_tests;
 mod a5_mod_tests;
 pub(crate) mod window_sessions;
+pub(crate) mod dialog_sessions;
 pub(crate) mod confirm;
 #[cfg(test)]
 mod frames_mod_tests;
