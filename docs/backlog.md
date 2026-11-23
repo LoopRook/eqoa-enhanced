@@ -419,6 +419,6 @@ A font restored after going missing is retried after a face or size change or af
 - **Status:** Deferred; recorded from the owner's play test of dev 49f8abcc.
 - **Spellbook:** ability icons and a better layout.
 - **Quest Journal:** links from a quest to the map (where the map knows the place).
-- **Frames:** show what an effect does (how much a stat went up, etc.) if the client or server provides it; check what data exists before promising it.
+- **Frames / buff numbers:** show what an effect does in numbers (e.g. Anthem of Conquest: +N to which stats) if the client or server provides it. Owner 2026-11-23: low effort; if no API change is needed it is a later mod change or a small PR. A short look at the data is in reports/eqoa-owner-fixes-2-2026-11-23 (lead's notes).
 - **Cast bars:** a player-style unit-frame set (your own cast bar, your target's cast bar, target health, etc.), as in modern MMOs. The API capability exists (A3/A4); this is a mod, not an API change.
 - **Target Frame demo:** its menu shows "Invite to group" for every target (fine for a demo; a real mod should offer only what applies).
