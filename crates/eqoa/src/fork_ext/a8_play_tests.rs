@@ -743,6 +743,8 @@ mod e2e {
 
     fn rig_with_mod() -> Rig {
         let p = rig_play();
+        // the window size is process-wide and other tests leave it at 0 x 0: the mod's layout needs the HUD frame
+        crate::fork_ext::addons::hud_layout::set_window_size(1024, 768);
         // the ImGui context first: the bridge binds to the one that exists when it is installed
         let context = context();
         let host = Host::for_addon(&addon()).unwrap();

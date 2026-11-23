@@ -29,6 +29,8 @@ fn fresh() {
     window_takeover::reset_all_for_test();
     window_takeover::forget_switch_for_test();
     native_a8::clear();
+    // process-wide, and other tests leave it at 0 x 0: the mod's layout needs the HUD frame
+    super::hud_layout::set_window_size(1024, 768);
     crate::fork_ext::bindpage::reset_in_memory();
     CORE.with(|c| c.borrow_mut().view.in_world = true);
 }
