@@ -325,6 +325,66 @@ fn a5_character_factions_and_combat_tabs_ask_and_show() {
     assert_eq!(w.host.drain_logs().unwrap().len(), 0, "no diagnostic");
 }
 
+/// Owner test 2026-11-23: with the last request still awaited the Buy button was offered and its Yes was refused with a red
+/// line. The button now waits for the server like the game's window, and comes back when the answer is in.
+/// Negative control: with nothing awaited the same skill offers Buy.
+#[test]
+fn a5_character_buy_waits_while_the_servers_last_answer_is_awaited() {
+    let mut w = window();
+    CORE.with(|c| c.borrow_mut().view.mastery_skills = Some(vec![skill(1, "Ironhide", true, false, 1)]));
+    w.open();
+    assert!(w.tap("tab:masteries"));
+    assert!(w.tap("skill:1"));
+    CORE.with(|c| c.borrow_mut().view.mastery_node = Some(node(1, false, true)));
+    w.frames(2);
+    assert!(w.find("Buy").is_some(), "control: nothing awaited, Buy is offered");
+    CORE.with(|c| {
+        c.borrow_mut().view.mastery = Some(json!({"available": 3, "spent": 2, "experience_share": 0.1, "progress_raw": 0, "pending": true, "stats": [], "bonuses": []}))
+    });
+    w.frames(2);
+    assert!(w.find("Buy").is_none(), "the last request is awaited: no Buy yet");
+    CORE.with(|c| {
+        c.borrow_mut().view.mastery = Some(json!({"available": 3, "spent": 2, "experience_share": 0.1, "progress_raw": 0, "pending": false, "stats": [], "bonuses": []}))
+    });
+    w.frames(2);
+    assert!(w.find("Buy").is_some(), "answered: Buy is back");
+}
+
+/// Owner test 2026-11-23: the skill's detail line and the red status line ran off the window. They wrap over two lines now.
+/// Negative control: the same ordinary sentences, cut to one line, were cut (this test failed with one line).
+#[test]
+fn a5_character_masteries_detail_and_status_lines_wrap_inside_the_window() {
+    let mut w = window();
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.mastery_skills = Some(vec![skill(1, "Beauty 1", true, true, 1)]);
+        c.view.mastery_node = Some({
+            let mut n = node(1, true, true);
+            n["text"] = json!("Beauty increases charisma. Cost: 15. Your CHA must be 60 or more.");
+            n
+        });
+    });
+    w.open();
+    w.eval::<()>("require('character').record = true");
+    assert!(w.tap("tab:masteries"));
+    assert!(w.tap("skill:1"));
+    w.eval::<()>(
+        "local S = require('character').state
+         S.result = { text = 'Purchase not sent: a class mastery request is still pending', ok = false }",
+    );
+    w.frames(2);
+    let (inside, cuts, lines): (bool, i64, i64) = w.eval(
+        "local M = require('character')
+         local r, ok, lines = M.rect, true, 0
+         for _, d in ipairs(M.drawn) do
+             if d.x < r.x - 0.5 or d.y < r.y - 0.5 or d.x + d.w > r.x + r.w + 0.5 or d.y + d.h > r.y + r.h + 0.5 then ok = false end
+         end
+         return ok, M.cuts, #M.drawn",
+    );
+    assert!(inside, "every line lies inside the window");
+    assert_eq!(cuts, 0, "the detail and the status are whole, wrapped, not cut ({lines} texts)");
+}
+
 /// Every text of every tab lies inside the window at the default size, with the longest names and as many rows as the
 /// server may send (the lists scroll). Controls: the same data really was too long for the lines (texts were cut); a
 /// normal name is not cut; and the check itself fails for a text drawn outside the window.
