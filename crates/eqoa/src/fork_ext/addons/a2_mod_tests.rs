@@ -228,11 +228,22 @@ fn a2_dialogs_answer_a_hand_in_by_themselves_only_when_told_to_and_only_with_one
     r.frames(3);
     assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "on: the one real answer is sent");
     drop(r);
-    // a dialog that offers a choice is only marked (negative control: the one above was answered)
+    // a farewell is not a choice: a hand-in beside Goodbye / Farewell is still the one real answer (owner, 2026-11-23)
+    for farewell in ["Goodbye", "Farewell."] {
+        let mut r = rig("eqoa_dialogs");
+        options::set_toggle("eqoa_dialogs", "auto_answer", true);
+        r.frames(2);
+        r.dialog(7, "Well?", &[farewell, "Here is the bat eyes quest done"]);
+        r.frames(3);
+        assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "{farewell} beside a hand-in: answered");
+        drop(r);
+    }
+    // a dialog that offers a real choice (a path quest's two ways, say) is only marked (negative control: the ones
+    // above were answered)
     let mut r = rig("eqoa_dialogs");
     options::set_toggle("eqoa_dialogs", "auto_answer", true);
     r.frames(2);
-    r.dialog(7, "Well?", &["Goodbye", "Here is the bat eyes quest done"]);
+    r.dialog(7, "Well?", &["Here is the bat eyes quest done", "I will walk the other path", "Goodbye"]);
     r.frames(3);
     assert!(action_broker::queued_kinds_for_test().is_empty(), "a choice is left to the player");
     drop(r);

@@ -27,7 +27,7 @@ appear in the mod's window instead of the game's dialog window.
   automatically**, off by default, in the mod's options): an answer whose words name a quest in your journal (the
   whole title, any capitals, the longest title wins) has a green frame and a **Hand in** button beside it. Clicking
   either sends that answer, as the number key does. Only the answer's own words count, never its position. With
-  the automatic option on, a dialog whose only real answer (the game's own More, Back and Close do not count) names
+  the automatic option on, a dialog whose only real answer (the game's own More, Back and Close, and a plain Goodbye or Farewell, do not count) names
   a quest is answered at once. A dialog that offers any choice is only marked: your click answers it.
 
 It uses the window sessions of `eqoa/1` (`eqoa.windows.takeover` with `scope = "all"` for `text_dialog`,

@@ -18,8 +18,9 @@ eqoa.options.toggle({ id = "offers", label = "Show invitations, summons and resu
 eqoa.options.toggle({ id = "highlight", label = "Highlight quest hand-ins", default = true })
 eqoa.options.toggle({ id = "auto_answer", label = "Answer quest hand-ins automatically", default = false })
 
--- The game's own paging entries: never a real answer.
-local GAME_ENTRIES = { more = true, back = true, close = true }
+-- Never a real answer: the game's own paging entries, and a plain farewell (leaving is not a choice to make for the
+-- player, so a hand-in offered beside Goodbye is still the dialog's only real answer).
+local NOT_ANSWERS = { more = true, back = true, close = true, goodbye = true, ["good bye"] = true, farewell = true, bye = true }
 local HAND_W = 56
 
 local state = {
@@ -95,12 +96,12 @@ local function hand_ins(options)
     return found
 end
 
--- The one real answer of a dialog: the only option that is not the game's own More / Back / Close. nil when the
--- dialog offers a choice (or nothing).
+-- The one real answer of a dialog: the only option that is not the game's own More / Back / Close or a farewell.
+-- nil when the dialog offers a choice (a path to pick, say) or nothing.
 local function only_answer(options)
     local index
     for i, text in ipairs(options) do
-        if not GAME_ENTRIES[match.norm(text)] then
+        if not NOT_ANSWERS[match.norm(text)] then
             if index then return nil end
             index = i
         end
