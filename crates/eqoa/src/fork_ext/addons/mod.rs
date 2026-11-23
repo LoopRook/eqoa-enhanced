@@ -115,10 +115,13 @@ pub(crate) mod native_r6a;
 pub(crate) mod native_a3;
 pub(crate) mod frame_actions;
 pub(crate) mod native_a1;
+pub(crate) mod native_a5;
 #[cfg(test)]
 mod a1_tests;
 #[cfg(test)]
 mod a1_mod_tests;
+#[cfg(test)]
+mod a5_mod_tests;
 pub(crate) mod window_sessions;
 pub(crate) mod confirm;
 #[cfg(test)]

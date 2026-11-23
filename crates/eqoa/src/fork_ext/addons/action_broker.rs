@@ -168,6 +168,8 @@ pub(crate) enum ActionKind {
     Frame(super::frame_actions::FrameAction),
     /// Round A1: destroy (asks the player first), link item, hide look.
     A1(super::native_a1::A1Action),
+    /// Round A5: spend training points (asks the player first), ask for a faction page or the combat record.
+    A5(super::native_a5::A5Action),
     /// `eqoa.actions.ready_check_answer`: answer an open raid ready check.
     ReadyCheckAnswer { id: u32, ready: bool },
     /// `eqoa.actions.loot_roll`: answer an open raid loot roll (0=pass, 1=need, 2=greed).
@@ -228,6 +230,7 @@ impl ActionKind {
             Self::ClearWaypoint { .. } => "clear_waypoint",
             Self::Frame(action) => action.name(),
             Self::A1(action) => action.name(),
+            Self::A5(action) => action.name(),
             Self::ReadyCheckAnswer { .. } => "ready_check_answer",
             Self::LootRoll { .. } => "loot_roll",
             Self::LootAssign { .. } => "loot_assign",
@@ -284,6 +287,7 @@ impl ActionKind {
             | Self::ClearWaypoint { .. }
             | Self::Frame(_)
             | Self::A1(_)
+            | Self::A5(_)
             | Self::ReadyCheckAnswer { .. }
             | Self::LootRoll { .. } => None,
         }
@@ -4889,6 +4893,12 @@ pub(crate) fn queued_kinds_for_test() -> Vec<&'static str> {
             .flat_map(|v| v.queued.iter().map(|q| q.kind.name()))
             .collect()
     })
+}
+
+/// The queued actions themselves (a test that needs what a mod asked for, not only its name).
+#[cfg(test)]
+pub(crate) fn queued_actions_for_test() -> Vec<ActionKind> {
+    BROKER.with(|b| b.borrow().vms.values().flat_map(|v| v.queued.iter().map(|q| q.kind.clone())).collect())
 }
 
 #[cfg(test)]
