@@ -413,3 +413,12 @@ A font restored after going missing is retried after a face or size change or af
   server packet replaces the box within that frame, 134 lands on the new box without re-checking `prompt_answerable`.
   Safe today (a new Yes/No box resets its selection to No; untagged OK-only boxes have no action). Hardening: clear the
   queued presses when a new box opens, via a fork hook rather than editing upstream's `dialog.rs`.
+
+## Owner wishes from the A1 test (2026-11-23)
+
+- **Status:** Deferred; recorded from the owner's play test of dev 49f8abcc.
+- **Spellbook:** ability icons and a better layout.
+- **Quest Journal:** links from a quest to the map (where the map knows the place).
+- **Frames:** show what an effect does (how much a stat went up, etc.) if the client or server provides it; check what data exists before promising it.
+- **Cast bars:** a player-style unit-frame set (your own cast bar, your target's cast bar, target health, etc.), as in modern MMOs. The API capability exists (A3/A4); this is a mod, not an API change.
+- **Target Frame demo:** its menu shows "Invite to group" for every target (fine for a demo; a real mod should offer only what applies).
