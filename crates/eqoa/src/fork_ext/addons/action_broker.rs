@@ -4906,6 +4906,47 @@ pub(crate) fn queued_assign_slots_for_test() -> Vec<i64> {
     })
 }
 
+/// The queued memorize and unmemorize requests in order, as "assign slot N id I" / "unmemorize slot N" (slots 1-based,
+/// as the mod says them; the broker counts from 0).
+#[cfg(test)]
+pub(crate) fn queued_ability_steps_for_test() -> Vec<String> {
+    BROKER.with(|b| {
+        b.borrow()
+            .vms
+            .values()
+            .flat_map(|v| v.queued.iter())
+            .filter_map(|q| match &q.kind {
+                ActionKind::AssignAbility { slot, ability } => {
+                    Some(format!("assign slot {} id {}", slot + 1, ability.id.unwrap_or(-1)))
+                }
+                ActionKind::UnmemorizeAbility { slot: Some(slot), .. } => {
+                    Some(format!("unmemorize slot {}", slot + 1))
+                }
+                ActionKind::UnmemorizeAbility { ability: Some(ability), .. } => {
+                    Some(format!("unmemorize id {}", ability.id.unwrap_or(-1)))
+                }
+                _ => None,
+            })
+            .collect()
+    })
+}
+
+/// Every queued request is answered by the server's refusal (the first step of a move is refused).
+#[cfg(test)]
+pub(crate) fn refuse_all_for_test() {
+    let snap = NativeSnapshot {
+        in_world: true,
+        mode: 0,
+        ..Default::default()
+    };
+    BROKER.with(|b| {
+        b.borrow_mut().step_tick(snap, |_| DispatchOutcome::Refused {
+            code: "not_ready",
+            reason: "ability is not learned".into(),
+        });
+    });
+}
+
 #[cfg(test)]
 pub(crate) fn dispatch_all_for_test() -> Vec<&'static str> {
     let snap = NativeSnapshot {
