@@ -4327,6 +4327,7 @@ impl Play {
                 }
                 _ => {}
             }
+            fork_hooks::divert_event(self);
             fork_hooks::end_game_event(self, change);
         }
         self.agree_entity_view();

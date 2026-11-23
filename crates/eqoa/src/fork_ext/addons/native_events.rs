@@ -198,7 +198,7 @@ fn install_event_fields(lua: &mlua::Lua) {
             "batch_id state ok completed total current_step code reason queued_tick completed_tick failed_step detail",
         ),
         ("events.dropped", "first_seq last_seq count streams"),
-        ("windows.session", "owner phase ref kind origin opened_from revision reason"),
+        ("windows.session", "owner phase ref kind origin opened_from revision reason data"),
         ("windows.key", "owner ref key down"),
         ("confirm.closed", "owner confirm kind answer detail"),
     ] {

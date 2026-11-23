@@ -36,6 +36,8 @@ pub(crate) enum Act {
     /// `inv_index` is the game's slot for the item (what the destroy message names), `count` how many.
     Destroy { inv_index: u32, name: String, count: i64 },
     DropQuest { index: usize, title: String, stamp: u32, revision: u64 },
+    /// Round A2: accepting a summons or a resurrection the game offered (`dialog_sessions`); `session` is the offer's.
+    AcceptOffer { session: String, summons: bool },
 }
 
 impl Act {
@@ -43,6 +45,8 @@ impl Act {
         match self {
             Self::Destroy { .. } => "destroy",
             Self::DropQuest { .. } => "drop_quest",
+            Self::AcceptOffer { summons: true, .. } => "summon_offer",
+            Self::AcceptOffer { summons: false, .. } => "revive_offer",
         }
     }
 }
@@ -94,10 +98,34 @@ pub(crate) fn open(
     text: String,
     ask_tick: u64,
 ) -> std::result::Result<u64, (&'static str, String)> {
+    open_with(vm, addon, session, act, text, ask_tick, false)
+}
+
+/// Round A2: the question for accepting a resurrection, which is offered to a character who is dead (so a dead
+/// character may be asked; one out of the world still may not).
+pub(crate) fn open_for_offer(
+    vm: u64,
+    addon: &str,
+    session: Option<String>,
+    act: Act,
+    text: String,
+) -> std::result::Result<u64, (&'static str, String)> {
+    open_with(vm, addon, session, act, text, 0, true)
+}
+
+fn open_with(
+    vm: u64,
+    addon: &str,
+    session: Option<String>,
+    act: Act,
+    text: String,
+    ask_tick: u64,
+    allow_dead: bool,
+) -> std::result::Result<u64, (&'static str, String)> {
     // modal over whatever is up (a game window under it keeps its own keys until the player answers): never to a
-    // character who is dead or out of the world
+    // character who is dead (unless it is the offer of a resurrection) or out of the world
     let env = super::window_sessions::env();
-    if env.dead || env.away {
+    if (env.dead && !allow_dead) || env.away {
         return Err(("not_ready", "the question cannot be asked while dead or out of the world".into()));
     }
     STATE.with(|s| {
