@@ -500,7 +500,8 @@ fn a6_chat_mod_has_all_and_a_tab_per_style_and_sends_on_the_picked_channel() {
     ws::open_client(vm, "eqoa_chat", "chat_entry", "key", json!({"text": "/", "channel": "say", "links": []}));
     native_core::flush_deferred();
     frames(&host, &bridge, &mut context, 2);
-    for c in ["g", "r", "o", "u", "p"] {
+    // (a bare channel word such as /group only changes the channel now; a real command is still sent)
+    for c in ["w", "h", "o"] {
         key(&host, c, c);
     }
     key(&host, "return", "");
@@ -613,9 +614,9 @@ fn a6_chat_window_moves_and_sizes_with_the_pointer_and_keeps_its_place() {
 /// Owner request 2026-11-23 (item 8): tabs are edited inside the chat window. A right click on a tab opens Rename, Move
 /// left, Move right, Delete and "Show in this tab" with a check per style; a right click on the empty strip (or the +)
 /// makes a New tab that starts with nothing ticked; All can be renamed and moved, never deleted; the tabs are kept in
-/// the mod's settings and Reset tabs brings the default set back; the game's own Chat Tabs ("Mine") are not touched.
+/// the mod's settings and Reset tabs brings the default set back; the Styles/Mine switch and the Notices tab are gone (an old saved mode is ignored).
 /// Negative controls are inline: a left click opens no menu, All has no Delete or style rows, the first tab's Move left
-/// is off, Escape drops a rename, a new tab shows nothing while All shows the lines, "Mine" has no menu.
+/// is off, Escape drops a rename, a new tab shows nothing while All shows the lines, no Mine or Notices view exists.
 #[test]
 fn a6_chat_tabs_are_edited_inside_the_window_and_kept() {
     use super::{native_settings, pointer_api};
@@ -676,10 +677,11 @@ fn a6_chat_tabs_are_edited_inside_the_window_and_kept() {
         ticks(context, 1);
     };
 
-    // the default set: All, a tab per style, Notices
+    // the default set: All and a tab per style (no Notices, no Mine)
     let start = names(&host);
     assert_eq!(start.first().map(String::as_str), Some("All"));
-    assert_eq!(start.last().map(String::as_str), Some("Notices"));
+    assert!(!start.iter().any(|n| n == "Notices" || n == "Main"), "no Notices tab and no game tabs: {start:?}");
+    assert!(center("mode").is_none(), "no Styles/Mine switch");
     assert!(start.len() >= 4 && start.iter().any(|n| n == "Say"), "{start:?}");
     // control: a left click chooses the tab and opens no menu
     click(&mut context, "tab:say", "left");
@@ -788,6 +790,9 @@ fn a6_chat_tabs_are_edited_inside_the_window_and_kept() {
     native_a6::set_chat_info(native_a6::ChatInfo { tabs: vec![(0, "Main".into(), vec!["say", "combat"])], reply_to: String::new() });
     let host2 = Host::for_addon(&addon("eqoa_chat")).unwrap();
     let bridge2 = Bridge::install(&host2).unwrap();
+    // a value saved by the old version also holds its mode: ignored, not an error
+    let mut last = last;
+    last["table"].as_array_mut().unwrap().push(json!(["own_tabs", true]));
     native_settings::configure(&host2, Some(last.clone()), Rc::new(|_| Ok(())));
     host2.run_addon(&addon("eqoa_chat")).unwrap();
     let value = super::profile::decode(&host2.lua, &last).unwrap();
@@ -814,29 +819,250 @@ fn a6_chat_tabs_are_edited_inside_the_window_and_kept() {
     }
     let reset = names(&host2);
     assert_eq!(reset, start, "Reset tabs restores All and one tab per style");
-    // the game's own tabs ("Mine") are not edited here: no menu on a right click
-    let (mx, my): (f64, f64) = host2.lua.load("local h = chat_probe.hit('mode'); return h.x + h.w / 2, h.y + h.h / 2").eval().unwrap();
-    CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": mx, "y": my, "inside_window": true, "button": "left"})));
-    for _ in 0..2 {
+    assert!(host2.lua.load("return chat_probe.hit('mode') == nil").eval::<bool>().unwrap(), "the Styles/Mine switch is gone");
+}
+
+// ---- owner test 2026-11-23 evening (lane A): typing, rename, channels, Shift+T, combat -------------------------------
+
+fn tick_n(host: &Host, bridge: &Bridge, context: &mut Context, n: usize) {
+    for _ in 0..n {
         CORE.with(|c| c.borrow_mut().frame += 1);
-        frames(&host2, &bridge2, &mut context, 1);
+        frames(host, bridge, context, 1);
     }
-    assert_eq!(names(&host2), vec!["All".to_string(), "Main".to_string(), "Notices".to_string()], "Mine: the game's own tabs");
-    let (tx, ty): (f64, f64) = host2.lua.load("local h = chat_probe.hit('tab:own0'); return h.x + h.w / 2, h.y + h.h / 2").eval().unwrap();
-    CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": tx, "y": ty, "inside_window": true, "button": "right"})));
-    for _ in 0..2 {
-        CORE.with(|c| c.borrow_mut().frame += 1);
-        frames(&host2, &bridge2, &mut context, 1);
+}
+
+/// A key the way a real keyboard gives it to the mods (`input::route_mod_key`, the viewer's own policy): down and up.
+fn real_key(host: &Host, key: winit::keyboard::Key) {
+    super::input::route_mod_key(&key, true, false, false, true, false);
+    super::input::route_mod_key(&key, false, false, false, true, false);
+    native_core::flush_deferred();
+    native_events::dispatch(host).unwrap();
+}
+
+fn real_text(host: &Host, text: &str) {
+    for c in text.chars() {
+        let key = if c == ' ' { winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) } else { winit::keyboard::Key::Character(c.to_string().into()) };
+        real_key(host, key);
     }
-    assert!(host2.lua.load("return chat_probe.hit('menu:Rename') == nil").eval::<bool>().unwrap(), "control: no menu on the game's own tabs");
+}
+
+fn named(host: &Host, k: winit::keyboard::NamedKey) {
+    real_key(host, winit::keyboard::Key::Named(k));
+}
+
+fn loaded() -> (Host, Bridge, Context, u64) {
+    fresh();
+    super::input::reset_input_state();
+    ships("eqoa_chat");
+    let context = context();
+    native_a6::set_chat_info(native_a6::ChatInfo { tabs: vec![(0, "Main".into(), vec!["say", "combat"])], reply_to: String::new() });
+    let host = Host::for_addon(&addon("eqoa_chat")).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon("eqoa_chat")).unwrap();
+    let vm = native_events::bus(&host.lua).borrow().vm;
+    (host, bridge, context, vm)
+}
+
+fn probe_str(host: &Host, code: &str) -> String {
+    host.lua.load(format!("return tostring({code})")).eval().unwrap()
+}
+
+/// Item 3: "Nothing I type works in the rename, and typing fires the other hot keys." The client lets a text capture lapse
+/// after one second unless the mod asks again; the mod asked once when the rename began. Now it asks every frame it is
+/// wanted. The keys go in by the real route (`route_mod_key`), and while the rename is open the game's hot keys are the
+/// mod's (`wants_key_capture`); when it ends they are the game's again.
+/// Negative control: with the old Lua the capture is gone after a second of waiting (the first assertion) and nothing typed arrives.
+#[test]
+fn a6_chat_rename_takes_the_typed_keys_for_longer_than_a_second_and_holds_the_hot_keys() {
+    let (host, bridge, mut context, _vm) = loaded();
+    tick_n(&host, &bridge, &mut context, 3);
+    host.execute("chat_probe.state.w = 640").unwrap();
+    tick_n(&host, &bridge, &mut context, 2);
+    super::pointer_api::position([0.0, 0.0], true, (1024, 768));
+    let press = |context: &mut Context, id: &str, button: &str| {
+        let (x, y): (f64, f64) = host.lua.load(format!("local h = chat_probe.hit('{id}'); return h.x + h.w / 2, h.y + h.h / 2")).eval().unwrap();
+        super::pointer_api::position([x as f32, y as f32], true, (1024, 768));
+        CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": x, "y": y, "inside_window": true, "button": button})));
+        tick_n(&host, &bridge, context, 2);
+    };
+    press(&mut context, "tab:say", "right");
+    press(&mut context, "menu:Rename", "left");
+    assert!(super::input::is_text_capture_active(), "the rename holds the keyboard");
+    // longer than the lapse: the capture is renewed (the old code asked once and lost it)
+    std::thread::sleep(std::time::Duration::from_millis(1250));
+    tick_n(&host, &bridge, &mut context, 2);
+    assert!(super::input::is_text_capture_active(), "still held after more than a second");
+    // the hot keys do not reach the game or other mods while it is open
+    assert!(super::input::wants_key_capture(false, Some(b'w'), false, true), "W is the rename's, not the game's");
+    assert!(super::input::wants_key_capture(false, Some(0x0D), false, true), "Enter is the rename's");
+    // letters, a digit and a space, then Backspace, by the real route
+    host.execute("chat_probe.state.rename.text = ''").unwrap();
+    real_text(&host, "Hi 5x");
+    named(&host, winit::keyboard::NamedKey::Backspace);
+    assert_eq!(probe_str(&host, "chat_probe.state.rename.text"), "Hi 5", "typed by the real keyboard route");
+    // Escape drops it: the name is as it was; the keyboard is let go
+    named(&host, winit::keyboard::NamedKey::Escape);
+    tick_n(&host, &bridge, &mut context, 2);
+    assert!(host.lua.load("return chat_probe.state.rename == nil").eval::<bool>().unwrap());
+    assert!(!super::input::is_text_capture_active(), "the keyboard is the game's again");
+    assert!(!super::input::wants_key_capture(false, Some(b'w'), false, true), "control: W is the game's again");
+    assert!(host.lua.load("return chat_probe.names()[2] == 'Say'").eval::<bool>().unwrap(), "Escape keeps the old name");
+    // Enter keeps it
+    press(&mut context, "tab:say", "right");
+    press(&mut context, "menu:Rename", "left");
+    for _ in 0..3 {
+        named(&host, winit::keyboard::NamedKey::Backspace);
+    }
+    real_text(&host, "Talk");
+    named(&host, winit::keyboard::NamedKey::Enter);
+    tick_n(&host, &bridge, &mut context, 2);
+    assert_eq!(probe_str(&host, "chat_probe.names()[2]"), "Talk");
+}
+
+fn open_line(host: &Host, bridge: &Bridge, context: &mut Context, vm: u64, text: &str, channel: &str) {
+    ws::open_client(vm, "eqoa_chat", "chat_entry", "key", json!({"text": text, "channel": channel, "links": []}));
+    native_core::flush_deferred();
+    tick_n(host, bridge, context, 2);
+}
+
+/// Items 5 and 6: after a channel change by a slash command (/g, /s, /say, /gu, /t name), by Tab or by the buttons, typing
+/// keeps going into the line; a line opened by T or Shift+T ("/tell ") takes the keys at once, even a second later.
+/// Negative control: before, "/g" sent a command and closed the line, and the capture lapsed after a second.
+#[test]
+fn a6_chat_line_keeps_taking_keys_after_a_channel_change_and_for_a_tell() {
+    let (host, bridge, mut context, vm) = loaded();
+    tick_n(&host, &bridge, &mut context, 3);
+    let state = |code: &str| probe_str(&host, &format!("chat_probe.state.{code}"));
+    // "/g " (the space types the change): group, the line empty and open, then typing goes on
+    open_line(&host, &bridge, &mut context, vm, "", "say");
+    assert!(super::input::is_text_capture_active());
+    real_text(&host, "/g ");
+    assert_eq!((state("channel").as_str(), state("text").as_str()), ("group", ""), "/g changes the channel");
+    assert!(ws::get(vm, "chat_entry").is_some(), "the line stays open");
+    assert!(action_broker::queued_kinds_for_test().contains(&"set_channel"), "the game's chat mode follows: {:?}", action_broker::queued_kinds_for_test());
+    real_text(&host, "hello");
+    assert_eq!(state("text"), "hello");
+    // a bare "/s" and Enter changes the channel too, and keeps the line
+    for (cmd, want) in [("/s", "shout"), ("/say", "say"), ("/gu", "guild"), ("/group", "group")] {
+        host.execute("chat_probe.state.text = ''").unwrap();
+        real_text(&host, cmd);
+        named(&host, winit::keyboard::NamedKey::Enter);
+        tick_n(&host, &bridge, &mut context, 1);
+        assert_eq!((state("channel").as_str(), state("text").as_str()), (want, ""), "{cmd}");
+        assert!(ws::get(vm, "chat_entry").is_some(), "{cmd}: the line is still open");
+        real_text(&host, "x");
+        assert_eq!(state("text"), "x", "{cmd}: typing continues");
+    }
+    assert!(!action_broker::queued_kinds_for_test().contains(&"command"), "a channel command is not sent as a command");
+    // "/t " (the space) changes to Tell; the name and the message are typed after it
+    host.execute("chat_probe.state.text = ''").unwrap();
+    real_text(&host, "/t Wil");
+    assert_eq!((state("channel").as_str(), state("text").as_str()), ("tell", "Wil"));
+    real_text(&host, " hi");
+    assert_eq!(state("text"), "Wil hi");
+    // and a pasted "/t Wil" with Enter keeps the name ready for the message
+    host.execute("chat_probe.state.text = '/t Wil'; chat_probe.state.channel = 'say'").unwrap();
+    named(&host, winit::keyboard::NamedKey::Enter);
+    assert_eq!((state("channel").as_str(), state("text").as_str()), ("tell", "Wil "));
+    // Tab goes round the channels and typing continues; so do the buttons
+    host.execute("chat_probe.state.text = ''").unwrap();
+    named(&host, winit::keyboard::NamedKey::Tab);
+    assert_eq!(state("channel"), "reply", "Tab goes on from Tell");
+    real_text(&host, "ok");
+    assert_eq!(state("text"), "ok", "typing after Tab");
+    let (x, y): (f64, f64) = host.lua.load("local h = chat_probe.hit('chan:guild'); return h.x + h.w / 2, h.y + h.h / 2").eval().unwrap();
+    super::pointer_api::position([x as f32, y as f32], true, (1024, 768));
+    CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": x, "y": y, "inside_window": true, "button": "left"})));
+    tick_n(&host, &bridge, &mut context, 2);
+    assert_eq!(state("channel"), "guild");
+    real_text(&host, "yo");
+    assert_eq!(state("text"), "okyo", "typing after a button");
+    // more than a second later the line still takes keys (the capture is renewed)
+    std::thread::sleep(std::time::Duration::from_millis(1250));
+    tick_n(&host, &bridge, &mut context, 2);
+    real_text(&host, "!");
+    assert_eq!(state("text"), "okyo!", "typing after a second's wait");
+    // control: a real command (not a bare channel word) is still sent, and closes the line
+    host.execute("chat_probe.state.text = '/who'").unwrap();
+    named(&host, winit::keyboard::NamedKey::Enter);
+    assert!(action_broker::queued_kinds_for_test().contains(&"command"), "/who is a command");
+    assert!(ws::get(vm, "chat_entry").is_none(), "sent: the line closed");
+    // Shift+T: the game opens its line with "/tell "; the mod's line is Tell with nothing to delete, and takes the keys at once
+    action_broker::reset_all_for_test();
+    open_line(&host, &bridge, &mut context, vm, "/tell ", "say");
+    assert_eq!((state("channel").as_str(), state("text").as_str()), ("tell", ""));
+    std::thread::sleep(std::time::Duration::from_millis(1250));
+    tick_n(&host, &bridge, &mut context, 2);
+    real_text(&host, "Wil hello");
+    assert_eq!(state("text"), "Wil hello", "typed at once, a second after it opened");
+    // R: Reply
+    named(&host, winit::keyboard::NamedKey::Escape);
+    open_line(&host, &bridge, &mut context, vm, "/reply ", "say");
+    assert_eq!(state("channel"), "reply");
+}
+
+/// Item 7: the game shows hits as numbers over heads and sends no chat line for them, so nothing reached the Combat tab.
+/// The tab is made from the `combat.hit` events (the player's, the pet's, and what hits them), in time order with the
+/// chat lines that are combat too. Negative controls: before any hit the tab is empty; someone else's hit is not shown;
+/// All does not show the combat log.
+#[test]
+fn a6_chat_combat_tab_shows_the_hits_the_game_tells_the_client_of() {
+    let (host, bridge, mut context, _vm) = loaded();
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.player = json!({"id": 256, "name": "Me", "level": 20, "pet_id": 9000});
+        c.view.entities = vec![
+            json!({"ref": {"$ref": "entity", "key": "8193", "generation": 0, "incarnation": 1}, "id": 8193, "name": "Gnoll", "level": 22, "kind": "npc", "is_creature": true,
+                   "position": {"x": 1.0, "y": 0.0, "z": 1.0}, "actor_position": {"x": 1.0, "y": 0.0, "z": 1.0}}),
+            json!({"ref": {"$ref": "entity", "key": "9000", "generation": 0, "incarnation": 1}, "id": 9000, "name": "Spirit", "level": 20, "kind": "npc", "is_creature": true,
+                   "position": {"x": 1.0, "y": 0.0, "z": 1.0}, "actor_position": {"x": 1.0, "y": 0.0, "z": 1.0}}),
+        ];
+    });
+    host.execute("chat_probe.state.w = 640").unwrap();
+    tick_n(&host, &bridge, &mut context, 3);
+    let press_tab = |context: &mut Context, id: &str| {
+        let (x, y): (f64, f64) = host.lua.load(format!("local h = chat_probe.hit('{id}'); return h.x + h.w / 2, h.y + h.h / 2")).eval().unwrap();
+        super::pointer_api::position([x as f32, y as f32], true, (1024, 768));
+        CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": x, "y": y, "inside_window": true, "button": "left"})));
+        tick_n(&host, &bridge, context, 2);
+    };
+    let lines = |host: &Host| -> Vec<String> { host.lua.load("return chat_probe.lines()").eval().unwrap() };
+    press_tab(&mut context, "tab:combat");
+    assert!(lines(&host).is_empty(), "control: nothing before a hit");
+    // the player hits the gnoll, the gnoll hits back, the pet hits, a stranger hits another stranger, a heal
+    native_core::observe_hit(256, 8193, -12, None);
+    native_core::observe_text("You have slain a gnoll.", [1.0, 0.55, 0.15, 1.0]);
+    native_core::observe_hit(8193, 256, -7, None);
+    native_core::observe_hit(9000, 8193, -4, None);
+    native_core::observe_hit(5555, 6666, -99, None);
+    native_core::observe_hit(256, 256, 5, None);
+    native_core::flush_deferred();
+    tick_n(&host, &bridge, &mut context, 2);
+    assert_eq!(
+        lines(&host),
+        vec![
+            "You hit Gnoll for 12.",
+            "You have slain a gnoll.",
+            "Gnoll hits you for 7.",
+            "Spirit hits Gnoll for 4.",
+            "You heal yourself for 5.",
+        ],
+        "the combat log in time order, with the chat line that is combat; the stranger's hit is not there"
+    );
+    // All shows the chat lines only
+    press_tab(&mut context, "tab:all");
+    assert_eq!(lines(&host), vec!["You have slain a gnoll."], "control: All does not carry the combat log");
 }
 
 #[test]
 fn a6_chat_mod_tabs_are_all_plus_one_per_style_or_the_players_own() {
     fresh();
     let source = std::fs::read_to_string(root("eqoa_chat").join("main.lua")).unwrap();
-    for needle in ["id = \"all\"", "STYLE_LABELS", "eqoa.chat.tabs()", "Notices", "own_tabs"] {
+    for needle in ["id = \"all\"", "STYLE_LABELS", "eqoa.chat.tabs()"] {
         assert!(source.contains(needle), "the chat mod has {needle}");
+    }
+    for gone in ["Notices", "own_tabs", "drag to move"] {
+        assert!(!source.contains(gone), "the chat mod no longer has {gone}");
     }
     for kind in ["say", "tells", "group", "guild", "shouts", "combat", "loot", "rolls", "experience", "system"] {
         assert!(source.contains(&format!("{kind} = \"")), "a label for the {kind} style");

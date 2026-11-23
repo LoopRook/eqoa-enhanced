@@ -651,3 +651,33 @@ fn a6_get_channel_names_the_channel_the_line_goes_to() {
         assert_eq!(native_a6::channel_name(code), Some(name));
     }
 }
+
+/// Owner test 2026-11-23 (lane A, item 4): "Hitting Enter makes me stop running." A mod's text capture cleared the
+/// character's autorun, follow and attack on every step; the game's own chat box does not. While the mod's chat line is
+/// open the run goes on. Negative control: any other text capture (a mod's own text box, no chat line) still stops them.
+#[test]
+fn a6_a_mods_chat_line_keeps_the_character_running() {
+    let mut p = ready();
+    let h = host();
+    let vm = hold(&h, TakeoverKind::ChatEntry);
+    p.autorun = true;
+    p.following = true;
+    p.follow_id = 7;
+    // control: a text capture with no chat line stops them, as it always did
+    crate::fork_ext::addons::input::reset_input_state();
+    crate::fork_ext::addons::input::testing_text_capture(true);
+    step(&mut p, &h);
+    assert!(!p.autorun && !p.following, "another text box takes the stops");
+    // the chat line is open: the run keeps going
+    p.autorun = true;
+    p.following = true;
+    ws::open_client(vm, "a6_mod", "chat_entry", "key", json!({"text": "", "channel": "say", "links": []}));
+    step(&mut p, &h);
+    assert!(p.autorun && p.following, "the chat line keeps the run, as the game's box does");
+    // closing the line: the capture alone stops them again
+    let id = ws::get(vm, "chat_entry").unwrap().id;
+    let _ = ws::close(vm, &id, "closed");
+    step(&mut p, &h);
+    assert!(!p.autorun, "no chat line, the capture stops the run");
+    crate::fork_ext::addons::input::testing_text_capture(false);
+}

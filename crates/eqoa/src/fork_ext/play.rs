@@ -850,7 +850,9 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
             super::raidplay::fork_win::snapshot_raid(_play);
         }
         net::fork_record::drain(&mut _play.session);
-        if crate::fork_ext::addons::input::is_text_capture_active() {
+        // a mod's text box takes the character's stops (an attack, autorun, a follow); the chat line is not one: the
+        // game's own chat box keeps them going, so a mod's line does too
+        if crate::fork_ext::addons::input::is_text_capture_active() && !a6_play::chat_line_open() {
             _play.attack_release();
             _play.info_up = false;
             _play.aim_hold = false;
