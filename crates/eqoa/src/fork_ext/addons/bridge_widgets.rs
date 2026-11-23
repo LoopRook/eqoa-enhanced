@@ -324,6 +324,11 @@ pub(super) fn install(lua: &Lua, imgui: &Table, frame: &Rc<RefCell<Frame>>) -> R
                 let value:String=lua.unpack_multi(args)?;
                 let value = text(&value)?;
                 f.borrow_mut().check()?;
+                // round A1: a tooltip is drawn above every window, the client's question included, so while the
+                // question is up a mod's tooltip is not drawn (a silent no-op)
+                if name == "SetTooltip" && super::super::confirm::is_open() {
+                    return Ok(());
+                }
                 unsafe {
                     match name {
                         "BulletText" => sys::igBulletText(c"%s".as_ptr(), value.as_ptr()),

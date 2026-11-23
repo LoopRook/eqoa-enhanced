@@ -363,3 +363,71 @@ fn a1_fix1_a_mod_that_errors_in_render_or_windows_key_loses_the_controller_and_i
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+/// Names of the draw lists with something in them, back to front, of the frame just rendered.
+fn drawn_back_to_front(context: &mut Context) -> Vec<String> {
+    let _ = context;
+    unsafe {
+        let d = dear_imgui_rs::sys::igGetDrawData();
+        let lists = &(*d).CmdLists;
+        (0..lists.Size as usize)
+            .filter_map(|i| {
+                let l = *lists.Data.add(i);
+                ((*l).VtxBuffer.Size > 0).then(|| std::ffi::CStr::from_ptr((*l)._OwnerName).to_string_lossy().into_owned())
+            })
+            .collect()
+    }
+}
+
+#[test]
+fn a1_fix1_no_mod_tooltip_popup_or_window_is_drawn_above_the_question() {
+    fixture();
+    let (a, dir) = scratch_addon(
+        "layers",
+        &["eqoa.events.on", "eqoa.imgui"],
+        r#"
+        local ui = eqoa.imgui
+        eqoa.events.on("render", function()
+            ui.SetNextWindowPos(480, 300, ImGuiCond.Always)
+            ui.SetNextWindowSize(300, 200, ImGuiCond.Always)
+            ui.Begin("over", true, ImGuiWindowFlags.NoTitleBar + ImGuiWindowFlags.NoSavedSettings + ImGuiWindowFlags.NoBringToFrontOnFocus)
+            ui.Text("over the question's place")
+            ui.SetTooltip("Destroy nothing: this is safe")
+            ui.OpenPopup("pp")
+            if ui.BeginPopup("pp") then ui.Text("a popup over it"); ui.EndPopup() end
+            ui.End()
+        end)
+        "#,
+    );
+    let mut context = context();
+    let host = Host::for_addon(&a).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&a).unwrap();
+    let vm = native_events::bus(&host.lua).borrow().vm;
+    // control: with no question up, the mod's tooltip is drawn above everything (the layer this closes)
+    for _ in 0..4 {
+        frame_with_question(&host, &bridge, &mut context);
+    }
+    let layers = drawn_back_to_front(&mut context);
+    assert!(
+        layers.last().is_some_and(|n| n.starts_with("##Tooltip")),
+        "control: the tooltip is the topmost layer without a question: {layers:?}"
+    );
+    confirm::open(vm, "layers", None, confirm::Act::Destroy { inv_index: 1, name: "Rock".into(), count: 1 }, "Destroy Rock?".into(), 0).unwrap();
+    for _ in 0..4 {
+        frame_with_question(&host, &bridge, &mut context);
+    }
+    let layers = drawn_back_to_front(&mut context);
+    assert!(
+        layers.last().is_some_and(|n| n.starts_with("Are you sure?")),
+        "the question is the topmost layer; mod tooltips, popups and windows are below it: {layers:?}"
+    );
+    assert!(!layers.iter().any(|n| n.starts_with("##Tooltip")), "no mod tooltip is drawn while the question is up: {layers:?}");
+    // the question over, tooltips are the mod's again
+    confirm::cancel_all("test");
+    for _ in 0..4 {
+        frame_with_question(&host, &bridge, &mut context);
+    }
+    assert!(drawn_back_to_front(&mut context).iter().any(|n| n.starts_with("##Tooltip")));
+    let _ = std::fs::remove_dir_all(dir);
+}
