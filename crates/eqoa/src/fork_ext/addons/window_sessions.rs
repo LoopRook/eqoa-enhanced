@@ -187,7 +187,7 @@ pub(crate) fn open(
             if TakeoverKind::parse(kind).is_ok() {
                 format!("the '{kind}' window is opened by the server: hold it with eqoa.windows.takeover instead")
             } else {
-                format!("a mod cannot open its own '{kind}' window in this version (only 'inventory', 'spellbook' and 'quest_log')")
+                format!("a mod cannot open its own '{kind}' window in this version (only 'inventory', 'spellbook', 'quest_log', 'recipe_book' and 'experiment')")
             },
         ));
     }
@@ -233,6 +233,14 @@ pub(crate) fn get(vm: u64, kind: &str) -> Option<Session> {
         return None;
     }
     with(|s| s.sessions.iter().find(|x| x.vm == vm && x.kind == kind).cloned())
+}
+
+/// Some mod holds a window of one of `kinds` (its own, not a held corpse, merchant or bank).
+pub(crate) fn any_open(kinds: &[&str]) -> bool {
+    if !is_active() {
+        return false;
+    }
+    with(|s| s.sessions.iter().any(|x| x.held.is_none() && kinds.contains(&x.kind.as_str())))
 }
 
 pub(crate) fn find(vm: u64, id: &str) -> Option<Session> {

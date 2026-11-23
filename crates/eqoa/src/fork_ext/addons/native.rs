@@ -976,6 +976,13 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ("player", "training breath", 8),
         ("quests", "goals", 8),
         ("target", "info", 8),
+        // round A8: crafting
+        ("craft", "get", 8),
+        (
+            "actions",
+            "craft_list craft_inspect craft_tray_add craft_tray_remove craft_tray_clear craft_fill craft_combine craft_keep",
+            8,
+        ),
     ] {
         let module_path = format!("eqoa.{module}");
         let backing = match modules.get::<Value>(module)? {
@@ -1118,6 +1125,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_r6a::install(host)?;
     super::native_a3::install(host)?;
     super::native_a1::install(host)?;
+    super::native_a8::install(host)?;
     super::frame_actions::install(host)?;
     super::raid_strips::install(host)?;
     super::map_views::install(host)?;
@@ -1267,6 +1275,15 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.windows.Window", "rows") => Some("eqoa.windows.MenuRow"),
         ("eqoa.windows.Window", "hints") => Some("eqoa.windows.ButtonHint"),
         ("eqoa.windows.Window", "dialog") => Some("eqoa.windows.Dialog"),
+        ("eqoa.craft.State", "skills") => Some("eqoa.craft.Skill"),
+        ("eqoa.craft.State", "recipes") => Some("eqoa.craft.Recipe"),
+        ("eqoa.craft.State", "detail") => Some("eqoa.craft.Detail"),
+        ("eqoa.craft.State", "tray") => Some("eqoa.craft.TrayItem"),
+        ("eqoa.craft.State", "items") => Some("eqoa.craft.Item"),
+        ("eqoa.craft.State", "question") => Some("eqoa.craft.Question"),
+        ("eqoa.craft.State", "notice") => Some("eqoa.craft.Notice"),
+        ("eqoa.craft.Detail", "ingredients") => Some("eqoa.craft.Ingredient"),
+        ("eqoa.craft.Detail", "tools") => Some("eqoa.craft.Tool"),
         _ => None,
     }
 }
