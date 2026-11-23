@@ -39,11 +39,11 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_target_frame_demo",
     "eqoa_spellbook",
     "eqoa_quest_journal",
-    "eqoa_start_menu",
-    "eqoa_chat",
     "eqoa_character",
     "eqoa_dialogs",
     "eqoa_turnin",
+    "eqoa_start_menu",
+    "eqoa_chat",
 ];
 
 #[derive(Clone, Copy, Debug)]
