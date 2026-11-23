@@ -236,6 +236,68 @@ fn window_rect(name: &std::ffi::CStr) -> [f32; 4] {
     }
 }
 
+/// A player's left click at `at`: hover for two frames, press, release, as the manager's tests do.
+fn click_at(host: &Host, bridge: &Bridge, context: &mut Context, at: [f32; 2]) {
+    context.io_mut().add_mouse_pos_event(at);
+    frames(host, bridge, context, 2);
+    context.io_mut().add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+    frames(host, bridge, context, 1);
+    context.io_mut().add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+    frames(host, bridge, context, 1);
+}
+
+/// Clicks down the Target window a few pixels at a time; says whether any click queued that action.
+fn target_window_queues(host: &Host, bridge: &Bridge, context: &mut Context, action: &str) -> bool {
+    let [x, y, _w, h] = window_rect(c"Target");
+    let mut dy = 24.0;
+    while dy < h - 2.0 {
+        click_at(host, bridge, context, [x + 20.0, y + dy]);
+        if action_broker::queued_kinds_for_test().contains(&action) {
+            return true;
+        }
+        dy += 6.0;
+    }
+    false
+}
+
+/// Owner report 2026-11-23: "Invite to group" showed for every target, including monsters and yourself. It is now
+/// drawn only for another player who is not already in your group.
+///
+/// Runs the mod against the fixture with `target_id`/`kind` and, with `member`, that id in the group, then says
+/// whether any click down the Target window queued the invite.
+fn invite_offered(target_id: u64, kind: &str, member: bool) -> bool {
+    fixture();
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.player["target_id"] = json!(target_id);
+        c.view.entities[0]["id"] = json!(target_id);
+        c.view.entities[0]["kind"] = json!(kind);
+        c.view.group = json!({
+            "in_group": member, "self_leader": null,
+            "members": if member { json!([{"id": 8193, "name": "Mira", "active": true}]) } else { json!([]) },
+            "raid": [], "invites": [],
+        });
+    });
+    let mut context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon()).unwrap();
+    assert!(frames(&host, &bridge, &mut context, 2) > 0);
+    let offered = target_window_queues(&host, &bridge, &mut context, "group_invite");
+    assert!(host.drain_logs().unwrap().is_empty());
+    offered
+}
+
+#[test]
+fn a3_frames_mod_offers_invite_only_for_another_player_outside_the_group() {
+    // control: another player outside the group gets the button, and clicking it queues the invite
+    assert!(invite_offered(8193, "player", false), "a player outside the group can be invited");
+    // and these do not: a monster, yourself, and someone already in your group
+    assert!(!invite_offered(8193, "npc", false), "a monster is not offered the Invite button");
+    assert!(!invite_offered(256, "player", false), "yourself is not offered the Invite button");
+    assert!(!invite_offered(8193, "player", true), "a group member is not offered the Invite button");
+}
+
 /// Hovers `at` for a few frames and says whether a tooltip is up.
 fn tip_at(host: &Host, bridge: &Bridge, context: &mut Context, at: [f32; 2]) -> bool {
     context.io_mut().add_mouse_pos_event(at);

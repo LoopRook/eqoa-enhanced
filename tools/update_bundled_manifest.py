@@ -14,6 +14,28 @@ RE_TEST_MOD_FILES = re.compile(r"BUNDLED_MOD_FILES\s*=\s*\[[^\]]*\]", re.DOTALL)
 RE_CHECKSUM_LINE = re.compile(r"^[0-9a-f]{64}\s+\S+")
 
 ALLOWED_EXTENSIONS = {".json", ".lua", ".md", ".png", ".ttf", ".txt"}
+# Files the client ships and the mutation tests read as text: a CR byte means the file was saved CRLF.
+TEXT_EXTENSIONS = {".json", ".lua", ".md", ".txt"}
+# Only the fork's own mods (eqoa_*) must be LF. Vendored FrontiersForge mods and font notices stay byte for byte as
+# shipped upstream (CRLF), so they are not checked; neither is any `resources` folder.
+
+
+def find_files_with_cr(bundled_dir):
+    """Every text file of a fork-owned mod (`eqoa_*`, outside `resources`) that contains a CR byte.
+
+    Files under bundled-mods are `-text` in .gitattributes (stored byte for byte), so a CRLF save stays CRLF and
+    breaks the tests that match LF source. The names are returned relative to `bundled_dir`, sorted.
+    """
+    found = []
+    for path in sorted(Path(bundled_dir).rglob("*")):
+        if not (path.is_file() and path.suffix.lower() in TEXT_EXTENSIONS):
+            continue
+        rel = path.relative_to(bundled_dir)
+        if not rel.parts[0].startswith("eqoa_") or "resources" in rel.parts[1:-1]:
+            continue
+        if b"\r" in path.read_bytes():
+            found.append(rel.as_posix())
+    return found
 
 
 def sha256_file(path):
@@ -242,6 +264,12 @@ def update_bundled_manifests(root=None, check=False):
             diffs.append((path, "".join(diff), new_b))
 
     if check:
+        cr_files = find_files_with_cr(bundled_dir)
+        if cr_files:
+            print(f"Bundled mod text files contain CR bytes ({len(cr_files)} file(s)); keep them LF:")
+            for rel in cr_files:
+                print(f"  bundled-mods/{rel}")
+            return 1
         if diffs:
             print(f"Bundled mod manifests are out of date ({len(diffs)} file(s) differ):")
             for _, d, _ in diffs:
