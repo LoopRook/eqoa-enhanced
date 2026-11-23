@@ -26,6 +26,8 @@ mod a7_play;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "a7_play_tests.rs"]
 mod a7_play_tests;
+
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "a2_play.rs"]
 mod a2_play;
 
