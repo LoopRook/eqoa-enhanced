@@ -399,9 +399,9 @@ function draw()
                 local total = att and att.total[name] or 0
                 local cap = (t.caps and t.caps[name]) or t.stat_cap or 0
                 local add = S.add[name]
-                text(PAD, y, STAT_LABELS[i], c.text, 68)
-                text(PAD + 70, y, string.format("%d / %d (%d)", base + add, cap, total + add), add > 0 and c.good or c.text, 96)
-                local bx = PAD + 168
+                text(PAD, y, STAT_LABELS[i], c.text, 74)
+                text(PAD + 76, y, string.format("%d / %d (%d)", base + add, cap, total + add), add > 0 and c.good or c.text, 96)
+                local bx = PAD + 178
                 fill(bx, y, 12, 12, c.raised)
                 frame(bx, y, 12, 12, add > 0 and c.border or c.surface)
                 text(bx + 3, y, "-", add > 0 and c.text or c.muted, 8)
@@ -410,16 +410,16 @@ function draw()
                 frame(bx + 14, y, 12, 12, left > 0 and c.border or c.surface)
                 text(bx + 17, y, "+", left > 0 and c.text or c.muted, 8)
                 S.hits[#S.hits + 1] = hit(bx + 14, y, 12, 12, { run = function() adjust(name, 1) end, label = "+" .. name })
-                if add > 0 then text(bx + 28, y, "+" .. add, c.good, 26) end
+                if add > 0 then text(bx + 28, y, "+" .. add, c.good, 22) end
             end
-            text(PAD, list_y + 12 * LINE, string.format("Training points: %d   left to place: %d", t.points, left), c.text, 200)
+            text(PAD, list_y + 12 * LINE, string.format("Training points: %d   left to place: %d", t.points, left), c.text, W - 2 * PAD)
             -- the resists and armor
-            text(236, list_y + 3 * LINE, "Resists", c.muted, W - PAD - 236)
+            text(240, list_y + 3 * LINE, "Resists", c.muted, W - PAD - 240)
             for i, r in ipairs(RESISTS) do
                 local y = list_y + (3 + i) * LINE + 2
                 local item = st and st[r[1]]
-                text(236, y, r[2], c.text, 56)
-                text(236 + 58, y, item and tostring(item.current) or "-", c.text, W - PAD - 294)
+                text(240, y, r[2], c.text, 56)
+                text(240 + 58, y, item and tostring(item.current) or "-", c.text, W - PAD - 298)
             end
         end
     elseif S.tab == "masteries" then

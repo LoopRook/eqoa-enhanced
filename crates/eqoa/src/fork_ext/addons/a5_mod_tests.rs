@@ -64,7 +64,7 @@ fn a5_mods_and_addons_says_what_the_character_mod_can_do() {
         "{lines:?}"
     );
     // the label never says the three steps act on their own
-    assert!(!lines.iter().any(|l| l.starts_with("Actions:") && (l.contains("train_stats") || l.contains("mastery_"))), "{lines:?}");
+    assert!(!lines.iter().any(|l| l.starts_with("Actions:") && (l.contains("train_stats") || l.contains("mastery_buy") || l.contains("mastery_refund"))), "{lines:?}");
     let other = super::runtime::disclosure_lines(&super::a1_mod_tests::addon("eqoa_spellbook"));
     assert!(!other.iter().any(|l| l.contains("training points") || l.contains("Class Mastery")), "{other:?}");
 }

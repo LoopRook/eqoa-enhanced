@@ -1895,6 +1895,8 @@
         "eqoa.actions.quick_slot",
         "eqoa.actions.ready_check_answer",
         "eqoa.actions.remove_effect",
+        "eqoa.actions.request_combat_record",
+        "eqoa.actions.request_factions",
         "eqoa.actions.select_row",
         "eqoa.actions.sell",
         "eqoa.actions.status",
@@ -1905,6 +1907,7 @@
         "eqoa.actions.target",
         "eqoa.actions.target_target",
         "eqoa.actions.toggle_stats_box",
+        "eqoa.actions.train_stats",
         "eqoa.actions.unmemorize_ability",
         "eqoa.actions.unmemorize_all",
         "eqoa.actions.use_hotbar",
@@ -2465,18 +2468,18 @@
     {
       "children": [],
       "path": "eqoa.actions.mastery_buy",
-      "reason": "the game asks the player to confirm this step; a mod cannot take it until the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer",
-      "revision": 0,
+      "reason": null,
+      "revision": 1,
       "round": 6,
-      "status": "not_yet"
+      "status": "supported"
     },
     {
       "children": [],
       "path": "eqoa.actions.mastery_refund",
-      "reason": "the game asks the player to confirm this step; a mod cannot take it until the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer",
-      "revision": 0,
+      "reason": null,
+      "revision": 1,
       "round": 6,
-      "status": "not_yet"
+      "status": "supported"
     },
     {
       "children": [],
@@ -2568,6 +2571,22 @@
     },
     {
       "children": [],
+      "path": "eqoa.actions.request_combat_record",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.request_factions",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.actions.select_row",
       "reason": null,
       "revision": 1,
@@ -2644,6 +2663,14 @@
       "reason": null,
       "revision": 1,
       "round": 3,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.train_stats",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -3297,8 +3324,11 @@
     {
       "children": [
         "eqoa.combat.CombatHit",
+        "eqoa.combat.CombatRecord",
+        "eqoa.combat.CombatRow",
         "eqoa.combat.Counters",
-        "eqoa.combat.get_counters"
+        "eqoa.combat.get_counters",
+        "eqoa.combat.record"
       ],
       "path": "eqoa.combat",
       "reason": null,
@@ -3398,6 +3428,69 @@
     },
     {
       "children": [
+        "eqoa.combat.CombatRecord.name",
+        "eqoa.combat.CombatRecord.rows"
+      ],
+      "path": "eqoa.combat.CombatRecord",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.combat.CombatRecord.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.combat.CombatRecord.rows",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.combat.CombatRow.heading",
+        "eqoa.combat.CombatRow.label",
+        "eqoa.combat.CombatRow.value"
+      ],
+      "path": "eqoa.combat.CombatRow",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.combat.CombatRow.heading",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.combat.CombatRow.label",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.combat.CombatRow.value",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
         "eqoa.combat.Counters.dropped",
         "eqoa.combat.Counters.received"
       ],
@@ -3429,6 +3522,14 @@
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.combat.record",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -6254,6 +6355,89 @@
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.factions.Faction",
+        "eqoa.factions.FactionPage",
+        "eqoa.factions.list"
+      ],
+      "path": "eqoa.factions",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.factions.Faction.name",
+        "eqoa.factions.Faction.standing"
+      ],
+      "path": "eqoa.factions.Faction",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.factions.Faction.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.factions.Faction.standing",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.factions.FactionPage.entries",
+        "eqoa.factions.FactionPage.page",
+        "eqoa.factions.FactionPage.pages"
+      ],
+      "path": "eqoa.factions.FactionPage",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.factions.FactionPage.entries",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.factions.FactionPage.page",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.factions.FactionPage.pages",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.factions.list",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -12303,10 +12487,19 @@
     },
     {
       "children": [
+        "eqoa.player.Training.caps",
         "eqoa.player.Training.points",
         "eqoa.player.Training.stat_cap"
       ],
       "path": "eqoa.player.Training",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.player.Training.caps",
       "reason": null,
       "revision": 1,
       "round": 8,
