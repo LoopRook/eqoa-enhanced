@@ -36,7 +36,7 @@ local function byte_at(s, n)
 end
 
 local state = {
-    lines = {}, notices = {}, tab = "all", own_tabs = false, scroll = 0,
+    lines = {}, combat = {}, seq = 0, tab = "all", scroll = 0,
     session = nil, text = "", channel = "say", links = {}, last_offer = 0, note = nil,
     hits = {}, rect = nil, tokens = {}, claim = nil,
     w = DEF_W, h = DEF_H, lx = 4, ly = nil, drag = nil,
@@ -94,14 +94,39 @@ end)
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
-local function notice(text)
-    state.notices[#state.notices + 1] = { text = text, kind = "notice", links = {} }
-    while #state.notices > 50 do table.remove(state.notices, 1) end
+local function add_line(m)
+    state.seq = state.seq + 1
+    state.lines[#state.lines + 1] = { text = m.text, kind = m.kind or "system", links = m.links or {}, color = m.color, seq = state.seq }
+    while #state.lines > MAX_LINES do table.remove(state.lines, 1) end
 end
 
-local function add_line(m)
-    state.lines[#state.lines + 1] = { text = m.text, kind = m.kind or "system", links = m.links or {}, color = m.color }
-    while #state.lines > MAX_LINES do table.remove(state.lines, 1) end
+-- What this mod has to say (a line it could not send, and why) comes as a System line, in red.
+local function notice(text)
+    add_line({ text = "[Chat] " .. text, kind = "system", color = { r = 1, g = .45, b = .45 } })
+end
+
+-- The combat log: the game tells the client of every hit as a number over the head, not as a line of chat, so the
+-- Combat tab is made from those hits (yours, your pet's and what hits you or your pet), in time order with the lines.
+local MAX_COMBAT = 300
+local function add_combat(text, color)
+    state.seq = state.seq + 1
+    state.combat[#state.combat + 1] = { text = text, kind = "combat", links = {}, color = color, seq = state.seq }
+    while #state.combat > MAX_COMBAT do table.remove(state.combat, 1) end
+end
+
+local function entity_name(id)
+    local e = eqoa.entities.find(id)
+    return e and e.name or "Something"
+end
+
+local function on_hit(d)
+    if not d or not (d.outgoing or d.incoming or d.from_pet or d.to_pet) then return end
+    local heal = d.kind == "heal"
+    local who = d.outgoing and "You" or entity_name(d.attacker_id)
+    local whom = (d.outgoing and d.incoming) and "yourself" or (d.incoming and "you" or entity_name(d.defender_id))
+    local verb = heal and (d.outgoing and "heal" or "heals") or (d.outgoing and "hit" or "hits")
+    local color = heal and { r = .5, g = 1, b = .6 } or (d.incoming and { r = 1, g = .6, b = .6 } or { r = .85, g = .95, b = .85 })
+    add_combat(string.format("%s %s %s for %d.", who, verb, whom, d.amount or 0), color)
 end
 
 -- The default set: All, then a tab per chat style. Empty of styles while the client has not said which exist.
@@ -124,24 +149,12 @@ local function edited_tabs()
     return state.custom
 end
 
--- The tabs: All, then a tab per chat style (as the player edited them), or the player's own tabs (the game's Chat
--- Tabs setting, not editable here).
+-- The tabs: All, then a tab per chat style, as the player edited them.
 local function tabs()
     local out = {}
-    if state.own_tabs then
-        out[1] = { id = "all", label = "All", kinds = nil }
-        local setup = eqoa.chat.tabs()
-        for _, t in ipairs(setup and setup.tabs or {}) do
-            local set = {}
-            for _, k in ipairs(t.kinds) do set[k] = true end
-            out[#out + 1] = { id = "own" .. t.index, label = t.name, kinds = set, main = t.index == 0 }
-        end
-    else
-        for _, t in ipairs(edited_tabs()) do
-            out[#out + 1] = { id = t.id, label = t.name, kinds = (not t.all) and t.kinds or nil, entry = t }
-        end
+    for _, t in ipairs(edited_tabs()) do
+        out[#out + 1] = { id = t.id, label = t.name, kinds = (not t.all) and t.kinds or nil, entry = t }
     end
-    out[#out + 1] = { id = "notices", label = "Notices", notices = true }
     return out
 end
 
@@ -152,13 +165,27 @@ local function active_tab()
 end
 
 local function visible_lines(tab)
-    if tab.notices then return state.notices end
+    -- All is every line of chat (the combat log is for the tabs that show Combat)
     if not tab.kinds then return state.lines end
     local out = {}
     for _, l in ipairs(state.lines) do
         if tab.kinds[l.kind] then out[#out + 1] = l end
     end
-    -- the player's Main tab also takes every kind no other tab was given
+    if tab.kinds.combat and #state.combat > 0 then
+        -- the combat log lines in time order with the rest
+        local merged, i, j = {}, 1, 1
+        while i <= #out or j <= #state.combat do
+            local a, b = out[i], state.combat[j]
+            if b == nil or (a and a.seq < b.seq) then
+                merged[#merged + 1] = a
+                i = i + 1
+            else
+                merged[#merged + 1] = b
+                j = j + 1
+            end
+        end
+        out = merged
+    end
     return out
 end
 
@@ -231,8 +258,45 @@ local function finish_rename(apply)
     end
 end
 
+-- The channel a line goes to. The game's own four also become the game's chat mode (what Community > Chat Modes sets).
+local function choose_channel(id)
+    state.channel = id
+    if id == "say" or id == "group" or id == "guild" or id == "shout" then
+        local _, err = eqoa.actions.set_channel(id)
+        if err then state.note = err.message or err.code end
+    end
+end
+
+-- A slash command that only names a channel changes the channel and keeps the line: "/g", "/s", "/gu", "/say" (and
+-- their long names), "/t" and "/tell" (then the name), "/r" and "/reply". `final` is Enter; without it (the space typed
+-- after the word) only the word and its space count. Returns whether the text was one.
+local SLASH_CHANNELS = {
+    s = "shout", shout = "shout", g = "group", group = "group", gu = "guild", guild = "guild", sa = "say", say = "say",
+    t = "tell", tell = "tell", r = "reply", reply = "reply",
+}
+local function channel_command(final)
+    local word, rest = state.text:match("^/(%a+)%s*(.*)$")
+    local id = word and SLASH_CHANNELS[word:lower()]
+    if not id then return false end
+    local spaced = state.text:match("^/%a+%s") ~= nil
+    if not final and not (spaced and rest == "") then return false end
+    if id == "tell" then
+        -- "/t Wil" keeps the name for the message; a message after it is a line to send, not a channel change
+        if rest:find("%s") then return false end
+        choose_channel("tell")
+        state.text = rest ~= "" and (rest .. " ") or ""
+        return true
+    end
+    if rest ~= "" then return false end
+    choose_channel(id)
+    state.text = ""
+    return true
+end
+
 -- Sending: Tell takes the first word as the player's name; a line that starts with / is a command.
 local function send()
+    -- "/g" and the like only change the channel: the line stays open to type in
+    if channel_command(true) then return end
     local text = state.text:gsub("^%s+", ""):gsub("%s+$", "")
     if text == "" then
         if state.session then eqoa.windows.close_session(state.session.ref) end
@@ -274,6 +338,8 @@ local function insert_text(s)
         if chars(state.text) >= 110 then break end
         if not c:find("[%z\1-\31\127]") then state.text = state.text .. c end
     end
+    -- the space after "/g" (or "/t", "/r") is the channel change
+    channel_command(false)
 end
 
 -- Take what the game would have put in its own box: its text, its channel, the links it kept, a link offered.
@@ -393,6 +459,7 @@ do
     for _, m in ipairs(old or {}) do add_line(m) end
 end
 listen("chat.message", function(e) add_line(e.data) end)
+listen("combat.hit", function(e) on_hit(e.data) end)
 listen("pointer.pressed", function(e) pointer_pressed(e.data) end)
 listen("pointer.wheel", function(e) on_wheel(e.data) end)
 listen("input.key", function(e) on_key(e.data) end)
@@ -431,10 +498,14 @@ eqoa.events.on("render", function()
     local k = math.min(f.scale_x, f.scale_y)
     local dw, dh = ui.GetDisplaySize()
     if k <= 0 or dw <= 0 then return end
+    -- the client lets a text capture lapse after a second unless it is asked for again: every frame it is wanted
     local want = state.session ~= nil or state.rename ~= nil
-    if want ~= state.capturing then
-        state.capturing = want
-        eqoa.input.capture_text(want)
+    if want then
+        eqoa.input.capture_text(true)
+        state.capturing = true
+    elseif state.capturing then
+        eqoa.input.capture_text(false)
+        state.capturing = false
     end
     local tab = active_tab()
     local list = visible_lines(tab)
@@ -507,7 +578,7 @@ eqoa.events.on("render", function()
     -- the tab strip
     local function tag(h, id, ctx) h.id, h.ctx = id, ctx; return h end
     local tx = 2
-    local limit = state.own_tabs and W - 40 or W - 54
+    local limit = W - 20
     if state.rename then
         -- a tab being renamed: its name is typed here (Enter keeps it, Esc drops it)
         fill(2, HEAD + 2, W - 44, 12, c.raised)
@@ -526,31 +597,25 @@ eqoa.events.on("render", function()
                 "tab:" .. t.id, entry and function(d) state.menu = { x = d.x, y = d.y, entry = entry } end or nil)
             tx = tx + tw + 2
         end
-        if not state.own_tabs then
-            -- the small + (always there, beside Styles) makes a new tab
-            fill(W - 52, HEAD + 2, 12, 12, c.raised)
-            frame(W - 52, HEAD + 2, 12, 12, c.border)
-            text(W - 49, HEAD + 2, "+", c.muted)
-            state.hits[#state.hits + 1] = tag(hit(W - 52, HEAD + 2, 12, 12, new_tab), "tab:new")
+        do
+            -- the small + (always there, at the right) makes a new tab
+            fill(W - 16, HEAD + 2, 12, 12, c.raised)
+            frame(W - 16, HEAD + 2, 12, 12, c.border)
+            text(W - 13, HEAD + 2, "+", c.muted)
+            state.hits[#state.hits + 1] = tag(hit(W - 16, HEAD + 2, 12, 12, new_tab), "tab:new")
         end
-        if not state.own_tabs and tx < limit then
+        if tx < limit then
             -- the empty strip beside the tabs: a right click there offers New tab and Reset tabs
             state.hits[#state.hits + 1] = tag(hit(tx, HEAD + 2, limit - tx, 12, function() end), "strip",
                 function(d) state.menu = { x = d.x, y = d.y } end)
         end
     end
-    local mode = state.own_tabs and "Mine" or "Styles"
-    fill(W - 38, HEAD + 2, 36, 12, c.raised)
-    frame(W - 38, HEAD + 2, 36, 12, c.border)
-    text(W - 34, HEAD + 2, mode, c.muted)
-    state.hits[#state.hits + 1] = tag(hit(W - 38, HEAD + 2, 36, 12, function()
-        close_menu()
-        state.own_tabs, state.tab, state.scroll = not state.own_tabs, "all", 0
-    end), "mode")
 
     -- the strip beside the tabs moves the window; the corner sizes it
     state.hits[#state.hits + 1] = { x = x0, y = y0, w = W * k, h = HEAD * k, drag = "move", id = "move" }
-    text(W / 2 - 20, 0, "drag to move", c.muted, 60)
+    -- a faint grip line, no words
+    fill(W / 2 - 14, 4, 28, 1, c.border)
+    fill(W / 2 - 14, 6, 28, 1, c.border)
     state.hits[#state.hits + 1] = { x = x0 + (W - 12) * k, y = y0 + (H - 12) * k, w = 12 * k, h = 12 * k, drag = "size" }
     fill(W - 8, H - 3, 6, 1, c.muted)
     fill(W - 6, H - 6, 4, 1, c.muted)
@@ -582,7 +647,6 @@ eqoa.events.on("render", function()
             end
         end
     end
-    if tab.notices and #list == 0 then text(PAD, HEAD + 18, "Nothing to report", c.muted) end
 
     -- the entry line while the player is typing
     if state.session then
@@ -600,12 +664,9 @@ eqoa.events.on("render", function()
             frame(x, y, bw, 12, c.border)
             text(x + 4, y, label, ch.id == state.channel and c.white or c.muted)
             local id = ch.id
-            state.hits[#state.hits + 1] = hit(x, y, bw, 12, function()
-                state.channel = id
-                if id == "say" or id == "group" or id == "guild" or id == "shout" then
-                    eqoa.actions.set_channel(id)
-                end
-            end)
+            state.hits[#state.hits + 1] = tag(hit(x, y, bw, 12, function()
+                choose_channel(id)
+            end), "chan:" .. id)
             x = x + bw + 2
         end
         local prompt = state.channel == "tell" and "To (name message): " or (state.channel == "reply" and "Reply: " or "")
@@ -668,6 +729,11 @@ end)
 chat_probe = {
     state = state,
     visible = function() return #visible_lines(active_tab()) end,
+    lines = function()
+        local out = {}
+        for _, l in ipairs(visible_lines(active_tab())) do out[#out + 1] = l.text end
+        return out
+    end,
     names = function()
         local out = {}
         for _, t in ipairs(tabs()) do out[#out + 1] = t.label end
