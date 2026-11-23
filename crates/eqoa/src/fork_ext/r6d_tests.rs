@@ -107,11 +107,15 @@ fn quests(p: &mut Play, titles: &[&str]) {
 fn round6d_drop_quest_sends_native_remove_and_refuses_stale_or_ungestured() {
     let (mut p, host) = rig_confirm_gated();
     quests(&mut p, &["Bat Eyes", "The Militia"]);
-    p.mode = 22;
     let sent = p.session.sends_lost;
     gesture(&mut p, &host, "return eqoa.actions.drop_quest(eqoa.quests.list()[2].ref)");
     assert!(last_ok(&host));
-    assert!(p.session.sends_lost > sent, "0x007D went out through the session");
+    // round A1: the call only asks (the client's own question, on No); the player's Yes sends the drop
+    assert_eq!(p.session.sends_lost, sent, "nothing is sent by the call itself");
+    crate::fork_ext::addons::confirm::key(&winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowRight));
+    crate::fork_ext::addons::confirm::key(&winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter));
+    super::super::begin_iteration(&mut p, true);
+    assert!(p.session.sends_lost > sent, "0x007D went out through the session after the player's Yes");
 
     // a ref from before the journal changed is stale at queue time
     host.execute("old = eqoa.quests.list()[1].ref").unwrap();
@@ -459,12 +463,13 @@ fn round6d_capabilities_are_supported_for_what_is_wired() {
     let (_p, host) = rig();
     host.execute(
         r#"
-        for _, n in ipairs({"mastery_share","mastery_browse","close_window","select_row","activate_row","dialog_answer","input_text","menu_command"}) do
+        -- round A1: drop_quest is supported (the player's own question comes first)
+        for _, n in ipairs({"mastery_share","mastery_browse","close_window","select_row","activate_row","dialog_answer","input_text","menu_command","drop_quest","destroy"}) do
             local c = eqoa.capabilities.get("eqoa.actions." .. n)
             assert(c and c.status == "supported", n)
         end
-        -- round 7H: the steps the game confirms wait for the confirm contract
-        for _, n in ipairs({"drop_quest","mastery_buy","mastery_refund"}) do
+        -- round 7H: the mastery steps the game confirms wait for the character-summary round
+        for _, n in ipairs({"mastery_buy","mastery_refund"}) do
             local c = eqoa.capabilities.get("eqoa.actions." .. n)
             assert(c and c.status == "not_yet", n)
         end

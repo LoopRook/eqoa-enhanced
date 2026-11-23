@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_quest_journal",
+  "name": "EQOA Quest Journal",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "provides": [
+    "Quest Journal window (Shift+J)"
+  ],
+  "capabilities": [
+    "eqoa.quests.list",
+    "eqoa.quests.goals",
+    "eqoa.actions.drop_quest",
+    "eqoa.windows.session",
+    "eqoa.log.write",
+    "eqoa.hud.frame",
+    "eqoa.input.bind",
+    "eqoa.input.claim",
+    "eqoa.input.pointer",
+    "eqoa.input.claim_pointer",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ]
+}

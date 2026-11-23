@@ -39,6 +39,9 @@ pub(crate) struct Extensions {
     pub commands: Vec<String>,
     pub permissions: Vec<String>,
     pub replaces: Vec<String>,
+    /// The windows and keys the mod adds, as it names them ("Bags (B)"): shown in Mods & Addons before the mod is
+    /// enabled (`runtime::disclosure_lines`). Names only: it grants nothing.
+    pub provides: Vec<String>,
 }
 fn extension_list(raw: &serde_json::Value, field: &str) -> Result<Vec<String>, String> {
     let Some(value) = raw.get(field) else {
@@ -77,6 +80,12 @@ fn extension_list(raw: &serde_json::Value, field: &str) -> Result<Vec<String>, S
                 true
             }
             "permissions" => matches!(value, "import" | "export"),
+            // a short plain label: it is shown to the player as it is
+            "provides" => {
+                !value.trim().is_empty()
+                    && value.chars().count() <= 48
+                    && value.chars().all(|c| !c.is_control() && c != '\u{202e}')
+            }
             _ => false,
         };
         if !valid {
@@ -94,6 +103,7 @@ fn extensions(raw: &serde_json::Value) -> Result<Extensions, String> {
         commands: extension_list(raw, "commands")?,
         permissions: extension_list(raw, "permissions")?,
         replaces: extension_list(raw, "replaces")?,
+        provides: extension_list(raw, "provides")?,
     })
 }
 

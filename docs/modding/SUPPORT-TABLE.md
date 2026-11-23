@@ -52,16 +52,18 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.close_window` | supported | 6 |  |
 | `eqoa.actions.command` | supported | 6 |  |
 | `eqoa.actions.cycle_target` | supported | 6 |  |
-| `eqoa.actions.destroy` | unsupported |  | excluded until after the upstream PR by the mod API plan |
+| `eqoa.actions.destroy` | supported | 2 |  |
 | `eqoa.actions.dialog_answer` | supported | 6 |  |
-| `eqoa.actions.drop_quest` | not_yet | 6 | the game asks the player to confirm this step; a mod cannot take it until the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer |
+| `eqoa.actions.drop_quest` | supported | 6 |  |
 | `eqoa.actions.emote` | supported | 8 |  |
 | `eqoa.actions.equip` | supported | 6 |  |
 | `eqoa.actions.follow` | supported | 6 |  |
 | `eqoa.actions.group_invite` | supported | 8 |  |
+| `eqoa.actions.hide_look` | supported | 2 |  |
 | `eqoa.actions.input_text` | supported | 6 |  |
 | `eqoa.actions.interact` | supported | 6 |  |
 | `eqoa.actions.jump` | supported | 8 |  |
+| `eqoa.actions.link_item` | supported | 2 |  |
 | `eqoa.actions.look` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 8) |
 | `eqoa.actions.loot` | supported | 6 |  |
 | `eqoa.actions.loot_abandon` | supported | 7 |  |
@@ -549,13 +551,20 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | Path | Status | Since round | Reason |
 |---|---|---|---|
 | `eqoa.windows` | supported | 3 |  |
+| `eqoa.windows.close_session` | supported | 2 |  |
+| `eqoa.windows.confirm` | supported | 2 |  |
 | `eqoa.windows.find` | supported | 6 |  |
+| `eqoa.windows.focus` | supported | 2 |  |
 | `eqoa.windows.format_hint` | supported | 6 |  |
 | `eqoa.windows.get` | supported | 6 |  |
 | `eqoa.windows.get_window` | supported | 6 |  |
 | `eqoa.windows.open` | supported | 3 |  |
+| `eqoa.windows.open_session` | supported | 2 |  |
 | `eqoa.windows.parse_hint` | supported | 6 |  |
+| `eqoa.windows.pass` | supported | 2 |  |
 | `eqoa.windows.release` | supported | 6 |  |
+| `eqoa.windows.release_focus` | supported | 2 |  |
+| `eqoa.windows.session` | supported | 2 |  |
 | `eqoa.windows.taken` | supported | 6 |  |
 | `eqoa.windows.takeover` | supported | 6 |  |
 
@@ -575,6 +584,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.chat.history_scroll` | supported | 2 |  |
 | `eqoa.events.chat.message` | supported | 2 |  |
 | `eqoa.events.combat.hit` | supported | 2 |  |
+| `eqoa.events.confirm.closed` | supported | 8 |  |
 | `eqoa.events.cooldown.ended` | supported | 2 |  |
 | `eqoa.events.cooldown.started` | supported | 2 |  |
 | `eqoa.events.cooldown.updated` | supported | 2 |  |
@@ -611,6 +621,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.target.changed` | supported | 2 |  |
 | `eqoa.events.timer` | supported | 2 |  |
 | `eqoa.events.windows.changed` | supported | 6 |  |
+| `eqoa.events.windows.key` | supported | 8 |  |
+| `eqoa.events.windows.session` | supported | 8 |  |
 | `eqoa.events.world.entered` | supported | 2 |  |
 | `eqoa.events.world.leaving` | supported | 2 |  |
 
@@ -877,6 +889,11 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.combat.hit.data.kind` | supported | 2 |  |
 | `eqoa.events.combat.hit.data.outgoing` | supported | 2 |  |
 | `eqoa.events.combat.hit.data.to_pet` | supported | 2 |  |
+| `eqoa.events.confirm.closed.data.answer` | supported | 8 |  |
+| `eqoa.events.confirm.closed.data.confirm` | supported | 8 |  |
+| `eqoa.events.confirm.closed.data.detail` | supported | 8 |  |
+| `eqoa.events.confirm.closed.data.kind` | supported | 8 |  |
+| `eqoa.events.confirm.closed.data.owner` | supported | 8 |  |
 | `eqoa.events.cooldown.ended.data.ability` | supported | 2 |  |
 | `eqoa.events.cooldown.ended.data.ability_id` | supported | 2 |  |
 | `eqoa.events.cooldown.ended.data.display_key` | supported | 2 |  |
@@ -985,6 +1002,18 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.windows.changed.data.after` | supported | 6 |  |
 | `eqoa.events.windows.changed.data.before` | supported | 6 |  |
 | `eqoa.events.windows.changed.data.changed` | supported | 6 |  |
+| `eqoa.events.windows.key.data.down` | supported | 8 |  |
+| `eqoa.events.windows.key.data.key` | supported | 8 |  |
+| `eqoa.events.windows.key.data.owner` | supported | 8 |  |
+| `eqoa.events.windows.key.data.ref` | supported | 8 |  |
+| `eqoa.events.windows.session.data.kind` | supported | 8 |  |
+| `eqoa.events.windows.session.data.opened_from` | supported | 8 |  |
+| `eqoa.events.windows.session.data.origin` | supported | 8 |  |
+| `eqoa.events.windows.session.data.owner` | supported | 8 |  |
+| `eqoa.events.windows.session.data.phase` | supported | 8 |  |
+| `eqoa.events.windows.session.data.reason` | supported | 8 |  |
+| `eqoa.events.windows.session.data.ref` | supported | 8 |  |
+| `eqoa.events.windows.session.data.revision` | supported | 8 |  |
 | `eqoa.events.world.entered.data.initial` | supported | 2 |  |
 | `eqoa.events.world.entered.data.world_id` | supported | 2 |  |
 | `eqoa.events.world.leaving.data.reason` | supported | 2 |  |
@@ -1464,6 +1493,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.windows.ButtonHint` | supported | 6 |  |
 | `eqoa.windows.ButtonHint.button` | supported | 6 |  |
 | `eqoa.windows.ButtonHint.label` | supported | 6 |  |
+| `eqoa.windows.Confirm` | supported | 8 |  |
+| `eqoa.windows.Confirm.id` | supported | 8 |  |
+| `eqoa.windows.Confirm.kind` | supported | 8 |  |
+| `eqoa.windows.Confirm.text` | supported | 8 |  |
 | `eqoa.windows.Dialog` | supported | 6 |  |
 | `eqoa.windows.Dialog.chat` | supported | 6 |  |
 | `eqoa.windows.Dialog.kind` | supported | 6 |  |
@@ -1482,6 +1515,14 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.windows.MenuRow.index` | supported | 6 |  |
 | `eqoa.windows.MenuRow.item` | supported | 6 |  |
 | `eqoa.windows.MenuRow.text` | supported | 6 |  |
+| `eqoa.windows.Session` | supported | 8 |  |
+| `eqoa.windows.Session.focused` | supported | 8 |  |
+| `eqoa.windows.Session.kind` | supported | 8 |  |
+| `eqoa.windows.Session.opened_from` | supported | 8 |  |
+| `eqoa.windows.Session.origin` | supported | 8 |  |
+| `eqoa.windows.Session.ref` | supported | 8 |  |
+| `eqoa.windows.Session.revision` | supported | 8 |  |
+| `eqoa.windows.Session.title` | supported | 8 |  |
 | `eqoa.windows.Window` | supported | 6 |  |
 | `eqoa.windows.Window.dialog` | supported | 6 |  |
 | `eqoa.windows.Window.focused` | supported | 6 |  |

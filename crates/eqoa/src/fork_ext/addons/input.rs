@@ -122,6 +122,8 @@ pub(crate) fn live_snapshot() -> InputSnapshot {
 pub(crate) fn focus(focused: bool) {
     FOCUSED.with(|f| f.set(focused));
     if !focused {
+        // round A1: a mod window's hold on the controller ends when the system takes the focus
+        super::window_sessions::focus_lost();
         PRESSES.with(|c| c.borrow_mut().clear());
         INPUT_STATE.with(|s| {
             let mut state = s.borrow_mut();

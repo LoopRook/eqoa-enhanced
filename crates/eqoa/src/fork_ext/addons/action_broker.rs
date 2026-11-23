@@ -166,6 +166,8 @@ pub(crate) enum ActionKind {
     ClearWaypoint { vm: u64 },
     /// Round A3 (`frame_actions`): invite the target, the pet's commands, an emote, a jump, a buff taken off.
     Frame(super::frame_actions::FrameAction),
+    /// Round A1: destroy (asks the player first), link item, hide look.
+    A1(super::native_a1::A1Action),
     /// `eqoa.actions.ready_check_answer`: answer an open raid ready check.
     ReadyCheckAnswer { id: u32, ready: bool },
     /// `eqoa.actions.loot_roll`: answer an open raid loot roll (0=pass, 1=need, 2=greed).
@@ -225,6 +227,7 @@ impl ActionKind {
             Self::SetWaypoint { .. } => "set_waypoint",
             Self::ClearWaypoint { .. } => "clear_waypoint",
             Self::Frame(action) => action.name(),
+            Self::A1(action) => action.name(),
             Self::ReadyCheckAnswer { .. } => "ready_check_answer",
             Self::LootRoll { .. } => "loot_roll",
             Self::LootAssign { .. } => "loot_assign",
@@ -279,7 +282,8 @@ impl ActionKind {
             | Self::Talk { .. }
             | Self::SetWaypoint { .. }
             | Self::ClearWaypoint { .. }
-            | Self::Frame(_) => None,
+            | Self::Frame(_)
+            | Self::A1(_)
             | Self::ReadyCheckAnswer { .. }
             | Self::LootRoll { .. } => None,
         }
@@ -1575,7 +1579,8 @@ impl BrokerState {
                             .and_then(|v| v.queued.pop_front())
                             .expect("front queued");
 
-                        let _vm_guard = DispatchVmGuard::enter(vm_id);
+                        let _vm_guard =
+                            DispatchVmGuard::enter(vm_id, self.vms.get(&vm_id).map(|v| v.addon_id.clone()));
                         match dispatch(&popped.kind) {
                             DispatchOutcome::Completed { detail } => {
                                 let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
@@ -1747,7 +1752,8 @@ impl BrokerState {
                         self.next_id = self.next_id.wrapping_add(1).max(1);
                         DISPATCH_CLAIMS.with(|c| c.set([false; 3]));
                         let outcome = {
-                            let _vm_guard = DispatchVmGuard::enter(vm_id);
+                            let _vm_guard =
+                                DispatchVmGuard::enter(vm_id, self.vms.get(&vm_id).map(|v| v.addon_id.clone()));
                             dispatch(&step_kind)
                         };
                         let used = DISPATCH_CLAIMS.with(|c| c.replace([false; 3]));
@@ -2091,20 +2097,25 @@ thread_local! {
     static CURRENT_CORPSE_TARGET: Cell<Option<u32>> = const { Cell::new(None) };
     static EXPIRED_LOOT_TIMEOUT: Cell<bool> = const { Cell::new(false) };
     static DISPATCHING_VM: Cell<Option<u64>> = const { Cell::new(None) };
+    static DISPATCHING_ADDON: RefCell<Option<String>> = const { RefCell::new(None) };
     /// Claims the action being dispatched armed (indexed by `TakeoverKind`), read back by a batch step.
     static DISPATCH_CLAIMS: Cell<[bool; 3]> = const { Cell::new([false; 3]) };
 }
 
-struct DispatchVmGuard(Option<u64>);
+struct DispatchVmGuard(Option<u64>, Option<String>);
 impl DispatchVmGuard {
-    fn enter(vm: u64) -> Self {
+    /// `addon` is the mod's id, taken by the caller from the broker it holds (the dispatch runs inside the broker's
+    /// own borrow, so nothing in it may ask the broker again).
+    fn enter(vm: u64, addon: Option<String>) -> Self {
         let prev = DISPATCHING_VM.with(|d| d.replace(Some(vm)));
-        Self(prev)
+        let prev_addon = DISPATCHING_ADDON.with(|a| a.replace(addon));
+        Self(prev, prev_addon)
     }
 }
 impl Drop for DispatchVmGuard {
     fn drop(&mut self) {
         DISPATCHING_VM.with(|d| d.set(self.0));
+        DISPATCHING_ADDON.with(|a| *a.borrow_mut() = self.1.take());
     }
 }
 
@@ -2119,6 +2130,11 @@ pub(crate) fn note_dispatch_claim(kind: super::window_takeover::TakeoverKind) {
 
 pub(crate) fn current_dispatch_vm() -> Option<u64> {
     DISPATCHING_VM.with(Cell::get)
+}
+
+/// The add-on id of the mod whose action is being dispatched (what a question it asks names it by).
+pub(crate) fn dispatch_addon() -> Option<String> {
+    DISPATCHING_ADDON.with(|a| a.borrow().clone())
 }
 
 pub(crate) fn set_corpse_target_id(id: Option<u32>) {
@@ -3829,14 +3845,6 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         }
     }
 
-    super::native::refuse_native(
-        lua,
-        "actions",
-        "destroy",
-        "unsupported",
-        None,
-        "excluded until after the upstream PR by the mod API plan",
-    )?;
     for name in ["move", "look", "buttons"] {
         super::native::refuse_native(
             lua,
@@ -5516,7 +5524,8 @@ mod tests {
             .load("return assert(eqoa.capabilities.get('eqoa.actions.destroy')).status")
             .eval()
             .unwrap();
-        assert_eq!(destroy_status, "unsupported");
+        // round A1: destroy is supported (it asks the player first, `confirm.rs`)
+        assert_eq!(destroy_status, "supported");
         for not_yet in [
             "eqoa.actions.move",
             "eqoa.actions.look",

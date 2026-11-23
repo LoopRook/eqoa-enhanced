@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_spellbook",
+  "name": "EQOA Spellbook",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "provides": [
+    "Spellbook window (Shift+K)"
+  ],
+  "capabilities": [
+    "eqoa.abilities.list",
+    "eqoa.cooldowns.get",
+    "eqoa.actions.cast",
+    "eqoa.actions.assign_ability",
+    "eqoa.actions.unmemorize_ability",
+    "eqoa.actions.unmemorize_all",
+    "eqoa.windows.session",
+    "eqoa.log.write",
+    "eqoa.hud.frame",
+    "eqoa.input.bind",
+    "eqoa.input.claim",
+    "eqoa.input.pointer",
+    "eqoa.input.claim_pointer",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ]
+}

@@ -319,6 +319,11 @@ pub(crate) fn forget_switch_for_test() {
 pub(crate) fn set_use_game_windows(on: bool) {
     USE_GAME_WINDOWS.with(|value| value.set(Some(on)));
     save_switch(on);
+    if on {
+        // round A1: every window a mod has open closes at once (told to its mod), a question it asked is
+        // answered No, and the held corpse, merchant and bank sessions end with the claims released below
+        super::window_sessions::end_all("game_windows");
+    }
     if on && has_activity() {
         let released = release_claims_where("released by the player", |scope| scope == TakeoverScope::All);
         super::action_broker::stop_batches_of_released_claims(&released);
@@ -406,6 +411,8 @@ pub(crate) fn release_vm(vm: u64) {
 }
 
 pub(crate) fn release_all() {
+    // round A1: the mod windows, held sessions, controller focus and any question end with the world
+    super::window_sessions::world_changed();
     let _ = release_claims_where("zoning", |_| true);
     // a by-id open of the world left that still waits for its answer decides nothing in the next one
     crate::fork_ext::loot_by_id::clear();
@@ -519,6 +526,41 @@ pub(crate) fn note_merchant_transaction_sent() {
             h.relist_owed = true;
         }
     });
+}
+
+/// The holder of `kind` while its hidden session is up: its `(vm, addon)`.
+pub(crate) fn hidden_holder(kind: TakeoverKind) -> Option<(u64, String)> {
+    if !has_activity() {
+        return None;
+    }
+    with_state(|s| {
+        let idx = kind as usize;
+        s.holders[idx]
+            .as_ref()
+            .filter(|h| s.hidden[idx].active && s.hidden[idx].vm == h.vm)
+            .map(|h| (h.vm, h.addon_id.clone()))
+    })
+}
+
+/// Round A1 `pass`: the hidden session of `kind` is handed to the game's own window. The session just stops being
+/// hidden: nothing is closed and nothing is sent (the server's corpse, merchant or bank stays open and is now the
+/// player's native window). The mod keeps its claim for the next opening. False when `vm` has no hidden session of it.
+pub(crate) fn hand_back(vm: u64, kind: TakeoverKind) -> bool {
+    if !TakeoverKind::ALL.contains(&kind) {
+        return false;
+    }
+    with_state_mut(|s| {
+        let idx = kind as usize;
+        if s.holders[idx].as_ref().is_some_and(|h| h.vm == vm) && s.hidden[idx].active && s.hidden[idx].vm == vm {
+            s.hidden[idx] = HiddenSession::default();
+            s.pending_opens[idx] = None;
+            s.pending_close[idx] = None;
+            s.close_owed[idx] = None;
+            true
+        } else {
+            false
+        }
+    })
 }
 
 pub(crate) fn is_hidden_active(kind: TakeoverKind) -> bool {

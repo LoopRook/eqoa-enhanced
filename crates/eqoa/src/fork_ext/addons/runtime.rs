@@ -348,6 +348,7 @@ impl Runtime {
                             .handle_window_event(&mut active.context, window, event)
                 {
                     self.error = Some(e.to_string());
+                    super::window_sessions::mods_stopped("ended");
                     crate::say(&format!("Addons: {e}"));
                 }
                 if self.error.is_none() {
@@ -469,6 +470,11 @@ impl Runtime {
     }
 
     fn route_key(&mut self, event: KeyRoute<'_>, plain_play: bool, keyboard: bool) -> bool {
+        // round A1: the player's own key press answers the question a mod's destroy or drop-quest put to them
+        // (`confirm.rs`); a synthetic or repeated event never does
+        if event.down && !event.repeat && !event.synthetic && super::confirm::is_open() && super::confirm::key(event.logical) {
+            return true;
+        }
         // The manager key opens and closes the Mods & Addons window, with or without a mod.
         if super::input::manager_key_pressed(
             event.logical,
@@ -647,6 +653,8 @@ impl Runtime {
                         super::visibility::publish(false);
                         self.want_mouse = false;
                         crate::say(&format!("Addons paused: {e}"));
+                        // round A1: no mod window is drawn now, so none holds a session, a question or the controller
+                        super::window_sessions::mods_stopped("ended");
                         self.error = Some(e);
                     }
                 }
@@ -903,6 +911,15 @@ pub(super) fn dispatch_frame(
     selected
 }
 
+/// round A1: the question a mod's destroy or drop-quest put to the player is the client's. It is drawn LAST, after
+/// every mod window (`mods` draws them), and brought to the front each frame, so nothing a mod draws can cover it,
+/// take the click meant for its buttons or ride on it.
+pub(super) fn with_question_on_top<R>(ui: &Ui, mods: impl FnOnce() -> R) -> R {
+    let out = mods();
+    super::confirm::draw(ui);
+    out
+}
+
 struct FrameState {
     open: bool,
     settings: Option<String>,
@@ -924,6 +941,8 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
                 "command" => "command (slash lines)",
                 // its own line (`TEXT_BOXES_LABEL`)
                 "input_text" => continue,
+                // round A1: these never act on their own: the player's Yes is asked first (`asks_first_label`)
+                "destroy" | "drop_quest" => continue,
                 _ => kind,
             };
             if !label.is_empty() && !kinds.contains(&label) {
@@ -997,6 +1016,10 @@ pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec
     let mut lines = Vec::new();
     lines.extend(autonomous_action_label(caps));
     let can_takeover = super::native::capability_grants(caps, "eqoa.windows.takeover");
+    // round A1: what the mod adds (its windows and their keys) before what it hides
+    if !addon.extensions.provides.is_empty() {
+        lines.push(format!("Provides: {}", addon.extensions.provides.join(", ")));
+    }
     lines.extend(replacement_labels(&addon.extensions.replaces, can_takeover).into_iter().flatten());
     if declares_dialog_actions(caps) {
         lines.push("Can answer NPC dialogs".into());
@@ -1004,7 +1027,20 @@ pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec
     if super::native::capability_grants(caps, "eqoa.actions.input_text") {
         lines.push(TEXT_BOXES_LABEL.into());
     }
+    lines.extend(asks_first_label(caps));
     lines
+}
+
+/// "Asks you first: ..." for the steps a mod can only start, never finish: the game's "are you sure?" goes to the
+/// player (starting on No) and only their own Yes acts (`confirm.rs`). `eqoa.actions.*` grants them too.
+pub(crate) fn asks_first_label(caps: &[String]) -> Option<String> {
+    let mut steps = Vec::new();
+    for (name, words) in [("destroy", "destroy an item"), ("drop_quest", "drop a quest")] {
+        if super::native::capability_grants(caps, &format!("eqoa.actions.{name}")) {
+            steps.push(words);
+        }
+    }
+    (!steps.is_empty()).then(|| format!("Asks you first: {}", steps.join(", ")))
 }
 
 /// What `eqoa.actions.input_text` grants, said plainly in Mods & Addons (fix round 4 item 3).
@@ -1093,13 +1129,14 @@ fn render_managed(
             manager.profile_setup_controls(ui);
         }
         let mut open = plan.controls.unwrap_or(false);
+        super::window_sessions::set_manager_open(open && !snapshot.start_menu);
         if open && !snapshot.start_menu {
             let actions = controls(ui, manager, &mut open, plan.root.as_ref());
             let extra = FramePlan::collect(actions, plan.settings.take());
             plan.commands.extend(extra.commands);
             plan.settings = extra.settings;
         }
-        let settings = dispatch_frame(ui, manager, snapshot, plan);
+        let settings = with_question_on_top(ui, || dispatch_frame(ui, manager, snapshot, plan));
         #[cfg(test)]
         if fault == Some(RenderFault::PrepareRender) {
             return Err("injected prepare_render failure".into());
@@ -2637,6 +2674,52 @@ mod tests {
         assert!(declares_dialog_actions(&["eqoa.actions.*".into()]));
         assert!(!declares_dialog_actions(&["eqoa.actions.talk".into()]));
         assert!(declares_dialog_actions(&["eqoa.actions.activate_row".into()]));
+    }
+
+    /// Round A1: only the player's own, first (not repeated, not synthetic) Enter or arrow answers the question
+    /// a mod's destroy or drop-quest put to them. The negative control is the same press made synthetic or a
+    /// repeat: it answers nothing, and goes on to the game as any key does.
+    #[test]
+    fn a1_the_question_takes_only_the_players_own_key_press() {
+        use super::super::confirm;
+        confirm_reset();
+        let mut runtime = Runtime::new(Paths::select(PathBuf::new(), None, None, None));
+        let open = || {
+            confirm::open(1, "mod", None, confirm::Act::DropQuest { index: 1, title: "Bat Eyes".into(), stamp: 1, revision: 1 }, "Drop?".into(), 0)
+                .unwrap();
+        };
+        let enter = Key::Named(NamedKey::Enter);
+        let right = Key::Named(NamedKey::ArrowRight);
+        let mut route = |runtime: &mut Runtime, key: &Key, down: bool, repeat: bool, synthetic: bool| {
+            runtime.route_key(
+                KeyRoute { button: Button::ScriptedKey(78), logical: key, down, repeat, synthetic, base: None },
+                true,
+                false,
+            )
+        };
+        open();
+        // a synthetic Right and a repeated Right choose nothing; neither does a key release
+        assert!(!route(&mut runtime, &right, true, false, true), "synthetic");
+        assert!(!route(&mut runtime, &right, true, true, false), "repeat");
+        assert!(!route(&mut runtime, &right, false, false, false), "release");
+        assert!(!confirm::current_for_test().unwrap().yes);
+        // and a synthetic Enter on the starting No (or after the player chose Yes) answers nothing
+        assert!(route(&mut runtime, &right, true, false, false), "the player's own Right is taken");
+        assert!(confirm::current_for_test().unwrap().yes);
+        assert!(!route(&mut runtime, &enter, true, false, true), "a synthetic Enter is not an answer");
+        assert!(!route(&mut runtime, &enter, true, true, false), "a repeated Enter is not an answer");
+        assert!(confirm::is_open() && confirm::take_answered().is_empty());
+        // the player's own Enter answers it
+        assert!(route(&mut runtime, &enter, true, false, false));
+        assert_eq!(confirm::take_answered().len(), 1);
+        assert!(!confirm::is_open());
+        // control: with no question up the same key is the game's
+        assert!(!route(&mut runtime, &enter, true, false, false));
+        confirm_reset();
+    }
+
+    fn confirm_reset() {
+        super::super::confirm::reset_for_test();
     }
 
     #[test]

@@ -931,6 +931,7 @@ fn generation_loss(c: &mut Core, count: u64) {
     }
 }
 pub(crate) fn flush_deferred() {
+    super::window_sessions::flush_outbox();
     let _timed = super::addon_perf::section("deferred.flush");
     let batch = DEFERRED.with(|d| {
         let mut d = d.borrow_mut();

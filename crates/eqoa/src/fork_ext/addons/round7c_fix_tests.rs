@@ -449,7 +449,7 @@ ImGui.GetForegroundDrawList ImGui.GetMouseDragDelta ImGui.GetMousePos ImGui.GetM
 ImGui.GetMouseWheel ImGui.IsMouseClicked ImGui.IsMouseDoubleClicked ImGui.IsMouseDown ImGui.IsMousePosValid \
 ImGui.IsMouseReleased ImGui.PopItemWidth ImGui.PopStyleVar ImGui.PushItemWidth ImGui.PushStyleVar \
 ImGui.ResetMouseDragDelta ImGui.SetMouseCursor ImGui.SetMousePos ImGui.SetNextWindowFocus ImGui.SetWindowFocus \
-eqoa.actions.buttons eqoa.actions.destroy eqoa.actions.drop_quest eqoa.actions.look eqoa.actions.mastery_buy eqoa.actions.mastery_refund eqoa.actions.move eqoa.fonts.default eqoa.fonts.game \
+eqoa.actions.buttons eqoa.actions.look eqoa.actions.mastery_buy eqoa.actions.mastery_refund eqoa.actions.move eqoa.fonts.default eqoa.fonts.game \
 eqoa.fonts.load eqoa.fonts.release eqoa.hud.hidden_by eqoa.hud.hide eqoa.hud.show eqoa.icons.class \
 eqoa.icons.disposition eqoa.icons.info eqoa.icons.resource eqoa.icons.ui eqoa.imgui.BeginItemTooltip \
 eqoa.imgui.BeginTooltip eqoa.imgui.EndTooltip eqoa.imgui.GetForegroundDrawList eqoa.imgui.GetMouseDragDelta \
@@ -497,7 +497,7 @@ fn round7c_every_refusing_member_reports_its_status_through_its_call() {
             let paths: String = host.lua.globals().get("round7c_refusing_paths").unwrap();
             eprintln!("round7c refusing members checked through their call: {checked}");
             let expected: Vec<&str> = EXPECTED_REFUSING_CALLABLES.split_whitespace().collect();
-            assert_eq!(expected.len(), 91, "the pinned list holds every refusing callable");
+            assert_eq!(expected.len(), 89, "the pinned list holds every refusing callable");
             assert_eq!(paths.split_whitespace().collect::<Vec<_>>(), expected, "refusing callables by name");
             assert_eq!(checked as usize, expected.len(), "refusing callables by count");
         });
@@ -512,7 +512,7 @@ fn round7c_refusal_checker_detects_wrong_codes_and_missing_values() {
             host.execute(
                 r#"
                 local issues = inspect_refusals(function(path, fn)
-                    if path == 'eqoa.actions.destroy' then
+                    if path == 'eqoa.actions.move' then
                         local _, second = fn()
                         return true, nil, {code='permission_denied', message=second.message}
                     end

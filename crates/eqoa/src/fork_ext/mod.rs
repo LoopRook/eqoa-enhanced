@@ -69,6 +69,10 @@ pub(crate) fn prepare_controls(
     {
         addons::native_core::presentation();
         addons::input::observe_report(_report, _connected, _gameplay);
+        // round A1: a mod window's pad focus takes the d-pad, confirm and back (after the report is seen, before the game)
+        if _gameplay {
+            addons::window_sessions::apply_pad(_report);
+        }
         if _gameplay && addons::input::is_text_capture_active() {
             *_report = crate::input::Report::default();
         }

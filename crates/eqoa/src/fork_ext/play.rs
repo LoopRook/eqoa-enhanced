@@ -14,6 +14,11 @@ macro_rules! tlog {
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "api_capture.rs"]
 mod api_capture;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "a1_play.rs"]
+mod a1_play;
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "map_mod_tests.rs"]
 mod map_mod_tests;
@@ -791,6 +796,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         sync_hidden_sessions(_play);
+        a1_play::tick(_play);
         if crate::fork_ext::addons::native_core::capture_requested()
             || crate::fork_ext::addons::window_takeover::has_activity()
         {
@@ -1012,6 +1018,9 @@ pub(super) fn dropped(_play: &mut Play) {
     // a mod disabled since the last game step: its pins go before the world does (a logout)
     #[cfg(not(target_arch = "wasm32"))]
     drain_released_waypoints(_play);
+    // round A1: no mod window, question or controller focus outlives the world
+    #[cfg(not(target_arch = "wasm32"))]
+    a1_play::play_dropped(_play.quit || _play.disconnected.is_some());
 }
 
 /// Clears the pins disabled mods still own, once the map has read the window's pins; until then the
@@ -3179,6 +3188,7 @@ fn dispatch_broker_action(
             }
         }
         ActionKind::Frame(action) => api_capture::a3::dispatch(play, action),
+        ActionKind::A1(action) => a1_play::dispatch(play, action),
         ActionKind::DropQuest { .. }
         | ActionKind::MasteryShare { .. }
         | ActionKind::MasteryBrowse { .. }
@@ -3297,9 +3307,8 @@ fn dispatch_window_action(
             if current != *revision || play.quests.stamp != *stamp || now_title.as_deref() != Some(title.as_str()) {
                 return refuse("stale_handle", "the quest journal changed since the handle was taken");
             }
-            let m = play.quests.send_remove(*index as i32 - 1);
-            play.session.send(&m);
-            DispatchOutcome::Completed { detail: Some(json!({"sent": true, "stamp": play.quests.stamp})) }
+            // round A1: never at once. The question goes to the player; their own Yes sends it (`a1_play::tick`)
+            a1_play::ask_drop_quest(*index, title, *stamp, *revision)
         }
         ActionKind::MasteryShare { percent } => {
             let ready = crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow().mastery_flags.share);

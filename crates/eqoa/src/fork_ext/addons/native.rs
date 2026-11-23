@@ -1117,6 +1117,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_items::install(host)?;
     super::native_r6a::install(host)?;
     super::native_a3::install(host)?;
+    super::native_a1::install(host)?;
     super::frame_actions::install(host)?;
     super::raid_strips::install(host)?;
     super::map_views::install(host)?;

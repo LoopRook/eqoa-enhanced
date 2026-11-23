@@ -1,8 +1,13 @@
 # EQOA Bag Viewer
 
-Off by default. Enable it in the Addon Manager, then bind **Bag viewer** on the
-Controls page (it starts unbound). The key opens and closes a read-only Bags
-window; Escape closes it too.
+Off by default. Enable it in Mods & Addons (it shows **Provides: Bags window (B)**), then press **B**
+(the Controls page has a **Bag viewer** row, so you can move it; a key the game, a macro or another mod
+already has leaves the row empty and says why). The key opens and closes the Bags window; Escape and
+turning the mod off close it too, and so do zoning, dying and the **Use the game's windows** switch (the
+client ends the window's session). It opens over play: you can keep walking.
+
+On a controller the window is usable once it is open (a controller button does not open it yet): the d-pad
+moves over the slots, confirm opens the item's menu (and presses a row), back closes the menu, then the window.
 
 The window shows the 40 pack slots as item icons with stack counts and a green
 **E** on worn items, the tunar you carry and used/capacity at the bottom.
@@ -77,3 +82,10 @@ and is the worked example for the items API. While the window is closed it does
 nothing but note pickups for the log.
 
 AGPL-3.0-or-later.
+
+## Item menu: Link in chat, Hide look, Destroy
+
+An item's menu also has **Link in chat** (puts its link in the chat line), **Hide look** and **Show look** (for
+worn items, where the server offers them) and **Destroy...**. Destroy never destroys at once: the game puts its own
+**"Destroy ...?"** question on the screen, starting on **No**; Left or Right chooses, Enter answers, Escape is No, or
+click Yes or No. Only your own Yes destroys the item; the window's result line then says what you answered.
