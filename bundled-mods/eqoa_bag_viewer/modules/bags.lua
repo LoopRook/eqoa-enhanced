@@ -551,6 +551,16 @@ function M.icon_dimmed(entry, stamp)
     return entry.dim
 end
 
+-- The corner letter for a pack item set aside for a helper: "B" marked to bank, "R" kept up to a number when selling
+-- or restocking. (Junk has its own "J".) nil for anything else. Bottom-left, clear of the stack count.
+function M.mark_letter(it)
+    local H = M.helpers
+    if not H or it.list ~= "inventory" then return nil end
+    if H.is_banked(it) then return "B" end
+    if H.keep_of(it) then return "R" end
+    return nil
+end
+
 local DESCRIPTION_WIDTH, DESCRIPTION_LINES = 34, 3
 
 -- The description cut into lines of about DESCRIPTION_WIDTH characters at spaces, at most DESCRIPTION_LINES, with

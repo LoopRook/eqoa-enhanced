@@ -323,6 +323,7 @@ function draw()
         worn = ui.GetColorU32(.35, .8, .4, 1), warn = ui.GetColorU32(1, .3, .3, 1),
         junk = ui.GetColorU32(.95, .72, .20, 1),
         white = ui.GetColorU32(1, 1, 1, 1), shadow = ui.GetColorU32(0, 0, 0, 1),
+        mark = ui.GetColorU32(.45, .7, 1, 1),
         dim_icon = ui.GetColorU32(.35, .35, .35, 1),
         menu_bg = ui.GetColorU32(.09, .09, .10, .98), menu_hl = ui.GetColorU32(.20, .20, .24, 1),
     }
@@ -382,6 +383,11 @@ function draw()
             if not it.equipped and B.is_junk(it) then
                 fill(sx + SLOT - 11, sy + 2, 9, 11, c.shadow)
                 text(sx + SLOT - 9, sy + 2, "J", c.junk)
+            end
+            local mark = B.mark_letter(it)
+            if mark then
+                fill(sx + 2, sy + SLOT - 13, 9, 11, c.shadow)
+                text(sx + 4, sy + SLOT - 13, mark, c.mark)
             end
             if it.quantity > 1 then
                 local label = tostring(it.quantity)

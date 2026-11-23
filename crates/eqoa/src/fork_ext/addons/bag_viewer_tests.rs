@@ -521,6 +521,45 @@ fn a_bag_viewer_tooltip_body() {
 }
 
 #[test]
+fn a_bag_viewer_grid_marks_items_set_to_bank_or_keep_with_a_corner_letter_and_unmarking_removes_it() {
+    big_stack(a_bag_viewer_marks_body)
+}
+fn a_bag_viewer_marks_body() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    bv.open();
+    let letters = |bv: &Bv| -> Vec<String> {
+        bv.eval("(function() local b = require('bags') local t = {} for i, e in ipairs(b.grid.items) do t[i] = b.mark_letter(e.item) or '' end return t end)()")
+    };
+    assert!(letters(&bv).iter().all(|l| l.is_empty()), "nothing is marked at first");
+    bv.lua().load("local b = require('bags') local a, c = b.grid.items[7].item, b.grid.items[8].item b.helpers.set_bank(a, true) b.helpers.set_keep(c, 3)").exec().unwrap();
+    bv.point((1., 1.));
+    let marked = bv.frames(3);
+    assert_eq!(letters(&bv), ["", "", "", "", "", "", "B", "R"]);
+    let w = bv.win.0;
+    // the letter's pale blue sits in the bottom-left corner of a marked slot and not of an unmarked one
+    let corner = |bv: &Bv, n: usize| {
+        let c = bv.slot(n);
+        let (_, _, _, _, k) = bv.rect();
+        (c.0 - 12. * k, c.1 + 10. * k)
+    };
+    let px = rm_pixels(&bv.gpu, &marked);
+    let blue = [115, 178, 255, 255];
+    for n in [7usize, 8] {
+        assert!(bv_near(&px, w, corner(&bv, n), 5, blue, 40), "slot {n} has its marker");
+    }
+    assert!(!bv_near(&px, w, corner(&bv, 1), 5, blue, 40), "an unmarked slot has none");
+    // negative control: take the bank mark off and the marker goes
+    bv.lua().load("local b = require('bags') b.helpers.set_bank(b.grid.items[7].item, false)").exec().unwrap();
+    bv.point((1., 1.));
+    let after = bv.frames(3);
+    let px = rm_pixels(&bv.gpu, &after);
+    assert!(!bv_near(&px, w, corner(&bv, 7), 5, blue, 40), "unmarked: the marker is gone");
+    assert!(bv_near(&px, w, corner(&bv, 8), 5, blue, 40), "the other mark stays");
+    bv.clean();
+}
+
+#[test]
 fn round5b_the_loot_log_is_fed_by_pickups_newest_first_and_keeps_fifty() {
     big_stack(round5b_the_loot_log_is_fed_by_pickups_newest_first_and_keeps_fifty_body)
 }
