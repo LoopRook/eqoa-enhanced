@@ -6146,6 +6146,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.windows.session.data.data",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.windows.session.data.kind",
       "reason": null,
       "revision": 1,
@@ -13671,6 +13679,7 @@
     },
     {
       "children": [
+        "eqoa.windows.Session.data",
         "eqoa.windows.Session.focused",
         "eqoa.windows.Session.kind",
         "eqoa.windows.Session.opened_from",
@@ -13680,6 +13689,14 @@
         "eqoa.windows.Session.title"
       ],
       "path": "eqoa.windows.Session",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.Session.data",
       "reason": null,
       "revision": 1,
       "round": 8,
