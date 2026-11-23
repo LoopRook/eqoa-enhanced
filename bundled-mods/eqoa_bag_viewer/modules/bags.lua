@@ -598,10 +598,14 @@ function M.card(it)
     if (it.level_required or 0) > 0 then
         lines[#lines + 1] = {"Level " .. it.level_required, why.level and "red" or "text"}
     end
-    local classes = names_of(it.allowed_classes, M.CLASS_NAMES, CLASS_COUNT)
-    lines[#lines + 1] = {classes == "" and "All classes" or ("Class: " .. classes), why.class and "red" or "text"}
-    local races = names_of(it.allowed_races, M.RACE_NAMES, RACE_COUNT)
-    if races ~= "" then lines[#lines + 1] = {"Race: " .. races, why.race and "red" or "text"} end
+    -- the class and race lines are for gear only, as the dimming is: a crafting or misc item has no class or race
+    -- rule, and "All classes" on it was a statement the game never makes
+    if M.is_gear(it) then
+        local classes = names_of(it.allowed_classes, M.CLASS_NAMES, CLASS_COUNT)
+        lines[#lines + 1] = {classes == "" and "All classes" or ("Class: " .. classes), why.class and "red" or "text"}
+        local races = names_of(it.allowed_races, M.RACE_NAMES, RACE_COUNT)
+        if races ~= "" then lines[#lines + 1] = {"Race: " .. races, why.race and "red" or "text"} end
+    end
     if it.slot_name then lines[#lines + 1] = {"Slot: " .. it.slot_name, "text"} end
     for _, s in ipairs(it.stats) do
         lines[#lines + 1] = {string.format("%s %+d", s.name or ("Stat " .. s.id), s.value), "text"}
