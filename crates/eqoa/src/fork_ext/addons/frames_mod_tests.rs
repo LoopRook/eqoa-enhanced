@@ -350,3 +350,48 @@ fn a3_frames_mod_shows_an_effects_tip_only_while_the_pointer_is_on_an_effect() {
     assert!(!tip_at(&host, &bridge, &mut context, [900.0, 700.0]), "the tip goes with the pointer");
     assert!(host.drain_logs().unwrap().is_empty());
 }
+
+/// What the Effects window's content measures, by the height ImGui laid its lines out to.
+fn content_height(name: &std::ffi::CStr) -> f32 {
+    use dear_imgui_rs::sys;
+    // SAFETY: as `tooltip_up`
+    unsafe {
+        let w = sys::igFindWindowByName(name.as_ptr());
+        assert!(!w.is_null(), "window {name:?} is drawn");
+        (*w).ContentSize.y
+    }
+}
+
+/// Owner test 2026-11-23: the pet's effects showed twice, once in the buff list (the lines whose `whose` is "pet") and
+/// again in the separate Pet section. Each is shown once: the separate section stays only where the buff list has no
+/// pet line. Negative control: with the pet's effect in the list and no section the window is shorter than when the
+/// same effect is in the section (a server with no pet lines in its list), and the old code made it taller than both.
+#[test]
+fn a3_frames_mod_shows_each_pet_effect_once() {
+    let name = c"Effects";
+    // the list holds the player's Dark Ward and the pet's Plague, and the pet strip names Rage as well
+    fixture();
+    let mut context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon()).unwrap();
+    frames(&host, &bridge, &mut context, 4);
+    let both = content_height(name);
+    // the same list with the pet strip empty: the pet effect is shown by the list alone
+    native_a3::sync_pet(true, 6, Vec::new);
+    frames(&host, &bridge, &mut context, 3);
+    let list_only = content_height(name);
+    assert!((both - list_only).abs() < 0.5, "a pet effect in the list is not shown again in the Pet section: {both} vs {list_only}");
+    // control: with no pet line in the list, the Pet section is shown (the window grows by its separator and line)
+    native_a3::sync_buffs(true, 7, || {
+        vec![BuffLine { whose: 0, id: 9304, icon: 11, removable: true, name: "Dark Ward".into(), ends_tick: Some(1800), description: None }]
+    });
+    native_a3::sync_pet(true, 8, || vec![PetLine { icon: 21, name: "Rage".into(), ends_tick: 900 }]);
+    frames(&host, &bridge, &mut context, 3);
+    let section = content_height(name);
+    native_a3::sync_pet(true, 9, Vec::new);
+    frames(&host, &bridge, &mut context, 3);
+    let none = content_height(name);
+    assert!(section > none + 4.0, "control: a pet strip with no pet line in the list still gets its section ({section} vs {none})");
+    assert!(host.drain_logs().unwrap().is_empty());
+}

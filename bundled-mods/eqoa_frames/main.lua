@@ -38,9 +38,13 @@ local function effects_window()
     ui.SetNextWindowPos(60, 60, FIRST_USE)
     if not ui.Begin("Effects") then ui.End() return end
     local buffs = has("eqoa.effects.buffs") and eqoa.effects.buffs() or nil
+    -- the pet's effects come in the buff list when the server has one; the separate Pet section is for a server
+    -- without it, so each pet effect is shown once
+    local pet_in_buffs = false
     if buffs then
         if #buffs == 0 then ui.TextDisabled("no effects") end
         for _, b in ipairs(buffs) do
+            if b.whose == "pet" then pet_in_buffs = true end
             local label = string.format("%s  %s##buff%d", b.name, clock(b.time_left), b.index)
             if b.whose == "pet" then label = "Pet: " .. label end
             if ui.Button(label) and b.removable then
@@ -60,7 +64,7 @@ local function effects_window()
         end
     end
     local pet = has("eqoa.effects.pet") and eqoa.effects.pet() or nil
-    if pet and #pet > 0 then
+    if pet and #pet > 0 and not pet_in_buffs then
         ui.Separator()
         for _, e in ipairs(pet) do ui.Text(string.format("Pet: %s  %s", e.name, clock(e.time_left))) end
     end
