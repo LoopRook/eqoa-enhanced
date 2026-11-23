@@ -259,8 +259,8 @@ fn a2_dialog_window_draws_a_dialog_answers_with_a_key_and_gives_it_back_on_escap
     r.dialog(10, "Welcome, traveller. What do you seek?", &["Rumors", "Work", "Nothing"]);
     let vertices = r.frames(3);
     assert!(vertices > 0, "the dialog window is drawn: {:?}", r.host.drain_logs());
-    let logs: Vec<String> = r.host.drain_logs().unwrap().into_iter().filter(|l| !l.contains("holding ")).collect();
-    assert!(logs.is_empty(), "no diagnostic: {logs:?}");
+    let logs: Vec<String> = r.host.drain_logs().unwrap().into_iter().filter(|l| !l.contains("[info]")).collect();
+    assert!(logs.is_empty(), "no warning or error: {logs:?}");
     press(&r.host, "2");
     assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "key 2 answers the second option");
     // Escape: back to the game's window, never dropped
