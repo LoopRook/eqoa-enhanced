@@ -833,7 +833,11 @@ fn round5b_captures_for_the_owner_draw_the_discs_own_item_art_and_the_corpse_in_
         // bottom-left, clear of the count)
         let low = bv.at(8. + ((n - 1) % 8) as f64 * 38. + 6., 46. + ((n - 1) / 8) as f64 * 38. + 33.);
         let under = bv_px(&px, w, low.0, low.1);
-        assert!(under[0] as u32 + under[1] as u32 + under[2] as u32 > 120, "slot {n}: black strip under the icon: {under:?}");
+        // slots 4 to 6 hold items this character cannot use: their art is drawn dim, as dark as the padding, so
+        // only the colour count above tells art from padding there
+        if !(4..=6).contains(&n) {
+            assert!(under[0] as u32 + under[1] as u32 + under[2] as u32 > 120, "slot {n}: black strip under the icon: {under:?}");
+        }
         if n == 1 {
             bv_png(&px, size, "r5-bags-all.png");
         }
