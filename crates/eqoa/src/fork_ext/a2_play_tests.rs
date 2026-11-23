@@ -54,6 +54,14 @@ fn answer_msg(id: u32, choice: u8) -> Vec<u8> {
     w.data
 }
 
+fn show(o: &action_broker::DispatchOutcome) -> String {
+    match o {
+        action_broker::DispatchOutcome::Completed { detail } => format!("completed {detail:?}"),
+        action_broker::DispatchOutcome::Refused { code, reason } => format!("refused {code}: {reason}"),
+        _ => "another outcome".into(),
+    }
+}
+
 fn hold(vm: u64, kinds: &[TakeoverKind]) {
     for k in kinds {
         window_takeover::takeover(vm, "mod", *k, TakeoverScope::All).unwrap();
@@ -248,7 +256,7 @@ fn a2_answering_a_session_sends_what_the_games_own_key_sends() {
         let got = action_broker::with_dispatch_for_test(VM, "mod", || {
             super::super::a2_play::dispatch_answer(&mut p2, &id, super::super::a2_play::Choice::Option(pick + 1))
         });
-        assert!(matches!(got, action_broker::DispatchOutcome::Completed { .. }), "{got:?}");
+        assert!(matches!(got, action_broker::DispatchOutcome::Completed { .. }), "{}", show(&got));
         assert_eq!(sent(&mut p2), want, "option {}: the same bytes as the game's own key", pick + 1);
         assert_eq!(p2.mode, 0, "and the game's window is not left up");
         assert!(session_of("response_dialog").is_none(), "the session ended answered");
@@ -363,14 +371,14 @@ fn a2_the_dialog_a_mod_stops_showing_goes_back_to_the_game_after_the_idle_time()
 fn a2_walking_away_lets_the_dialog_go_as_the_games_escape_would() {
     let mut p = ready(true);
     hold(VM, &[TakeoverKind::ResponseDialog]);
-    p.self_at = Some(([0.0, 0.0, 0.0], 0.0));
+    p.self_at = Some(([0.0, 0.0, 0.0], None));
     dialog(&mut p, 8, "Choose", &OPTIONS[..3]);
     pump(&mut p);
     assert!(session_of("response_dialog").is_some());
-    p.self_at = Some(([10.0, 0.0, 0.0], 0.0));
+    p.self_at = Some(([10.0, 0.0, 0.0], None));
     pump(&mut p);
     assert!(session_of("response_dialog").is_some(), "control: 10 units is still beside the NPC");
-    p.self_at = Some(([30.0, 0.0, 0.0], 0.0));
+    p.self_at = Some(([30.0, 0.0, 0.0], None));
     pump(&mut p);
     // negative control: without the walk-away check the dialog stays and nothing is sent
     assert!(session_of("response_dialog").is_none());
@@ -428,7 +436,7 @@ fn a2_a_group_invitation_is_a_session_accepted_and_declined_through_the_games_bo
         let got = action_broker::with_dispatch_for_test(VM, "mod", || {
             super::super::a2_play::dispatch_answer(&mut p, &s.id, super::super::a2_play::Choice::Option(if accept { 1 } else { 2 }))
         });
-        assert!(matches!(got, action_broker::DispatchOutcome::Completed { .. }), "{got:?}");
+        assert!(matches!(got, action_broker::DispatchOutcome::Completed { .. }), "{}", show(&got));
         let out = sent(&mut p);
         let mut w = Writer::op(if accept { 0x0622 } else { 0x0624 });
         w.u32(3001);
@@ -481,7 +489,7 @@ fn a2_declining_an_offer_is_always_allowed_and_sent_at_once() {
     let got = action_broker::with_dispatch_for_test(vm, "mod", || {
         super::super::a2_play::dispatch_answer(&mut p, &s.id, super::super::a2_play::Choice::Option(2))
     });
-    assert!(matches!(got, action_broker::DispatchOutcome::Completed { .. }), "{got:?}");
+    assert!(matches!(got, action_broker::DispatchOutcome::Completed { .. }), "{}", show(&got));
     let mut no = Writer::op(0x00D4);
     no.u8(0);
     assert_eq!(sent(&mut p), vec![no.data]);
@@ -535,7 +543,7 @@ fn a2_an_option_on_a_later_page_is_reached_with_the_games_more_entry() {
     let got = action_broker::with_dispatch_for_test(VM, "mod", || {
         super::super::a2_play::dispatch_answer(&mut p, &id, super::super::a2_play::Choice::Option(14))
     });
-    assert!(matches!(got, action_broker::DispatchOutcome::Completed { .. }), "{got:?}");
+    assert!(matches!(got, action_broker::DispatchOutcome::Completed { .. }), "{}", show(&got));
     assert_eq!(sent(&mut p), vec![answer_msg(21, 13)], "choice 13 (the fourteenth) through More");
 }
 
@@ -549,7 +557,7 @@ fn a2_a_dialog_session_that_the_player_cannot_answer_now_is_busy_not_lost() {
     let got = action_broker::with_dispatch_for_test(VM, "mod", || {
         super::super::a2_play::dispatch_answer(&mut p, &id, super::super::a2_play::Choice::Option(1))
     });
-    assert!(matches!(got, action_broker::DispatchOutcome::Refused { code: "busy", .. }), "{got:?}");
+    assert!(matches!(got, action_broker::DispatchOutcome::Refused { code: "busy", .. }), "{}", show(&got));
     assert!(session_of("text_dialog").is_some());
 }
 
