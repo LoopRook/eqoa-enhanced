@@ -16,6 +16,21 @@ local STYLE_LABELS = {
     loot = "Loot", rolls = "Rolls", experience = "XP", system = "System",
 }
 
+-- the sandbox has no utf8 library: characters are counted by their lead bytes
+local function chars(s) local _, n = s:gsub("[^\128-\191]", ""); return n end
+-- the byte where character `n` (1-based) of `s` starts; #s + 1 past the end
+local function byte_at(s, n)
+    local seen = 0
+    for i = 1, #s do
+        local b = s:byte(i)
+        if b < 128 or b >= 192 then
+            seen = seen + 1
+            if seen == n then return i end
+        end
+    end
+    return #s + 1
+end
+
 local state = {
     lines = {}, notices = {}, tab = "all", own_tabs = false, scroll = 0,
     session = nil, text = "", channel = "say", links = {}, last_offer = 0, note = nil,
@@ -94,7 +109,7 @@ local function send()
         for _, link in ipairs(state.links) do
             local a, b = text:find(link.name, from, true)
             if a then
-                opts.links[#opts.links + 1] = { start = utf8.len(text, 1, a - 1) + 1, len = utf8.len(link.name), list = link.list, key = link.key }
+                opts.links[#opts.links + 1] = { start = chars(text:sub(1, a - 1)) + 1, len = chars(link.name), list = link.list, key = link.key }
                 from = b + 1
             end
         end
@@ -111,7 +126,7 @@ end
 
 local function insert_text(s)
     for c in s:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
-        if utf8.len(state.text) >= 110 then break end
+        if chars(state.text) >= 110 then break end
         if not c:find("[%z\1-\31\127]") then state.text = state.text .. c end
     end
 end
@@ -296,8 +311,8 @@ eqoa.events.on("render", function()
             if l.color and l.color.r then color = ui.GetColorU32(l.color.r, l.color.g, l.color.b, 1) end
             text(PAD, y, body, color, W - 2 * PAD)
             for _, link in ipairs(l.links or {}) do
-                local from = utf8.offset(body, link.start) or link.start
-                local upto = utf8.offset(body, link.start + link.len) or (#body + 1)
+                local from = byte_at(body, link.start)
+                local upto = byte_at(body, link.start + link.len)
                 local before = body:sub(1, from - 1)
                 local name = body:sub(from, upto - 1)
                 local lx = PAD + ui.CalcTextSize(before) / k

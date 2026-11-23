@@ -1860,6 +1860,7 @@
         "eqoa.actions.cancel",
         "eqoa.actions.cast",
         "eqoa.actions.chat",
+        "eqoa.actions.chat_line",
         "eqoa.actions.close_window",
         "eqoa.actions.command",
         "eqoa.actions.cycle_target",
@@ -1887,6 +1888,7 @@
         "eqoa.actions.mastery_share",
         "eqoa.actions.menu_command",
         "eqoa.actions.move",
+        "eqoa.actions.open_link",
         "eqoa.actions.open_loot",
         "eqoa.actions.open_window",
         "eqoa.actions.pet_attack",
@@ -1897,6 +1899,7 @@
         "eqoa.actions.remove_effect",
         "eqoa.actions.select_row",
         "eqoa.actions.sell",
+        "eqoa.actions.set_channel",
         "eqoa.actions.status",
         "eqoa.actions.stop",
         "eqoa.actions.stop_batch",
@@ -2288,6 +2291,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.actions.chat_line",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.actions.close_window",
       "reason": null,
       "revision": 1,
@@ -2504,6 +2515,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.actions.open_link",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.actions.open_loot",
       "reason": null,
       "revision": 1,
@@ -2580,6 +2599,14 @@
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.set_channel",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
       "status": "supported"
     },
     {
@@ -3041,10 +3068,15 @@
     },
     {
       "children": [
+        "eqoa.chat.ChatLink",
         "eqoa.chat.ChatMessage",
+        "eqoa.chat.ChatTab",
+        "eqoa.chat.ChatTabs",
         "eqoa.chat.channel_name",
         "eqoa.chat.get_channel",
-        "eqoa.chat.history"
+        "eqoa.chat.history",
+        "eqoa.chat.reply_to",
+        "eqoa.chat.tabs"
       ],
       "path": "eqoa.chat",
       "reason": null,
@@ -3054,9 +3086,56 @@
     },
     {
       "children": [
+        "eqoa.chat.ChatLink.id",
+        "eqoa.chat.ChatLink.len",
+        "eqoa.chat.ChatLink.name",
+        "eqoa.chat.ChatLink.start"
+      ],
+      "path": "eqoa.chat.ChatLink",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.chat.ChatLink.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.chat.ChatLink.len",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.chat.ChatLink.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.chat.ChatLink.start",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
         "eqoa.chat.ChatMessage.channel",
         "eqoa.chat.ChatMessage.channel_code",
         "eqoa.chat.ChatMessage.color",
+        "eqoa.chat.ChatMessage.kind",
+        "eqoa.chat.ChatMessage.links",
         "eqoa.chat.ChatMessage.outgoing",
         "eqoa.chat.ChatMessage.sender",
         "eqoa.chat.ChatMessage.seq",
@@ -3088,6 +3167,22 @@
     {
       "children": [],
       "path": "eqoa.chat.ChatMessage.color",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.chat.ChatMessage.kind",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.chat.ChatMessage.links",
       "reason": null,
       "revision": 1,
       "round": 2,
@@ -3134,6 +3229,69 @@
       "status": "supported"
     },
     {
+      "children": [
+        "eqoa.chat.ChatTab.index",
+        "eqoa.chat.ChatTab.kinds",
+        "eqoa.chat.ChatTab.name"
+      ],
+      "path": "eqoa.chat.ChatTab",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.chat.ChatTab.index",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.chat.ChatTab.kinds",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.chat.ChatTab.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.chat.ChatTabs.kinds",
+        "eqoa.chat.ChatTabs.tabs"
+      ],
+      "path": "eqoa.chat.ChatTabs",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.chat.ChatTabs.kinds",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.chat.ChatTabs.tabs",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
       "children": [],
       "path": "eqoa.chat.channel_name",
       "reason": null,
@@ -3152,6 +3310,22 @@
     {
       "children": [],
       "path": "eqoa.chat.history",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.chat.reply_to",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.chat.tabs",
       "reason": null,
       "revision": 1,
       "round": 2,
@@ -4747,6 +4921,22 @@
     {
       "children": [],
       "path": "eqoa.events.chat.message.data.color",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.chat.message.data.kind",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.chat.message.data.links",
       "reason": null,
       "revision": 1,
       "round": 2,
@@ -13415,10 +13605,14 @@
     {
       "children": [
         "eqoa.windows.ButtonHint",
+        "eqoa.windows.ChatLink",
         "eqoa.windows.Confirm",
         "eqoa.windows.Dialog",
+        "eqoa.windows.LinkOffer",
         "eqoa.windows.MenuRow",
         "eqoa.windows.Session",
+        "eqoa.windows.SessionData",
+        "eqoa.windows.StartEntry",
         "eqoa.windows.Window",
         "eqoa.windows.Windows",
         "eqoa.windows.close_session",
@@ -13469,6 +13663,60 @@
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.windows.ChatLink.key",
+        "eqoa.windows.ChatLink.len",
+        "eqoa.windows.ChatLink.list",
+        "eqoa.windows.ChatLink.name",
+        "eqoa.windows.ChatLink.start"
+      ],
+      "path": "eqoa.windows.ChatLink",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.ChatLink.key",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.ChatLink.len",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.ChatLink.list",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.ChatLink.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.ChatLink.start",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -13617,6 +13865,51 @@
     },
     {
       "children": [
+        "eqoa.windows.LinkOffer.key",
+        "eqoa.windows.LinkOffer.list",
+        "eqoa.windows.LinkOffer.name",
+        "eqoa.windows.LinkOffer.seq"
+      ],
+      "path": "eqoa.windows.LinkOffer",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.LinkOffer.key",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.LinkOffer.list",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.LinkOffer.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.LinkOffer.seq",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
         "eqoa.windows.MenuRow.command",
         "eqoa.windows.MenuRow.enabled",
         "eqoa.windows.MenuRow.index",
@@ -13671,6 +13964,7 @@
     },
     {
       "children": [
+        "eqoa.windows.Session.data",
         "eqoa.windows.Session.focused",
         "eqoa.windows.Session.kind",
         "eqoa.windows.Session.opened_from",
@@ -13680,6 +13974,14 @@
         "eqoa.windows.Session.title"
       ],
       "path": "eqoa.windows.Session",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.Session.data",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -13736,6 +14038,123 @@
     {
       "children": [],
       "path": "eqoa.windows.Session.title",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.windows.SessionData.channel",
+        "eqoa.windows.SessionData.entries",
+        "eqoa.windows.SessionData.links",
+        "eqoa.windows.SessionData.offer",
+        "eqoa.windows.SessionData.reply_to",
+        "eqoa.windows.SessionData.text"
+      ],
+      "path": "eqoa.windows.SessionData",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.channel",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.entries",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.links",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.offer",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.reply_to",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.text",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.windows.StartEntry.command",
+        "eqoa.windows.StartEntry.enabled",
+        "eqoa.windows.StartEntry.entries",
+        "eqoa.windows.StartEntry.native",
+        "eqoa.windows.StartEntry.text"
+      ],
+      "path": "eqoa.windows.StartEntry",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.StartEntry.command",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.StartEntry.enabled",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.StartEntry.entries",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.StartEntry.native",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.StartEntry.text",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -17517,7 +17936,7 @@
   "metadata": {
     "client_version": "0.7.0",
     "commit": "unstamped local build",
-    "generated_utc": "2026-11-22",
+    "generated_utc": "2026-11-23",
     "platform": "windows-x86_64"
   },
   "schema_version": 1

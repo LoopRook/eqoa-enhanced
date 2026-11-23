@@ -519,16 +519,6 @@ mod tests {
     }
 
     #[test]
-    fn zz_a6_temp_write_surface() {
-        let docs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/modding");
-        for (fmt, file) in [("json", "eqoa-1-surface.json"), ("md", "SUPPORT-TABLE.md")] {
-            let out = docs.join(file).to_string_lossy().to_string();
-            let r = run(&args(&["mod-api", "--format", fmt, "--out", &out])).unwrap();
-            eprintln!("A6TEMP {fmt}: {r:?}");
-        }
-    }
-
-    #[test]
     #[cfg(windows)]
     fn round7b_support_table_matches_the_running_client() {
         const REGENERATE: &str = "Rebuild eqoa, then run: eqoa mod-api --format md --out docs/modding/SUPPORT-TABLE.md AND eqoa mod-api --format json --out docs/modding/eqoa-1-surface.json";

@@ -396,9 +396,6 @@ fn chat_line(play: &mut Play, route: Route, to: Option<&str>, text: &str, links:
     if route == Route::Reply && play.reply_name.is_empty() {
         return refuse("not_ready", "nobody has sent the player a tell to reply to");
     }
-    if route == Route::Group && !play.group.in_group {
-        return refuse("not_ready", "the player is not in a group");
-    }
     // each link must be an item the player has
     for l in links {
         let items = if l.list == 0 { &play.dump.inventory.items } else { &play.dump.bank.items.items };

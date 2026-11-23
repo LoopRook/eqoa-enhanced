@@ -56,6 +56,7 @@ fn recording() -> Play {
     s.record = Some(Vec::new());
     s.item_links_offer = true;
     let mut p = Play::new(s, net::session::Player::default(), Box::<net::dump::MemoryDump>::default());
+    let _ = p.loading.wait.take();
     p.agree_item_links();
     p.hud = Some((
         crate::ui::Vui::new(Default::default(), Default::default(), vec![]),

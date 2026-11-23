@@ -1,7 +1,6 @@
 # EQOA Chat
 
-Off by default. Enable it in Mods & Addons (F10); it shows **Provides: Chat window with tabs and a channel picker (the
-Enter key)** and **Replaces game windows: Chat Entry** before you do.
+Off by default. Enable it in Mods & Addons (F10); it shows **Provides: Chat window with tabs, channels, links (Enter)** and **Replaces game windows: Chat Entry** before you do.
 
 A chat window of this mod's own, bottom left. The game's chat box is hidden while it is on.
 

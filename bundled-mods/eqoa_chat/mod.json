@@ -8,7 +8,7 @@
   "entryMode": "once",
   "enabled": false,
   "provides": [
-    "Chat window with tabs and a channel picker (the Enter key)"
+    "Chat window with tabs, channels, links (Enter)"
   ],
   "replaces": [
     "chat_entry",
