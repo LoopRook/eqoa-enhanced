@@ -233,6 +233,39 @@ fn a5_character_masteries_tab_holds_a_session_and_buys_and_refunds() {
     assert_eq!(w.host.drain_logs().unwrap().len(), 0);
 }
 
+/// The skill list arrives between two frames with no `mastery.changed` (a fast server): the tab, which showed "waiting",
+/// shows it. Negative control: before the list, no skill row exists; the fix round's old code cached the empty answer and
+/// kept waiting for ever (the rows never appeared).
+#[test]
+fn a5_character_masteries_tab_picks_up_a_list_that_arrives_between_frames() {
+    let mut w = window();
+    w.open();
+    assert!(w.tap("tab:masteries"));
+    w.frames(3);
+    assert!(w.find("skill:1").is_none(), "control: no list yet, no rows");
+    CORE.with(|c| c.borrow_mut().view.mastery_skills = Some(vec![skill(1, "Ironhide", true, false, 1)]));
+    w.frames(2);
+    assert!(w.find("skill:1").is_some(), "the list that came without an event is shown");
+    assert_eq!(w.host.drain_logs().unwrap().len(), 0);
+}
+
+/// A skill turns known (the server's sub-op 7 changes no counter, so no `mastery.changed`): Buy is offered without a tab
+/// switch. Negative control: while it is not known, Buy is not offered, and it stays so until the read changes.
+#[test]
+fn a5_character_a_skill_turning_known_is_picked_up_without_a_tab_switch() {
+    let mut w = window();
+    CORE.with(|c| c.borrow_mut().view.mastery_skills = Some(vec![skill(3, "Locked", false, false, 1)]));
+    w.open();
+    assert!(w.tap("tab:masteries"));
+    assert!(w.tap("skill:3"));
+    CORE.with(|c| c.borrow_mut().view.mastery_node = Some(node(3, false, true)));
+    w.frames(2);
+    assert!(w.find("Buy").is_none(), "control: the skill is not known yet");
+    CORE.with(|c| c.borrow_mut().view.mastery_skills = Some(vec![skill(3, "Locked", true, false, 1)]));
+    w.frames(2);
+    assert!(w.find("Buy").is_some(), "known now: Buy is offered");
+}
+
 /// Closing the window closes the Class Mastery session with it, and the client ending the window's session closes
 /// the mod's window. Control: the session was open just before.
 #[test]
