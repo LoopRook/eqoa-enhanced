@@ -433,7 +433,9 @@ fn a6_a_chat_line_goes_as_the_games_own_line_does() {
     let (a, b) = (sent(&mut mine), sent(&mut native));
     assert_eq!(a, b, "the linked line is the game's own linked line");
     // the link is on the wire: the control that shows the comparison is not of two plain lines
-    let mut r = Reader::new(&a[0][2..]);
+    // the channel switch (0x000E) goes first and last; the linked line is the longest message
+    let line = a.iter().max_by_key(|m| m.len()).unwrap();
+    let mut r = Reader::new(&line[2..]);
     let (_route, _target, _text, n) = (r.u8(), r.u32(), r.wide(1024), r.u8());
     assert_eq!(n, 1, "one link went with the line");
     // a link to an item the player does not have is refused
