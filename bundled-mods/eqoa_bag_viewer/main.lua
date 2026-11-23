@@ -90,7 +90,7 @@ local function open()
     local s, err = eqoa.windows.open_session("inventory", {opened_from = "key"})
     if not s then
         -- the client says why (the player is using the game's windows, dead, out of the world)
-        eqoa.log.write("Bag viewer did not open: " .. tostring(err and err.message))
+        eqoa.log.write("warn", "Bag viewer did not open: " .. tostring(err and err.message))
         return
     end
     session = s
@@ -169,7 +169,7 @@ local function open()
     escape = eqoa.input.claim("Escape", true)
 end
 
-eqoa.input.bind({id = "open", label = "Bag viewer", default_key = "b"}, function()
+eqoa.input.bind({id = "open", label = "Bag viewer", default_key = "shift+b"}, function()
     if B.open then close() else open() end
 end)
 -- The loot log is the one thing kept while the window is closed, from events only.

@@ -9,7 +9,7 @@ local W, PAD, LINE, ROWS, SLOT_W = 332, 8, 13, 13, 30
 local state = {
     open = false, session = nil, tokens = {}, escape = nil,
     list = nil, scroll = 0, selected = nil, result = nil,
-    hits = {}, row_hits = {}, slot_hits = {}, rect = nil,
+    hits = {}, row_hits = {}, slot_hits = {}, rect = nil, sb_rect = nil,
 }
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
@@ -64,8 +64,37 @@ end
 
 local close
 
+-- Memorize, as the game's Abilities page does it: an ability already memorized is refused (the game says so and
+-- offers Unmemorize), one that is not usable is refused, else it goes on the slot chosen (or the first free one).
+local function memorize(a, slot)
+    if not a then say("Choose an ability first", false); return end
+    if a.spellbook_slot then
+        say(a.name .. " is already memorized (slot " .. a.spellbook_slot .. "): Unmemorize it first", false)
+        return
+    end
+    if not a.usable then say(a.name .. " cannot be memorized yet", false); return end
+    if not slot then
+        for n = 1, 20 do
+            if not by_slot(n) then slot = n; break end
+        end
+    end
+    if not slot then say("Every slot is taken: Unmemorize one first", false); return end
+    if by_slot(slot) then say("Slot " .. slot .. " is taken: Unmemorize it first", false); return end
+    run("Memorize", function() return eqoa.actions.assign_ability(slot, a.ref) end)
+end
+
+-- The scroll track: a click on it puts the list there (the API has no button-release event, so no drag).
+local function scroll_to(y)
+    local r = state.sb_rect
+    local most = math.max(0, #abilities() - ROWS)
+    if not r or most == 0 then return end
+    local frac = math.max(0, math.min(1, (y - r.y) / r.h))
+    state.scroll = math.floor(frac * most + 0.5)
+end
+
 local function pointer_pressed(d)
     if d.button ~= "left" and d.button ~= "right" then return end
+    if d.button == "left" and inside(d.x, d.y, state.sb_rect) then scroll_to(d.y); return end
     for _, h in ipairs(state.hits) do
         if d.button == "left" and inside(d.x, d.y, h) and h.run then h.run(); return end
     end
@@ -76,8 +105,7 @@ local function pointer_pressed(d)
                     run("Unmemorize", function() return eqoa.actions.unmemorize_ability(h.slot) end)
                 end
             elseif state.selected and by_id(state.selected) then
-                local a = by_id(state.selected)
-                run("Memorize", function() return eqoa.actions.assign_ability(h.slot, a.ref) end)
+                memorize(by_id(state.selected), h.slot)
             elseif h.ability then
                 state.selected = h.ability.id
             end
@@ -96,7 +124,7 @@ local function open(opened_from)
     local s, err = eqoa.windows.open_session("spellbook", { opened_from = opened_from or "key" })
     if not s then
         -- a refusal says why (the player is using the game's windows, dead, out of the world...)
-        eqoa.log.write("Spellbook did not open: " .. tostring(err and err.message))
+        eqoa.log.write("warn", "Spellbook did not open: " .. tostring(err and err.message))
         return
     end
     state.session, state.open, state.list, state.scroll, state.result = s, true, nil, 0, nil
@@ -220,15 +248,17 @@ function draw()
             state.row_hits[#state.row_hits + 1] = hit(PAD, y, W - 2 * PAD, LINE, { ability = a })
         end
     end
+    state.sb_rect = nil
     if #list > ROWS then
         local sb_x, thumb_h = W - PAD + 1, math.max(10, list_h * ROWS / #list)
-        fill(sb_x, list_y, 2, list_h, c.border)
-        fill(sb_x, list_y + (list_h - thumb_h) * (state.scroll / (#list - ROWS)), 2, thumb_h, c.muted)
+        fill(sb_x, list_y, 6, list_h, c.border)
+        fill(sb_x, list_y + (list_h - thumb_h) * (state.scroll / (#list - ROWS)), 6, thumb_h, c.muted)
+        state.sb_rect = { x = x0 + (sb_x - 1) * k, y = y0 + list_y * k, w = 7 * k, h = list_h * k }
     end
 
     -- the 20 memorized slots: click one with an ability chosen to put it there; right-click to clear it
     state.slot_hits = {}
-    text(PAD, slots_y - 11, "Memorized (click with an ability chosen to memorize; right-click to clear)", c.muted, W - 2 * PAD)
+    text(PAD, slots_y - 11, "Memorized (choose an ability, then Memorize or click a slot; right-click clears)", c.muted, W - 2 * PAD)
     local per_row = 10
     for slot = 1, 20 do
         local col, row = (slot - 1) % per_row, math.floor((slot - 1) / per_row)
@@ -268,6 +298,7 @@ function draw()
         if enabled then state.hits[#state.hits + 1] = hit(bx, bar_y, bw, 16, { run = run }) end
         bx = bx + bw + 4
     end
+    button("Memorize", sel ~= nil and sel.spellbook_slot == nil, function() memorize(sel) end)
     button("Cast", sel ~= nil and sel.spellbook_slot ~= nil, function()
         run("Cast", function() return eqoa.actions.cast(sel.ref) end)
     end)

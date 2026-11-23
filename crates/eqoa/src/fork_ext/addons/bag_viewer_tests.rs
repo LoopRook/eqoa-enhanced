@@ -319,15 +319,19 @@ fn round5b_off_by_default_loads_clean_has_an_unbound_controls_row_and_its_key_op
     assert!(!entry.metadata.initially_enabled);
     assert_eq!(crate::fork_ext::bindpage::get_key(BV, "open"), None, "no Controls row while it is off");
     bv.enable();
-    // round A1: the row exists and starts on B (a free key: the game's keys are not changed)
-    assert_eq!(crate::fork_ext::bindpage::get_key(BV, "open"), Some("b".to_string()));
-    assert_eq!(bv.eval::<Option<String>>("eqoa.binds.get('open')"), Some("b".to_string()));
+    // round A1: the row exists and starts on Shift+B (B is upstream's Controls-page key and I is Camera up, so neither is free)
+    assert_eq!(crate::fork_ext::bindpage::get_key(BV, "open"), Some("shift+b".to_string()));
+    assert_eq!(bv.eval::<Option<String>>("eqoa.binds.get('open')"), Some("shift+b".to_string()));
     bv.key(Key::Character("9".into()));
     assert!(!bv.is_open(), "a key the row is not on opens nothing");
     bv.key(Key::Character("b".into()));
-    assert!(bv.is_open(), "B opens the Bags window: {:?}", bv.manager.diagnostics());
-    bv.key(Key::Character("b".into()));
-    assert!(!bv.is_open(), "B again closes it");
+    assert!(!bv.is_open(), "plain B is not the Bags key");
+    super::super::input::set_modifiers((false, false, true));
+    bv.key(Key::Character("B".into()));
+    assert!(bv.is_open(), "Shift+B opens the Bags window: {:?}", bv.manager.diagnostics());
+    bv.key(Key::Character("B".into()));
+    assert!(!bv.is_open(), "Shift+B again closes it");
+    super::super::input::set_modifiers((false, false, false));
     // bound to K: the key opens and closes
     bv.bind_k();
     bv.toggle();
