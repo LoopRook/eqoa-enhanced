@@ -34,5 +34,8 @@
     "eqoa.input.claim_pointer",
     "eqoa.events.on",
     "eqoa.imgui"
+  ],
+  "commands": [
+    "open"
   ]
 }
