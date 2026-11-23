@@ -332,6 +332,68 @@ fn assert_window_fits_horizontally(name: &str, label: &str) {
     );
 }
 
+/// Owner test 2026-11-23: a group search that came back empty looked the same as one never made ("No group search
+/// results yet"), and "Searching..." was hidden once registration was known. The tab now hears the answer (even an
+/// empty one) and says "Nobody found". Negative control: before any answer the note is the old "No group search results
+/// yet"; the same events with players give a count, not "nobody".
+#[test]
+fn a7_social_group_search_says_nobody_found_for_an_empty_answer() {
+    fixture();
+    let mut context = context();
+    let a = addon(ID);
+    let host = Host::for_addon(&a).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&a).unwrap();
+    let lfg = |entries: Vec<LfgEntrySnap>, busy: bool, hash: u64, result: bool| {
+        native_a7::sync_lfg(
+            hash,
+            move || LfgSnap {
+                available: true,
+                busy,
+                registered: Some(false),
+                invites_open: None,
+                members_invite: None,
+                default_min_level: 30,
+                default_max_level: 40,
+                entries,
+            },
+            result,
+        );
+    };
+    lfg(Vec::new(), false, 1, false);
+    frames(&host, &bridge, &mut context, 2);
+    let probe = || -> (Option<i64>, Option<String>) { host.lua.load("return social_probe()").eval().unwrap() };
+    assert_eq!(probe().0, None, "control: nothing heard before a search");
+    host.execute("assert(social_lfg_empty_note(false, nil, nil) == 'No group search results yet. Click Search LFG.')").unwrap();
+    // a search is out: the note says so (also when registration is known)
+    host.execute("assert(social_lfg_empty_note(true, nil, nil) == 'Searching...')").unwrap();
+    // the empty answer arrives
+    lfg(Vec::new(), false, 2, true);
+    frames(&host, &bridge, &mut context, 2);
+    assert_eq!(probe().0, Some(0), "an empty answer is heard");
+    host.execute(
+        "local n = social_lfg_empty_note(false, 0, nil); assert(n:find('Nobody found', 1, true), n)
+         assert(social_lfg_empty_note(false, 0, 'players'):find('No player', 1, true))
+         assert(social_lfg_empty_note(false, 0, 'groups'):find('No group', 1, true))",
+    )
+    .unwrap();
+    // control: an answer with someone in it is a count, never "nobody"
+    let one = vec![LfgEntrySnap {
+        id: 9,
+        name: "Wil".into(),
+        race_id: 0,
+        race_name: Some("Human".into()),
+        class_id: 0,
+        class_name: Some("Warrior".into()),
+        level: 30,
+        world_id: 1,
+        position: [0.0; 3],
+    }];
+    lfg(one, false, 3, true);
+    frames(&host, &bridge, &mut context, 2);
+    assert_eq!(probe().0, Some(1));
+}
+
 #[test]
 fn a7_social_no_text_exceeds_window_at_default_size_across_all_tabs_and_prompts() {
     fixture();
