@@ -198,7 +198,7 @@ pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
                 None => Err("a class mastery request is still pending".into()),
             }
         }
-        Act::Destroy { .. } | Act::DropQuest { .. } => Err("not a character step".into()),
+        Act::Destroy { .. } | Act::DropQuest { .. } | Act::AcceptOffer { .. } => Err("not a character step".into()),
     }
 }
 

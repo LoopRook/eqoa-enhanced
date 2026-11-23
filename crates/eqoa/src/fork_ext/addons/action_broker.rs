@@ -2106,6 +2106,13 @@ thread_local! {
     static DISPATCH_CLAIMS: Cell<[bool; 3]> = const { Cell::new([false; 3]) };
 }
 
+/// Runs `f` as the dispatch of `vm`'s action (what a test needs to call a dispatch function directly).
+#[cfg(test)]
+pub(crate) fn with_dispatch_for_test<R>(vm: u64, addon: &str, f: impl FnOnce() -> R) -> R {
+    let _guard = DispatchVmGuard::enter(vm, Some(addon.to_string()));
+    f()
+}
+
 struct DispatchVmGuard(Option<u64>, Option<String>);
 impl DispatchVmGuard {
     /// `addon` is the mod's id, taken by the caller from the broker it holds (the dispatch runs inside the broker's

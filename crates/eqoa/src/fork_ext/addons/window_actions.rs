@@ -102,6 +102,35 @@ fn whole(v: &Value, what: &str, min: i64, max: i64) -> std::result::Result<i64, 
     Ok(n)
 }
 
+/// Round A2: a dialog or offer session's `ref` (the string, or the session table that carries it), when the value is
+/// one; a `WindowRef` is a userdata and is none.
+fn session_ref(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) => s.to_str().ok().map(|s| s.to_string()),
+        Value::Table(t) => match t.get::<Value>("ref").ok()? {
+            Value::String(s) => s.to_str().ok().map(|s| s.to_string()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The action for a dialog or offer session of this mod: how many answers it has, or why it cannot be answered.
+fn session_answers(lua: &Lua, id: &str) -> std::result::Result<usize, Fail> {
+    let vm = super::native_events::bus(lua).borrow().vm;
+    let found = super::window_sessions::find(vm, id);
+    let Some(s) = found else {
+        return Err(("stale_handle", "no such open window session".into()));
+    };
+    if !s.held.is_some_and(|k| super::window_takeover::TakeoverKind::DIALOGS.contains(&k)) {
+        return Err(("unsupported", "only an NPC dialog or offer session can be answered by its ref".into()));
+    }
+    match super::dialog_sessions::find(id) {
+        Some(a) => Ok(a.item.answers()),
+        None => Err(("stale_handle", "the dialog or offer is gone".into())),
+    }
+}
+
 /// Resolve a `WindowRef` to its current view entry and the handle's captured identity.
 fn window(arg: &Value) -> std::result::Result<(WinTarget, Json), Fail> {
     let Some(ud) = arg.as_userdata() else {
@@ -243,6 +272,10 @@ pub(crate) fn install(lua: &Lua) -> Result<()> {
         "close_window",
         lua.create_function(|lua, r: Value| {
             enqueue_lua_with(lua, "eqoa.actions.close_window", || {
+                if let Some(id) = session_ref(&r) {
+                    session_answers(lua, &id)?;
+                    return Ok(ActionKind::A1(super::native_a1::A1Action::SessionAnswer { session: id, option: None }));
+                }
                 let (win, w) = window(&r)?;
                 guard(&w, None, None)?;
                 Ok(ActionKind::CloseWindow { win })
@@ -279,6 +312,11 @@ pub(crate) fn install(lua: &Lua) -> Result<()> {
         "dialog_answer",
         lua.create_function(|lua, (r, option): (Value, Value)| {
             enqueue_lua_with(lua, "eqoa.actions.dialog_answer", || {
+                if let Some(id) = session_ref(&r) {
+                    let n = session_answers(lua, &id)?;
+                    let option = whole(&option, "option", 1, n as i64)? as usize;
+                    return Ok(ActionKind::A1(super::native_a1::A1Action::SessionAnswer { session: id, option: Some(option) }));
+                }
                 let (win, w) = window(&r)?;
                 guard(&w, None, None)?;
                 if w["dialog"]["kind"].is_null() || w["dialog"]["kind"] == "input" {

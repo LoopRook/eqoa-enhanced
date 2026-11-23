@@ -506,5 +506,7 @@ mod round7h_play_tests;
 #[path = "a1_play_tests.rs"]
 mod a1_play_tests;
 #[cfg(test)]
+#[path = "a2_play_tests.rs"]
+mod a2_play_tests;
 #[path = "a5_tests.rs"]
 mod a5_tests;
