@@ -7,14 +7,113 @@ use super::{
 use mlua::{Result, Table, Value};
 use serde_json::json;
 use std::{cell::RefCell, collections::BTreeMap};
+/// One claimed rectangle. `win` is the ImGui window the mod was building when it claimed (its layer), which
+/// gives the claim its place in the one display order every mod window shares (`pointer_order`); `seq` orders
+/// claims made outside a window.
+#[derive(Clone, Copy)]
+struct Claim {
+    r: [f32; 4],
+    win: Option<u32>,
+    seq: u64,
+}
 #[derive(Default)]
 struct Pointer {
     at: [f32; 2],
     inside: bool,
-    claims: BTreeMap<u64, (u64, Vec<[f32; 4]>)>,
+    claims: BTreeMap<u64, (u64, Vec<Claim>)>,
     wheels: BTreeMap<u64, f32>,
+    next_seq: u64,
+}
+fn hit(r: &[f32; 4], x: f64, y: f64) -> bool {
+    x >= r[0] as f64 && x <= (r[0] + r[2]) as f64 && y >= r[1] as f64 && y <= (r[1] + r[3]) as f64
+}
+/// The front-most live claim holding a point: whose it is and where it sits in the display order.
+struct Front {
+    vm: u64,
+    win: Option<u32>,
+    z: Option<usize>,
+}
+/// The render frame now (not for use while `CORE` is borrowed: an event being emitted carries its own frame).
+fn now() -> u64 {
+    CORE.with(|c| c.borrow().frame)
+}
+fn front_claim(frame: u64, x: f64, y: f64) -> Option<Front> {
+    let found = POINTER.with(|p| {
+        let p = p.borrow();
+        if !p.inside {
+            return None;
+        }
+        Some(
+            p.claims
+                .iter()
+                .filter(|(_, (f, _))| frame.saturating_sub(*f) <= 1)
+                .flat_map(|(vm, (_, cs))| cs.iter().map(move |c| (*vm, *c)))
+                .filter(|(_, c)| hit(&c.r, x, y))
+                .map(|(vm, c)| (vm, c.win, c.seq))
+                .collect::<Vec<_>>(),
+        )
+    });
+    let found = found?;
+    // the order of ImGui's windows is read once the claims are out of the cell (it holds no pointer state)
+    found
+        .into_iter()
+        .map(|(vm, win, seq)| (win.and_then(super::pointer_order::z_of), seq, vm, win))
+        .max_by_key(|(z, seq, _, _)| (*z, *seq))
+        .map(|(z, _, vm, win)| Front { vm, win, z })
+}
+/// The place in display order of the front-most claim under the pointer, when ImGui knows its window.
+pub(super) fn front_claim_z(x: f32, y: f32) -> Option<usize> {
+    front_claim(now(), x as f64, y as f64).and_then(|f| f.z)
+}
+/// The pointer's place when it is inside the window.
+pub(super) fn pointer_at() -> Option<[f32; 2]> {
+    POINTER.with(|p| {
+        let p = p.borrow();
+        p.inside.then_some(p.at)
+    })
+}
+/// `true` when a real ImGui window is drawn in front of the claimed window `front` at the point (ImGui owns it).
+fn real_window_in_front(front: &Front, x: f64, y: f64) -> bool {
+    super::pointer_order::front_real_window_z(x as f32, y as f32)
+        .is_some_and(|real| front.z.is_none_or(|z| real > z))
+}
+/// Whether `vm` is behind another window at a point: a window in front (another mod's claimed window, or a real
+/// ImGui window) is the one the pointer is on, so this mod gets no click, wheel or hover there. A point no mod
+/// claimed is nobody's.
+pub(crate) fn covered(frame: u64, vm: u64, x: f64, y: f64) -> bool {
+    !legacy() && front_claim(frame, x, y).is_some_and(|f| f.vm != vm || real_window_in_front(&f, x, y))
+}
+/// Whether a pointer event is delivered to `vm`: all other events always are. `frame` is the event's own (it is
+/// asked while the event is being emitted, so the core's cell is not read here).
+pub(crate) fn delivers(name: &str, data: &serde_json::Value, frame: u64, vm: u64) -> bool {
+    if !matches!(name, "pointer.pressed" | "pointer.wheel") || data["inside_window"] != true {
+        return true;
+    }
+    match (data["x"].as_f64(), data["y"].as_f64()) {
+        (Some(x), Some(y)) => !covered(frame, vm, x, y),
+        _ => true,
+    }
 }
 thread_local! {static POINTER:RefCell<Pointer>=RefCell::new(Pointer::default());}
+#[cfg(test)]
+thread_local! {static LEGACY:std::cell::Cell<bool>=const{std::cell::Cell::new(false)};}
+/// Tests: the behaviour before windows had an order (every mod got every click, nothing was raised or covered).
+#[cfg(test)]
+pub(crate) fn set_legacy_for_test(on: bool) {
+    LEGACY.with(|l| l.set(on));
+}
+#[cfg(test)]
+pub(crate) fn legacy() -> bool {
+    LEGACY.with(|l| l.get())
+}
+#[cfg(not(test))]
+pub(crate) const fn legacy() -> bool {
+    false
+}
+#[cfg(test)]
+pub(crate) fn claim_rects_for_test(vm: u64) -> Vec<[f32; 4]> {
+    POINTER.with(|p| p.borrow().claims.get(&vm).map(|(_, rs)| rs.iter().map(|c| c.r).collect()).unwrap_or_default())
+}
 #[cfg(test)]
 pub(crate) fn claim_count() -> usize {
     POINTER.with(|p| p.borrow().claims.len())
@@ -47,13 +146,7 @@ fn claimed() -> bool {
         let p = p.borrow();
         p.inside
             && p.claims.values().any(|(f, rs)| {
-                frame.saturating_sub(*f) <= 1
-                    && rs.iter().any(|r| {
-                        p.at[0] >= r[0]
-                            && p.at[0] <= r[0] + r[2]
-                            && p.at[1] >= r[1]
-                            && p.at[1] <= r[1] + r[3]
-                    })
+                frame.saturating_sub(*f) <= 1 && rs.iter().any(|c| hit(&c.r, p.at[0] as f64, p.at[1] as f64))
             })
     })
 }
@@ -62,15 +155,9 @@ pub(crate) fn point_in_vm_claim(vm: u64, x: f64, y: f64) -> bool {
     POINTER.with(|p| {
         let p = p.borrow();
         p.inside
-            && p.claims.get(&vm).is_some_and(|(f, rs)| {
-                frame.saturating_sub(*f) <= 1
-                    && rs.iter().any(|r| {
-                        x >= r[0] as f64
-                            && x <= (r[0] + r[2]) as f64
-                            && y >= r[1] as f64
-                            && y <= (r[1] + r[3]) as f64
-                    })
-            })
+            && p.claims
+                .get(&vm)
+                .is_some_and(|(f, rs)| frame.saturating_sub(*f) <= 1 && rs.iter().any(|c| hit(&c.r, x, y)))
     })
 }
 fn emit(name: &str, button: Option<&str>, steps: Option<f32>) {
@@ -82,6 +169,23 @@ fn emit(name: &str, button: Option<&str>, steps: Option<f32>) {
         json!({"x":p.at[0],"y":p.at[1],"inside_window":p.inside,"button":button,"steps":steps})
     });
     native_core::emit(name, data);
+}
+/// A press on a claimed window brings that window to the front (the one that holds the pointer there, not one
+/// a real ImGui window covers): ImGui raises its own windows on a click, a custom-drawn layer needs this.
+fn raise_pressed_window() {
+    if legacy() || crate::hudlayout::unlocked() {
+        return;
+    }
+    let Some(at) = pointer_at() else {
+        return;
+    };
+    let (x, y) = (at[0] as f64, at[1] as f64);
+    if let Some(front) = front_claim(now(), x, y)
+        && !real_window_in_front(&front, x, y)
+        && let Some(win) = front.win
+    {
+        super::pointer_order::raise_next_frame(win);
+    }
 }
 pub(crate) fn observe(event: &winit::event::WindowEvent, size: (u32, u32)) -> bool {
     use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent as E};
@@ -99,16 +203,19 @@ pub(crate) fn observe(event: &winit::event::WindowEvent, size: (u32, u32)) -> bo
             state: ElementState::Pressed,
             button,
             ..
-        } => emit(
-            "pointer.pressed",
-            Some(match button {
-                MouseButton::Left => "left",
-                MouseButton::Right => "right",
-                MouseButton::Middle => "middle",
-                _ => "other",
-            }),
-            None,
-        ),
+        } => {
+            raise_pressed_window();
+            emit(
+                "pointer.pressed",
+                Some(match button {
+                    MouseButton::Left => "left",
+                    MouseButton::Right => "right",
+                    MouseButton::Middle => "middle",
+                    _ => "other",
+                }),
+                None,
+            )
+        }
         E::MouseWheel { delta, .. } => {
             let n = match delta {
                 MouseScrollDelta::LineDelta(_, y) => *y,
@@ -127,10 +234,14 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         "input",
         "pointer",
         lua.create_function(|lua, ()| {
+            // a mod behind another window sees the pointer outside its own: no hover, no tooltip there
+            let vm = super::native_events::bus(lua).borrow().vm;
             let data = POINTER.with(|p| {
                 let p = p.borrow();
-                json!({"x":p.at[0],"y":p.at[1],"inside_window":p.inside})
+                (p.at, p.inside)
             });
+            let inside = data.1 && !covered(now(), vm, data.0[0] as f64, data.0[1] as f64);
+            let data = json!({"x":data.0[0],"y":data.0[1],"inside_window":inside});
             lua.pack_multi((
                 super::native::record_cached(
                     lua,
@@ -176,8 +287,11 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             }
             let vm = super::native_events::bus(lua).borrow().vm;
             let frame = CORE.with(|c| c.borrow().frame);
+            let win = super::pointer_order::current_window_id();
             let ok = POINTER.with(|p| {
                 let mut p = p.borrow_mut();
+                p.next_seq += 1;
+                let seq = p.next_seq;
                 let (f, rs) = p.claims.entry(vm).or_insert_with(|| (frame, Vec::new()));
                 if *f != frame {
                     *f = frame;
@@ -186,7 +300,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 if rs.len() >= 32 {
                     return false;
                 }
-                rs.push(r);
+                rs.push(Claim { r, win, seq });
                 true
             });
             if !ok {

@@ -128,6 +128,8 @@ mod a1_tests;
 #[cfg(test)]
 mod a1_mod_tests;
 #[cfg(test)]
+mod click_through_tests;
+#[cfg(test)]
 mod a7_mod_tests;
 #[cfg(test)]
 mod a2_mod_tests;
@@ -150,6 +152,7 @@ pub(crate) mod options;
 pub(crate) mod package;
 pub(crate) mod player;
 pub(crate) mod pointer_api;
+pub(crate) mod pointer_order;
 mod profile;
 pub(crate) mod quest_log;
 #[cfg(test)]

@@ -915,6 +915,9 @@ pub(super) fn dispatch_frame(
 /// every mod window (`mods` draws them), and brought to the front each frame, so nothing a mod draws can cover it,
 /// take the click meant for its buttons or ride on it.
 pub(super) fn with_question_on_top<R>(ui: &Ui, mods: impl FnOnce() -> R) -> R {
+    // the frame has just begun: the window the last press landed on comes to the front, and a real window under
+    // a claimed window in front of it does not see the pointer (`pointer_order`)
+    super::pointer_order::begin_frame();
     let out = mods();
     super::confirm::draw(ui);
     out
