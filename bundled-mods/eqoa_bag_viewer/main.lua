@@ -323,6 +323,8 @@ function draw()
         worn = ui.GetColorU32(.35, .8, .4, 1), warn = ui.GetColorU32(1, .3, .3, 1),
         junk = ui.GetColorU32(.95, .72, .20, 1),
         white = ui.GetColorU32(1, 1, 1, 1), shadow = ui.GetColorU32(0, 0, 0, 1),
+        mark = ui.GetColorU32(.45, .7, 1, 1),
+        dim_icon = ui.GetColorU32(.35, .35, .35, 1),
         menu_bg = ui.GetColorU32(.09, .09, .10, .98), menu_hl = ui.GetColorU32(.20, .20, .24, 1),
     }
     local kinds = {title = c.white, text = c.text, muted = c.muted, red = c.warn}
@@ -351,6 +353,8 @@ function draw()
         tx = tx + tabw + 2
     end
 
+    local pl = eqoa.player.get()
+    local use_stamp = tostring(pl and pl.level) .. ":" .. tostring(pl and pl.class_id) .. ":" .. tostring(pl and pl.race_id)
     local p = eqoa.input.pointer()
     local over
     slot_hits = {}
@@ -371,7 +375,7 @@ function draw()
             local it = entry.item
             if entry.texture then
                 dl:AddImage(entry.texture, at(sx + 2, sy + 2), at(sx + SLOT - 2, sy + SLOT - 2),
-                    ImVec2.new(0, 0), ImVec2.new(1, 1), c.white)
+                    ImVec2.new(0, 0), ImVec2.new(1, 1), B.icon_dimmed(entry, use_stamp) and c.dim_icon or c.white)
             else
                 text(sx + 14, sy + 11, it.name:sub(1, 1), c.muted)
             end
@@ -379,6 +383,11 @@ function draw()
             if not it.equipped and B.is_junk(it) then
                 fill(sx + SLOT - 11, sy + 2, 9, 11, c.shadow)
                 text(sx + SLOT - 9, sy + 2, "J", c.junk)
+            end
+            local mark = B.mark_letter(it)
+            if mark then
+                fill(sx + 2, sy + SLOT - 13, 9, 11, c.shadow)
+                text(sx + 4, sy + SLOT - 13, mark, c.mark)
             end
             if it.quantity > 1 then
                 local label = tostring(it.quantity)

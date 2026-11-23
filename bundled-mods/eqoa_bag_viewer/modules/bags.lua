@@ -518,11 +518,82 @@ end
 
 -- The card for one item: name, level, slot, stats, HP and durability, value, and the red line when the
 -- character's class, race or level rule it out. Read once per item hovered, not once per frame.
+-- The game's class and race names by ID (the order of the class and race lists the items' masks use).
+M.CLASS_NAMES = {[0] = "Warrior", "Ranger", "Paladin", "Shadowknight", "Monk", "Bard", "Rogue", "Druid", "Shaman",
+    "Cleric", "Magician", "Necromancer", "Enchanter", "Wizard", "Alchemist"}
+M.RACE_NAMES = {[0] = "Human", "Elf", "Dark Elf", "Gnome", "Dwarf", "Troll", "Barbarian", "Halfling", "Erudite", "Ogre"}
+local CLASS_COUNT, RACE_COUNT = 15, 10
+
+-- "Warrior, Paladin", or "" when the list is empty or names every one (an item nobody is shut out of).
+local function names_of(ids, names, count)
+    if type(ids) ~= "table" or #ids == 0 or #ids >= count then return "" end
+    local out = {}
+    for _, id in ipairs(ids) do out[#out + 1] = names[id] or ("#" .. tostring(id)) end
+    return table.concat(out, ", ")
+end
+
+-- What rules the item out for this character: a set like {class = true}, or nil when it can be used.
+function M.blockers(it)
+    local can = eqoa.items.can_use(it.ref)
+    if not can or can.allowed then return nil end
+    local set = {}
+    for _, r in ipairs(can.reasons or {}) do set[r] = true end
+    return set
+end
+
+-- The grid draws an item's icon dim when this is true. Kept on the entry, and read again when the character's
+-- level changes (the stamp), not once per frame.
+function M.icon_dimmed(entry, stamp)
+    if entry.dim_stamp ~= stamp then
+        entry.dim_stamp = stamp
+        entry.dim = entry.item ~= nil and M.blockers(entry.item) ~= nil
+    end
+    return entry.dim
+end
+
+-- The corner letter for a pack item set aside for a helper: "B" marked to bank, "R" kept up to a number when selling
+-- or restocking. (Junk has its own "J".) nil for anything else. Bottom-left, clear of the stack count.
+function M.mark_letter(it)
+    local H = M.helpers
+    if not H or it.list ~= "inventory" then return nil end
+    if H.is_banked(it) then return "B" end
+    if H.keep_of(it) then return "R" end
+    return nil
+end
+
+local DESCRIPTION_WIDTH, DESCRIPTION_LINES = 34, 3
+
+-- The description cut into lines of about DESCRIPTION_WIDTH characters at spaces, at most DESCRIPTION_LINES, with
+-- "..." when it goes on.
+function M.wrap_description(text)
+    local lines, line = {}, ""
+    local cut = false
+    for word in tostring(text or ""):gmatch("%S+") do
+        if line ~= "" and #line + 1 + #word > DESCRIPTION_WIDTH then
+            lines[#lines + 1] = line
+            line = word
+            if #lines == DESCRIPTION_LINES then cut = true; line = ""; break end
+        else
+            line = line == "" and word or (line .. " " .. word)
+        end
+    end
+    if line ~= "" then lines[#lines + 1] = line end
+    if cut then lines[#lines] = lines[#lines] .. "..." end
+    return lines
+end
+
 function M.card(it)
     local h = M.hover
     if h and h.key == it.ref then return h.lines end
+    local why = M.blockers(it) or {}
     local lines = {{it.name, "title"}}
-    if (it.level_required or 0) > 0 then lines[#lines + 1] = {"Level " .. it.level_required, "text"} end
+    if (it.level_required or 0) > 0 then
+        lines[#lines + 1] = {"Level " .. it.level_required, why.level and "red" or "text"}
+    end
+    local classes = names_of(it.allowed_classes, M.CLASS_NAMES, CLASS_COUNT)
+    lines[#lines + 1] = {classes == "" and "All classes" or ("Class: " .. classes), why.class and "red" or "text"}
+    local races = names_of(it.allowed_races, M.RACE_NAMES, RACE_COUNT)
+    if races ~= "" then lines[#lines + 1] = {"Race: " .. races, why.race and "red" or "text"} end
     if it.slot_name then lines[#lines + 1] = {"Slot: " .. it.slot_name, "text"} end
     for _, s in ipairs(it.stats) do
         lines[#lines + 1] = {string.format("%s %+d", s.name or ("Stat " .. s.id), s.value), "text"}
@@ -530,9 +601,9 @@ function M.card(it)
     if (it.maximum_hp or 0) > 0 then lines[#lines + 1] = {"HP " .. it.current_hp .. "/" .. it.maximum_hp, "text"} end
     if (it.durability or 0) > 0 then lines[#lines + 1] = {"Durability " .. it.durability, "text"} end
     if (it.value or 0) > 0 then lines[#lines + 1] = {"Value " .. M.tunar(it.value) .. " tunar", "muted"} end
-    local can = eqoa.items.can_use(it.ref)
-    if can and not can.allowed then lines[#lines + 1] = {"You can't use this", "red"} end
+    if next(why) ~= nil then lines[#lines + 1] = {"You can't use this", "red"} end
     if M.helpers and it.list == "inventory" then M.helpers.card_lines(it, lines) end
+    for _, d in ipairs(M.wrap_description(it.description)) do lines[#lines + 1] = {d, "muted"} end
     M.hover = {key = it.ref, lines = lines}
     return lines
 end

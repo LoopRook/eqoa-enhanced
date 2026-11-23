@@ -46,6 +46,7 @@ struct Spec {
     icon: i64,
     p4c: i64,
     p54: i64,
+    desc: String,
 }
 impl Spec {
     fn new(id: i64, name: &'static str, key: u32) -> Self {
@@ -69,6 +70,7 @@ impl Spec {
             icon: 4001,
             p4c: 0,
             p54: 0,
+            desc: "a described thing".into(),
         }
     }
     /// `ReadNetItem`'s bytes: the slot's six words, the item's 23 words, name, description, stats.
@@ -81,7 +83,7 @@ impl Spec {
         ] {
             w.signed(v);
         }
-        w.wide(self.name).wide("a described thing").signed(self.stats.len() as i64);
+        w.wide(self.name).wide(&self.desc).signed(self.stats.len() as i64);
         for (id, value) in &self.stats {
             w.signed(*id).signed(*value);
         }
@@ -1548,6 +1550,9 @@ impl Spec {
         s.icon = int("icon", 4001);
         s.p4c = int("p4c", 0);
         s.p54 = int("p54", 0);
+        if let Some(d) = v.get("desc").and_then(|x| x.as_str()) {
+            s.desc = d.to_string();
+        }
         if let Some(stats) = v.get("stats").and_then(|x| x.as_array()) {
             s.stats = stats.iter().map(|p| (p[0].as_i64().unwrap(), p[1].as_i64().unwrap())).collect();
         }

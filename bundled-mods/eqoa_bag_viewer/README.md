@@ -12,9 +12,12 @@ moves over the slots, confirm opens the item's menu (and presses a row), back cl
 The window shows the 40 pack slots as item icons with stack counts and a green
 **E** on worn items, the tunar you carry and used/capacity at the bottom.
 Tabs: **All**, **Usable**, **Equipment**, **Charged**, **Misc** (the game's own
-item-page tabs) and **Bank** (the bank's contents and its tunar, readable anywhere). Hover an item for its card: name, level, slot, stats, HP and
-durability, value, and a red "You can't use this" when your class, race or level
-rule it out. Under the grid is this session's loot log: the last 50 pickups,
+item-page tabs) and **Bank** (the bank's contents and its tunar, readable anywhere). Hover an item for its card: name, level, class ("All classes" or "Class: Paladin, Cleric"),
+race (only when the item is shut to some races), slot, stats, HP and
+durability, value, and its description at the bottom in grey (wrapped, at most three lines).
+When your class, race or level rule the item out, only that line turns red, with a red "You can't use this"
+under it; the name keeps its colour. The icon of an item you cannot use is dimmed in the grid.
+Items you set aside for a helper carry a small letter in the bottom-left corner of their slot: a blue **B** (marked to bank) or **R** (kept up to a number for Restock); junk keeps its yellow **J** at the top right. Under the grid is this session's loot log: the last 50 pickups,
 newest first ("12:41 Rusty Sword x1, from a decaying skeleton"; the corpse is named
 the corpse you asked to loot); the wheel scrolls it. Moving, selling,
 looting and banking stay in the game's windows.

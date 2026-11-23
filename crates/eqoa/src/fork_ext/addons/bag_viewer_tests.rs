@@ -29,8 +29,8 @@ fn bv_world() -> serde_json::Value {
             {"name":"Iron Ring","id":900003,"key":13,"wear":8,"class_mask":3,"race_mask":5,"level":20,"rent":0,"icon":4003},
             {"name":"Mage Robe","id":900004,"key":14,"wear":2,"class_mask":32,"icon":4004},
             {"name":"Elf Cloak","id":900005,"key":15,"wear":9,"race_mask":64,"icon":4005},
-            {"name":"Hero Helm","id":900006,"key":16,"wear":1,"level":55,"icon":4006},
-            {"name":"Rat Pelt","id":900007,"key":17,"qty":3,"max_stack":100,"icon":4007},
+            {"name":"Hero Helm","id":900006,"key":16,"wear":1,"level":55,"icon":4006,"desc":"Forged for champions of the old wars, this helm is heavy and cold and very long winded about its history and the many who wore it before you came along"},
+            {"name":"Rat Pelt","id":900007,"key":17,"qty":3,"max_stack":100,"icon":4007,"desc":""},
             {"name":"Odd Thing","id":900008,"key":18,"wear":0,"icon":4008}
         ],
         "bank": [
@@ -451,12 +451,111 @@ fn round5b_the_card_has_the_items_fields_and_the_red_line_only_when_the_characte
     for (slot, name, reason) in [(4, "Mage Robe", "class"), (5, "Elf Cloak", "race"), (6, "Hero Helm", "level")] {
         let card = bv.hover(slot);
         assert_eq!(card[0], format!("{name}|title"));
-        assert_eq!(card.last().map(String::as_str), Some("You can't use this|red"), "{name}: {card:?}");
+        assert!(card.contains(&"You can't use this|red".to_string()), "{name}: {card:?}");
         let reasons: Vec<String> = bv.eval(&format!(
             "(function() local r = eqoa.items.can_use(require('bags').grid.items[{slot}].item.ref).reasons local t = {{}} for _, v in ipairs(r) do t[#t + 1] = v end return t end)()"
         ));
         assert_eq!(reasons, [reason], "{name} is ruled out by its {reason} alone");
     }
+    bv.clean();
+}
+
+#[test]
+fn a_bag_viewer_tooltip_names_class_and_race_reddens_only_the_failing_line_dims_the_icon_and_ends_with_the_description() {
+    big_stack(a_bag_viewer_tooltip_body)
+}
+fn a_bag_viewer_tooltip_body() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    bv.open();
+    // usable, no restriction: "All classes", no race line, nothing red, the description last in the muted colour
+    let sword = bv.hover(1);
+    assert!(sword.contains(&"All classes|text".to_string()), "{sword:?}");
+    assert!(!sword.iter().any(|l| l.starts_with("Race:")), "no race line when no race is shut out: {sword:?}");
+    assert!(!sword.iter().any(|l| l.ends_with("|red")), "{sword:?}");
+    assert_eq!(sword.last().map(String::as_str), Some("a described thing|muted"), "{sword:?}");
+    // usable but restricted: the lines name the classes and races, in the normal colour
+    let ring = bv.hover(3);
+    assert!(ring.contains(&"Class: Warrior, Ranger|text".to_string()), "{ring:?}");
+    assert!(ring.contains(&"Race: Human, Dark Elf|text".to_string()), "{ring:?}");
+    assert!(!ring.iter().any(|l| l.ends_with("|red")), "{ring:?}");
+    // each failing rule turns its own line red and no other; the name stays white
+    let robe = bv.hover(4);
+    assert_eq!(robe[0], "Mage Robe|title");
+    assert!(robe.contains(&"Class: Bard|red".to_string()), "{robe:?}");
+    assert_eq!(robe.iter().filter(|l| l.ends_with("|red")).count(), 2, "the class line and the can't-use line: {robe:?}");
+    let cloak = bv.hover(5);
+    assert!(cloak.contains(&"Race: Barbarian|red".to_string()), "{cloak:?}");
+    assert!(cloak.contains(&"All classes|text".to_string()), "{cloak:?}");
+    let helm = bv.hover(6);
+    assert!(helm.contains(&"Level 55|red".to_string()), "{helm:?}");
+    assert!(helm.contains(&"All classes|text".to_string()), "{helm:?}");
+    // a long description is wrapped and cut to three lines, muted, after the can't-use line
+    let at = helm.iter().position(|l| l == "You can't use this|red").expect("can't use line");
+    let tail = &helm[at + 1..];
+    assert_eq!(tail.len(), 3, "{helm:?}");
+    assert!(tail.iter().all(|l| l.ends_with("|muted")) && tail[2].ends_with("...|muted"), "{helm:?}");
+    // an empty description adds no line
+    let pelt = bv.hover(7);
+    assert!(!pelt.iter().any(|l| l.ends_with("|muted") && !l.starts_with("Value")), "{pelt:?}");
+    // the icon is dim only for what cannot be used
+    let dim: Vec<bool> = bv.eval(
+        "(function() local b = require('bags') local t = {} for i, e in ipairs(b.grid.items) do t[i] = b.icon_dimmed(e, 's') end return t end)()",
+    );
+    assert_eq!(dim, [false, false, false, true, true, true, false, false]);
+    // and drawn so: the usable ring shows its icon's colour, the robe's is darker
+    bv.point((1., 1.));
+    let calm = bv.frames(3);
+    let px = rm_pixels(&bv.gpu, &calm);
+    let w = bv.win.0;
+    for (n, icon, dimmed) in [(3usize, 4003u32, false), (4, 4004, true)] {
+        let c = bv.slot(n);
+        let pix = bv_px(&px, w, c.0, c.1);
+        let want = bv_icon_color(icon);
+        let lit = (0..3).all(|i| (pix[i] as i32 - want[i] as i32).abs() <= 3);
+        let dark = (0..3).all(|i| (pix[i] as i32) < want[i] as i32 / 2 + 3);
+        assert_eq!(lit, !dimmed, "slot {n}: {pix:?} vs {want:?}");
+        assert_eq!(dark, dimmed, "slot {n}: {pix:?} vs {want:?}");
+    }
+    bv.clean();
+}
+
+#[test]
+fn a_bag_viewer_grid_marks_items_set_to_bank_or_keep_with_a_corner_letter_and_unmarking_removes_it() {
+    big_stack(a_bag_viewer_marks_body)
+}
+fn a_bag_viewer_marks_body() {
+    let Some(mut bv) = Bv::new() else { return };
+    bv.enable();
+    bv.open();
+    let letters = |bv: &Bv| -> Vec<String> {
+        bv.eval("(function() local b = require('bags') local t = {} for i, e in ipairs(b.grid.items) do t[i] = b.mark_letter(e.item) or '' end return t end)()")
+    };
+    assert!(letters(&bv).iter().all(|l| l.is_empty()), "nothing is marked at first");
+    bv.lua().load("local b = require('bags') local a, c = b.grid.items[7].item, b.grid.items[8].item b.helpers.set_bank(a, true) b.helpers.set_keep(c, 3)").exec().unwrap();
+    bv.point((1., 1.));
+    let marked = bv.frames(3);
+    assert_eq!(letters(&bv), ["", "", "", "", "", "", "B", "R"]);
+    let w = bv.win.0;
+    // the letter's pale blue sits in the bottom-left corner of a marked slot and not of an unmarked one
+    let corner = |bv: &Bv, n: usize| {
+        let c = bv.slot(n);
+        let (_, _, _, _, k) = bv.rect();
+        (c.0 - 12. * k, c.1 + 10. * k)
+    };
+    let px = rm_pixels(&bv.gpu, &marked);
+    let blue = [115, 178, 255, 255];
+    for n in [7usize, 8] {
+        assert!(bv_near(&px, w, corner(&bv, n), 5, blue, 40), "slot {n} has its marker");
+    }
+    assert!(!bv_near(&px, w, corner(&bv, 1), 5, blue, 40), "an unmarked slot has none");
+    // negative control: take the bank mark off and the marker goes
+    bv.lua().load("local b = require('bags') b.helpers.set_bank(b.grid.items[7].item, false)").exec().unwrap();
+    bv.point((1., 1.));
+    let after = bv.frames(3);
+    let px = rm_pixels(&bv.gpu, &after);
+    assert!(!bv_near(&px, w, corner(&bv, 7), 5, blue, 40), "unmarked: the marker is gone");
+    assert!(bv_near(&px, w, corner(&bv, 8), 5, blue, 40), "the other mark stays");
     bv.clean();
 }
 
@@ -773,7 +872,11 @@ fn round5b_captures_for_the_owner_draw_the_discs_own_item_art_and_the_corpse_in_
         // bottom-left, clear of the count)
         let low = bv.at(8. + ((n - 1) % 8) as f64 * 38. + 6., 46. + ((n - 1) / 8) as f64 * 38. + 33.);
         let under = bv_px(&px, w, low.0, low.1);
-        assert!(under[0] as u32 + under[1] as u32 + under[2] as u32 > 120, "slot {n}: black strip under the icon: {under:?}");
+        // slots 4 to 6 hold items this character cannot use: their art is drawn dim, as dark as the padding, so
+        // only the colour count above tells art from padding there
+        if !(4..=6).contains(&n) {
+            assert!(under[0] as u32 + under[1] as u32 + under[2] as u32 > 120, "slot {n}: black strip under the icon: {under:?}");
+        }
         if n == 1 {
             bv_png(&px, size, "r5-bags-all.png");
         }
