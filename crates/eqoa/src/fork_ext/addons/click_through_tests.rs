@@ -191,6 +191,9 @@ fn deliver(mods: &[&Mod]) {
 
 fn setup() -> Context {
     h::fixture();
+    // the layout the bundled windows draw in (another test may have left a different window size or Move HUD on)
+    super::hud_layout::set_window_size(640, 448);
+    crate::hudlayout::set_unlocked(false);
     pointer_api::set_legacy_for_test(false);
     pointer_api::position([0.0, 0.0], false, SIZE);
     h::context()
@@ -293,22 +296,36 @@ fn a_press_on_a_window_behind_brings_it_to_the_front() {
     deliver(&[&back, &front]);
 }
 
-/// A mod window ImGui itself draws and hit-tests (no layer, real title bar and input).
+/// A mod window ImGui itself draws and hit-tests (no layer, real title bar and input). Its place is read from the
+/// globals `wx, wy, ww, wh` every frame, so a test can put it where the claimed window it uses is.
 const IMGUI_WINDOW: &str = r#"
     local ui = eqoa.imgui
-    local x, y = 420, 100
+    wx, wy, ww, wh = 20, 20, 200, 200
     eqoa.events.on("render", function()
-        ui.SetNextWindowPos(x, y, ImGuiCond.Always)
-        ui.SetNextWindowSize(200, 200, ImGuiCond.Always)
+        ui.SetNextWindowPos(wx, wy, ImGuiCond.Always)
+        ui.SetNextWindowSize(ww, wh, ImGuiCond.Always)
         ui.Begin("click_through_imgui_window", true, ImGuiWindowFlags.NoSavedSettings + ImGuiWindowFlags.NoMove + ImGuiWindowFlags.NoResize)
         hovered = ui.IsWindowHovered()
-        ui.Text("a mod's own ImGui window")
+        ui.Button("hold")
         ui.End()
     end)
 "#;
 
-fn imgui_window_rect() -> [f32; 4] {
-    [420.0, 100.0, 200.0, 200.0]
+/// Puts the scratch ImGui window where it overlaps the right edge of the claimed rectangle `book` by 60 pixels
+/// and sticks out beyond it (`beyond`: whether it starts past the edge instead), and returns its rectangle.
+fn place(window: &Mod, book: &[f32; 4], beyond: bool) -> [f32; 4] {
+    let r = if beyond {
+        [book[0] + book[2] + 10.0, book[1] + 60.0, 150.0, 100.0]
+    } else {
+        [book[0] + book[2] - 60.0, book[1] + 100.0, 200.0, 200.0]
+    };
+    window
+        .host
+        .lua
+        .load(format!("wx, wy, ww, wh = {}, {}, {}, {}", r[0], r[1], r[2], r[3]))
+        .exec()
+        .unwrap();
+    r
 }
 
 #[test]
@@ -317,8 +334,11 @@ fn an_imgui_window_in_front_of_a_custom_drawn_one_takes_the_click_alone() {
     let book = Mod::real("eqoa_spellbook");
     let window = Mod::scratch("imgui_front", IMGUI_WINDOW);
     h::press(&book.host, "k", "shift+k");
+    frames(&[&book], &mut context, 4);
+    let rb = rect(book.vm);
+    // the ImGui window is drawn for the first time after the book: it is in front of it
+    let rw = place(&window, &rb, false);
     frames(&[&book, &window], &mut context, 4);
-    let (rb, rw) = (rect(book.vm), imgui_window_rect());
     assert!(z("click_through_imgui_window") > z("eqoa_spellbook_layer"), "the ImGui window opened last is in front");
     let overlap = find_point(|x, y| inside(&rb, x, y) && inside(&rw, x, y));
     let only_book = find_point(|x, y| inside(&rb, x, y) && !inside(&rw, x, y));
@@ -347,7 +367,9 @@ fn a_custom_drawn_window_in_front_of_an_imgui_one_hides_the_pointer_from_it() {
     frames(&[&window, &book], &mut context, 3);
     h::press(&book.host, "k", "shift+k");
     frames(&[&window, &book], &mut context, 4);
-    let (rb, rw) = (rect(book.vm), imgui_window_rect());
+    let rb = rect(book.vm);
+    let rw = place(&window, &rb, false);
+    frames(&[&window, &book], &mut context, 2);
     assert!(z("eqoa_spellbook_layer") > z("click_through_imgui_window"), "the book opened last is in front");
     let overlap = find_point(|x, y| inside(&rb, x, y) && inside(&rw, x, y));
     let only_window = find_point(|x, y| inside(&rw, x, y) && !inside(&rb, x, y));
@@ -376,25 +398,16 @@ fn a_custom_drawn_window_in_front_of_an_imgui_one_hides_the_pointer_from_it() {
 #[test]
 fn a_drag_that_began_on_an_imgui_window_is_kept_when_it_passes_under_a_claimed_one() {
     let mut context = setup();
-    let window = Mod::scratch(
-        "imgui_drag",
-        r#"
-        local ui = eqoa.imgui
-        eqoa.events.on("render", function()
-            ui.SetNextWindowPos(480, 100, ImGuiCond.Always)
-            ui.SetNextWindowSize(150, 100, ImGuiCond.Always)
-            ui.Begin("click_through_drag", true, ImGuiWindowFlags.NoSavedSettings + ImGuiWindowFlags.NoMove + ImGuiWindowFlags.NoResize)
-            ui.Button("hold")
-            ui.End()
-        end)
-        "#,
-    );
+    let window = Mod::scratch("imgui_drag", IMGUI_WINDOW);
     let book = Mod::real("eqoa_spellbook");
+    frames(&[&window, &book], &mut context, 3);
     h::press(&book.host, "k", "shift+k");
     frames(&[&window, &book], &mut context, 4);
     let rb = rect(book.vm);
-    // hold the button (top left of the window, outside the book) ...
-    let start = (500.0, 135.0);
+    // the window sits just beside the book; hold its button (the top left of the window) ...
+    let rw = place(&window, &rb, true);
+    frames(&[&window, &book], &mut context, 2);
+    let start = (rw[0] + 20.0, rw[1] + 35.0);
     assert!(!inside(&rb, start.0, start.1));
     move_to(start.0, start.1, &mut context);
     frames(&[&window, &book], &mut context, 2);
@@ -403,8 +416,9 @@ fn a_drag_that_began_on_an_imgui_window_is_kept_when_it_passes_under_a_claimed_o
     let held = unsafe { (*dear_imgui_rs::sys::igGetCurrentContext()).ActiveId };
     assert_ne!(held, 0, "the button is held");
     // ... and drag on under the book
-    move_to(300.0, 200.0, &mut context);
-    assert!(inside(&rb, 300.0, 200.0));
+    let under = (rb[0] + rb[2] - 50.0, start.1);
+    assert!(inside(&rb, under.0, under.1));
+    move_to(under.0, under.1, &mut context);
     frames(&[&window, &book], &mut context, 2);
     let active = unsafe { (*dear_imgui_rs::sys::igGetCurrentContext()).ActiveId };
     assert_eq!(active, held, "the button is still held under the book");
