@@ -48,10 +48,9 @@ pub(crate) struct Session {
     /// `"key"` or `"mod"` for a mod's own window, `"npc"` for what the server opened.
     pub opened_from: String,
     pub revision: u64,
-    /// The takeover kind this session mirrors (held corpse, merchant or bank).
+    /// The takeover kind this session mirrors (held corpse, merchant or bank, or a dialog or offer of round A2).
     pub held: Option<TakeoverKind>,
-    /// Round A6: what belongs to this one opening (the Start menu's entries, the chat line's start), for the
-    /// kinds the client opens itself (`open_client`). None for every other session.
+    /// Round A2: what this one opening carries (a dialog's text and options, an offer's words); null for the rest.
     pub data: serde_json::Value,
 }
 
@@ -70,8 +69,8 @@ impl Session {
         out
     }
 
-    /// `data` is always a table: the kind's own fields (the Start menu's entries, the chat line's start), empty for
-    /// every other window.
+    /// `data` is always a table: the dialog's or offer's own fields, the Start menu's entries, the chat line's start;
+    /// empty for every other window.
     pub(crate) fn data_json(&self) -> serde_json::Value {
         if self.data.is_null() { json!({}) } else { self.data.clone() }
     }
@@ -164,6 +163,7 @@ fn emit_closed(s: &Session, reason: &str) {
         "opened_from": s.opened_from,
         "revision": s.revision,
         "reason": reason,
+        "data": s.data_json(),
     });
     super::window_sessions::queue_event("windows.session", event);
 }
@@ -178,6 +178,7 @@ fn emit_opened(s: &Session) {
         "opened_from": s.opened_from,
         "revision": s.revision,
         "reason": serde_json::Value::Null,
+        "data": s.data_json(),
     });
     super::window_sessions::queue_event("windows.session", event);
 }
@@ -328,6 +329,7 @@ fn emit_changed(s: &Session) {
         "opened_from": s.opened_from,
         "revision": s.revision,
         "reason": serde_json::Value::Null,
+        "data": s.data_json(),
     });
     queue_event("windows.session", event);
 }
@@ -337,7 +339,14 @@ pub(crate) fn get(vm: u64, kind: &str) -> Option<Session> {
     if !is_active() {
         return None;
     }
-    with(|s| s.sessions.iter().find(|x| x.vm == vm && x.kind == kind).cloned())
+    let found = with(|s| s.sessions.iter().find(|x| x.vm == vm && x.kind == kind).cloned());
+    // round A2: a mod that asks for its dialog is showing it (the dialog's idle timer)
+    if let Some(s) = &found
+        && s.held.is_some_and(|k| TakeoverKind::DIALOGS.contains(&k))
+    {
+        super::dialog_sessions::touch(&s.id);
+    }
+    found
 }
 
 /// Some mod holds a session of `kind` (a window it opened for itself, or a held corpse, merchant or bank).
@@ -394,6 +403,9 @@ fn end_where(reason: &str, which: impl Fn(&Session) -> bool) -> usize {
     for session in &ended {
         super::confirm::cancel_for_session(&session.id, reason);
         emit_closed(session, reason);
+        if session.held.is_some_and(|k| TakeoverKind::DIALOGS.contains(&k)) {
+            super::dialog_sessions::session_ended(session, reason);
+        }
     }
     ended.len()
 }
@@ -456,6 +468,7 @@ pub(crate) fn end_vm(vm: u64) {
             }
         });
     }
+    super::dialog_sessions::vm_gone(vm);
     super::confirm::cancel_for_vm(vm);
 }
 
@@ -499,6 +512,34 @@ pub(crate) fn sync_held(holders: [Option<(u64, String)>; 3]) {
     }
 }
 
+/// Round A2: a dialog or offer the server sent, held for `vm` (`dialog_sessions` decides when). The session carries
+/// `data`; the registry ends it with `end_dialog_session`.
+pub(crate) fn start_dialog_session(vm: u64, addon: &str, kind: TakeoverKind, data: serde_json::Value) -> Session {
+    with(|s| {
+        s.next_id += 1;
+        s.next_revision += 1;
+        let session = Session {
+            id: format!("ws-{}", s.next_id),
+            kind: kind.name().into(),
+            vm,
+            addon: addon.into(),
+            origin: "server",
+            opened_from: "npc".into(),
+            revision: s.next_revision,
+            held: Some(kind),
+            data,
+        };
+        s.sessions.push(session.clone());
+        emit_opened(&session);
+        session
+    })
+}
+
+/// Round A2: the registry ends one of its dialog sessions (answered, passed, walked away, ...), told to the mod.
+pub(crate) fn end_dialog_session(id: &str, reason: &str) {
+    end_where(reason, |x| x.id == id);
+}
+
 fn take_pass_reason(vm: u64, kind: TakeoverKind) -> Option<&'static str> {
     with(|s| {
         let before = s.passes.len();
@@ -513,6 +554,10 @@ pub(crate) fn pass(vm: u64, id: &str) -> std::result::Result<(), (&'static str, 
     let Some(session) = find(vm, id) else {
         return Err(("stale_handle", "no such open window session".into()));
     };
+    if session.held.is_some_and(|k| TakeoverKind::DIALOGS.contains(&k)) {
+        // round A2: the game's own window shows this dialog or offer; the client does it at the next step
+        return super::dialog_sessions::request_pass(&session.id);
+    }
     let Some(kind) = session.held else {
         return Err((
             "unsupported",
@@ -679,6 +724,7 @@ pub(crate) fn reset_for_test() {
     FOCUS_ON.with(|a| a.set(false));
     OUTBOX.with(|o| o.borrow_mut().clear());
     super::confirm::reset_for_test();
+    super::dialog_sessions::reset_for_test();
 }
 
 #[cfg(test)]

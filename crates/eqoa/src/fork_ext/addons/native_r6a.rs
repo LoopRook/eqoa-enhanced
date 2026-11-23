@@ -457,6 +457,14 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             if scope == TakeoverScope::Own && super::window_kinds::is_strip(&kind_str) {
                 return error(lua, "eqoa.windows.takeover", "invalid_argument", "a raid strip requires scope 'all'");
             }
+            if scope == TakeoverScope::Own && super::window_kinds::is_dialog(&kind_str) {
+                return error(
+                    lua,
+                    "eqoa.windows.takeover",
+                    "invalid_argument",
+                    "a dialog or offer requires scope 'all': the game names no speaker, so none can be proven to answer this mod's own talk",
+                );
+            }
             let parsed = match TakeoverKind::parse(&kind_str) {
                 Ok(k) => k,
                 Err((code, msg)) => return error(lua, "eqoa.windows.takeover", code, &msg),
@@ -549,6 +557,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 tbl.set("raid_roll", window_takeover::is_taken(TakeoverKind::RaidRoll))?;
                 tbl.set("start_menu", window_takeover::is_taken(TakeoverKind::StartMenu))?;
                 tbl.set("chat_entry", window_takeover::is_taken(TakeoverKind::ChatEntry))?;
+                for k in TakeoverKind::DIALOGS {
+                    tbl.set(k.name(), window_takeover::is_taken(k))?;
+                }
                 tbl.set("holders", holders)?;
                 lua.pack_multi((tbl, Value::Nil))
             }

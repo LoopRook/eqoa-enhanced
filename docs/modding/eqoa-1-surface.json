@@ -6446,6 +6446,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.windows.session.data.data",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.windows.session.data.kind",
       "reason": null,
       "revision": 1,

@@ -711,6 +711,7 @@
   "eqoa.events.windows.key.data.owner",
   "eqoa.events.windows.key.data.ref",
   "eqoa.events.windows.session",
+  "eqoa.events.windows.session.data.data",
   "eqoa.events.windows.session.data.kind",
   "eqoa.events.windows.session.data.opened_from",
   "eqoa.events.windows.session.data.origin",

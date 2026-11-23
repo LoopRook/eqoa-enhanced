@@ -63,7 +63,12 @@ pub(crate) const RAID_READY: (&str, &str) = ("raid_ready", "Ready Check");
 pub(crate) const RAID_ROLL: (&str, &str) = ("raid_roll", "Loot Roll");
 /// Round A6: the chat line the Enter key opens, as a window a mod can hold (the game's edit box, chat purpose only).
 pub(crate) const CHAT_ENTRY: (&str, &str) = ("chat_entry", "Chat Entry");
-const OVERLAYS: [(&str, &str); 7] = [INVENTORY, MAP, SEARCH, TYPING, RAID_READY, RAID_ROLL, CHAT_ENTRY];
+/// Round A2: the game's yes/no offers (its message box, mode 14) a mod can hold under their own kinds.
+pub(crate) const GROUP_INVITE: (&str, &str) = ("group_invite", "Group Invitation");
+pub(crate) const REVIVE_OFFER: (&str, &str) = ("revive_offer", "Resurrection Offer");
+pub(crate) const SUMMON_OFFER: (&str, &str) = ("summon_offer", "Summons");
+const OVERLAYS: [(&str, &str); 10] =
+    [INVENTORY, MAP, SEARCH, TYPING, RAID_READY, RAID_ROLL, CHAT_ENTRY, GROUP_INVITE, REVIVE_OFFER, SUMMON_OFFER];
 
 /// The `eqoa` mode name of a native mode ID; `"other"` for an ID no window owns.
 pub(crate) fn mode_name(mode: i32) -> &'static str {
@@ -107,6 +112,12 @@ pub(super) fn is_view(kind: &str) -> bool {
 /// Server-pushed raid strips have no helper (`own`) session; a mod replaces them with scope `"all"`.
 pub(super) fn is_strip(kind: &str) -> bool {
     matches!(kind, "raid_ready" | "raid_roll")
+}
+
+/// Round A2: NPC dialogs and offers need scope `"all"`: the wire names no speaker, so a dialog cannot be proven to
+/// answer the mod's own `talk` (and an offer is never the mod's own action).
+pub(super) fn is_dialog(kind: &str) -> bool {
+    matches!(kind, "text_dialog" | "response_dialog" | "group_invite" | "revive_offer" | "summon_offer")
 }
 
 #[cfg(test)]

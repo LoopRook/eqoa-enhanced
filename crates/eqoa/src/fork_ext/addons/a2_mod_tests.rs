@@ -1,0 +1,293 @@
+// Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
+//! Round A2: the two bundled example mods, the Dialog Window and the Quest Turn-in Helper. Each ships off, declares
+//! what it calls, holds its kinds with scope all, and reacts to a dialog session the client starts (the registry the
+//! packets feed: `dialog_sessions`). The turn-in helper matches an option by the quest's own words and gives every
+//! dialog it does not recognise back to the game's window at once.
+use super::{
+    action_broker,
+    bridge::Bridge,
+    dialog_sessions::{self, Item},
+    discovery::DiscoveredAddon,
+    host::Host,
+    native_core::{CORE, Core},
+    native_events, options, window_sessions as ws, window_takeover,
+};
+use dear_imgui_rs::Context;
+use serde_json::json;
+use std::path::PathBuf;
+
+fn root(id: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods").join(id).canonicalize().unwrap()
+}
+
+fn manifest(id: &str) -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(root(id).join("mod.json")).unwrap()).unwrap()
+}
+
+/// The mod as discovery reads it (so its `replaces` and `provides` are the manifest's).
+fn addon(id: &str) -> DiscoveredAddon {
+    let found = super::discovery::discover(root(id).parent().unwrap());
+    found.addons.into_iter().find(|a| a.id == id).unwrap_or_else(|| panic!("{id} is bundled"))
+}
+
+fn context() -> Context {
+    let mut context = Context::create();
+    context.set_ini_filename::<PathBuf>(None).unwrap();
+    context.io_mut().set_display_size([1024.0, 768.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    context.font_atlas().try_claim_legacy_renderer().unwrap().build();
+    context
+}
+
+fn fixture() {
+    CORE.with(|c| *c.borrow_mut() = Core::default());
+    action_broker::reset_all_for_test();
+    ws::reset_for_test();
+    window_takeover::reset_all_for_test();
+    window_takeover::forget_switch_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+    options::reset_in_memory();
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.in_world = true;
+        c.view.player = json!({"id": 256, "name": "Me", "level": 20});
+        c.view.quests = vec![
+            json!({"ref": {"$ref": "quest", "key": "1", "generation": 0, "incarnation": 1}, "index": 1, "title": "Bat Eyes"}),
+            json!({"ref": {"$ref": "quest", "key": "2", "generation": 0, "incarnation": 1}, "index": 2, "title": "The Militia"}),
+        ];
+    });
+}
+
+fn frames(host: &Host, bridge: &Bridge, context: &mut Context, n: usize) -> usize {
+    let mut vertices = 0;
+    for _ in 0..n {
+        context.frame();
+        bridge
+            .invoke(|| {
+                native_events::dispatch(host)?;
+                native_events::render(host)
+            })
+            .unwrap();
+        vertices = context.render_legacy().draw_data().total_vtx_count();
+    }
+    vertices
+}
+
+fn press(host: &Host, key: &str) {
+    CORE.with(|c| {
+        c.borrow_mut().emit("input.key", json!({"key": key, "combo": key, "down": true, "repeat": false, "synthetic": false, "text": ""}))
+    });
+    native_events::dispatch(host).unwrap();
+}
+
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().collect()
+}
+
+struct Rig {
+    host: Host,
+    bridge: Bridge,
+    context: Context,
+    vm: u64,
+}
+
+fn rig(id: &str) -> Rig {
+    fixture();
+    let m = manifest(id);
+    assert_eq!(m["enabled"], false, "{id} ships off");
+    assert!(crate::fork_ext::bundled::PACKAGES.contains(&id), "{id} ships in the bundle");
+    for file in ["mod.json", "main.lua", "README.md"] {
+        assert!(crate::fork_ext::bundled::EMBEDDED_FILES.iter().any(|f| f.path == format!("{id}/{file}")), "{file} ships");
+    }
+    let context = context();
+    let host = Host::for_addon(&addon(id)).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon(id)).unwrap();
+    let vm = native_events::bus(&host.lua).borrow().vm;
+    Rig { host, bridge, context, vm }
+}
+
+impl Rig {
+    fn frames(&mut self, n: usize) -> usize {
+        frames(&self.host, &self.bridge, &mut self.context, n)
+    }
+    /// A dialog with answers arrives and starts as a session for this mod, as the client does it.
+    fn dialog(&mut self, id: u32, text: &str, options: &[&str]) {
+        dialog_sessions::hold(
+            Item::Box { id, text: wide(text), options: options.iter().map(|o| wide(o)).collect(), talked_to: None },
+            None,
+        );
+        assert!(dialog_sessions::start_next(true, None).is_some(), "the session started");
+    }
+}
+
+/// The mod holds every kind it declares (scope all) after its first frames.
+fn assert_holds(vm: u64, kinds: &[window_takeover::TakeoverKind]) {
+    for k in kinds {
+        assert_eq!(window_takeover::holder_vm(*k), Some(vm), "{} is held", k.name());
+    }
+}
+
+#[test]
+fn a2_manifests_declare_what_the_mods_call() {
+    for id in ["eqoa_dialogs", "eqoa_turnin"] {
+        let m = manifest(id);
+        let declared: Vec<String> = m["capabilities"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()).collect();
+        let src = std::fs::read_to_string(root(id).join("main.lua")).unwrap();
+        for cap in ["eqoa.windows.takeover", "eqoa.windows.session", "eqoa.actions.dialog_answer"] {
+            assert!(declared.iter().any(|d| d == cap), "{id} declares {cap}");
+        }
+        for (call, cap) in [("eqoa.options.toggle", "eqoa.options.toggle"), ("eqoa.options.get", "eqoa.options.get"), ("eqoa.log.write", "eqoa.log.write")] {
+            if src.contains(call) {
+                assert!(declared.iter().any(|d| d == cap), "{id} calls {call} and must declare {cap}");
+            }
+        }
+        assert!(m["replaces"].as_array().unwrap().iter().any(|r| r == "response_dialog"), "{id} replaces the dialog");
+    }
+    // the Dialog Window also takes the offers
+    let m = manifest("eqoa_dialogs");
+    for kind in ["group_invite", "revive_offer", "summon_offer"] {
+        assert!(m["replaces"].as_array().unwrap().iter().any(|r| r == kind), "{kind}");
+    }
+}
+
+#[test]
+fn a2_mods_and_addons_labels_the_dialog_mods() {
+    let found = super::discovery::discover(root("eqoa_dialogs").parent().unwrap());
+    let lines = |id: &str| {
+        let a = found.addons.iter().find(|a| a.id == id).unwrap_or_else(|| panic!("{id} is bundled"));
+        super::runtime::disclosure_lines(a)
+    };
+    let dialogs = lines("eqoa_dialogs");
+    assert!(dialogs.contains(&"Can answer NPC dialogs".to_string()), "{dialogs:?}");
+    assert!(
+        dialogs.iter().any(|l| l == "Replaces game windows: Dialog, Group Invitation, Resurrection Offer, Summons"),
+        "{dialogs:?}"
+    );
+    assert!(dialogs.contains(&"Provides: NPC dialog window".to_string()), "{dialogs:?}");
+    let turnin = lines("eqoa_turnin");
+    assert!(turnin.contains(&"Can answer NPC dialogs".to_string()), "{turnin:?}");
+    assert!(turnin.iter().any(|l| l == "Replaces game windows: Dialog"), "{turnin:?}");
+    // the control: a mod that answers nothing says nothing of the kind
+    assert!(!lines("eqoa_stats_box").contains(&"Can answer NPC dialogs".to_string()));
+}
+
+#[test]
+fn a2_turnin_holds_the_dialogs_shows_a_matching_quest_and_passes_everything_else_at_once() {
+    let mut r = rig("eqoa_turnin");
+    r.frames(3);
+    assert_holds(r.vm, &[window_takeover::TakeoverKind::TextDialog, window_takeover::TakeoverKind::ResponseDialog]);
+    // a dialog that names a quest in the journal: a box, no pass, nothing answered
+    r.dialog(1, "Well?", &["Tell me about the weather", "I have brought the bat eyes you wanted", "Goodbye"]);
+    let vertices = r.frames(3);
+    assert!(vertices > 0, "the hand-in box is drawn: {:?}", r.host.drain_logs());
+    assert!(dialog_sessions::take_passes().is_empty(), "a recognised dialog is not passed back");
+    assert!(action_broker::queued_kinds_for_test().is_empty(), "and nothing is answered without the player's click");
+    drop(r);
+    // a dialog it does not recognise: passed at once (negative control: the matched one above was not)
+    let mut r = rig("eqoa_turnin");
+    r.frames(2);
+    r.dialog(2, "Hello there", &["Where is the inn?", "Goodbye"]);
+    r.frames(2);
+    assert_eq!(dialog_sessions::take_passes().len(), 1, "an unknown dialog goes back to the game's window");
+    drop(r);
+    // plain text is never its business either
+    let mut r = rig("eqoa_turnin");
+    r.frames(2);
+    dialog_sessions::hold(Item::Text { text: wide("Hail, bat eyes"), talked_to: None }, None);
+    assert!(dialog_sessions::start_next(true, None).is_some());
+    r.frames(2);
+    assert_eq!(dialog_sessions::take_passes().len(), 1, "a text dialog is passed");
+}
+
+#[test]
+fn a2_turnin_matches_on_the_options_words_never_on_their_position() {
+    let mut r = rig("eqoa_turnin");
+    r.frames(2);
+    // the same words in another order and place: still a match, and the box names the quest
+    r.dialog(3, "Well?", &["Goodbye", "Not now", "About The Militia: I am done", "Tell me more"]);
+    assert!(r.frames(3) > 0);
+    assert!(dialog_sessions::take_passes().is_empty());
+    // option text that only looks like a hand-in by position is not one
+    drop(r);
+    let mut r = rig("eqoa_turnin");
+    r.frames(2);
+    r.dialog(4, "Hand in?", &["Option 1", "Option 2", "Option 3"]);
+    r.frames(2);
+    assert_eq!(dialog_sessions::take_passes().len(), 1);
+}
+
+#[test]
+fn a2_turnin_answers_by_itself_only_when_told_to_and_never_between_two_matches() {
+    let mut r = rig("eqoa_turnin");
+    r.frames(2);
+    assert_eq!(options::get_toggle("eqoa_turnin", "auto_answer"), Some(false), "off by default");
+    r.dialog(5, "Well?", &["Goodbye", "Here is the bat eyes quest done"]);
+    r.frames(3);
+    assert!(action_broker::queued_kinds_for_test().is_empty(), "off: no answer");
+    drop(r);
+    let mut r = rig("eqoa_turnin");
+    options::set_toggle("eqoa_turnin", "auto_answer", true);
+    r.frames(2);
+    r.dialog(6, "Well?", &["Goodbye", "Here is the bat eyes quest done"]);
+    r.frames(3);
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "on: the one matching answer is sent");
+    // two matches: it never guesses
+    drop(r);
+    let mut r = rig("eqoa_turnin");
+    options::set_toggle("eqoa_turnin", "auto_answer", true);
+    r.frames(2);
+    r.dialog(7, "Well?", &["Bat Eyes is done", "The Militia is done"]);
+    r.frames(3);
+    assert!(action_broker::queued_kinds_for_test().is_empty(), "two quests match: nothing is answered for the player");
+}
+
+#[test]
+fn a2_dialog_window_draws_a_dialog_answers_with_a_key_and_gives_it_back_on_escape() {
+    let mut r = rig("eqoa_dialogs");
+    assert_eq!(r.frames(3), 0, "no dialog, nothing drawn");
+    assert_holds(
+        r.vm,
+        &[
+            window_takeover::TakeoverKind::TextDialog,
+            window_takeover::TakeoverKind::ResponseDialog,
+            window_takeover::TakeoverKind::GroupInvite,
+            window_takeover::TakeoverKind::ReviveOffer,
+            window_takeover::TakeoverKind::SummonOffer,
+        ],
+    );
+    r.dialog(10, "Welcome, traveller. What do you seek?", &["Rumors", "Work", "Nothing"]);
+    let vertices = r.frames(3);
+    assert!(vertices > 0, "the dialog window is drawn: {:?}", r.host.drain_logs());
+    let logs: Vec<String> = r.host.drain_logs().unwrap().into_iter().filter(|l| !l.contains("[info]")).collect();
+    assert!(logs.is_empty(), "no warning or error: {logs:?}");
+    press(&r.host, "2");
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "key 2 answers the second option");
+    // Escape: back to the game's window, never dropped
+    action_broker::reset_all_for_test();
+    press(&r.host, "escape");
+    assert_eq!(dialog_sessions::take_passes().len(), 1, "Escape passes the dialog back (negative control: a mod that dropped it passes nothing)");
+    assert!(action_broker::queued_kinds_for_test().is_empty());
+}
+
+#[test]
+fn a2_dialog_window_pages_a_long_list_and_shows_an_offer() {
+    let mut r = rig("eqoa_dialogs");
+    r.frames(2);
+    let many: Vec<String> = (1..=10).map(|i| format!("Choice {i}")).collect();
+    let refs: Vec<&str> = many.iter().map(String::as_str).collect();
+    r.dialog(11, "Many", &refs);
+    assert!(r.frames(3) > 0);
+    // 7 is More on a page of six: the seventh option needs the next page, so key 7 pages and does not answer
+    press(&r.host, "7");
+    assert!(action_broker::queued_kinds_for_test().is_empty(), "More only turns the page");
+    r.frames(2);
+    press(&r.host, "1");
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "key 1 on the second page is the seventh option");
+    // an offer is shown in its own box and answered with the same call
+    drop(r);
+    let mut r = rig("eqoa_dialogs");
+    r.frames(2);
+    dialog_sessions::hold(Item::Offer { summons: true, name: "Mage".into(), text: wide("Mage summons you.") }, None);
+    assert!(r.frames(3) > 0, "the offer box is drawn");
+}

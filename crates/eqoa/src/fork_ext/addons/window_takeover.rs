@@ -41,17 +41,23 @@ pub(crate) enum TakeoverKind {
     Bank = 2,
     RaidReady = 3,
     RaidRoll = 4,
+    // round A2: NPC dialogs and the game's yes/no offers (`dialog_sessions`)
+    TextDialog = 5,
+    ResponseDialog = 6,
+    GroupInvite = 7,
+    ReviveOffer = 8,
+    SummonOffer = 9,
     /// Round A6: the Start key's menu. A client-side window with no server session: a mod holds it whole (`all`).
-    StartMenu = 5,
+    StartMenu = 10,
     /// Round A6: the chat line the Enter key opens (the chat purpose of the game's edit box only).
-    ChatEntry = 6,
+    ChatEntry = 11,
 }
 
 impl TakeoverKind {
     /// The three server-window kinds (loot, merchant, bank) that carry hidden server sessions and batch hooks.
     pub(crate) const ALL: [Self; 3] = [Self::Loot, Self::Merchant, Self::Bank];
     /// Every takeover kind, including server-pushed raid strips (`raid_ready`, `raid_roll`).
-    pub(crate) const ALL_KINDS: [Self; 7] = [
+    pub(crate) const ALL_KINDS: [Self; 12] = [
         Self::Loot,
         Self::Merchant,
         Self::Bank,
@@ -59,6 +65,19 @@ impl TakeoverKind {
         Self::RaidRoll,
         Self::StartMenu,
         Self::ChatEntry,
+        Self::TextDialog,
+        Self::ResponseDialog,
+        Self::GroupInvite,
+        Self::ReviveOffer,
+        Self::SummonOffer,
+    ];
+    /// The NPC dialogs and offers of round A2: scope `all` only, held as `dialog_sessions`.
+    pub(crate) const DIALOGS: [Self; 5] = [
+        Self::TextDialog,
+        Self::ResponseDialog,
+        Self::GroupInvite,
+        Self::ReviveOffer,
+        Self::SummonOffer,
     ];
 
     pub(crate) const fn name(self) -> &'static str {
@@ -70,6 +89,11 @@ impl TakeoverKind {
             Self::RaidRoll => "raid_roll",
             Self::StartMenu => "start_menu",
             Self::ChatEntry => "chat_entry",
+            Self::TextDialog => "text_dialog",
+            Self::ResponseDialog => "response_dialog",
+            Self::GroupInvite => "group_invite",
+            Self::ReviveOffer => "revive_offer",
+            Self::SummonOffer => "summon_offer",
         }
     }
 
@@ -82,17 +106,22 @@ impl TakeoverKind {
             "raid_roll" => Ok(Self::RaidRoll),
             "start_menu" => Ok(Self::StartMenu),
             "chat_entry" => Ok(Self::ChatEntry),
+            "text_dialog" => Ok(Self::TextDialog),
+            "response_dialog" => Ok(Self::ResponseDialog),
+            "group_invite" => Ok(Self::GroupInvite),
+            "revive_offer" => Ok(Self::ReviveOffer),
+            "summon_offer" => Ok(Self::SummonOffer),
             _ if super::window_kinds::is_window(s) => Err((
                 "unsupported",
                 format!(
                     "the game's '{s}' window cannot be taken over in this version (only 'loot', 'merchant', \
-                     'bank', 'raid_ready', 'raid_roll', 'start_menu' and 'chat_entry'); more windows follow the window-replacement roadmap"
+                     'bank', 'raid_ready', 'raid_roll', 'text_dialog', 'response_dialog', 'group_invite',                      'revive_offer', 'summon_offer', 'start_menu' and 'chat_entry'); more windows follow the window-replacement roadmap"
                 ),
             )),
             _ => Err((
                 "invalid_argument",
                 format!(
-                    "window takeover kind must be 'loot', 'merchant', 'bank', 'raid_ready', 'raid_roll', 'start_menu' or 'chat_entry', got '{s}'"
+                    "window takeover kind must be 'loot', 'merchant', 'bank', 'raid_ready', 'raid_roll', 'text_dialog', 'response_dialog', 'group_invite', 'revive_offer', 'summon_offer', 'start_menu' or 'chat_entry', got '{s}'"
                 ),
             )),
         }
@@ -216,7 +245,7 @@ struct TakeoverState {
     /// The merchant's list still owed for the mod's last sale or buy when its hidden session ended (the
     /// sale's answer can follow the action's end): held hidden for `LIST_GRACE`, then closed again quietly.
     grace_merchant: Option<ListGrace>,
-    holders: [Option<Holder>; 7],
+    holders: [Option<Holder>; 12],
     pending_opens: [Option<PendingOpen>; 3],
     /// Why a kind's hidden session is to end (set by release, the mod finishing, the holder going).
     pending_close: [Option<&'static str>; 3],
@@ -357,6 +386,8 @@ pub(crate) fn takeover(
         if let Some(existing) = &mut s.holders[idx] {
             if existing.vm == vm {
                 existing.scope = scope;
+                // round A2: asking again while holding keeps a dialog the mod is showing from going idle
+                super::dialog_sessions::touch_vm(vm);
                 // asking again while holding renews a live hidden session's idle timer (L5): a mod
                 // that is still showing the session keeps it
                 if idx < 3 && s.hidden[idx].active && s.hidden[idx].vm == vm {
@@ -421,6 +452,8 @@ pub(crate) fn release_vm(vm: u64) {
 }
 
 pub(crate) fn release_all() {
+    // round A2: the dialogs and offers in the registry are the old world's
+    super::dialog_sessions::world_changed();
     // round A1: the mod windows, held sessions, controller focus and any question end with the world
     super::window_sessions::world_changed();
     let _ = release_claims_where("zoning", |_| true);
@@ -736,10 +769,7 @@ pub(crate) fn decide_open(
                             TakeoverKind::Merchant => observed_target,
                             TakeoverKind::Loot if !pending.foreign => Some(pending.target_id),
                             TakeoverKind::Loot => observed_target,
-                            TakeoverKind::RaidReady
-                            | TakeoverKind::RaidRoll
-                            | TakeoverKind::StartMenu
-                            | TakeoverKind::ChatEntry => None,
+                            _ => None,
                         };
                         known == Some(pending.target_id)
                     }

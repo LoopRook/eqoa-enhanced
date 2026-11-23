@@ -22,6 +22,10 @@ mod a1_play;
 #[path = "a6_play.rs"]
 mod a6_play;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "a2_play.rs"]
+mod a2_play;
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "map_mod_tests.rs"]
 mod map_mod_tests;
@@ -119,6 +123,8 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
     } else {
         crate::fork_ext::addons::native_a6::event_boundary();
     }
+    // round A2: what a dialog or offer this packet brings looks like before the game handles it
+    a2_play::pre_event(play, event);
     let api = api_capture::begin_game_event(play, event);
     if let net::session::Event::MasterLoot(m) = event {
         crate::fork_ext::addons::action_broker::set_master_loot(m.is_some());
@@ -259,6 +265,15 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
         loot_inv_add,
     }
 }
+
+/// Round A2: right after the game handled a packet and before its window state is read (`end_game_event`), a dialog or
+/// offer the packet opened or queued is taken for the mod that holds its kind. The one upstream line for A2.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn divert_event(play: &mut Play) {
+    a2_play::post_event(play);
+}
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn divert_event(_: &mut Play) {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
@@ -520,11 +535,7 @@ pub(crate) fn window_taken(play: &Play, mode: i32) -> bool {
         let observed_target = match kind {
             TakeoverKind::Loot => crate::fork_ext::loot_source::peek_single(),
             TakeoverKind::Merchant => play.npcw.shop.id,
-            TakeoverKind::Bank
-            | TakeoverKind::RaidReady
-            | TakeoverKind::RaidRoll
-            | TakeoverKind::StartMenu
-            | TakeoverKind::ChatEntry => None,
+            _ => None,
         };
         let fallback_player_target = (play.target != u32::MAX).then_some(play.target);
         let decision = window_takeover::decide_open(
@@ -678,7 +689,7 @@ fn close_hidden_session(
             tlog!("takeover: bank hidden session closed ({})", owed.reason);
             play.bank.state = 0;
         }
-        TakeoverKind::RaidReady | TakeoverKind::RaidRoll | TakeoverKind::StartMenu | TakeoverKind::ChatEntry => {}
+        _ => {}
     }
 }
 
@@ -812,6 +823,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         sync_hidden_sessions(_play);
         a1_play::tick(_play);
         a6_play::tick(_play);
+        a2_play::tick(_play);
         api_capture::a5::tick(_play);
         if crate::fork_ext::addons::native_core::capture_requested()
             || crate::fork_ext::addons::window_takeover::has_activity()
