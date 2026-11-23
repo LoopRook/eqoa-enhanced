@@ -84,6 +84,17 @@ local function cast_window(player, target)
     ui.End()
 end
 
+local function invitable(player, target)
+    if target.kind ~= "player" or target.id == player.id then return false end
+    local group = eqoa.group.get()
+    if group then
+        for _, m in ipairs(group.members) do
+            if m.id == target.id then return false end
+        end
+    end
+    return true
+end
+
 local function target_window(player, target)
     ui.SetNextWindowPos(320, 60, FIRST_USE)
     if not ui.Begin("Target") then ui.End() return end
@@ -100,11 +111,20 @@ local function target_window(player, target)
     if target.level then ui.SameLine() ui.Text("level " .. tostring(target.level)) end
     if info and info.title then ui.Text(info.title) end
     if info and info.guild then ui.TextDisabled("<" .. info.guild .. ">") end
-    if ui.Button("Invite to group") then eqoa.actions.group_invite() end
+    -- each button only where it applies: Invite for another player who is not in your group yet
+    local shown = false
+    if invitable(player, target) then
+        if ui.Button("Invite to group") then eqoa.actions.group_invite() end
+        shown = true
+    end
     if player and player.has_pet then
-        ui.SameLine()
-        if ui.Button("Pet attack") then eqoa.actions.pet_attack() end
-        ui.SameLine()
+        -- the pet cannot attack yourself or itself; back off applies whatever is targeted
+        if target.id ~= player.id and target.id ~= player.pet_id then
+            if shown then ui.SameLine() end
+            if ui.Button("Pet attack") then eqoa.actions.pet_attack() end
+            shown = true
+        end
+        if shown then ui.SameLine() end
         if ui.Button("Pet back off") then eqoa.actions.pet_back_off() end
     end
     ui.End()
