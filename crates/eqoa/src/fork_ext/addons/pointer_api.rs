@@ -77,9 +77,11 @@ fn emit(name: &str, button: Option<&str>, steps: Option<f32>) {
     if !native_core::capture_requested() {
         return;
     }
+    // the modifiers held at this press (a click that selects with Ctrl or Shift), as the window last said
+    let (ctrl, alt, shift) = super::input::modifiers();
     let data = POINTER.with(|p| {
         let p = p.borrow();
-        json!({"x":p.at[0],"y":p.at[1],"inside_window":p.inside,"button":button,"steps":steps})
+        json!({"x":p.at[0],"y":p.at[1],"inside_window":p.inside,"button":button,"steps":steps,"ctrl":ctrl,"shift":shift,"alt":alt})
     });
     native_core::emit(name, data);
 }

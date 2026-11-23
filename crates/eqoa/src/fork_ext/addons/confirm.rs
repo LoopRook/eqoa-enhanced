@@ -35,6 +35,9 @@ pub(crate) const TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) enum Act {
     /// `inv_index` is the game's slot for the item (what the destroy message names), `count` how many.
     Destroy { inv_index: u32, name: String, count: i64 },
+    /// Bag Viewer multi-select: several whole stacks, asked about once. Each is (the game's slot, name, count). A Yes
+    /// destroys them one at a time, each waiting for the server's answer to the last (`Run`), re-checking the slot.
+    DestroyMany { items: Vec<(u32, String, i64)> },
     DropQuest { index: usize, title: String, stamp: u32, revision: u64 },
     /// Round A7: guild kick, accepting a friend request, accepting a guild invitation.
     GuildKick { member_id: i32, name: String },
@@ -53,6 +56,7 @@ impl Act {
     pub(crate) const fn kind(&self) -> &'static str {
         match self {
             Self::Destroy { .. } => "destroy",
+            Self::DestroyMany { .. } => "destroy_many",
             Self::DropQuest { .. } => "drop_quest",
             Self::GuildKick { .. } => "guild_kick",
             Self::FriendAccept { .. } => "friend_accept",
@@ -87,6 +91,32 @@ struct State {
     next_id: u64,
     /// Yes answers waiting for the client to carry them out.
     answered: Vec<Pending>,
+    /// Group destroys the player said Yes to, being carried out one stack at a time (`a1_play::step_runs`).
+    runs: Vec<Run>,
+}
+
+/// A group destroy under way: what is left to destroy, and what has been done.
+pub(crate) struct Run {
+    pub p: Pending,
+    pub queue: std::collections::VecDeque<(u32, String, i64)>,
+    pub total: usize,
+    pub sent: u32,
+    /// Names of the stacks not destroyed (gone, changed or smaller by the time their turn came).
+    pub skipped: Vec<String>,
+    /// Since when the server has owed an answer to the last destroy.
+    pub waiting_since: Option<Instant>,
+}
+
+impl Run {
+    pub(crate) fn detail(&self, reason: Option<&str>) -> serde_json::Value {
+        json!({
+            "sent": self.sent > 0,
+            "sent_count": self.sent,
+            "total": self.total,
+            "skipped": self.skipped,
+            "reason": reason,
+        })
+    }
 }
 
 thread_local! {
@@ -173,7 +203,7 @@ pub(crate) fn is_open() -> bool {
 pub(crate) fn has_work() -> bool {
     STATE.with(|s| {
         let s = s.borrow();
-        s.current.is_some() || !s.answered.is_empty()
+        s.current.is_some() || !s.answered.is_empty() || !s.runs.is_empty()
     })
 }
 
@@ -243,6 +273,23 @@ pub(crate) fn take_answered() -> Vec<Pending> {
     STATE.with(|s| std::mem::take(&mut s.borrow_mut().answered))
 }
 
+/// A Yes to a group destroy starts its run (`Act::DestroyMany` only).
+pub(crate) fn begin_run(p: Pending) {
+    let Act::DestroyMany { items } = &p.act else { return };
+    let queue: std::collections::VecDeque<_> = items.iter().cloned().collect();
+    let run = Run { total: queue.len(), queue, sent: 0, skipped: Vec::new(), waiting_since: None, p };
+    STATE.with(|s| s.borrow_mut().runs.push(run));
+}
+
+/// The runs, for the client to advance one step; `put_runs` gives back the ones still going.
+pub(crate) fn take_runs() -> Vec<Run> {
+    STATE.with(|s| std::mem::take(&mut s.borrow_mut().runs))
+}
+
+pub(crate) fn put_runs(runs: Vec<Run>) {
+    STATE.with(|s| s.borrow_mut().runs.extend(runs));
+}
+
 /// The client carried a Yes out (or could not): told to the mod.
 pub(crate) fn report_done(p: &Pending, answer: &str, detail: serde_json::Value) {
     emit_closed(p, answer, detail);
@@ -254,6 +301,13 @@ pub(crate) fn cancel_for_session(session: &str, reason: &str) {
         finish(false, reason);
     }
     STATE.with(|s| s.borrow_mut().answered.retain(|p| p.session.as_deref() != Some(session)));
+    // a group destroy under way stops with its window: what is left is not destroyed
+    let (stopped, kept): (Vec<Run>, Vec<Run>) =
+        take_runs().into_iter().partition(|r| r.p.session.as_deref() == Some(session));
+    put_runs(kept);
+    for r in stopped {
+        emit_closed(&r.p, reason, r.detail(Some(reason)));
+    }
 }
 
 /// Cancels any open or queued confirm of `kind` (e.g. a 45 s request timeout cancelling a pending accept prompt).
@@ -273,6 +327,7 @@ pub(crate) fn cancel_for_vm(vm: u64) {
             s.current = None;
         }
         s.answered.retain(|p| p.vm != vm);
+        s.runs.retain(|r| r.p.vm != vm);
     });
 }
 
@@ -284,6 +339,10 @@ pub(crate) fn cancel_all(reason: &str) {
     let stale = STATE.with(|s| std::mem::take(&mut s.borrow_mut().answered));
     for p in stale {
         emit_closed(&p, reason, serde_json::Value::Null);
+    }
+    // a group destroy under way ends with the world: what is left is not destroyed, and the mod is told how far it got
+    for r in take_runs() {
+        emit_closed(&r.p, reason, r.detail(Some(reason)));
     }
 }
 
@@ -330,6 +389,26 @@ pub(crate) fn destroy_text(name: &str, count: i64, worn: bool, quick_slot: bool,
     }
     if no_trade {
         text.push_str(" It is NO TRADE: it cannot be given back.");
+    }
+    text
+}
+
+/// The question for a group destroy: how many stacks, then one line for each, as `destroy_text` names one.
+pub(crate) fn destroy_many_text(items: &[(String, i64, bool, bool, bool)]) -> String {
+    let noun = if items.len() == 1 { "item" } else { "items" };
+    let mut text = format!("Destroy these {} {noun}? It cannot be undone.", items.len());
+    for (name, count, worn, quick_slot, no_trade) in items {
+        text.push_str(&format!("
+- {}", if *count > 1 { format!("{count} x \"{name}\"") } else { format!("\"{name}\"") }));
+        if *worn {
+            text.push_str(" (worn)");
+        }
+        if *quick_slot {
+            text.push_str(" (quick slot)");
+        }
+        if *no_trade {
+            text.push_str(" (NO TRADE)");
+        }
     }
     text
 }

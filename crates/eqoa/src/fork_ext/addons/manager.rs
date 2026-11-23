@@ -1138,6 +1138,7 @@ mod tests {
     include!("map_mod_manager_tests.rs");
     include!("round_minimap_manager_tests.rs");
     include!("bag_viewer_tests.rs");
+    include!("bag_multi_window_tests.rs");
     include!("perf_round_tests.rs");
 
     use super::super::big_stack;

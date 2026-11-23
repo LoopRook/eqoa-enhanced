@@ -62,6 +62,22 @@ pub(crate) fn dispatch(play: &mut Play, action: &A1Action) -> DispatchOutcome {
             let act = Act::Destroy { inv_index: it.inv_index, name: it.item.name.clone(), count };
             ask(act, text, "inventory")
         }
+        A1Action::DestroyMany { items } => {
+            // one question for every whole stack named; each is checked to be in the pack now, and again at its turn
+            let mut lines = Vec::with_capacity(items.len());
+            let mut acts = Vec::with_capacity(items.len());
+            for item in items {
+                let idx = match item_index(play, item) {
+                    Ok(i) => i,
+                    Err(e) => return e,
+                };
+                let it = &play.dump.inventory.items[idx];
+                let count = it.quantity.max(1);
+                lines.push((it.item.name.clone(), count, it.equip_slot != -1, it.quick_slot >= 0, it.item.no_trade > 0));
+                acts.push((it.inv_index, it.item.name.clone(), count));
+            }
+            ask(Act::DestroyMany { items: acts }, confirm::destroy_many_text(&lines), "inventory")
+        }
         A1Action::LinkItem { item } => {
             let idx = match item_index(play, item) {
                 Ok(i) => i,
@@ -147,6 +163,8 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
             play.item_outs(vec![crate::itemmenu::ItemOut::UseItemOn(idx as i32, *count as i32)]);
             Ok(())
         }
+        // a group destroy is carried out stack by stack (`step_runs`), never in one step
+        Act::DestroyMany { .. } => Err("a group destroy runs stack by stack".into()),
         Act::DropQuest { index, title, stamp, revision } => {
             let current = crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow().quest_revision);
             let now_title = play
@@ -238,7 +256,62 @@ pub(crate) fn tick(play: &mut Play) {
             super::api_capture::a5::hold(p);
             continue;
         }
+        if matches!(p.act, Act::DestroyMany { .. }) {
+            confirm::begin_run(p);
+            continue;
+        }
         finish_answer(play, &p);
+    }
+    step_runs(play);
+}
+
+/// How long a group destroy waits for the server's answer to one stack before it gives up on the rest (the game's own
+/// item window gives up after 10 s too).
+const RUN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A group destroy the player said Yes to, one stack a step: the game's own destroy (0x003C) waits for the server's
+/// answer to the last, so this does too. Each stack is checked to be what the question named at its turn (the slot may
+/// have moved, emptied or changed meanwhile); one that is not is skipped and told to the mod, never destroyed.
+fn step_runs(play: &mut Play) {
+    let mut runs = confirm::take_runs();
+    runs.retain_mut(|run| advance_run(play, run));
+    confirm::put_runs(runs);
+}
+
+/// Returns whether the run goes on.
+fn advance_run(play: &mut Play, run: &mut confirm::Run) -> bool {
+    if play.is_dead() || !play.in_world_now() {
+        confirm::report_done(&run.p, "yes", run.detail(Some("not in the world")));
+        return false;
+    }
+    loop {
+        if play.waiting {
+            let since = *run.waiting_since.get_or_insert_with(std::time::Instant::now);
+            if since.elapsed() >= RUN_WAIT {
+                confirm::report_done(&run.p, "yes", run.detail(Some("the server did not answer")));
+                return false;
+            }
+            return true;
+        }
+        run.waiting_since = None;
+        let Some((inv_index, name, count)) = run.queue.pop_front() else {
+            confirm::report_done(&run.p, "yes", run.detail(None));
+            return false;
+        };
+        let found = play.dump.inventory.items.iter().position(|it| it.inv_index == inv_index);
+        match found {
+            Some(idx) => {
+                let it = &play.dump.inventory.items[idx];
+                if it.item.name == name && count <= it.quantity.max(1) {
+                    play.item_outs(vec![crate::itemmenu::ItemOut::UseItemOn(idx as i32, count as i32)]);
+                    run.sent += 1;
+                    // the game waits for the server now: the next stack goes on a later step
+                    return true;
+                }
+                run.skipped.push(name);
+            }
+            None => run.skipped.push(name),
+        }
     }
 }
 

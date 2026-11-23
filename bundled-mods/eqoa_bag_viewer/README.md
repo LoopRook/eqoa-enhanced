@@ -92,3 +92,27 @@ An item's menu also has **Link in chat** (puts its link in the chat line), **Hid
 worn items, where the server offers them) and **Destroy...**. Destroy never destroys at once: the game puts its own
 **"Destroy ...?"** question on the screen, starting on **No**; Left or Right chooses, Enter answers, Escape is No, or
 click Yes or No. Only your own Yes destroys the item; the window's result line then says what you answered.
+
+## Several items at once (Ctrl+click, Shift+click)
+
+**Ctrl+click** a slot to select it (it gets a blue outline); Ctrl+click it again to take it out of the selection. **Shift+click**
+selects every slot from the one you clicked last to this one (**Ctrl+Shift+click** adds that range to what is already selected).
+A plain click works as before and clears the selection. The line under the grid says how many are selected. **Right-click** any
+selected item for one menu titled **"N items selected"**:
+
+- **Mark as junk** and **Unmark** (marking asks once, with the same Yes or No as a single item, when some of the items are
+  equipment, potions or other things the game's merchant would ask about), **Mark to bank**.
+- **Sell (N)** at a merchant and **Put in bank (N)** at a banker: greyed with the reason when none is near ("no merchant nearby",
+  "too far from the merchant"; the same reach rules as the other buttons, and a second click tries anyway). They go item by item
+  at the game's own pace, never faster than the game's own single actions: one batch at a time, each item looked up again by its
+  own identity before its turn, so a stack that moved, emptied or changed while the run goes is skipped, not acted on by its
+  slot. A refused item does not stop the rest. The result line says what happened, for example "Sold 4 of 5: Rusty Sword was
+  refused; 1 moved or gone; 1 worn item kept" (the reasons go to the game's log).
+- **Destroy...** puts the game's own question on the screen once, listing every item (starting on **No**); nothing is destroyed
+  without your own Yes. The items are then destroyed one at a time.
+- On the **Bank** tab the menu has **Take out of bank (N)**, which works the same way.
+
+A worn item is never sold, banked or destroyed by a group action: it is skipped and the result line says so. The selection clears when
+you close the window, zone, change tab, or when the action finishes. The controller does not multi-select (its d-pad and confirm
+work as before). The mod uses `eqoa.actions.destroy_many` and the `ctrl` and `shift` fields of `pointer.pressed` (both
+additions to `eqoa/1`).

@@ -470,6 +470,7 @@ function M.rebuild()
             items[#items + 1] = {item = it, texture = nil}
         end
     end
+    if M.multi then M.multi.prune(items) end -- a selected stack that left the view leaves the selection
     local slots = math.max(c.capacity or 40, #c.items)
     local total_rows = math.max(5, math.ceil(slots / M.COLUMNS))
     local rows = math.min(M.MAX_ROWS, total_rows)
@@ -495,6 +496,7 @@ function M.dirty()
 end
 
 function M.select(tab)
+    if M.multi and tab ~= M.tab then M.multi.clear() end -- multi-select: a selection belongs to the tab it was made on
     if tab == 7 and (eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse() ~= nil) and M.tab ~= 7 then
         if M.tab == 6 then release_takeover("bank") end
         M.tab = 7; M.scroll = 0; M.grid_scroll = 0; M.grid = nil; M.menu = nil
@@ -1022,6 +1024,7 @@ end
 
 function M.on_batch_progress(d)
     if not d or not M.batch_id or d.batch_id ~= M.batch_id then return end
+    if M.batch_kind == "multi" and M.multi and M.multi.on_progress(d) then return end
     local verb = ({loot = "Looting", restock = "Restocking", bank = "Banking"})[M.batch_kind] or "Selling junk"
     M.result = {
         text = string.format("%s %d of %d...", verb, d.completed or 0, d.total or M.batch_total or 0),
@@ -1031,6 +1034,8 @@ end
 
 function M.on_batch_result(d)
     if not d or not M.batch_id or d.batch_id ~= M.batch_id then return end
+    -- a multi-select Sell / Put in bank / Take out of bank: the group's own run counts it and goes on with the rest
+    if M.batch_kind == "multi" and M.multi then M.multi.on_batch_result(d); return end
     local kind = M.batch_kind
     local verb = M.batch_verb or (kind == "loot" and "Looted" or "Sold")
     local done, total = d.completed or 0, d.total or M.batch_total or 0
@@ -1234,6 +1239,7 @@ function M.run_asking(label, fn)
 end
 
 function M.on_confirm_closed(d)
+    if d and d.kind == "destroy_many" and M.multi then M.multi.on_destroy_closed(d); return end
     if not d or d.kind ~= "destroy" then return end
     if d.answer == "yes" then
         local sent = d.detail and d.detail.sent
@@ -1288,6 +1294,7 @@ end
 
 function M.trigger_menu(row)
     if not row then return end
+    if row.group and M.multi then M.multi.trigger(row); return end -- a row of the multi-select menu
     if row.mark_ask and not row.confirmed and row.enabled and row.run then
         M.ask_to_mark(row)
         return
