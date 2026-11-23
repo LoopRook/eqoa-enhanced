@@ -330,7 +330,7 @@ fn a2_a_mod_that_goes_away_gives_every_dialog_back_to_the_games_window() {
         assert_eq!(p.mode, 7, "{how}: the dialog with answers is the game's window now");
         let (shown, _, _) = p.response.read_state();
         assert_eq!(utf(shown), "Choose", "{how}");
-        if how != "release" {
+        if how == "vm_gone" {
             assert_eq!(p.dialogs.len(), 1, "{how}: the text waits in the game's own queue");
         }
         assert!(session_of("response_dialog").is_none());

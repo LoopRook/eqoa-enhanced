@@ -64,6 +64,7 @@ fn talked_to(play: &Play) -> TalkedTo {
 /// Before the game handles `event`: what it looks like now, when a mod holds a dialog or offer kind.
 pub(crate) fn pre_event(play: &Play, event: &net::session::Event) {
     if !dialog_sessions::any_holder() {
+        PRE.with(|p| *p.borrow_mut() = None);
         return;
     }
     let mut pre = Pre {
