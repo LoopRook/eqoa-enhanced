@@ -109,7 +109,7 @@ fn sync_open(play: &mut Play) -> bool {
 }
 
 /// A row the game's Experiment lists: a component (`p54 > 0`) that is not of type 8 (`craftwnd.rs` `refresh`).
-fn listed(it: &net::dump::NetItem) -> bool {
+fn offered(it: &net::dump::NetItem) -> bool {
     it.item.p54 > 0 && it.item.p4c != 8
 }
 
@@ -127,7 +127,7 @@ fn refresh_items(play: &mut Play) {
     play.craft.items = play.dump.inventory.clone();
     let mut kept: Vec<net::dump::NetItem> = Vec::new();
     for t in std::mem::take(&mut play.craft.combine) {
-        let have = play.craft.items.items.iter().find(|i| i.item.id == t.item.id && listed(i)).map_or(0, |i| i.quantity);
+        let have = play.craft.items.items.iter().find(|i| i.item.id == t.item.id && offered(i)).map_or(0, |i| i.quantity);
         if (kept.iter().filter(|k| k.item.id == t.item.id).count() as i64) < have {
             kept.push(t);
         }
@@ -254,7 +254,7 @@ fn snapshot(play: &Play) -> Json {
         .items
         .iter()
         .enumerate()
-        .filter(|(_, it)| listed(it))
+        .filter(|(_, it)| offered(it))
         .map(|(i, it)| {
             json!({
                 "slot": i + 1,
@@ -459,7 +459,7 @@ fn tray_add(craft: &mut Craft, slot: usize, id: i64, words: &vi::strtab::StringT
     if it.item.id != id {
         return Err(refuse("stale_handle", "that row holds a different item now"));
     }
-    if !listed(it) {
+    if !offered(it) {
         return Err(refuse("invalid_argument", "that item is not a crafting component"));
     }
     let before = craft.combine.len();
