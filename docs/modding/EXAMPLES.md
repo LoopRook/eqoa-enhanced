@@ -20,6 +20,7 @@ API names below are the ones each `main.lua` calls (see the spec for signatures)
 | `eqoa_spellbook` | A spellbook window on its own key (Shift+K): your abilities, the 20 memorized slots, cast and (un)memorize. A window session that the client ends for you (zoning, death, the player's switch). Off by default. | `abilities.list`, `cooldowns.get`, `actions.cast/assign_ability/unmemorize_ability/unmemorize_all`, `windows.open_session/close_session`, `input.bind/claim/pointer/claim_pointer`, `imgui` |
 | `eqoa_crafting` | A crafting window on its own key (Shift+R): your six tradeskills, searchable recipes with how many of each ingredient you hold, Fill tray and one Combine per click, an Experiment tab, and the server's keep-this-recipe question answered by the player's click. Off by default. | `craft.get`, `actions.craft_list/craft_inspect/craft_tray_add/craft_tray_remove/craft_tray_clear/craft_fill/craft_combine/craft_keep`, `windows.open_session/close_session` (`recipe_book`, `experiment`), `input.bind/claim/pointer/claim_pointer/capture_text`, `imgui` |
 | `eqoa_quest_journal` | A quest journal window on its own key (Shift+J): your quests and their goals, and a Drop quest button that asks the player first (`confirm.closed`). Off by default. | `quests.list/goals`, `actions.drop_quest`, `windows.open_session/close_session`, `input.bind/claim/pointer/claim_pointer`, `imgui` |
+| `eqoa_character` | A Character window on its own key (Shift+C): stats, resists and training points with a spend control per stat, Class Masteries (browse, buy, refund), factions and the combat record. Spending a point and buying or refunding a skill always ask the player first (the client's own question). A window session that the client ends for you, and a Class Mastery session held while the Masteries tab is up. Off by default. | `player.get/stats/training`, `mastery.get/skills/selected`, `factions.list`, `combat.record`, `actions.train_stats/mastery_browse/mastery_buy/mastery_refund/request_factions/request_combat_record`, `windows.open_session/close_session`, `input.bind/claim/pointer/claim_pointer`, `imgui` |
 
 ## Forge-style packages (run unchanged on this client)
 
@@ -32,7 +33,7 @@ mod; use the native examples above.
 
 - First mod, health or text: `eqoa_example_hearts`, then `eqoa_hud_numbers`.
 - Sit beside the game's HUD: `eqoa_mana_bars`, `eqoa_target_of_target`.
-- Your own window with clicks: `eqoa_bag_viewer`; a window on its own key with a session: `eqoa_spellbook`, `eqoa_quest_journal`.
+- Your own window with clicks: `eqoa_bag_viewer`; a window on its own key with a session: `eqoa_spellbook`, `eqoa_quest_journal`, `eqoa_character` (which also asks the player first before it spends anything).
 - A step that must ask the player first (destroy, drop quest): `eqoa_quest_journal`.
 - A server's reply read for a mod window, one request at a time, a question answered by a click: `eqoa_crafting`.
 - Saved data and sharing between mods: `eqoa_creature_journal`, `eqoa_map_search`.

@@ -171,13 +171,39 @@ fn round7h_6_a_dispatched_result_has_no_ok_until_the_outcome_is_known() {
     done(&host);
 }
 
-/// Item 7: the game asks Yes/No before dropping a quest (`questlog.rs`, word 574) and before buying or
-/// refunding a Class Mastery skill (`classmastery.rs`, words 1663/1664 and 1665/1666). Until a mod-drawn
-/// confirmation can be tied to the player's own answer, these three are `not_yet` for native mods and send
-/// nothing. The game never asks before Unmemorize All (`spellbook.rs`, the menu's 0x0809_0000), so
-/// `unmemorize_all` stays supported.
+/// Owner test 2026-11-23: `Ability.valid` (the API's `usable`) is "on a slot", so an ability learned and not yet
+/// memorized has it 0. `assign_ability` follows the Abilities page's Memorize (`SpellBook::popup_message`): refuses one
+/// already on a slot and one not learned (`p14` 0), and sends the rest. (Before, it refused every ability not
+/// memorized, so a real Memorize never went out.)
 #[test]
-fn round7h_7_steps_the_game_confirms_are_not_yet_for_mods() {
+fn round7h_assign_ability_memorizes_a_learned_ability_and_refuses_one_on_a_slot_or_not_learned() {
+    let (mut p, host) = rig();
+    let ab = |id: i64, index: i64, valid: i64, slot: i64, p14: i64| {
+        net::dump::Ability { id, display_index: index, valid, slot, p14, name: format!("Spell {id}"), ..Default::default() }
+    };
+    p.abilities.insert(601, ab(601, 3, 0, -1, 1)); // learned, not memorized (Return Home)
+    p.abilities.insert(602, ab(602, 4, 1, 2, 1)); // memorized in slot 3
+    p.abilities.insert(603, ab(603, 5, 0, -1, 0)); // not learned
+    gesture(&mut p, &host, "return eqoa.actions.assign_ability(7, 601)");
+    host.execute("assert(last_req ~= nil and results[#results].state == 'dispatched', tostring(last_err and last_err.message) .. ' / ' .. tostring(results[#results] and results[#results].reason))").unwrap();
+    for (id, why) in [(602, "already memorized"), (603, "not learned")] {
+        gesture(&mut p, &host, &format!("return eqoa.actions.assign_ability(7, {id})"));
+        host.execute(&format!(
+            "local r = results[#results]; assert(r and r.ok == false and r.code == 'not_ready' and r.reason:find('{why}'), tostring(r and r.code) .. ' ' .. tostring(r and r.reason))"
+        ))
+        .unwrap();
+    }
+    done(&host);
+}
+
+/// Item 7: the game asks Yes/No before dropping a quest (`questlog.rs`, word 574) and before buying or
+/// refunding a Class Mastery skill (`classmastery.rs`, words 1663/1664 and 1665/1666). Round 7H made these
+/// `not_yet` for native mods until the player's own answer could be asked for; since rounds A1 and A5 each asks the
+/// player first (the client's own question, `confirm.rs`), so they are supported and send nothing on their own.
+/// The game never asks before Unmemorize All (`spellbook.rs`, the menu's 0x0809_0000), so `unmemorize_all` stays
+/// supported.
+#[test]
+fn round7h_7_steps_the_game_confirms_never_send_on_their_own() {
     let (mut p, host) = rig();
     p.quests.titles = ["Bat Eyes", "The Militia"].iter().map(|t| crate::ui::wide(t)).collect();
     p.quests.stamp = 7;
@@ -193,13 +219,15 @@ fn round7h_7_steps_the_game_confirms_are_not_yet_for_mods() {
         gesture(&mut p, &host, &format!("return {call}"));
         host.execute(&format!(
             r#"
-            assert(eqoa.capabilities.get('eqoa.actions.{name}').status == 'not_yet', '{name} is ' .. eqoa.capabilities.get('eqoa.actions.{name}').status)
-            assert(last_req == nil and last_err and last_err.code == 'not_yet', '{name}: ' .. tostring(last_err and last_err.code))
-            assert(last_err.message:find('confirm', 1, true), last_err.message)
+            assert(eqoa.capabilities.get('eqoa.actions.{name}').status == 'supported', '{name} is ' .. eqoa.capabilities.get('eqoa.actions.{name}').status)
+            -- mode 22 is the quest journal: no Class Mastery window is open, so there is nothing to buy from
+            local c = (last_err and last_err.code) or (results[1] and results[1].code)
+            assert(c == 'not_ready', '{name}: ' .. tostring(c))
         "#
         ))
         .unwrap();
         assert_eq!(p.session.sends_lost, sent, "{name} sent something");
+        assert!(!crate::fork_ext::addons::confirm::is_open(), "{name} asked with no window to buy from");
     }
     assert_eq!(p.quests.titles.len(), 2);
     host.execute("assert(eqoa.capabilities.get('eqoa.actions.unmemorize_all').status == 'supported')").unwrap();

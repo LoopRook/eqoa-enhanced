@@ -765,3 +765,105 @@ fn forge_recovery_warning_history_and_queue_are_bounded() {
         );
     }
 }
+
+/// Spellbook 2 (2026-11-23): IsMouseDown, IsMouseReleased and GetMouseDragDelta, read from ImGui's own mouse state
+/// the way IsMouseDragging is. Values while up, pressed, dragged, released and after; and the argument checks.
+#[test]
+fn spellbook2_mouse_button_state_and_drag_delta_follow_the_real_mouse() {
+    let mut context = context();
+    let host = Host::new().unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let probe = host
+        .compile(
+            r#"
+        ImGui.Begin('mouse probe', true, ImGuiWindowFlags.NoTitleBar)
+        down, released, right_down = ImGui.IsMouseDown(0), ImGui.IsMouseReleased(0), ImGui.IsMouseDown(1)
+        down_default, released_default = ImGui.IsMouseDown(), ImGui.IsMouseReleased()
+        dx, dy = ImGui.GetMouseDragDelta(0, 0)
+        ddx, ddy = ImGui.GetMouseDragDelta()
+        dragging = ImGui.IsMouseDragging(0)
+        ImGui.End()
+    "#,
+        )
+        .unwrap();
+    let frame = |context: &mut Context| {
+        context.frame();
+        bridge.invoke(|| host.run(&probe)).unwrap();
+        drop(context.render_legacy());
+    };
+    let get = |name: &str| host.lua.globals().get::<mlua::Value>(name).unwrap();
+    let flag = |name: &str| matches!(get(name), mlua::Value::Boolean(true));
+    let num = |name: &str| match get(name) {
+        mlua::Value::Number(n) => n,
+        mlua::Value::Integer(n) => n as f64,
+        other => panic!("{name} is {other:?}"),
+    };
+    // nothing pressed: all quiet, the delta is zero
+    context.io_mut().add_mouse_pos_event([100.0, 100.0]);
+    frame(&mut context);
+    assert!(!flag("down") && !flag("released") && !flag("right_down") && !flag("dragging"));
+    assert_eq!((num("dx"), num("dy")), (0.0, 0.0));
+    // pressed: down (the left button; the default argument is the left button too), not released, not yet moved
+    context
+        .io_mut()
+        .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+    frame(&mut context);
+    assert!(flag("down") && flag("down_default") && !flag("released") && !flag("right_down"));
+    assert_eq!((num("dx"), num("dy")), (0.0, 0.0));
+    // dragged 30 right and 10 up: still down, and the delta from where it was pressed
+    context.io_mut().add_mouse_pos_event([130.0, 90.0]);
+    frame(&mut context);
+    assert!(flag("down") && flag("dragging"));
+    assert_eq!((num("dx"), num("dy")), (30.0, -10.0));
+    assert_eq!((num("ddx"), num("ddy")), (30.0, -10.0), "the default threshold has been passed");
+    // released: not down, released for exactly this frame, the delta still readable on it
+    context
+        .io_mut()
+        .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+    frame(&mut context);
+    assert!(!flag("down") && flag("released") && flag("released_default"));
+    assert_eq!((num("dx"), num("dy")), (30.0, -10.0));
+    frame(&mut context);
+    assert!(!flag("down") && !flag("released"), "released lasts one frame");
+    assert_eq!((num("dx"), num("dy")), (0.0, 0.0));
+    // the right button is its own button
+    context
+        .io_mut()
+        .add_mouse_button_event(dear_imgui_rs::MouseButton::Right, true);
+    frame(&mut context);
+    assert!(flag("right_down") && !flag("down"));
+    context
+        .io_mut()
+        .add_mouse_button_event(dear_imgui_rs::MouseButton::Right, false);
+    frame(&mut context);
+    // bad arguments are errors (ImGui indexes its button arrays with the number), good ones are not
+    context.frame();
+    bridge
+        .invoke(|| {
+            host.execute(
+                r#"
+        ImGui.Begin('bad arguments', true, ImGuiWindowFlags.NoTitleBar)
+        for _, name in ipairs({'IsMouseDown', 'IsMouseReleased', 'GetMouseDragDelta'}) do
+            for _, bad in ipairs({5, -1, 99, 'left', {}}) do
+                local ok, err = pcall(ImGui[name], bad)
+                assert(not ok, name .. '(' .. tostring(bad) .. ') must be an error')
+            end
+            assert(pcall(ImGui[name], 4), name .. '(4): the last button is allowed')
+        end
+        assert(not pcall(ImGui.GetMouseDragDelta, 0, 1 / 0), 'infinite threshold')
+        assert(not pcall(ImGui.GetMouseDragDelta, 0, 0 / 0), 'NaN threshold')
+        assert(not pcall(ImGui.GetMouseDragDelta, 0, 'x'), 'text threshold')
+        local ok, err = pcall(ImGui.IsMouseDown, 7)
+        assert(tostring(err):find('mouse button must be 0 to 4'), tostring(err))
+        ImGui.End()
+    "#,
+            )
+        })
+        .unwrap();
+    drop(context.render_legacy());
+    // outside a frame they refuse like every other ImGui call
+    for call in ["ImGui.IsMouseDown(0)", "ImGui.IsMouseReleased(0)", "ImGui.GetMouseDragDelta(0)"] {
+        assert!(bridge.invoke(|| host.execute(call)).is_err(), "{call} outside a frame");
+        assert!(bridge.frame.borrow().context.is_null());
+    }
+}

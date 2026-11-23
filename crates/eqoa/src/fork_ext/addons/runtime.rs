@@ -945,6 +945,10 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
                 "destroy" | "drop_quest" => continue,
                 // round A8: their own line (`native_a8::crafting_label`)
                 k if k.starts_with("craft_") => continue,
+                // round A5: the same for spending training points and the two Class Mastery steps
+                "train_stats" | "mastery_buy" | "mastery_refund" => continue,
+                "request_factions" => "ask for faction standings",
+                "request_combat_record" => "ask for the combat record",
                 _ => kind,
             };
             if !label.is_empty() && !kinds.contains(&label) {
@@ -1038,7 +1042,13 @@ pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec
 /// player (starting on No) and only their own Yes acts (`confirm.rs`). `eqoa.actions.*` grants them too.
 pub(crate) fn asks_first_label(caps: &[String]) -> Option<String> {
     let mut steps = Vec::new();
-    for (name, words) in [("destroy", "destroy an item"), ("drop_quest", "drop a quest")] {
+    for (name, words) in [
+        ("destroy", "destroy an item"),
+        ("drop_quest", "drop a quest"),
+        ("train_stats", "spend training points"),
+        ("mastery_buy", "buy a Class Mastery skill"),
+        ("mastery_refund", "refund a Class Mastery skill"),
+    ] {
         if super::native::capability_grants(caps, &format!("eqoa.actions.{name}")) {
             steps.push(words);
         }

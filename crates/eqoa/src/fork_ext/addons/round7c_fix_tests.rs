@@ -445,17 +445,17 @@ const INSPECT_REFUSALS: &str = r#"
 /// Every callable that refuses on the reference host, by name: a refusal added, removed or turned into a real
 /// binding changes this list on purpose.
 const EXPECTED_REFUSING_CALLABLES: &str = "ImGui.BeginItemTooltip ImGui.BeginTooltip ImGui.EndTooltip \
-ImGui.GetForegroundDrawList ImGui.GetMouseDragDelta ImGui.GetMousePos ImGui.GetMousePosOnOpeningCurrentPopup \
-ImGui.GetMouseWheel ImGui.IsMouseClicked ImGui.IsMouseDoubleClicked ImGui.IsMouseDown ImGui.IsMousePosValid \
-ImGui.IsMouseReleased ImGui.PopItemWidth ImGui.PopStyleVar ImGui.PushItemWidth ImGui.PushStyleVar \
+ImGui.GetForegroundDrawList ImGui.GetMousePos ImGui.GetMousePosOnOpeningCurrentPopup \
+ImGui.GetMouseWheel ImGui.IsMouseClicked ImGui.IsMouseDoubleClicked ImGui.IsMousePosValid \
+ImGui.PopItemWidth ImGui.PopStyleVar ImGui.PushItemWidth ImGui.PushStyleVar \
 ImGui.ResetMouseDragDelta ImGui.SetMouseCursor ImGui.SetMousePos ImGui.SetNextWindowFocus ImGui.SetWindowFocus \
-eqoa.actions.buttons eqoa.actions.look eqoa.actions.mastery_buy eqoa.actions.mastery_refund eqoa.actions.move eqoa.fonts.default eqoa.fonts.game \
+eqoa.actions.buttons eqoa.actions.look eqoa.actions.move eqoa.fonts.default eqoa.fonts.game \
 eqoa.fonts.load eqoa.fonts.release eqoa.hud.hidden_by eqoa.hud.hide eqoa.hud.show eqoa.icons.class \
 eqoa.icons.disposition eqoa.icons.info eqoa.icons.resource eqoa.icons.ui eqoa.imgui.BeginItemTooltip \
-eqoa.imgui.BeginTooltip eqoa.imgui.EndTooltip eqoa.imgui.GetForegroundDrawList eqoa.imgui.GetMouseDragDelta \
+eqoa.imgui.BeginTooltip eqoa.imgui.EndTooltip eqoa.imgui.GetForegroundDrawList \
 eqoa.imgui.GetMousePos eqoa.imgui.GetMousePosOnOpeningCurrentPopup eqoa.imgui.GetMouseWheel \
-eqoa.imgui.IsMouseClicked eqoa.imgui.IsMouseDoubleClicked eqoa.imgui.IsMouseDown eqoa.imgui.IsMousePosValid \
-eqoa.imgui.IsMouseReleased eqoa.imgui.PopItemWidth eqoa.imgui.PopStyleVar eqoa.imgui.PushItemWidth \
+eqoa.imgui.IsMouseClicked eqoa.imgui.IsMouseDoubleClicked eqoa.imgui.IsMousePosValid \
+eqoa.imgui.PopItemWidth eqoa.imgui.PopStyleVar eqoa.imgui.PushItemWidth \
 eqoa.imgui.PushStyleVar eqoa.imgui.ResetMouseDragDelta eqoa.imgui.SetMouseCursor eqoa.imgui.SetMousePos \
 eqoa.imgui.SetNextWindowFocus eqoa.imgui.SetWindowFocus eqoa.map.images eqoa.map.load_image \
 eqoa.sound.is_playing eqoa.sound.load eqoa.sound.play eqoa.sound.release eqoa.sound.set_volume eqoa.sound.stop \
@@ -497,7 +497,7 @@ fn round7c_every_refusing_member_reports_its_status_through_its_call() {
             let paths: String = host.lua.globals().get("round7c_refusing_paths").unwrap();
             eprintln!("round7c refusing members checked through their call: {checked}");
             let expected: Vec<&str> = EXPECTED_REFUSING_CALLABLES.split_whitespace().collect();
-            assert_eq!(expected.len(), 89, "the pinned list holds every refusing callable");
+            assert_eq!(expected.len(), 81, "the pinned list holds every refusing callable");
             assert_eq!(paths.split_whitespace().collect::<Vec<_>>(), expected, "refusing callables by name");
             assert_eq!(checked as usize, expected.len(), "refusing callables by count");
         });

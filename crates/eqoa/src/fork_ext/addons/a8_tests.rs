@@ -201,7 +201,7 @@ fn a8_arguments_are_checked_before_anything_is_queued() {
 }
 
 #[test]
-fn a8_a_mod_may_open_the_two_crafting_windows_and_a_trainer_is_still_not_one() {
+fn a8_a_mod_may_open_the_two_crafting_windows_and_a_blacksmith_is_still_not_one() {
     fresh();
     let h = host(&["eqoa.windows.session", "eqoa.events.on"]);
     h.execute(
@@ -210,20 +210,20 @@ fn a8_a_mod_may_open_the_two_crafting_windows_and_a_trainer_is_still_not_one() {
         local b = assert(eqoa.windows.open_session('experiment'))
         assert(a.kind == 'recipe_book' and a.title == 'Recipe Book' and b.kind == 'experiment' and b.title == 'Experiment')
         assert(eqoa.windows.session('recipe_book').ref == a.ref)
-        local t, e = eqoa.windows.open_session('trainer')
+        local t, e = eqoa.windows.open_session('blacksmith')
         assert(t == nil and e.code == 'unsupported', e and e.code)
         "#,
     )
     .unwrap();
-    assert!(ws::any_open(&["recipe_book", "experiment"]));
+    assert!(ws::any_open_of(&["recipe_book", "experiment"]));
     // closing both is what ends the client's reading of the server's crafting replies
     h.execute("assert(eqoa.windows.close_session(eqoa.windows.session('recipe_book').ref)); assert(eqoa.windows.close_session(eqoa.windows.session('experiment').ref))").unwrap();
-    assert!(!ws::any_open(&["recipe_book", "experiment"]), "control: with both closed, none is open");
+    assert!(!ws::any_open_of(&["recipe_book", "experiment"]), "control: with both closed, none is open");
     // the player's switch closes a mod's crafting window like any other
     h.execute("assert(eqoa.windows.open_session('experiment'))").unwrap();
-    assert!(ws::any_open(&["recipe_book", "experiment"]));
+    assert!(ws::any_open_of(&["recipe_book", "experiment"]));
     window_takeover::set_use_game_windows(true);
-    assert!(!ws::any_open(&["recipe_book", "experiment"]), "Use the game's windows ends it");
+    assert!(!ws::any_open_of(&["recipe_book", "experiment"]), "Use the game's windows ends it");
     window_takeover::set_use_game_windows(false);
 }
 
@@ -353,7 +353,7 @@ fn a8_shift_r_is_free_on_the_controls_page_and_a_plain_r_is_the_games() {
 }
 
 fn session_open() -> bool {
-    ws::any_open(&["recipe_book", "experiment"])
+    ws::any_open_of(&["recipe_book", "experiment"])
 }
 
 #[test]

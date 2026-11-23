@@ -983,6 +983,10 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             "craft_list craft_inspect craft_tray_add craft_tray_remove craft_tray_clear craft_fill craft_combine craft_keep",
             8,
         ),
+        // round A5
+        ("factions", "list", 8),
+        ("combat", "record", 8),
+        ("actions", "train_stats request_factions request_combat_record", 8),
     ] {
         let module_path = format!("eqoa.{module}");
         let backing = match modules.get::<Value>(module)? {
@@ -1126,6 +1130,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_a3::install(host)?;
     super::native_a1::install(host)?;
     super::native_a8::install(host)?;
+    super::native_a5::install(host)?;
     super::frame_actions::install(host)?;
     super::raid_strips::install(host)?;
     super::map_views::install(host)?;
@@ -1229,6 +1234,9 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.group.Group", "raid") => Some("eqoa.group.RaidMember"),
         ("eqoa.group.Group", "invites") => Some("eqoa.group.Invite"),
         ("eqoa.quests.QuestGoals", "goals") => Some("eqoa.quests.QuestGoal"),
+        ("eqoa.player.Training", "caps") => Some("eqoa.player.SevenStats"),
+        ("eqoa.factions.FactionPage", "entries") => Some("eqoa.factions.Faction"),
+        ("eqoa.combat.CombatRecord", "rows") => Some("eqoa.combat.CombatRow"),
         ("eqoa.target.TargetInfo", "consider") => Some("eqoa.target.Consider"),
         ("eqoa.target.Consider", "color") => Some("eqoa.Color"),
         ("eqoa.items.Container", "items") => Some("eqoa.items.Item"),
@@ -1360,7 +1368,7 @@ fn install_fields(lua: &Lua) {
         ("eqoa.group.Invite", "id name"),
         (
             "eqoa.abilities.Ability",
-            "ref id name description display_key spellbook_slot usable level range cast_time power_cost icon_background icon_foreground scope cooldown equipment_mask lockout",
+            "ref id name description display_key spellbook_slot usable learned level range cast_time power_cost icon_background icon_foreground scope cooldown equipment_mask lockout",
         ),
         ("eqoa.abilities.RangeResult", "in_range distance"),
         (
@@ -1437,6 +1445,8 @@ fn install_fields(lua: &Lua) {
                 Some(6)
             } else if (path, field) == ("eqoa.hotbar.HotbarSlot", "item") {
                 Some(5)
+            } else if (path, field) == ("eqoa.abilities.Ability", "learned") {
+                Some(8)
             } else if matches!(
                 (path, field),
                 ("eqoa.entities.Entity", "power") | ("eqoa.group.Member", "power")

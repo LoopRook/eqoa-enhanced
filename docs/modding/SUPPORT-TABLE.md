@@ -79,8 +79,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.loot_assign` | supported | 7 |  |
 | `eqoa.actions.loot_roll` | supported | 7 |  |
 | `eqoa.actions.mastery_browse` | supported | 6 |  |
-| `eqoa.actions.mastery_buy` | not_yet | 6 | the game asks the player to confirm this step; a mod cannot take it until the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer |
-| `eqoa.actions.mastery_refund` | not_yet | 6 | the game asks the player to confirm this step; a mod cannot take it until the mod API plan's confirm contract (window replacement) ties a mod-drawn confirmation to the player's own answer |
+| `eqoa.actions.mastery_buy` | supported | 6 |  |
+| `eqoa.actions.mastery_refund` | supported | 6 |  |
 | `eqoa.actions.mastery_share` | supported | 6 |  |
 | `eqoa.actions.menu_command` | supported | 6 |  |
 | `eqoa.actions.move` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 8) |
@@ -92,6 +92,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.quick_slot` | supported | 6 |  |
 | `eqoa.actions.ready_check_answer` | supported | 7 |  |
 | `eqoa.actions.remove_effect` | supported | 8 |  |
+| `eqoa.actions.request_combat_record` | supported | 8 |  |
+| `eqoa.actions.request_factions` | supported | 8 |  |
 | `eqoa.actions.select_row` | supported | 6 |  |
 | `eqoa.actions.sell` | supported | 6 |  |
 | `eqoa.actions.status` | supported | 6 |  |
@@ -102,6 +104,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.target` | supported | 6 |  |
 | `eqoa.actions.target_target` | supported | 3 |  |
 | `eqoa.actions.toggle_stats_box` | supported | 3 |  |
+| `eqoa.actions.train_stats` | supported | 8 |  |
 | `eqoa.actions.unmemorize_ability` | supported | 6 |  |
 | `eqoa.actions.unmemorize_all` | supported | 6 |  |
 | `eqoa.actions.use_hotbar` | supported | 6 |  |
@@ -177,6 +180,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 |---|---|---|---|
 | `eqoa.combat` | supported | 2 |  |
 | `eqoa.combat.get_counters` | supported | 2 |  |
+| `eqoa.combat.record` | supported | 8 |  |
 
 ## eqoa.cooldowns
 
@@ -227,6 +231,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.off` | supported | 2 |  |
 | `eqoa.events.on` | supported | 2 |  |
 | `eqoa.events.once` | supported | 2 |  |
+
+## eqoa.factions
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.factions` | supported | 8 |  |
+| `eqoa.factions.list` | supported | 8 |  |
 
 ## eqoa.files
 
@@ -671,6 +682,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.abilities.Ability.icon_background` | supported | 2 |  |
 | `eqoa.abilities.Ability.icon_foreground` | supported | 2 |  |
 | `eqoa.abilities.Ability.id` | supported | 2 |  |
+| `eqoa.abilities.Ability.learned` | supported | 8 |  |
 | `eqoa.abilities.Ability.level` | supported | 2 |  |
 | `eqoa.abilities.Ability.lockout` | supported | 2 |  |
 | `eqoa.abilities.Ability.name` | supported | 2 |  |
@@ -764,6 +776,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.combat.CombatHit.kind` | supported | 2 |  |
 | `eqoa.combat.CombatHit.outgoing` | supported | 2 |  |
 | `eqoa.combat.CombatHit.to_pet` | supported | 2 |  |
+| `eqoa.combat.CombatRecord` | supported | 8 |  |
+| `eqoa.combat.CombatRecord.name` | supported | 8 |  |
+| `eqoa.combat.CombatRecord.rows` | supported | 8 |  |
+| `eqoa.combat.CombatRow` | supported | 8 |  |
+| `eqoa.combat.CombatRow.heading` | supported | 8 |  |
+| `eqoa.combat.CombatRow.label` | supported | 8 |  |
+| `eqoa.combat.CombatRow.value` | supported | 8 |  |
 | `eqoa.combat.Counters` | supported | 2 |  |
 | `eqoa.combat.Counters.dropped` | supported | 2 |  |
 | `eqoa.combat.Counters.received` | supported | 2 |  |
@@ -1091,6 +1110,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.world.entered.data.world_id` | supported | 2 |  |
 | `eqoa.events.world.leaving.data.reason` | supported | 2 |  |
 | `eqoa.events.world.leaving.data.world_id` | supported | 2 |  |
+| `eqoa.factions.Faction` | supported | 8 |  |
+| `eqoa.factions.Faction.name` | supported | 8 |  |
+| `eqoa.factions.Faction.standing` | supported | 8 |  |
+| `eqoa.factions.FactionPage` | supported | 8 |  |
+| `eqoa.factions.FactionPage.entries` | supported | 8 |  |
+| `eqoa.factions.FactionPage.page` | supported | 8 |  |
+| `eqoa.factions.FactionPage.pages` | supported | 8 |  |
 | `eqoa.files.FileEntry` | supported | 7 |  |
 | `eqoa.files.FileEntry.kind` | supported | 7 |  |
 | `eqoa.files.FileEntry.path` | supported | 7 |  |
@@ -1479,6 +1505,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.player.Stats.strength` | supported | 3 |  |
 | `eqoa.player.Stats.wisdom` | supported | 3 |  |
 | `eqoa.player.Training` | supported | 8 |  |
+| `eqoa.player.Training.caps` | supported | 8 |  |
 | `eqoa.player.Training.points` | supported | 8 |  |
 | `eqoa.player.Training.stat_cap` | supported | 8 |  |
 | `eqoa.player.Vital` | supported | 2 |  |
@@ -1676,10 +1703,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `ImGui.GetDisplaySize` | supported | 2 |  |
 | `ImGui.GetForegroundDrawList` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.GetFrameHeight` | supported | 2 |  |
-| `ImGui.GetMouseDragDelta` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
-| `ImGui.GetMousePos` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
-| `ImGui.GetMousePosOnOpeningCurrentPopup` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
-| `ImGui.GetMouseWheel` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.GetMouseDragDelta` | supported | 2 |  |
+| `ImGui.GetMousePos` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
+| `ImGui.GetMousePosOnOpeningCurrentPopup` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
+| `ImGui.GetMouseWheel` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
 | `ImGui.GetScrollMaxY` | supported | 2 |  |
 | `ImGui.GetScrollY` | supported | 2 |  |
 | `ImGui.GetTextLineHeight` | supported | 2 |  |
@@ -1695,13 +1722,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `ImGui.InvisibleButton` | supported | 2 |  |
 | `ImGui.IsItemActive` | supported | 2 |  |
 | `ImGui.IsItemHovered` | supported | 2 |  |
-| `ImGui.IsMouseClicked` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
-| `ImGui.IsMouseDoubleClicked` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
-| `ImGui.IsMouseDown` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.IsMouseClicked` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
+| `ImGui.IsMouseDoubleClicked` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
+| `ImGui.IsMouseDown` | supported | 2 |  |
 | `ImGui.IsMouseDragging` | supported | 2 |  |
 | `ImGui.IsMouseHoveringRect` | supported | 2 |  |
-| `ImGui.IsMousePosValid` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
-| `ImGui.IsMouseReleased` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.IsMousePosValid` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
+| `ImGui.IsMouseReleased` | supported | 2 |  |
 | `ImGui.IsWindowFocused` | supported | 2 |  |
 | `ImGui.IsWindowHovered` | supported | 2 |  |
 | `ImGui.MenuItem` | supported | 2 |  |
@@ -1722,15 +1749,15 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `ImGui.PushStyleVar` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.PushTextWrapPos` | supported | 2 |  |
 | `ImGui.RadioButton` | supported | 2 |  |
-| `ImGui.ResetMouseDragDelta` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.ResetMouseDragDelta` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
 | `ImGui.SameLine` | supported | 2 |  |
 | `ImGui.Selectable` | supported | 2 |  |
 | `ImGui.Separator` | supported | 2 |  |
 | `ImGui.SetCursorPos` | supported | 2 |  |
 | `ImGui.SetCursorScreenPos` | supported | 2 |  |
 | `ImGui.SetKeyboardFocusHere` | supported | 2 |  |
-| `ImGui.SetMouseCursor` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
-| `ImGui.SetMousePos` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `ImGui.SetMouseCursor` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
+| `ImGui.SetMousePos` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
 | `ImGui.SetNextItemWidth` | supported | 2 |  |
 | `ImGui.SetNextWindowFocus` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `ImGui.SetNextWindowPos` | supported | 2 |  |
@@ -1794,10 +1821,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.imgui.GetDisplaySize` | supported | 2 |  |
 | `eqoa.imgui.GetForegroundDrawList` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.GetFrameHeight` | supported | 2 |  |
-| `eqoa.imgui.GetMouseDragDelta` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
-| `eqoa.imgui.GetMousePos` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
-| `eqoa.imgui.GetMousePosOnOpeningCurrentPopup` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
-| `eqoa.imgui.GetMouseWheel` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.GetMouseDragDelta` | supported | 2 |  |
+| `eqoa.imgui.GetMousePos` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.GetMousePosOnOpeningCurrentPopup` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.GetMouseWheel` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
 | `eqoa.imgui.GetScrollMaxY` | supported | 2 |  |
 | `eqoa.imgui.GetScrollY` | supported | 2 |  |
 | `eqoa.imgui.GetTextLineHeight` | supported | 2 |  |
@@ -1813,13 +1840,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.imgui.InvisibleButton` | supported | 2 |  |
 | `eqoa.imgui.IsItemActive` | supported | 2 |  |
 | `eqoa.imgui.IsItemHovered` | supported | 2 |  |
-| `eqoa.imgui.IsMouseClicked` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
-| `eqoa.imgui.IsMouseDoubleClicked` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
-| `eqoa.imgui.IsMouseDown` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.IsMouseClicked` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.IsMouseDoubleClicked` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.IsMouseDown` | supported | 2 |  |
 | `eqoa.imgui.IsMouseDragging` | supported | 2 |  |
 | `eqoa.imgui.IsMouseHoveringRect` | supported | 2 |  |
-| `eqoa.imgui.IsMousePosValid` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
-| `eqoa.imgui.IsMouseReleased` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.IsMousePosValid` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.IsMouseReleased` | supported | 2 |  |
 | `eqoa.imgui.IsWindowFocused` | supported | 2 |  |
 | `eqoa.imgui.IsWindowHovered` | supported | 2 |  |
 | `eqoa.imgui.MenuItem` | supported | 2 |  |
@@ -1840,15 +1867,15 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.imgui.PushStyleVar` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.PushTextWrapPos` | supported | 2 |  |
 | `eqoa.imgui.RadioButton` | supported | 2 |  |
-| `eqoa.imgui.ResetMouseDragDelta` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.ResetMouseDragDelta` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
 | `eqoa.imgui.SameLine` | supported | 2 |  |
 | `eqoa.imgui.Selectable` | supported | 2 |  |
 | `eqoa.imgui.Separator` | supported | 2 |  |
 | `eqoa.imgui.SetCursorPos` | supported | 2 |  |
 | `eqoa.imgui.SetCursorScreenPos` | supported | 2 |  |
 | `eqoa.imgui.SetKeyboardFocusHere` | supported | 2 |  |
-| `eqoa.imgui.SetMouseCursor` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
-| `eqoa.imgui.SetMousePos` | unsupported |  | the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.SetMouseCursor` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
+| `eqoa.imgui.SetMousePos` | unsupported |  | the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events |
 | `eqoa.imgui.SetNextItemWidth` | supported | 2 |  |
 | `eqoa.imgui.SetNextWindowFocus` | unsupported |  | not part of the ImGui bridge in eqoa/1 |
 | `eqoa.imgui.SetNextWindowPos` | supported | 2 |  |

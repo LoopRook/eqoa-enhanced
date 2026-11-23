@@ -62,7 +62,7 @@ fn refuse(code: &'static str, reason: impl Into<String>) -> DispatchOutcome {
 
 /// Some mod holds its own recipe book or experiment window.
 pub(crate) fn mod_window_open() -> bool {
-    window_sessions::any_open(&KINDS)
+    window_sessions::any_open_of(&KINDS)
 }
 
 /// The game's own crafting window is up (the mod's actions wait for it to go).
