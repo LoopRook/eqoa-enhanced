@@ -44,6 +44,8 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_turnin",
     "eqoa_crafting",
     "eqoa_social",
+    "eqoa_start_menu",
+    "eqoa_chat",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -63,6 +65,36 @@ pub struct InstallResult {
 }
 
 pub const EMBEDDED_FILES: &[BundledFile] = &[
+    BundledFile {
+        path: "eqoa_start_menu/mod.json",
+        package: "eqoa_start_menu",
+        data: include_bytes!("../../../../bundled-mods/eqoa_start_menu/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_start_menu/main.lua",
+        package: "eqoa_start_menu",
+        data: include_bytes!("../../../../bundled-mods/eqoa_start_menu/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_start_menu/README.md",
+        package: "eqoa_start_menu",
+        data: include_bytes!("../../../../bundled-mods/eqoa_start_menu/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_chat/mod.json",
+        package: "eqoa_chat",
+        data: include_bytes!("../../../../bundled-mods/eqoa_chat/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_chat/main.lua",
+        package: "eqoa_chat",
+        data: include_bytes!("../../../../bundled-mods/eqoa_chat/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_chat/README.md",
+        package: "eqoa_chat",
+        data: include_bytes!("../../../../bundled-mods/eqoa_chat/README.md"),
+    },
     BundledFile {
         path: "eqoa_round_minimap/main.lua",
         package: "eqoa_round_minimap",
@@ -1298,7 +1330,9 @@ mod tests {
                 "eqoa_dialogs",
                 "eqoa_turnin",
                 "eqoa_crafting",
-                "eqoa_social"
+                "eqoa_social",
+                "eqoa_start_menu",
+                "eqoa_chat"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1600,7 +1634,9 @@ mod tests {
                 "eqoa_dialogs",
                 "eqoa_turnin",
                 "eqoa_crafting",
-                "eqoa_social"
+                "eqoa_social",
+                "eqoa_start_menu",
+                "eqoa_chat"
             ]
         );
 
@@ -1655,7 +1691,9 @@ mod tests {
                 "eqoa_dialogs",
                 "eqoa_turnin",
                 "eqoa_crafting",
-                "eqoa_social"
+                "eqoa_social",
+                "eqoa_start_menu",
+                "eqoa_chat"
             ]
         );
 
@@ -1684,7 +1722,9 @@ mod tests {
                 "eqoa_dialogs",
                 "eqoa_turnin",
                 "eqoa_crafting",
-                "eqoa_social"
+                "eqoa_social",
+                "eqoa_start_menu",
+                "eqoa_chat"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1779,7 +1819,9 @@ mod tests {
                 "eqoa_dialogs",
                 "eqoa_turnin",
                 "eqoa_crafting",
-                "eqoa_social"
+                "eqoa_social",
+                "eqoa_start_menu",
+                "eqoa_chat"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );

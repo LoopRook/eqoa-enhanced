@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_start_menu",
+  "name": "EQOA Start Menu",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "provides": [
+    "Start menu (the Start key and button)"
+  ],
+  "replaces": [
+    "start_menu"
+  ],
+  "capabilities": [
+    "eqoa.windows.takeover",
+    "eqoa.windows.session",
+    "eqoa.windows.focus",
+    "eqoa.actions.menu_command",
+    "eqoa.log.write",
+    "eqoa.hud.frame",
+    "eqoa.input.claim",
+    "eqoa.input.pointer",
+    "eqoa.input.claim_pointer",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ]
+}

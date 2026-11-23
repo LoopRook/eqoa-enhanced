@@ -61,13 +61,16 @@ pub(crate) const SEARCH: (&str, &str) = ("search", "Player Search");
 pub(crate) const TYPING: (&str, &str) = ("typing", "Chat");
 pub(crate) const RAID_READY: (&str, &str) = ("raid_ready", "Ready Check");
 pub(crate) const RAID_ROLL: (&str, &str) = ("raid_roll", "Loot Roll");
+/// Round A6: the chat line the Enter key opens, as a window a mod can hold (the game's edit box, chat purpose only).
+pub(crate) const CHAT_ENTRY: (&str, &str) = ("chat_entry", "Chat Entry");
 /// Round A2: the game's yes/no offers (its message box, mode 14) a mod can hold under their own kinds.
 pub(crate) const GROUP_INVITE: (&str, &str) = ("group_invite", "Group Invitation");
 pub(crate) const REVIVE_OFFER: (&str, &str) = ("revive_offer", "Resurrection Offer");
 pub(crate) const SUMMON_OFFER: (&str, &str) = ("summon_offer", "Summons");
 pub(crate) const FRIEND_REQUEST: (&str, &str) = ("friend_request", "Friend Request");
-const OVERLAYS: [(&str, &str); 10] =
-    [INVENTORY, MAP, SEARCH, TYPING, RAID_READY, RAID_ROLL, GROUP_INVITE, REVIVE_OFFER, SUMMON_OFFER, FRIEND_REQUEST];
+const OVERLAYS: [(&str, &str); 11] = [
+    INVENTORY, MAP, SEARCH, TYPING, RAID_READY, RAID_ROLL, GROUP_INVITE, REVIVE_OFFER, SUMMON_OFFER, FRIEND_REQUEST, CHAT_ENTRY,
+];
 
 /// The `eqoa` mode name of a native mode ID; `"other"` for an ID no window owns.
 pub(crate) fn mode_name(mode: i32) -> &'static str {
@@ -104,7 +107,7 @@ pub(super) fn is_view(kind: &str) -> bool {
     matches!(
         kind,
         "inventory" | "spellbook" | "quest_log" | "trainer" | "mastery"
-            | "recipe_book" | "experiment" | "start_menu" | "map"
+            | "recipe_book" | "experiment" | "start_menu" | "map" | "chat_entry"
     )
 }
 

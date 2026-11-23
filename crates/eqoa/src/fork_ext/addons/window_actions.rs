@@ -397,6 +397,24 @@ pub(crate) fn install(lua: &Lua) -> Result<()> {
         "menu_command",
         lua.create_function(|lua, (r, command, arg): (Value, String, Option<Value>)| {
             enqueue_lua_with(lua, "eqoa.actions.menu_command", || {
+                // round A6: the first argument may be the ref of this mod's Start menu session
+                if let Some(session_ref) = r.as_string().and_then(|s| s.to_str().ok().map(|s| s.to_string())) {
+                    let vm = super::native_events::bus(lua).borrow().vm;
+                    if let Some(why) = report_guard(&Json::Null, Some(&command), None) {
+                        return Err(("permission_denied", why.into()));
+                    }
+                    if !matches!(arg, None | Some(Value::Nil)) {
+                        return Err(("unsupported", "menu commands take no argument in this client".into()));
+                    }
+                    return match super::window_sessions::find(vm, &session_ref) {
+                        Some(s) if s.kind == "start_menu" => Ok(ActionKind::A6(super::native_a6::A6Action::StartMenuCommand {
+                            vm,
+                            session: session_ref,
+                            command,
+                        })),
+                        _ => Err(("stale_handle", "no such open Start menu session".into())),
+                    };
+                }
                 let (win, w) = window(&r)?;
                 guard(&w, Some(&command), None)?;
                 let arg = match arg {

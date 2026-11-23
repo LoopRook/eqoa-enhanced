@@ -49,6 +49,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.cancel` | supported | 6 |  |
 | `eqoa.actions.cast` | supported | 6 |  |
 | `eqoa.actions.chat` | supported | 6 |  |
+| `eqoa.actions.chat_line` | supported | 2 |  |
 | `eqoa.actions.close_window` | supported | 6 |  |
 | `eqoa.actions.command` | supported | 6 |  |
 | `eqoa.actions.craft_combine` | supported | 8 |  |
@@ -97,6 +98,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.mastery_share` | supported | 6 |  |
 | `eqoa.actions.menu_command` | supported | 6 |  |
 | `eqoa.actions.move` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 8) |
+| `eqoa.actions.open_link` | supported | 2 |  |
 | `eqoa.actions.open_loot` | supported | 6 |  |
 | `eqoa.actions.open_window` | supported | 6 |  |
 | `eqoa.actions.pet_attack` | supported | 8 |  |
@@ -109,6 +111,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.request_factions` | supported | 8 |  |
 | `eqoa.actions.select_row` | supported | 6 |  |
 | `eqoa.actions.sell` | supported | 6 |  |
+| `eqoa.actions.set_channel` | supported | 2 |  |
 | `eqoa.actions.status` | supported | 6 |  |
 | `eqoa.actions.stop` | supported | 6 |  |
 | `eqoa.actions.stop_batch` | supported | 6 |  |
@@ -178,6 +181,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.chat.channel_name` | supported | 2 |  |
 | `eqoa.chat.get_channel` | supported | 2 |  |
 | `eqoa.chat.history` | supported | 2 |  |
+| `eqoa.chat.reply_to` | supported | 2 |  |
+| `eqoa.chat.tabs` | supported | 2 |  |
 
 ## eqoa.client
 
@@ -799,15 +804,29 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.casts.Cast.remaining` | supported | 8 |  |
 | `eqoa.casts.Cast.target_id` | supported | 8 |  |
 | `eqoa.casts.Cast.targets` | supported | 8 |  |
+| `eqoa.chat.ChatLink` | supported | 8 |  |
+| `eqoa.chat.ChatLink.id` | supported | 8 |  |
+| `eqoa.chat.ChatLink.len` | supported | 8 |  |
+| `eqoa.chat.ChatLink.name` | supported | 8 |  |
+| `eqoa.chat.ChatLink.start` | supported | 8 |  |
 | `eqoa.chat.ChatMessage` | supported | 2 |  |
 | `eqoa.chat.ChatMessage.channel` | supported | 2 |  |
 | `eqoa.chat.ChatMessage.channel_code` | unsupported |  | the chat observer retains only text, color and the channel name |
 | `eqoa.chat.ChatMessage.color` | supported | 2 |  |
+| `eqoa.chat.ChatMessage.kind` | supported | 2 |  |
+| `eqoa.chat.ChatMessage.links` | supported | 2 |  |
 | `eqoa.chat.ChatMessage.outgoing` | unsupported |  | the chat observer retains only text, color and the channel name |
 | `eqoa.chat.ChatMessage.sender` | unsupported |  | the chat observer retains only text, color and the channel name |
 | `eqoa.chat.ChatMessage.seq` | supported | 2 |  |
 | `eqoa.chat.ChatMessage.text` | supported | 2 |  |
 | `eqoa.chat.ChatMessage.time` | supported | 2 |  |
+| `eqoa.chat.ChatTab` | supported | 8 |  |
+| `eqoa.chat.ChatTab.index` | supported | 8 |  |
+| `eqoa.chat.ChatTab.kinds` | supported | 8 |  |
+| `eqoa.chat.ChatTab.name` | supported | 8 |  |
+| `eqoa.chat.ChatTabs` | supported | 8 |  |
+| `eqoa.chat.ChatTabs.kinds` | supported | 8 |  |
+| `eqoa.chat.ChatTabs.tabs` | supported | 8 |  |
 | `eqoa.client.Client` | supported | 2 |  |
 | `eqoa.client.Client.frame` | supported | 2 |  |
 | `eqoa.client.Client.generation` | supported | 2 |  |
@@ -1021,6 +1040,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.chat.message.data.channel` | supported | 2 |  |
 | `eqoa.events.chat.message.data.channel_code` | unsupported |  | the chat observer retains only text, color and the channel name |
 | `eqoa.events.chat.message.data.color` | supported | 2 |  |
+| `eqoa.events.chat.message.data.kind` | supported | 2 |  |
+| `eqoa.events.chat.message.data.links` | supported | 2 |  |
 | `eqoa.events.chat.message.data.outgoing` | unsupported |  | the chat observer retains only text, color and the channel name |
 | `eqoa.events.chat.message.data.sender` | unsupported |  | the chat observer retains only text, color and the channel name |
 | `eqoa.events.chat.message.data.seq` | supported | 2 |  |
@@ -1744,6 +1765,12 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.windows.ButtonHint` | supported | 6 |  |
 | `eqoa.windows.ButtonHint.button` | supported | 6 |  |
 | `eqoa.windows.ButtonHint.label` | supported | 6 |  |
+| `eqoa.windows.ChatLink` | supported | 8 |  |
+| `eqoa.windows.ChatLink.key` | supported | 8 |  |
+| `eqoa.windows.ChatLink.len` | supported | 8 |  |
+| `eqoa.windows.ChatLink.list` | supported | 8 |  |
+| `eqoa.windows.ChatLink.name` | supported | 8 |  |
+| `eqoa.windows.ChatLink.start` | supported | 8 |  |
 | `eqoa.windows.Confirm` | supported | 8 |  |
 | `eqoa.windows.Confirm.id` | supported | 8 |  |
 | `eqoa.windows.Confirm.kind` | supported | 8 |  |
@@ -1760,6 +1787,11 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.windows.Dialog.tag` | supported | 6 |  |
 | `eqoa.windows.Dialog.text` | supported | 6 |  |
 | `eqoa.windows.Dialog.title` | supported | 6 |  |
+| `eqoa.windows.LinkOffer` | supported | 8 |  |
+| `eqoa.windows.LinkOffer.key` | supported | 8 |  |
+| `eqoa.windows.LinkOffer.list` | supported | 8 |  |
+| `eqoa.windows.LinkOffer.name` | supported | 8 |  |
+| `eqoa.windows.LinkOffer.seq` | supported | 8 |  |
 | `eqoa.windows.MenuRow` | supported | 6 |  |
 | `eqoa.windows.MenuRow.command` | supported | 6 |  |
 | `eqoa.windows.MenuRow.enabled` | supported | 6 |  |
@@ -1775,6 +1807,19 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.windows.Session.ref` | supported | 8 |  |
 | `eqoa.windows.Session.revision` | supported | 8 |  |
 | `eqoa.windows.Session.title` | supported | 8 |  |
+| `eqoa.windows.SessionData` | supported | 8 |  |
+| `eqoa.windows.SessionData.channel` | supported | 8 |  |
+| `eqoa.windows.SessionData.entries` | supported | 8 |  |
+| `eqoa.windows.SessionData.links` | supported | 8 |  |
+| `eqoa.windows.SessionData.offer` | supported | 8 |  |
+| `eqoa.windows.SessionData.reply_to` | supported | 8 |  |
+| `eqoa.windows.SessionData.text` | supported | 8 |  |
+| `eqoa.windows.StartEntry` | supported | 8 |  |
+| `eqoa.windows.StartEntry.command` | supported | 8 |  |
+| `eqoa.windows.StartEntry.enabled` | supported | 8 |  |
+| `eqoa.windows.StartEntry.entries` | supported | 8 |  |
+| `eqoa.windows.StartEntry.native` | supported | 8 |  |
+| `eqoa.windows.StartEntry.text` | supported | 8 |  |
 | `eqoa.windows.Window` | supported | 6 |  |
 | `eqoa.windows.Window.dialog` | supported | 6 |  |
 | `eqoa.windows.Window.focused` | supported | 6 |  |

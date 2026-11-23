@@ -168,6 +168,8 @@ pub(crate) enum ActionKind {
     Frame(super::frame_actions::FrameAction),
     /// Round A1: destroy (asks the player first), link item, hide look.
     A1(super::native_a1::A1Action),
+    /// Round A6: a Start menu entry of the mod's menu, the game's chat channel, a chat line with item links.
+    A6(super::native_a6::A6Action),
     /// Round A8: crafting (the tray, a combine, the recipe list and detail, the keep-this-recipe answer).
     A8(super::native_a8::A8Action),
     /// Round A7: friends, ignore, guild, who, group search.
@@ -234,6 +236,7 @@ impl ActionKind {
             Self::ClearWaypoint { .. } => "clear_waypoint",
             Self::Frame(action) => action.name(),
             Self::A1(action) => action.name(),
+            Self::A6(action) => action.name(),
             Self::A8(action) => action.name(),
             Self::A7(action) => action.name(),
             Self::A5(action) => action.name(),
@@ -293,6 +296,7 @@ impl ActionKind {
             | Self::ClearWaypoint { .. }
             | Self::Frame(_)
             | Self::A1(_)
+            | Self::A6(_)
             | Self::A8(_)
             | Self::A7(_)
             | Self::A5(_)
@@ -3206,7 +3210,7 @@ pub(crate) fn enqueue_lua_with(
     enqueue_lua_with_grant(lua, symbol, symbol, build)
 }
 
-fn enqueue_lua_with_grant(
+pub(crate) fn enqueue_lua_with_grant(
     lua: &Lua,
     symbol: &str,
     capability: &str,

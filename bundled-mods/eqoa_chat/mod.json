@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_chat",
+  "name": "EQOA Chat",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "provides": [
+    "Chat window with tabs, channels, links (Enter)"
+  ],
+  "replaces": [
+    "chat_entry",
+    "hud.chat"
+  ],
+  "capabilities": [
+    "eqoa.windows.takeover",
+    "eqoa.windows.session",
+    "eqoa.actions.chat",
+    "eqoa.actions.command",
+    "eqoa.actions.set_channel",
+    "eqoa.actions.open_link",
+    "eqoa.hud.hide",
+    "eqoa.hud.frame",
+    "eqoa.input.capture_text",
+    "eqoa.input.claim",
+    "eqoa.input.pointer",
+    "eqoa.input.claim_pointer",
+    "eqoa.log.write",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ]
+}

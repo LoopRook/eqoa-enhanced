@@ -67,6 +67,10 @@ pub(crate) fn dispatch(play: &mut Play, action: &A1Action) -> DispatchOutcome {
                 Ok(i) => i,
                 Err(e) => return e,
             };
+            // round A6: a mod that holds the chat line is offered the link instead (its session's `offer`)
+            if let Some(done) = super::a6_play::offer_link(play, idx) {
+                return done;
+            }
             // the game's own Link Item: the item's link goes into the chat line (opened if it is not). It goes
             // nowhere where the server offers no links, the line is full or already holds four
             if !play.link_item(0, idx as i32) {

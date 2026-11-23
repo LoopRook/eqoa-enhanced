@@ -178,7 +178,7 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("cooldown.ended", "ability ability_id display_key lockout"),
         (
             "chat.message",
-            "seq time text color channel channel_code sender outgoing",
+            "seq time text color channel channel_code sender outgoing kind links",
         ),
         ("chat.history_scroll", "active steps"),
         (
@@ -748,10 +748,12 @@ fn deliver_data(
             // controller and its held sessions are the game's again at once, not at some later disable
             // round A2 fix: and its claims go with them (as a disable does), so the next NPC dialog or offer shows in
             // the game's own window at once, not hidden for a mod that can no longer show it
+            // round A6: the same for the Start key and Enter (every kind it holds), and the mod is told its client-opened
+            // windows closed (`failed`)
             if matches!(e.name.as_str(), "render" | "windows.key" | "windows.session") {
                 let vm = shared.borrow().vm;
-                super::window_sessions::end_vm(vm);
                 super::window_takeover::release_vm(vm);
+                super::window_sessions::end_vm_told(vm, "failed");
             }
         }
     }

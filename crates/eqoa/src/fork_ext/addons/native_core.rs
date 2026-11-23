@@ -801,8 +801,11 @@ pub(crate) fn observe_text(text: &str, color: [f32; 4]) {
     }
     let text = text[..end].to_owned();
     let channel = CORE.with(|c| c.borrow().text_channel);
+    // round A6: what the chat box's tabs sort a line by (`chat::kind_of`)
+    let kind = crate::chat::kind_of(&text, color).key();
+    let links = super::native_a6::take_line_links(&text);
     defer(text.len() + 256, move |c| {
-        let message = json!({"seq":c.seq+1,"time":c.source_time.unwrap_or_else(||time_unborrowed(c)),"text":text,"color":{"r":color[0],"g":color[1],"b":color[2],"a":color[3]},"channel":channel});
+        let message = json!({"seq":c.seq+1,"time":c.source_time.unwrap_or_else(||time_unborrowed(c)),"text":text,"color":{"r":color[0],"g":color[1],"b":color[2],"a":color[3]},"channel":channel,"kind":kind,"links":links});
         if c.chat.len() == 1000 {
             c.chat.pop_front();
         }

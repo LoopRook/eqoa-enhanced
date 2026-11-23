@@ -18,6 +18,9 @@ mod api_capture;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "a1_play.rs"]
 mod a1_play;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "a6_play.rs"]
+mod a6_play;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "a7_play.rs"]
@@ -126,6 +129,13 @@ pub(crate) struct GameEventCapture {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> GameEventCapture {
     MODE_BEFORE_EVENT.with(|m| m.set(play.mode));
+    // round A6: the item links a chat line carries are told with the event before it
+    if let net::session::Event::ChatLinks(links) = event {
+        let spans: Vec<(u16, u16, u32)> = links.iter().map(|l| (l.start, l.len, l.id)).collect();
+        crate::fork_ext::addons::native_a6::stash_links(&spans);
+    } else {
+        crate::fork_ext::addons::native_a6::event_boundary();
+    }
     // round A2: what a dialog or offer this packet brings looks like before the game handles it
     a2_play::pre_event(play, event);
     let api = api_capture::begin_game_event(play, event);
@@ -829,6 +839,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         sync_hidden_sessions(_play);
         a7_play::hide_taken_requests(_play);
         a1_play::tick(_play);
+        a6_play::tick(_play);
         a7_play::tick(_play);
         a2_play::tick(_play);
         a8_play::tick(_play, _game_step);
@@ -3267,6 +3278,7 @@ fn dispatch_broker_action(
         }
         ActionKind::Frame(action) => api_capture::a3::dispatch(play, action),
         ActionKind::A1(action) => a1_play::dispatch(play, action),
+        ActionKind::A6(action) => a6_play::dispatch(play, action),
         ActionKind::A8(action) => a8_play::dispatch(play, action),
         ActionKind::A7(action) => a7_play::dispatch(play, action),
         ActionKind::A5(action) => api_capture::a5::dispatch(play, action),
