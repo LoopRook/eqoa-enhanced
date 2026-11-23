@@ -616,6 +616,17 @@ mod e2e {
             self.frames(2);
         }
 
+        /// What the mod and the broker say (for a failed assertion's message).
+        fn why(&self) -> String {
+            let results: String = self
+                .host
+                .lua
+                .load("local out = {}; for _, r in ipairs(results or {}) do out[#out + 1] = tostring(r.kind) .. ':' .. tostring(r.ok) .. ':' .. tostring(r.code) .. ':' .. tostring(r.reason) end return table.concat(out, ' | ')")
+                .eval()
+                .unwrap_or_else(|e| format!("(no results: {e})"));
+            format!("queued {:?}; results [{results}]; logs {:?}; mode {}; pending {}", action_broker::queued_kinds_for_test(), self.host.drain_logs(), self.p.mode, self.p.craft.pending)
+        }
+
         fn tap(&mut self, x: f64, y: f64) {
             let (px, py) = (self.x0 + x * self.k, self.y0 + y * self.k);
             CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": px, "y": py, "inside_window": true, "button": "left"})));
@@ -629,21 +640,22 @@ mod e2e {
         let host = Host::for_addon(&addon()).unwrap();
         let bridge = Bridge::install(&host).unwrap();
         host.run_addon(&addon()).unwrap();
+        host.execute("results = {}; eqoa.events.on('action.result', function(e) results[#results + 1] = e.data end)").unwrap();
         let mut r = Rig { p, host, bridge, context: context(), k: 1.0, x0: 0.0, y0: 0.0 };
         CORE.with(|c| {
             c.borrow_mut().emit("input.key", json!({"key": "r", "combo": "shift+r", "down": true, "repeat": false, "synthetic": false, "text": ""}))
         });
         native_events::dispatch(&r.host).unwrap();
         r.settle();
-        let (k, ox, oy): (f64, f64, f64) = r
+        let (k, sx, sy, ox, oy): (f64, f64, f64, f64, f64) = r
             .host
             .lua
-            .load("local f = eqoa.hud.frame(); return math.min(f.scale_x, f.scale_y), f.offset_x, f.offset_y")
+            .load("local f = eqoa.hud.frame(); return math.min(f.scale_x, f.scale_y), f.scale_x, f.scale_y, f.offset_x, f.offset_y")
             .eval()
             .unwrap();
         r.k = k;
-        r.x0 = (1024.0 - W * k).min(ox + (640.0 - W) / 2.0 * k).max(0.0);
-        r.y0 = (768.0 - H * k).min(oy + (448.0 - H) / 2.0 * k).max(0.0);
+        r.x0 = (1024.0 - W * k).min(ox + (640.0 - W) / 2.0 * sx).max(0.0);
+        r.y0 = (768.0 - H * k).min(oy + (448.0 - H) / 2.0 * sy).max(0.0);
         r
     }
 
@@ -654,7 +666,7 @@ mod e2e {
         // the skill (the fourth of six): the game is asked for its list, as its own recipe book asks
         let sw = (W - 16.0) / 6.0;
         r.tap(8.0 + 3.0 * sw + 10.0, 50.0);
-        assert_eq!(sent(), vec![vec![0x01, 0x11, 6, 4, 3, 2, 1, 3, 0, 0, 0]], "list of skill 3");
+        assert_eq!(sent(), vec![vec![0x01, 0x11, 6, 4, 3, 2, 1, 3, 0, 0, 0]], "list of skill 3: {}", r.why());
         // the server's list comes in: the window shows it, a recipe row is a click away
         assert!(reply(&mut r.p, &recipe_list(0x0A0B_0C0D, &[(11, "Iron Ring", 3, 0), (12, "Silk Hood", 3, 1)])));
         r.frames(2);
@@ -693,7 +705,8 @@ mod e2e {
         assert_eq!(sent()[3], vec![0x01, 0x11, 5, 0x22, 0x22, 0x11, 0x11, 0x92, 0x10, 0, 0]);
         r.tap(40.0, 190.0);
         assert_eq!(sent().len(), 4, "answered once");
-        assert!(r.host.drain_logs().unwrap().is_empty(), "no diagnostics");
+        let logs = r.host.drain_logs().unwrap();
+        assert!(logs.is_empty(), "no diagnostics: {logs:?}");
     }
 
     #[test]

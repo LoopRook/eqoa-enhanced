@@ -298,7 +298,7 @@ function draw()
                 text(PAD + 196, y, r.difficulty_name, col.muted)
                 text(PAD + 226, y, "Lv " .. r.level, col.muted)
                 text(PAD + 262, y, r.component_name, col.muted, 80)
-                if not asking then
+                if not asking and not waiting then
                     state.row_hits[#state.row_hits + 1] = hit(PAD, y, W - 2 * PAD, LINE, function()
                         state.sel = r.id
                         run("Inspect", function() return eqoa.actions.craft_inspect(r.id) end)

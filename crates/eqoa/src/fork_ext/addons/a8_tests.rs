@@ -419,12 +419,13 @@ const W: f64 = 360.0;
 const H: f64 = 350.0;
 
 fn screen(host: &Host) -> Screen {
-    let (k, ox, oy): (f64, f64, f64) = host
+    // as main.lua places the window: the frame's two scales differ on a screen that is not 640x448
+    let (k, sx, sy, ox, oy): (f64, f64, f64, f64, f64) = host
         .lua
-        .load("local f = eqoa.hud.frame(); return math.min(f.scale_x, f.scale_y), f.offset_x, f.offset_y")
+        .load("local f = eqoa.hud.frame(); return math.min(f.scale_x, f.scale_y), f.scale_x, f.scale_y, f.offset_x, f.offset_y")
         .eval()
         .unwrap();
-    Screen { k, x0: (1024.0 - W * k).min(ox + (640.0 - W) / 2.0 * k).max(0.0), y0: (768.0 - H * k).min(oy + (448.0 - H) / 2.0 * k).max(0.0) }
+    Screen { k, x0: (1024.0 - W * k).min(ox + (640.0 - W) / 2.0 * sx).max(0.0), y0: (768.0 - H * k).min(oy + (448.0 - H) / 2.0 * sy).max(0.0) }
 }
 
 #[test]
@@ -562,8 +563,9 @@ fn a8_no_text_leaves_the_window_at_the_default_size_with_the_longest_names() {
         frames(&host, &bridge, &mut context, 3);
         let v = layer_vertices();
         assert!(v.len() > 100, "the window drew its text ({} vertices)", v.len());
-        let (left, top) = (s.x0 as f32 - 0.5, s.y0 as f32 - 0.5);
-        let (right, bottom) = ((s.x0 + W * s.k) as f32 + 0.5, (s.y0 + H * s.k) as f32 + 0.5);
+        // the window's border is a one-pixel line centred on its edge: half a pixel each side, so a pixel of room
+        let (left, top) = (s.x0 as f32 - 1.0, s.y0 as f32 - 1.0);
+        let (right, bottom) = ((s.x0 + W * s.k) as f32 + 1.0, (s.y0 + H * s.k) as f32 + 1.0);
         let outside: Vec<_> = v.iter().filter(|p| p[0] < left || p[0] > right || p[1] < top || p[1] > bottom).collect();
         assert!(outside.is_empty(), "tab {tab_click:?} question {question}: {} vertices outside {left}..{right} x {top}..{bottom}: {:?}", outside.len(), &outside[..outside.len().min(4)]);
         // and the window fits the game's 640x448 frame

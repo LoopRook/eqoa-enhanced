@@ -822,7 +822,7 @@ A **session** is one opening of a window a mod shows. It is the handle that belo
 
 ### Crafting (round A8)
 
-A mod can show its own recipe book and experiment tray. It opens a `"recipe_book"` or `"experiment"` window session (above), reads the game's crafting state with `eqoa.craft.get`, and asks for what the game's own crafting windows ask for with the `eqoa.actions.craft_*` actions. The game's own Start menu > Tradeskills windows are unchanged, and nothing here exists while no mod holds one of the two sessions.
+A mod can show its own recipe book and experiment tray. It opens a `"recipe_book"` or `"experiment"` window session (above), reads the game's crafting state with `eqoa.craft.get`, and asks for what the game's own crafting windows ask for with the actions whose names begin `craft_` (listed below). The game's own Start menu > Tradeskills windows are unchanged, and nothing here exists while no mod holds one of the two sessions.
 
 **Why the session matters.** The game reads the server's crafting replies (the recipe list, a recipe's detail, a combine's result and its "keep this recipe?" question) only while its own recipe book or experiment is up. While a mod holds a `"recipe_book"` or `"experiment"` session the client reads them for the mod's window instead, and hands the mod the words the game's window would have shown. The actions below are refused (`not_ready`) without such a session of the calling mod, and (`busy`) while the game's own crafting window is up. Opening the session copies the bags into the crafting tray's list and empties the tray, as the game's Experiment does; closing it empties the tray.
 
