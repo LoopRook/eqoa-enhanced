@@ -420,5 +420,10 @@ A font restored after going missing is retried after a face or size change or af
 - **Spellbook:** ability icons and a better layout.
 - **Quest Journal:** links from a quest to the map (where the map knows the place).
 - **Frames / buff numbers:** show what an effect does in numbers (e.g. Anthem of Conquest: +N to which stats) if the client or server provides it. Owner 2026-11-23: low effort; if no API change is needed it is a later mod change or a small PR. A short look at the data is in reports/eqoa-owner-fixes-2-2026-11-23 (lead's notes).
+  Result (2026-11-23): the client gets no effect numbers: the buff list has spell id, icon, time and name only;
+  0x00B1's effect id is visual; ability records carry a server description text and unused "parts". A mod can
+  estimate it from `eqoa.player.stats()` (`current` before and after one buff lands; maximums, not HP/power) for
+  the player's own stats only, unreliable when other things change at once. Reliable numbers need the server to
+  send stat deltas with the buff (a later additive `Buff` field).
 - **Cast bars:** a player-style unit-frame set (your own cast bar, your target's cast bar, target health, etc.), as in modern MMOs. The API capability exists (A3/A4); this is a mod, not an API change.
 - **Target Frame demo:** its menu shows "Invite to group" for every target (fine for a demo; a real mod should offer only what applies).

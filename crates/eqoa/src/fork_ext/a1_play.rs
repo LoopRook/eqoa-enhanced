@@ -102,7 +102,7 @@ pub(crate) fn ask_drop_quest(index: usize, title: &str, stamp: u32, revision: u6
     ask(act, confirm::drop_quest_text(title), "quest_log")
 }
 
-fn ask(act: Act, text: String, session_kind: &str) -> DispatchOutcome {
+pub(super) fn ask(act: Act, text: String, session_kind: &str) -> DispatchOutcome {
     let Some(vm) = crate::fork_ext::addons::action_broker::current_dispatch_vm() else {
         return refuse("not_ready", "no mod is asking");
     };
@@ -152,6 +152,8 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
             play.session.send(&m);
             Ok(())
         }
+        // round A5: the character window's steps are carried out where they are judged (`a5_capture`)
+        Act::TrainStats { .. } | Act::Mastery { .. } => super::api_capture::a5::carry_out(play, &p.act),
     }
 }
 

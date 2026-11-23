@@ -22,7 +22,7 @@ use serde_json::json;
 use std::cell::{Cell, RefCell};
 
 /// The windows a mod may open for itself in A1 (a view: the game's window of that name stays where it is).
-pub(crate) const OWN_KINDS: [&str; 3] = ["inventory", "spellbook", "quest_log"];
+pub(crate) const OWN_KINDS: [&str; 5] = ["inventory", "spellbook", "quest_log", "trainer", "mastery"];
 /// Most sessions one mod may hold at once.
 const MAX_PER_VM: usize = 8;
 
@@ -204,7 +204,7 @@ pub(crate) fn open(
             if TakeoverKind::parse(kind).is_ok() {
                 format!("the '{kind}' window is opened by the server: hold it with eqoa.windows.takeover instead")
             } else {
-                format!("a mod cannot open its own '{kind}' window in this version (only 'inventory', 'spellbook' and 'quest_log')")
+                format!("a mod cannot open its own '{kind}' window in this version (only 'inventory', 'spellbook', 'quest_log', 'trainer' and 'mastery')")
             },
         ));
     }
@@ -338,6 +338,14 @@ pub(crate) fn get(vm: u64, kind: &str) -> Option<Session> {
         return None;
     }
     with(|s| s.sessions.iter().find(|x| x.vm == vm && x.kind == kind).cloned())
+}
+
+/// Some mod holds a session of `kind` (a window it opened for itself, or a held corpse, merchant or bank).
+pub(crate) fn any_open(kind: &str) -> bool {
+    if !is_active() {
+        return false;
+    }
+    with(|s| s.sessions.iter().any(|x| x.kind == kind))
 }
 
 pub(crate) fn find(vm: u64, id: &str) -> Option<Session> {

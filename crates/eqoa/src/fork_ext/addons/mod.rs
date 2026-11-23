@@ -118,10 +118,13 @@ pub(crate) mod native_a1;
 pub(crate) mod native_a6;
 #[cfg(test)]
 mod a6_tests;
+pub(crate) mod native_a5;
 #[cfg(test)]
 mod a1_tests;
 #[cfg(test)]
 mod a1_mod_tests;
+#[cfg(test)]
+mod a5_mod_tests;
 pub(crate) mod window_sessions;
 pub(crate) mod confirm;
 #[cfg(test)]

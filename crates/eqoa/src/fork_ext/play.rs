@@ -812,6 +812,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         sync_hidden_sessions(_play);
         a1_play::tick(_play);
         a6_play::tick(_play);
+        api_capture::a5::tick(_play);
         if crate::fork_ext::addons::native_core::capture_requested()
             || crate::fork_ext::addons::window_takeover::has_activity()
         {
@@ -1326,6 +1327,19 @@ pub(crate) fn bank_requests(_play: &Play, _out: &mut Vec<crate::bank::BankOut>) 
                 mark_deferred_sent("bank_money");
             }
         }
+    }
+}
+
+/// A skill the Class Mastery list's reply opened is kept (not dropped for want of the game's window) while a mod
+/// holds a Class Mastery window session (round A5; `play.rs` calls this where it drops the node).
+pub(crate) fn mastery_node_kept(_play: &Play) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        api_capture::a5::node_kept(_play)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
     }
 }
 
@@ -2397,10 +2411,19 @@ fn dispatch_broker_action(
                     reason: "ability not found in spellbook".into(),
                 };
             };
-            if found.valid == 0 {
+            // The Abilities page's Memorize (`SpellBook::popup_message`): an ability on a slot already is refused
+            // (the 0x0033 would toggle it off), one the character has not learned (`p14`, set by 0x00FD) is
+            // refused; any other goes onto the slot. `valid` is "on a slot", not "may be memorized".
+            if found.valid != 0 && found.slot >= 0 {
                 return DispatchOutcome::Refused {
                     code: "not_ready",
-                    reason: "ability is not usable".into(),
+                    reason: "ability is already memorized".into(),
+                };
+            }
+            if found.valid == 0 && found.p14 == 0 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "ability is not learned".into(),
                 };
             }
             play.book_actions(vec![crate::spellbook::Out::Send0033(
@@ -3205,6 +3228,7 @@ fn dispatch_broker_action(
         ActionKind::Frame(action) => api_capture::a3::dispatch(play, action),
         ActionKind::A1(action) => a1_play::dispatch(play, action),
         ActionKind::A6(action) => a6_play::dispatch(play, action),
+        ActionKind::A5(action) => api_capture::a5::dispatch(play, action),
         ActionKind::DropQuest { .. }
         | ActionKind::MasteryShare { .. }
         | ActionKind::MasteryBrowse { .. }
@@ -3341,8 +3365,9 @@ fn dispatch_window_action(
         }
         ActionKind::MasteryBrowse { skill_id } | ActionKind::MasteryBuy { skill_id } | ActionKind::MasteryRefund { skill_id } => {
             let ready = crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow().mastery_flags.skills);
-            if play.mode != 40 || !ready {
-                return refuse("not_ready", "the class mastery window must be open with its list loaded");
+            // round A5: the game's window, or a mod's "mastery" window session, which has its list fetched
+            if !api_capture::a5::mastery_open(play) || !ready {
+                return refuse("not_ready", "the class mastery window (the game's, or a mod's window session of kind 'mastery') must be open with its list loaded");
             }
             if play.cm.pending != 0 {
                 return refuse("busy", "a class mastery request is still pending");
@@ -3366,7 +3391,8 @@ fn dispatch_window_action(
                         if !skill.on {
                             return refuse("not_ready", "the skill is not owned");
                         }
-                        play.cm.send03(node.x08)
+                        // round A5: never at once. The question goes to the player; their own Yes sends it
+                        return api_capture::a5::ask_mastery(play, node.x08, true, node.x10, node.x0c);
                     } else {
                         if skill.on || skill.known == 0 {
                             return refuse("not_ready", "the skill is owned or not yet buyable");
@@ -3375,7 +3401,7 @@ fn dispatch_window_action(
                             play.warn(1840);
                             return refuse("not_ready", "another Master Class is already owned");
                         }
-                        play.cm.send02(node.x08)
+                        return api_capture::a5::ask_mastery(play, node.x08, false, node.x10, node.x0c);
                     }
                 }
             };
