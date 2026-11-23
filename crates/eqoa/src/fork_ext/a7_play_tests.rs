@@ -959,3 +959,109 @@ fn a7_every_new_event_reaches_lua_with_its_declared_fields_and_the_records_match
     step(&mut p, &host);
     host.execute("fields('guild.GuildInvite', eqoa.guild.invite())").unwrap();
 }
+
+/// Takes both request kinds for the test mod, delivers one friend request and one guild invitation, and steps until
+/// the mod holds both (the native boxes never drew).
+fn hold_both(p: &mut Play, host: &Host) {
+    host.execute("assert(eqoa.windows.takeover('friend_request', {scope='all'}) == true)").unwrap();
+    host.execute("assert(eqoa.windows.takeover('guild_invite', {scope='all'}) == true)").unwrap();
+    step(p, host);
+    deliver_op(p, 0x076F, pkt_076f(401, "Vex"));
+    super::health_redraw(p, false, false);
+    deliver_op(p, 0x057A, pkt_057a(501, "Garr", "Silver Hand"));
+    super::health_redraw(p, false, false);
+    step(p, host);
+    assert_eq!(p.mode, 0, "both prompts are the mod's: the game's boxes never opened");
+    host.execute("assert(eqoa.social.friend_request() ~= nil and eqoa.guild.invite() ~= nil)").unwrap();
+}
+
+#[test]
+fn a7_zoning_teleport_and_disconnect_refuse_held_requests_with_the_games_bytes() {
+    let _baseline = Baseline;
+    let mut ref_buddies = crate::social::Buddies::default();
+    ref_buddies.request = 401;
+    let friend_refusal = ref_buddies.refuse(2);
+    let mut ref_cmds = Cmds { inviter: 501, ..Default::default() };
+    let guild_refusal = ref_cmds.refuse(1);
+    let events = [
+        ("teleport", Event::Teleport { world: 1, pos: [0.0; 3], hpr: [0.0; 3], token: 7 }),
+        ("world entry", Event::WorldEntry { self_id: 100, player: Default::default(), dump: Default::default() }),
+        ("disconnect", Event::Disconnected(3)),
+    ];
+    for (what, event) in events {
+        let mut p = ready();
+        let host = host_all();
+        hold_both(&mut p, &host);
+        clear_recorded(&mut p);
+        let note = super::begin_game_event(&p, &event);
+        super::end_game_event(&p, note);
+        step(&mut p, &host);
+        let sent = recorded(&p);
+        assert!(sent.contains(&friend_refusal), "{what}: the friend request is refused to the server, got {sent:?}");
+        assert!(sent.contains(&guild_refusal), "{what}: the guild invitation is refused to the server, got {sent:?}");
+        assert_eq!(sent.len(), 2, "{what}: nothing else is sent");
+        host.execute(
+            "assert(eqoa.social.friend_request() == nil and eqoa.guild.invite() == nil              and eqoa.windows.session('friend_request') == nil and eqoa.windows.session('guild_invite') == nil)",
+        )
+        .unwrap();
+        // a second step sends nothing more: the refusal is given once
+        clear_recorded(&mut p);
+        step(&mut p, &host);
+        assert!(recorded(&p).is_empty(), "{what}: never refused twice");
+    }
+    // control: an event that is not the end of the world leaves the held requests held and sends nothing
+    let mut p = ready();
+    let host = host_all();
+    hold_both(&mut p, &host);
+    clear_recorded(&mut p);
+    let event = Event::State { channel: 1, data: vec![] };
+    let note = super::begin_game_event(&p, &event);
+    super::end_game_event(&p, note);
+    step(&mut p, &host);
+    assert!(recorded(&p).is_empty(), "control: nothing is refused while the world stands");
+    host.execute("assert(eqoa.social.friend_request() ~= nil and eqoa.guild.invite() ~= nil)").unwrap();
+}
+
+#[test]
+fn a7_a_mod_that_fails_hands_back_its_held_requests_and_the_next_ones_are_the_games() {
+    let _baseline = Baseline;
+    // control: a healthy mod keeps both claims and the prompts stay hidden
+    let mut p = ready();
+    let host = host_all();
+    hold_both(&mut p, &host);
+    step(&mut p, &host);
+    assert!(window_takeover::is_taken(window_takeover::TakeoverKind::FriendRequest), "control: still held");
+    assert_eq!(p.mode, 0, "control: hidden");
+    drop((p, host));
+    // a mod whose handler fails: it loses both claims, the held request is the game's box again with its time left,
+    // and the next request is the game's at once (negative control: without the release it stayed hidden and was
+    // refused after 45 s)
+    let mut p = ready();
+    let host = host_all();
+    host.execute("eqoa.events.on('windows.session', function(e) if e.data.phase == 'opened' then error('boom') end end)")
+        .unwrap();
+    host.execute("assert(eqoa.windows.takeover('friend_request', {scope='all'}) == true)").unwrap();
+    host.execute("assert(eqoa.windows.takeover('guild_invite', {scope='all'}) == true)").unwrap();
+    step(&mut p, &host);
+    deliver_op(&mut p, 0x076F, pkt_076f(401, "Vex"));
+    super::health_redraw(&mut p, false, false);
+    clear_recorded(&mut p);
+    step(&mut p, &host); // the session opens, the handler fails, the claims are released
+    step(&mut p, &host); // the held request goes back to the game
+    assert!(!window_takeover::is_taken(window_takeover::TakeoverKind::FriendRequest), "the failed mod holds nothing");
+    assert!(!window_takeover::is_taken(window_takeover::TakeoverKind::GuildInvite), "it holds no guild claim either");
+    assert_eq!(p.mode, 17, "the request it could not show is the game's own box");
+    assert!(p.buddy_wnd.mbox_visible);
+    assert!(recorded(&p).is_empty(), "handing back refuses nothing");
+    // the player answers the game's box; the next request is the game's at once, not hidden for a dead mod
+    p.mode = 0;
+    p.buddies.request = u32::MAX;
+    p.buddy_wnd.hide();
+    deliver_op(&mut p, 0x076F, pkt_076f(402, "Second"));
+    super::health_redraw(&mut p, false, false);
+    assert_eq!(p.mode, 17, "the next friend request opens the game's box");
+    p.mode = 0;
+    deliver_op(&mut p, 0x057A, pkt_057a(502, "Other", "Other Guild"));
+    super::health_redraw(&mut p, false, false);
+    assert_eq!(p.mode, 20, "the next guild invitation opens the game's box");
+}

@@ -1096,6 +1096,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.windows.key.data.key` | supported | 8 |  |
 | `eqoa.events.windows.key.data.owner` | supported | 8 |  |
 | `eqoa.events.windows.key.data.ref` | supported | 8 |  |
+| `eqoa.events.windows.session.data.data` | supported | 8 |  |
 | `eqoa.events.windows.session.data.kind` | supported | 8 |  |
 | `eqoa.events.windows.session.data.opened_from` | supported | 8 |  |
 | `eqoa.events.windows.session.data.origin` | supported | 8 |  |
@@ -1693,6 +1694,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.windows.MenuRow.item` | supported | 6 |  |
 | `eqoa.windows.MenuRow.text` | supported | 6 |  |
 | `eqoa.windows.Session` | supported | 8 |  |
+| `eqoa.windows.Session.data` | supported | 8 |  |
 | `eqoa.windows.Session.focused` | supported | 8 |  |
 | `eqoa.windows.Session.kind` | supported | 8 |  |
 | `eqoa.windows.Session.opened_from` | supported | 8 |  |

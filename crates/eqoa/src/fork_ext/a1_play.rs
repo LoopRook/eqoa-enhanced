@@ -38,6 +38,11 @@ fn item_index(play: &Play, item: &ResolvedItemSpec) -> Result<usize, DispatchOut
 }
 
 pub(crate) fn dispatch(play: &mut Play, action: &A1Action) -> DispatchOutcome {
+    // round A2: a dialog or offer is answered whatever the character's state (a resurrection is offered to the dead)
+    if let A1Action::SessionAnswer { session, option } = action {
+        use super::a2_play::{Choice, dispatch_answer};
+        return dispatch_answer(play, session, option.map_or(Choice::Close, Choice::Option));
+    }
     if play.is_dead() {
         return refuse("not_ready", "cannot do this while dead");
     }
@@ -72,6 +77,7 @@ pub(crate) fn dispatch(play: &mut Play, action: &A1Action) -> DispatchOutcome {
             }
             DispatchOutcome::Completed { detail: Some(json!({"sent": true})) }
         }
+        A1Action::SessionAnswer { .. } => refuse("unsupported", "not an item action"),
         A1Action::HideLook { item, hide } => {
             let idx = match item_index(play, item) {
                 Ok(i) => i,
@@ -113,10 +119,13 @@ pub(super) fn ask(act: Act, text: String, session_kind: &str) -> DispatchOutcome
 /// What a Yes does, as the game's own destroy and drop do, once the item or quest is checked to be what the
 /// question named.
 fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
-    if play.is_dead() || !play.in_world_now() {
+    // a resurrection offered to the dead is accepted dead: only the world must be there
+    let offer = matches!(p.act, Act::AcceptOffer { .. });
+    if (play.is_dead() && !offer) || !play.in_world_now() {
         return Err("not in the world".into());
     }
     match &p.act {
+        Act::AcceptOffer { session, .. } => super::a2_play::accept_offer(play, session),
         Act::Destroy { inv_index, name, count } => {
             let Some(idx) = play.dump.inventory.items.iter().position(|it| it.inv_index == *inv_index) else {
                 return Err("the item is no longer in the inventory".into());
@@ -208,11 +217,8 @@ pub(crate) fn tick(play: &mut Play) {
             TakeoverKind::Loot => crate::play::npcw::fork_pass::show_loot(play),
             TakeoverKind::Merchant => crate::play::npcw::fork_pass::show_merchant(play),
             TakeoverKind::Bank => crate::play::bankplay::fork_pass::show_bank(play),
-            // the raid strips and social requests are handled above or not held here
-            TakeoverKind::RaidReady
-            | TakeoverKind::RaidRoll
-            | TakeoverKind::FriendRequest
-            | TakeoverKind::GuildInvite => {}
+            // the raid strips are not held sessions: nothing of theirs is passed
+            _ => {}
         }
         window_sessions::finish_pass(vm, kind);
     }

@@ -271,6 +271,9 @@ pub(crate) fn begin_event(play: &Play, event: &net::session::Event) -> EventNote
 
 pub(crate) fn end_event(play: &Play, note: EventNote) {
     if note.reset {
+        // zoning, a teleport, a new world entry or a lost connection: the server must still hear a refusal for a
+        // request a mod holds (the next step sends it, `refuse_after_reset`), before the held state is wiped
+        a7::note_reset_refusals();
         a7::forget();
         return;
     }
@@ -440,7 +443,19 @@ fn refuse_held_guild(play: &mut Play, inviter_id: u32, reason: &'static str) {
 
 /// Runs each step from `begin_iteration`: hides taken requests, runs the 45-second timeout and holder checks so
 /// held requests are never left hanging, and refreshes community snapshots.
+/// Refuses the requests that were held when the world ended (`end_event`), with the game's own bytes.
+fn refuse_after_reset(play: &mut Play) {
+    let (friends, guilds) = a7::take_reset_refusals();
+    for id in friends {
+        refuse_held_friend(play, id, "left_world");
+    }
+    for id in guilds {
+        refuse_held_guild(play, id, "left_world");
+    }
+}
+
 pub(crate) fn tick(play: &mut Play) {
+    refuse_after_reset(play);
     hide_taken_requests(play);
     a7::enter_generation();
     let now = play.session.now() as i64;
@@ -513,6 +528,12 @@ pub(crate) fn tick(play: &mut Play) {
         window_sessions::sync_held_request(TakeoverKind::GuildInvite, None, "ended");
     }
 
+    // nothing is captured, hashed, copied or built while no mod listens (the zero-addon allocation gate): not the
+    // lists, and not the names of the game's own request box either
+    if !crate::fork_ext::addons::native_core::capture_requested() {
+        return;
+    }
+
     // Mirror native unheld prompts for read-only inspection
     let native_friend = (play.mode == 17 && play.buddies.request != u32::MAX)
         .then(|| (play.buddies.request, play.buddies.request_name.clone()));
@@ -520,8 +541,7 @@ pub(crate) fn tick(play: &mut Play) {
         .then(|| (play.guild_cmds.inviter, play.guild_cmds.name.clone(), play.guild_cmds.guild.clone()));
     a7::sync_native_requests(native_friend, native_guild);
 
-    // nothing is captured, hashed or built while no mod listens (the zero-addon allocation gate)
-    if !away && crate::fork_ext::addons::native_core::capture_requested() {
+    if !away {
         refresh_friends(play);
         refresh_ignored(play);
         refresh_guild(play);
@@ -535,6 +555,7 @@ pub(crate) fn play_dropped(play: &mut Play, leaving: bool) {
     if !leaving {
         return;
     }
+    refuse_after_reset(play);
     if let Some(req) = a7::friend_request()
         && req.held_by.is_some()
     {

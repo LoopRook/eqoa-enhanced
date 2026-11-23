@@ -265,6 +265,37 @@ pub(crate) fn forget() {
     STATE.with(|s| *s.borrow_mut() = State::default());
 }
 
+thread_local! {
+    /// Held requests whose world ended (zoning, a teleport, a new world entry): still to be refused to the server
+    /// by the next step, which has the `Play` to send with. Kept apart from `STATE` so a generation change or
+    /// `forget` cannot wipe them before that.
+    static RESET_REFUSE: RefCell<(Vec<u32>, Vec<u32>)> = const { RefCell::new((Vec::new(), Vec::new())) };
+}
+
+/// The world is ending: remember the ids of the held requests so the next step refuses them (`take_reset_refusals`).
+pub(crate) fn note_reset_refusals() {
+    let (friend, guild) = STATE.with(|s| {
+        let s = s.borrow();
+        (
+            s.friend_request.as_ref().filter(|r| r.held_by.is_some()).map(|r| r.id),
+            s.guild_invite.as_ref().filter(|r| r.held_by.is_some()).map(|r| r.inviter_id),
+        )
+    });
+    RESET_REFUSE.with(|r| {
+        let mut r = r.borrow_mut();
+        if let Some(id) = friend {
+            r.0.push(id);
+        }
+        if let Some(id) = guild {
+            r.1.push(id);
+        }
+    });
+}
+
+pub(crate) fn take_reset_refusals() -> (Vec<u32>, Vec<u32>) {
+    RESET_REFUSE.with(|r| std::mem::take(&mut *r.borrow_mut()))
+}
+
 pub(crate) fn enter_generation() -> bool {
     let generation = CORE.with(|c| c.borrow().generation);
     STATE.with(|s| {
