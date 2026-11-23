@@ -71,9 +71,13 @@ end
 
 -- ---- what the window shows -----------------------------------------------------------------------------------------
 
+-- The skill list, sorted. Only a list that has really arrived is kept (the read says "unavailable" until the server's
+-- list comes, and it comes between frames with no event), and draw() drops it each frame so a skill that turns known
+-- (the server's sub-op 7 changes nothing in `mastery.changed`) shows at once.
 local function sorted_skills()
     if S.skills == nil then
-        local list = eqoa.mastery.skills() or {}
+        local list = eqoa.mastery.skills()
+        if list == nil then return {} end
         local copy = {}
         for i, s in ipairs(list) do copy[i] = s end
         table.sort(copy, function(a, b)
@@ -374,6 +378,7 @@ function draw()
         fill(sb_x, list_y + LINE + (rows * LINE - th) * (S.scroll / (total - rows)), 6, th, c.muted)
         S.sb_rect = { x = x0 + (sb_x - 1) * k, y = y0 + (list_y + LINE) * k, w = 7 * k, h = rows * LINE * k }
     end
+    S.skills = nil
     clamp_scroll()
 
     if S.tab == "summary" then
