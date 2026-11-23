@@ -5,6 +5,52 @@ in the same push as the changes it describes. The dev release's page shows them
 (`release/notes.sh`, from `.github/workflows/dev.yml`); an edit to this file alone
 is put on the page by `.github/workflows/notes.yml`.
 
+## 2026-11-23 · 180 more hunting camps on the map
+- The map (M) shows about 180 more hunting camps: every sizeable group of creatures the server has that the map was missing, in Tunaria, the Rathe and Odus, each with its creatures' levels (for example the shriek camp in Wktaan's 4th Talon, the Isle of Dread's breath stealers, the Tomb of Kings' Holciel and the Tae Ew of Cazic-Thule), and Zentar's Keep's own hexbones and Bogman Village's rancidbone trolls.
+
+## 2026-11-23 · Lizardmen's helms fit their heads
+- A lizardman's helm is now bigger and sits further over the head, so the back and sides of the head and the jaw no longer poke through it. Before, every helm sat on top like a small cap, and on the strapped, bare and hierophant scales the head showed through the back and sides of it. The spines along the top and the snout still come out through the helm, as they are meant to.
+
+## 2026-11-23 · Sandstorms no longer flash clear
+- **A heavy sandstorm (or whiteout or snowstorm) no longer goes clear for a moment** when you turn the camera. The storm now thins and thickens smoothly: a storm that really ends fades out over a couple of seconds instead of vanishing in one frame.
+- **Walking under an arch, a palm or an awning in a storm** now eases the storm back over about a second instead of jumping between thick and thin.
+
+## 2026-11-23 · No more falling through blue space after dying in one world and waking in another
+- When you die and your bind point is in another world (or the server moves you to another world), you now wait on the loading screen until that world is in, standing still, then wake at your bind point. Before, especially in the web page, your character could be put back where you died but in the new world, with no ground under it, and fall through empty blue space until you logged out.
+- If the new world's files still have not come after half a minute, the game tries reading them once more. If that fails too, you are logged out where the server has you and told why, instead of being left on the loading screen or in the void.
+
+## 2026-11-22 · Your group's buffs on their bars, and a smaller buff bar when you have many
+- On a server that sends them, each group member's buffs now show as tiny icons on their bar in the group window, to the right of their health and power. Extended > UI > Group & Raid > Group Effects turns them off.
+- With more than eight buffs on you, the buff window's icons shrink a little so ten fit in a row (two rows hold twenty), instead of a second full-size row taking up more of the screen.
+
+## 2026-11-22 · Auto-cast fires damage spells that read like buffs
+- Marking a damage spell or debuff auto now makes it an attack, cast at your target in a fight, for spells whose description reads partly like a buff: Lightning Blast, Supernova, Lightning Nova, Lightning Storm, Lightning Maelstrom, Mana Blast, Dissipate, the bards' Blades, the alchemists' fire and mix potions, and others. Before, they were taken for buffs, cast at yourself, refused by the server, and switched off after three tries.
+- A slot still marked from before is switched off the old way once; mark it auto again (or type /autocast Lightning Blast attack) and it stays an attack.
+
+## 2026-11-22 · Web page: ✕ and □ on third-party PS4 controllers
+- In the web page, a PS4-style controller the browser has no layout for (a "DS4 Wired Controller" or another DualShock 4 copy, in Chrome or Edge on Windows and macOS, or Firefox on Windows) now has ✕, ○ and □ where they are printed. Before, its □ worked as ✕, its ✕ as ○ and its ○ as □, at logging in, in chat boxes and in the world. Controllers the browser knows, a real DualShock 4 included, are read as before.
+
+## 2026-11-22 · Frogloks jump higher
+- On a server with jumps, a froglok's jump goes twice as high as everyone else's (about its own height) and stays in the air a little longer. Every other race jumps as before. The server must allow the higher jump too: on one that does not yet, a froglok's higher jump is put back down.
+
+## 2026-11-22 · Your mercenary's commands in its details box
+- On a server that sends them, holding □ (Q) on your own mercenary lists its /merc commands under its name and level. Another player's mercenary and monsters still show only their name and level.
+
+## 2026-11-22 · Web page: a lost world no longer leaves you on the loading screen
+- In the web page, moving into one of the server's own worlds (the heroic dungeons, the Homelands) whose copy the browser had let go of now opens it again from the browser's storage and carries on.
+- If it still cannot be opened, you are logged out where the server has you and the page says why, instead of staying on "Loading, please wait" until the server drops you.
+- A second window of the page (another server, or a log in again) no longer deletes or rebuilds a world another window is playing in.
+- With "Remember my disc images" ticked, the disc picker opens with one click again; it no longer says "User activation required".
+- When one of the server's worlds cannot be built from your disc, the notice now says the real reason (a zone of your disc, or the built world, not matching the server's) instead of always blaming your disc.
+
+## 2026-11-22 · Every loot roll can be answered
+- With more than three loot rolls open, the roll strips now scroll, so no roll times out unseen. The d-pad or the arrow keys walk past the third strip, the mouse wheel over the strips (or a finger's drag on them) scrolls them, and "+N above" / "+N more" beside them can be clicked to page through.
+- A count turns red when a roll it hides has 15 seconds or less left.
+
+## 2026-11-22 · Quick chat after a server restart
+- When the server restarts and puts you back where you stood (or you respawn), an open quick-chat (L2) menu now closes, as on the PS2. It no longer stays open on the submenu you left it in, so your next press can't send a command from there by mistake, such as setting your pet to Passive.
+- L2 no longer opens the quick chat behind a loading screen, where it took your presses without showing them and used them all at once when the screen went away.
+
 ## 2026-11-21 · Trolls, ogres, dwarves, gnomes and halflings land a jump standing
 - A troll, ogre, dwarf, gnome or halfling no longer doubles over into what looked like an attack as it lands a jump: it comes down from the jump and stands up, as the other races do.
 
