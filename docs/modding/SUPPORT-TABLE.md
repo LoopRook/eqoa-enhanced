@@ -51,6 +51,14 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.chat` | supported | 6 |  |
 | `eqoa.actions.close_window` | supported | 6 |  |
 | `eqoa.actions.command` | supported | 6 |  |
+| `eqoa.actions.craft_combine` | supported | 8 |  |
+| `eqoa.actions.craft_fill` | supported | 8 |  |
+| `eqoa.actions.craft_inspect` | supported | 8 |  |
+| `eqoa.actions.craft_keep` | supported | 8 |  |
+| `eqoa.actions.craft_list` | supported | 8 |  |
+| `eqoa.actions.craft_tray_add` | supported | 8 |  |
+| `eqoa.actions.craft_tray_clear` | supported | 8 |  |
+| `eqoa.actions.craft_tray_remove` | supported | 8 |  |
 | `eqoa.actions.cycle_target` | supported | 6 |  |
 | `eqoa.actions.destroy` | supported | 2 |  |
 | `eqoa.actions.dialog_answer` | supported | 6 |  |
@@ -180,6 +188,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 |---|---|---|---|
 | `eqoa.cooldowns` | supported | 2 |  |
 | `eqoa.cooldowns.get` | supported | 2 |  |
+
+## eqoa.craft
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.craft` | supported | 8 |  |
+| `eqoa.craft.get` | supported | 8 |  |
 
 ## eqoa.effects
 
@@ -776,6 +791,64 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.cooldowns.Cooldown.estimated_remaining` | supported | 2 |  |
 | `eqoa.cooldowns.Cooldown.lockout` | supported | 2 |  |
 | `eqoa.cooldowns.Cooldown.started_at` | supported | 2 |  |
+| `eqoa.craft.Detail` | supported | 8 |  |
+| `eqoa.craft.Detail.count` | supported | 8 |  |
+| `eqoa.craft.Detail.description` | supported | 8 |  |
+| `eqoa.craft.Detail.ingredients` | supported | 8 |  |
+| `eqoa.craft.Detail.level` | supported | 8 |  |
+| `eqoa.craft.Detail.name` | supported | 8 |  |
+| `eqoa.craft.Detail.rarity` | supported | 8 |  |
+| `eqoa.craft.Detail.recipe` | supported | 8 |  |
+| `eqoa.craft.Detail.tools` | supported | 8 |  |
+| `eqoa.craft.Ingredient` | supported | 8 |  |
+| `eqoa.craft.Ingredient.have` | supported | 8 |  |
+| `eqoa.craft.Ingredient.name` | supported | 8 |  |
+| `eqoa.craft.Ingredient.need` | supported | 8 |  |
+| `eqoa.craft.Item` | supported | 8 |  |
+| `eqoa.craft.Item.id` | supported | 8 |  |
+| `eqoa.craft.Item.in_tray` | supported | 8 |  |
+| `eqoa.craft.Item.name` | supported | 8 |  |
+| `eqoa.craft.Item.quantity` | supported | 8 |  |
+| `eqoa.craft.Item.slot` | supported | 8 |  |
+| `eqoa.craft.Notice` | supported | 8 |  |
+| `eqoa.craft.Notice.seq` | supported | 8 |  |
+| `eqoa.craft.Notice.text` | supported | 8 |  |
+| `eqoa.craft.Question` | supported | 8 |  |
+| `eqoa.craft.Question.recipe` | supported | 8 |  |
+| `eqoa.craft.Question.text` | supported | 8 |  |
+| `eqoa.craft.Recipe` | supported | 8 |  |
+| `eqoa.craft.Recipe.component` | supported | 8 |  |
+| `eqoa.craft.Recipe.component_name` | supported | 8 |  |
+| `eqoa.craft.Recipe.difficulty` | supported | 8 |  |
+| `eqoa.craft.Recipe.difficulty_name` | supported | 8 |  |
+| `eqoa.craft.Recipe.id` | supported | 8 |  |
+| `eqoa.craft.Recipe.level` | supported | 8 |  |
+| `eqoa.craft.Recipe.name` | supported | 8 |  |
+| `eqoa.craft.Recipe.order` | supported | 8 |  |
+| `eqoa.craft.Recipe.skill` | supported | 8 |  |
+| `eqoa.craft.Skill` | supported | 8 |  |
+| `eqoa.craft.Skill.id` | supported | 8 |  |
+| `eqoa.craft.Skill.level` | supported | 8 |  |
+| `eqoa.craft.Skill.name` | supported | 8 |  |
+| `eqoa.craft.Skill.rank` | supported | 8 |  |
+| `eqoa.craft.State` | supported | 8 |  |
+| `eqoa.craft.State.detail` | supported | 8 |  |
+| `eqoa.craft.State.items` | supported | 8 |  |
+| `eqoa.craft.State.listed_skill` | supported | 8 |  |
+| `eqoa.craft.State.notice` | supported | 8 |  |
+| `eqoa.craft.State.pending` | supported | 8 |  |
+| `eqoa.craft.State.question` | supported | 8 |  |
+| `eqoa.craft.State.recipes` | supported | 8 |  |
+| `eqoa.craft.State.revision` | supported | 8 |  |
+| `eqoa.craft.State.skills` | supported | 8 |  |
+| `eqoa.craft.State.tray` | supported | 8 |  |
+| `eqoa.craft.Tool` | supported | 8 |  |
+| `eqoa.craft.Tool.have` | supported | 8 |  |
+| `eqoa.craft.Tool.name` | supported | 8 |  |
+| `eqoa.craft.TrayItem` | supported | 8 |  |
+| `eqoa.craft.TrayItem.id` | supported | 8 |  |
+| `eqoa.craft.TrayItem.name` | supported | 8 |  |
+| `eqoa.craft.TrayItem.slot` | supported | 8 |  |
 | `eqoa.effects.Buff` | supported | 8 |  |
 | `eqoa.effects.Buff.description` | supported | 8 |  |
 | `eqoa.effects.Buff.icon` | supported | 8 |  |

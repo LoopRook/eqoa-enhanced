@@ -21,8 +21,10 @@ use crate::input::bit;
 use serde_json::json;
 use std::cell::{Cell, RefCell};
 
-/// The windows a mod may open for itself in A1 (a view: the game's window of that name stays where it is).
-pub(crate) const OWN_KINDS: [&str; 5] = ["inventory", "spellbook", "quest_log", "trainer", "mastery"];
+/// The windows a mod may open for itself (a view: the game's window of that name stays where it is). Round A8 adds
+/// the crafting book and the experiment: while a mod holds one, the client reads the server's crafting replies
+/// (`native_a8`, `fork_ext/a8_play.rs`).
+pub(crate) const OWN_KINDS: [&str; 7] = ["inventory", "spellbook", "quest_log", "trainer", "mastery", "recipe_book", "experiment"];
 /// Most sessions one mod may hold at once.
 const MAX_PER_VM: usize = 8;
 
@@ -198,7 +200,7 @@ pub(crate) fn open(
             if TakeoverKind::parse(kind).is_ok() {
                 format!("the '{kind}' window is opened by the server: hold it with eqoa.windows.takeover instead")
             } else {
-                format!("a mod cannot open its own '{kind}' window in this version (only 'inventory', 'spellbook', 'quest_log', 'trainer' and 'mastery')")
+                format!("a mod cannot open its own '{kind}' window in this version (only 'inventory', 'spellbook', 'quest_log', 'trainer', 'mastery', 'recipe_book' and 'experiment')")
             },
         ));
     }
@@ -260,6 +262,14 @@ pub(crate) fn any_open(kind: &str) -> bool {
         return false;
     }
     with(|s| s.sessions.iter().any(|x| x.kind == kind))
+}
+
+/// Some mod holds a window of one of `kinds` (its own, not a held corpse, merchant or bank).
+pub(crate) fn any_open_of(kinds: &[&str]) -> bool {
+    if !is_active() {
+        return false;
+    }
+    with(|s| s.sessions.iter().any(|x| x.held.is_none() && kinds.contains(&x.kind.as_str())))
 }
 
 pub(crate) fn find(vm: u64, id: &str) -> Option<Session> {

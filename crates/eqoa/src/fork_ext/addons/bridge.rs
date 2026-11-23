@@ -225,7 +225,7 @@ fn text(v: &str) -> Result<CString> {
     CString::new(v).map_err(mlua::Error::external)
 }
 
-pub(super) struct Bridge {
+pub(crate) struct Bridge {
     frame: Rc<RefCell<Frame>>,
 }
 

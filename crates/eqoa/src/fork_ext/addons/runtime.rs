@@ -943,6 +943,8 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
                 "input_text" => continue,
                 // round A1: these never act on their own: the player's Yes is asked first (`asks_first_label`)
                 "destroy" | "drop_quest" => continue,
+                // round A8: their own line (`native_a8::crafting_label`)
+                k if k.starts_with("craft_") => continue,
                 // round A5: the same for spending training points and the two Class Mastery steps
                 "train_stats" | "mastery_buy" | "mastery_refund" => continue,
                 "request_factions" => "ask for faction standings",
@@ -1032,6 +1034,7 @@ pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec
         lines.push(TEXT_BOXES_LABEL.into());
     }
     lines.extend(asks_first_label(caps));
+    lines.extend(super::native_a8::crafting_label(caps));
     lines
 }
 

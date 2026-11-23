@@ -23,6 +23,10 @@ mod a1_play;
 #[path = "a2_play.rs"]
 mod a2_play;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "a8_play.rs"]
+mod a8_play;
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "map_mod_tests.rs"]
 mod map_mod_tests;
@@ -813,6 +817,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         sync_hidden_sessions(_play);
         a1_play::tick(_play);
         a2_play::tick(_play);
+        a8_play::tick(_play, _game_step);
         api_capture::a5::tick(_play);
         if crate::fork_ext::addons::native_core::capture_requested()
             || crate::fork_ext::addons::window_takeover::has_activity()
@@ -1038,6 +1043,22 @@ pub(super) fn dropped(_play: &mut Play) {
     // round A1: no mod window, question or controller focus outlives the world
     #[cfg(not(target_arch = "wasm32"))]
     a1_play::play_dropped(_play.quit || _play.disconnected.is_some());
+    // round A8: nothing of a mod's crafting window is left to read
+    #[cfg(not(target_arch = "wasm32"))]
+    a8_play::dropped();
+}
+
+/// Round A8: the server's crafting reply (0x1102), offered to a mod's crafting window before the game's own
+/// reading, which takes it only while the game's recipe book or experiment is up (`a8_play::reply`). True when a
+/// mod's window took it.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn craft_reply(play: &mut Play, data: &[u8]) -> bool {
+    a8_play::reply(play, data)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn craft_reply(_: &mut Play, _: &[u8]) -> bool {
+    false
 }
 
 /// Clears the pins disabled mods still own, once the map has read the window's pins; until then the
@@ -3228,6 +3249,7 @@ fn dispatch_broker_action(
         }
         ActionKind::Frame(action) => api_capture::a3::dispatch(play, action),
         ActionKind::A1(action) => a1_play::dispatch(play, action),
+        ActionKind::A8(action) => a8_play::dispatch(play, action),
         ActionKind::A5(action) => api_capture::a5::dispatch(play, action),
         ActionKind::DropQuest { .. }
         | ActionKind::MasteryShare { .. }

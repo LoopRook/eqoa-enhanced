@@ -42,6 +42,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_character",
     "eqoa_dialogs",
     "eqoa_turnin",
+    "eqoa_crafting",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -274,6 +275,21 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_turnin/README.md",
         package: "eqoa_turnin",
         data: include_bytes!("../../../../bundled-mods/eqoa_turnin/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_crafting/mod.json",
+        package: "eqoa_crafting",
+        data: include_bytes!("../../../../bundled-mods/eqoa_crafting/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_crafting/main.lua",
+        package: "eqoa_crafting",
+        data: include_bytes!("../../../../bundled-mods/eqoa_crafting/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_crafting/README.md",
+        package: "eqoa_crafting",
+        data: include_bytes!("../../../../bundled-mods/eqoa_crafting/README.md"),
     },
     BundledFile {
         path: "eqoa_example_hearts/mod.json",
@@ -1264,7 +1280,8 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-                "eqoa_turnin"
+                "eqoa_turnin",
+                "eqoa_crafting"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1564,7 +1581,8 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-                "eqoa_turnin"
+                "eqoa_turnin",
+                "eqoa_crafting"
             ]
         );
 
@@ -1617,7 +1635,8 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-                "eqoa_turnin"
+                "eqoa_turnin",
+                "eqoa_crafting"
             ]
         );
 
@@ -1644,7 +1663,8 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-                "eqoa_turnin"
+                "eqoa_turnin",
+                "eqoa_crafting"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1737,7 +1757,8 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-                "eqoa_turnin"
+                "eqoa_turnin",
+                "eqoa_crafting"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );
