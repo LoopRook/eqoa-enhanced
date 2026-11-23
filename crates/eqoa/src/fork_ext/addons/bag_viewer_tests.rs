@@ -499,6 +499,14 @@ fn a_bag_viewer_tooltip_body() {
     let tail = &helm[at + 1..];
     assert_eq!(tail.len(), 3, "{helm:?}");
     assert!(tail.iter().all(|l| l.ends_with("|muted")) && tail[2].ends_with("...|muted"), "{helm:?}");
+    // owner test 2026-11-23: a misc or crafting item (no wear slot) has no class or race rule, so its card says nothing
+    // about classes or races (it used to say "All classes"); the gear above keeps its lines.
+    // Negative control: the cards above (the sword, ring, robe, cloak, helm are gear) still carry their Class lines
+    for (slot, name) in [(2, "Healing Potion"), (7, "Rat Pelt")] {
+        let card = bv.hover(slot);
+        assert_eq!(card[0], format!("{name}|title"), "{card:?}");
+        assert!(!card.iter().any(|l| l.contains("classes") || l.starts_with("Class:") || l.starts_with("Race:")), "{name}: {card:?}");
+    }
     // an empty description adds no line
     let pelt = bv.hover(7);
     assert!(!pelt.iter().any(|l| l.ends_with("|muted") && !l.starts_with("Value")), "{pelt:?}");

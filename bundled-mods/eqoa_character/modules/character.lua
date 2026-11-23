@@ -193,9 +193,9 @@ local function spend()
 end
 
 local function inspect(skill)
-    S.sel = skill.id
     local m = eqoa.mastery.get()
-    if m and m.pending then say("Waiting for the server's last answer", false); return end
+    if m and m.pending then say("Waiting for the server's last answer, then click again", false); return end
+    S.sel = skill.id
     run("Opening " .. skill.name, function() return eqoa.actions.mastery_browse(skill.id) end)
 end
 
@@ -278,7 +278,7 @@ function draw()
     local list_y = TOP
     local list_h = ROWS * LINE
     local foot_y = list_y + list_h + 6
-    local bar_y = foot_y + LINE + 4
+    local bar_y = foot_y + 2 * LINE + 4
     local H = bar_y + 16 + PAD
     local x0 = math.max(0, math.min(dw - W * k, f.offset_x + (640 - W) / 2 * f.scale_x))
     local y0 = math.max(0, math.min(dh - H * k, f.offset_y + (448 - H) / 2 * f.scale_y))
@@ -461,7 +461,7 @@ function draw()
             if node then
                 local req = string.format("Level %d   %d points spent first", node.level_required or 0, node.points_spent_required or 0)
                 text(PAD, dy + LINE, req, c.muted, W - 2 * PAD)
-                wrapped(PAD, dy + 2 * LINE, node.text or "", c.text, W - 2 * PAD, 1)
+                wrapped(PAD, dy + 2 * LINE, node.text or "", c.text, W - 2 * PAD, 2)
             else
                 text(PAD, dy + LINE, "Opening it...", c.muted)
             end
@@ -469,7 +469,8 @@ function draw()
             text(PAD, dy, "Click a skill to read it", c.muted)
         end
         local bx = PAD
-        local ready = sel and node
+        -- the game's window answers nothing while it waits for the server's last answer; neither does this one
+        local ready = sel and node and not (m and m.pending)
         bx = button(bx, "Buy", ready and (not sel.owned) and sel.known and true or false, function()
             run("Asking you to confirm", function() return eqoa.actions.mastery_buy(sel.id) end)
         end)
@@ -541,7 +542,7 @@ function draw()
         end)
     end
     if S.result then
-        text(PAD, foot_y, S.result.text, S.result.ok == false and c.warn or c.muted, W - 2 * PAD)
+        wrapped(PAD, foot_y, S.result.text, S.result.ok == false and c.warn or c.muted, W - 2 * PAD, 2)
     elseif S.tab == "summary" then
         text(PAD, foot_y, "Train asks you to confirm before any point is spent", c.muted, W - 2 * PAD)
     end

@@ -16,7 +16,7 @@ Four tabs:
   choose, Enter to answer, Escape for No, or click). Spent points cannot be taken back.
 - **Masteries**: the skills of your Class Mastery list, with their cost and whether you own them (`owned`), can buy them
   (`buy`) or cannot yet (`locked`); `[M]` marks a Master Class. Click a skill to read it (the server sends its
-  description and what it needs). **Buy** and **Refund** ask **Are you sure?** the same way; only your own Yes sends the
+  description and what it needs). **Buy** and **Refund** wait while the game is still waiting for the server's last answer (they come back when it is in; a Yes given in that moment waits for it and then goes), and ask **Are you sure?** the same way; only your own Yes sends the
   request. One request goes to the server at a time. The wheel scrolls the list.
 - **Factions**: your standings, a page at a time (**Previous page** and **Next page**). The bar runs from the middle,
   red to the left and blue to the right, as in the game.

@@ -36,6 +36,10 @@ local state = {
     sel_guild = nil,
     sel_who = nil,
     sel_lfg = nil,
+    -- Group Search: what to look for (nil = the game's own choice: groups when alone, players when in a group), and
+    -- how many the last answer held (nil until an answer comes)
+    lfg_kind = nil,
+    lfg_count = nil,
 
     -- Cached lists
     friends = {},
@@ -482,6 +486,24 @@ local function draw_who_tab()
     return active
 end
 
+-- What the Group Search list says when it has no rows: that a search is out, that it came back empty (so the player
+-- knows the answer was heard), or that none was made yet. A global so a test can read it.
+function social_lfg_empty_note(busy, count, kind)
+    if busy then return "Searching..." end
+    if count == 0 then
+        if kind == "players" then return "Nobody found. No player is looking for a group right now." end
+        if kind == "groups" then return "Nobody found. No group is looking for members right now." end
+        return "Nobody found. No one is looking right now (try Find: Players or Find: Groups)."
+    end
+    return "No group search results yet. Click Search LFG."
+end
+
+-- what the tab has heard of the last search, for a test
+function social_probe() return state.lfg_count, state.lfg_kind end
+
+local KIND_LABEL = { [false] = "Find: Auto", groups = "Find: Groups", players = "Find: Players" }
+local NEXT_KIND = { [false] = "groups", groups = "players", players = false }
+
 local function draw_lfg_tab()
     local active = false
     local l = state.lfg
@@ -492,7 +514,8 @@ local function draw_lfg_tab()
     end
 
     if ui.Button("Search LFG") then
-        run_action("Group search", function() return eqoa.lfg.search() end)
+        state.lfg_count = nil
+        run_action("Group search", function() return eqoa.lfg.search(state.lfg_kind and { kind = state.lfg_kind } or nil) end)
     end
     ui.SameLine()
     if ui.Button("Register##lfg") then
@@ -505,7 +528,12 @@ local function draw_lfg_tab()
     if l.registered ~= nil then
         ui.SameLine()
         ui.TextDisabled(l.registered and "Registered" or "Not registered")
-    elseif l.busy then
+    end
+    if ui.Button(KIND_LABEL[state.lfg_kind or false] .. "##lfg_kind") then
+        state.lfg_kind = NEXT_KIND[state.lfg_kind or false] or nil
+        state.lfg_count = nil
+    end
+    if l.busy then
         ui.SameLine()
         ui.TextDisabled("Searching...")
     end
@@ -517,7 +545,7 @@ local function draw_lfg_tab()
     local list_h = state.tell_target and 115 or 170
     if ui.BeginChild("##lfg_list", 0, list_h, ImGuiChildFlags.Border) then
         if #entries == 0 then
-            ui.TextDisabled("No group search results yet. Click Search LFG.")
+            ui.TextWrapped(social_lfg_empty_note(l.busy, state.lfg_count, state.lfg_kind))
         else
             for _, e in ipairs(entries) do
                 local is_sel = state.sel_lfg == e.id
@@ -703,9 +731,11 @@ eqoa.events.on("who.result", function()
     local w = eqoa.who.get()
     if type(w) == "table" then state.who = w end
 end)
-eqoa.events.on("lfg.result", function()
+eqoa.events.on("lfg.result", function(e)
     local l = eqoa.lfg.get()
     if type(l) == "table" then state.lfg = l end
+    -- the answer was heard, even an empty one
+    state.lfg_count = (e.data and e.data.count) or (l and l.entries and #l.entries) or 0
 end)
 eqoa.events.on("lfg.changed", function(e)
     if e.data and type(e.data.after) == "table" then state.lfg = e.data.after end

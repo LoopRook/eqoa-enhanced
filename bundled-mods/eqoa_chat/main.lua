@@ -5,7 +5,11 @@
 -- own item card; the Bag Viewer's Link button puts an item into the line.
 local ui = eqoa.imgui
 
-local W, H, PAD, LINE, ROWS = 330, 150, 6, 12, 8
+local PAD, LINE = 6, 12
+-- The window's size and place are the player's: drag the strip beside the tabs to move it, the corner to size it. They
+-- are kept in this mod's settings, in HUD units (the 640 by 448 picture).
+local HEAD = 10 -- the strip at the top that moves the window
+local DEF_W, DEF_H, MIN_W, MAX_W, MIN_H, MAX_H = 330, HEAD + 22 + 8 * 12, 200, 640, HEAD + 22 + 2 * 12, 300
 local MAX_LINES = 400
 local CHANNELS = {
     { id = "say", label = "Say" }, { id = "group", label = "Group" }, { id = "guild", label = "Guild" },
@@ -35,7 +39,58 @@ local state = {
     lines = {}, notices = {}, tab = "all", own_tabs = false, scroll = 0,
     session = nil, text = "", channel = "say", links = {}, last_offer = 0, note = nil,
     hits = {}, rect = nil, tokens = {}, claim = nil,
+    w = DEF_W, h = DEF_H, lx = 4, ly = nil, drag = nil,
+    -- the tabs the player edits (nil until the styles are known, or after Reset tabs), the next id, the open menu
+    -- (a tab's, or the strip's), its rows' hit areas, a tab being renamed, and what the text was cut by
+    custom = nil, next_tab = 1, menu = nil, menu_hits = {}, rename = nil, cuts = 0, menu_cuts = 0, capturing = false,
 }
+
+local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
+
+-- The chat styles a tab can show, in the order its menu lists them.
+local STYLE_ORDER = { "say", "group", "guild", "shouts", "tells", "combat", "loot", "rolls", "experience", "system" }
+local NAME_MOST = 12
+
+-- What is kept: the window's place and size, and the tabs the player made (nil = the default set).
+local function snapshot()
+    local out = { x = state.lx, y = state.ly, w = state.w, h = state.h, next_tab = state.next_tab }
+    if state.custom then
+        out.tabs = {}
+        for i, t in ipairs(state.custom) do
+            local kinds = {}
+            for _, k in ipairs(STYLE_ORDER) do if t.kinds and t.kinds[k] then kinds[#kinds + 1] = k end end
+            out.tabs[i] = { id = t.id, name = t.name, all = t.all == true, kinds = kinds }
+        end
+    end
+    return out
+end
+
+local function persist() eqoa.settings.save(snapshot()) end
+
+eqoa.settings.on_save(snapshot)
+eqoa.settings.on_load(function(saved)
+    if type(saved) ~= "table" then return end
+    if type(saved.x) == "number" then state.lx = saved.x end
+    if type(saved.y) == "number" then state.ly = saved.y end
+    if type(saved.w) == "number" then state.w = clamp(saved.w, MIN_W, MAX_W) end
+    if type(saved.h) == "number" then state.h = clamp(saved.h, MIN_H, MAX_H) end
+    if type(saved.next_tab) == "number" then state.next_tab = saved.next_tab end
+    if type(saved.tabs) == "table" then
+        local list, has_all = {}, false
+        for _, t in ipairs(saved.tabs) do
+            if type(t) == "table" and type(t.id) == "string" and type(t.name) == "string" then
+                local entry = { id = t.id, name = t.name:sub(1, NAME_MOST), all = t.all == true }
+                if entry.all then has_all = true else
+                    entry.kinds = {}
+                    for _, k in ipairs(type(t.kinds) == "table" and t.kinds or {}) do entry.kinds[k] = true end
+                end
+                list[#list + 1] = entry
+            end
+        end
+        -- the All tab is always there
+        if has_all then state.custom = list end
+    end
+end)
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
@@ -49,10 +104,32 @@ local function add_line(m)
     while #state.lines > MAX_LINES do table.remove(state.lines, 1) end
 end
 
--- The tabs: All, then a tab per chat style, or the player's own tabs (the game's Chat Tabs setting).
+-- The default set: All, then a tab per chat style. Empty of styles while the client has not said which exist.
+local function default_tabs()
+    local out = { { id = "all", name = "All", all = true } }
+    local setup = eqoa.chat.tabs()
+    for _, k in ipairs(setup and setup.kinds or {}) do
+        out[#out + 1] = { id = k, name = STYLE_LABELS[k] or k, kinds = { [k] = true } }
+    end
+    return out
+end
+
+-- The tabs as edited: kept in `state.custom` once the styles are known.
+local function edited_tabs()
+    if not state.custom then
+        local d = default_tabs()
+        if #d > 1 then state.custom = d end
+        return d
+    end
+    return state.custom
+end
+
+-- The tabs: All, then a tab per chat style (as the player edited them), or the player's own tabs (the game's Chat
+-- Tabs setting, not editable here).
 local function tabs()
-    local out = { { id = "all", label = "All", kinds = nil } }
+    local out = {}
     if state.own_tabs then
+        out[1] = { id = "all", label = "All", kinds = nil }
         local setup = eqoa.chat.tabs()
         for _, t in ipairs(setup and setup.tabs or {}) do
             local set = {}
@@ -60,9 +137,8 @@ local function tabs()
             out[#out + 1] = { id = "own" .. t.index, label = t.name, kinds = set, main = t.index == 0 }
         end
     else
-        local setup = eqoa.chat.tabs()
-        for _, k in ipairs(setup and setup.kinds or {}) do
-            out[#out + 1] = { id = k, label = STYLE_LABELS[k] or k, kinds = { [k] = true } }
+        for _, t in ipairs(edited_tabs()) do
+            out[#out + 1] = { id = t.id, label = t.name, kinds = (not t.all) and t.kinds or nil, entry = t }
         end
     end
     out[#out + 1] = { id = "notices", label = "Notices", notices = true }
@@ -84,6 +160,75 @@ local function visible_lines(tab)
     end
     -- the player's Main tab also takes every kind no other tab was given
     return out
+end
+
+-- ---- editing the tabs -------------------------------------------------------------------------------------------
+
+local function index_of(t)
+    for i, e in ipairs(edited_tabs()) do if e == t then return i end end
+end
+
+local function close_menu() state.menu = nil; state.menu_hits = {} end
+
+local function move_tab(t, delta)
+    local list = edited_tabs()
+    local i = index_of(t)
+    local j = i and i + delta
+    if not i or j < 1 or j > #list then return end
+    list[i], list[j] = list[j], list[i]
+    persist()
+end
+
+local function delete_tab(t)
+    if t.all then return end
+    local list = edited_tabs()
+    local i = index_of(t)
+    if not i then return end
+    table.remove(list, i)
+    if state.tab == t.id then state.tab, state.scroll = "all", 0 end
+    persist()
+end
+
+local function new_tab()
+    local list = edited_tabs()
+    local id
+    repeat
+        id = "t" .. state.next_tab
+        state.next_tab = state.next_tab + 1
+        local taken = false
+        for _, e in ipairs(list) do if e.id == id then taken = true end end
+    until not taken
+    -- starts with nothing ticked
+    list[#list + 1] = { id = id, name = "New", kinds = {} }
+    state.tab, state.scroll = id, 0
+    state.custom = list
+    persist()
+end
+
+local function reset_tabs()
+    state.custom = nil
+    state.tab, state.scroll = "all", 0
+    persist()
+end
+
+local function toggle_kind(t, kind)
+    if t.all then return end
+    t.kinds = t.kinds or {}
+    t.kinds[kind] = (not t.kinds[kind]) or nil
+    persist()
+end
+
+local function begin_rename(t)
+    state.rename = { t = t, text = t.name }
+end
+
+local function finish_rename(apply)
+    local r = state.rename
+    state.rename = nil
+    if apply and r and r.text:match("%S") then
+        r.t.name = r.text:gsub("^%s+", ""):gsub("%s+$", "")
+        persist()
+    end
 end
 
 -- Sending: Tell takes the first word as the player's name; a line that starts with / is a command.
@@ -161,8 +306,24 @@ local function load_session(s)
 end
 
 local function on_key(d)
-    if not state.session or not d.down then return end
+    if not d.down then return end
     local k = d.key:lower()
+    -- a tab being renamed has the keys: Enter keeps the name, Escape drops it
+    if state.rename then
+        if k == "escape" then finish_rename(false)
+        elseif k == "enter" or k == "return" then finish_rename(true)
+        elseif k == "backspace" then
+            state.rename.text = state.rename.text:match("^(.*)[%z\1-\127\194-\244][\128-\191]*$") or ""
+        elseif d.text then
+            for c in d.text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+                if chars(state.rename.text) >= NAME_MOST then break end
+                if not c:find("[%z\1-\31\127]") then state.rename.text = state.rename.text .. c end
+            end
+        end
+        return
+    end
+    if state.menu and k == "escape" then close_menu(); return end
+    if not state.session then return end
     if k == "escape" then
         eqoa.windows.close_session(state.session.ref)
     elseif k == "enter" or k == "return" then
@@ -184,9 +345,34 @@ local function open_link(link)
 end
 
 local function pointer_pressed(d)
+    -- an open menu has the press: a row runs, anything else closes it
+    if state.menu then
+        local row
+        for _, h in ipairs(state.menu_hits) do if inside(d.x, d.y, h) then row = h; break end end
+        if row and d.button == "left" then
+            if row.run then row.run() end
+            return
+        end
+        close_menu()
+        if d.button == "left" or row then return end
+    end
+    if state.rename then return end
+    if d.button == "right" then
+        for _, h in ipairs(state.hits) do
+            if inside(d.x, d.y, h) and h.ctx then h.ctx(d); return end
+        end
+        return
+    end
     if d.button ~= "left" then return end
     for _, h in ipairs(state.hits) do
-        if inside(d.x, d.y, h) and h.run then h.run(); return end
+        if inside(d.x, d.y, h) then
+            if h.drag then
+                state.drag = { kind = h.drag, px = d.x, py = d.y, lx = state.lx, ly = state.eff_ly or state.ly or 0,
+                    w = state.w, h = state.h, age = 0 }
+                return
+            end
+            if h.run then h.run(); return end
+        end
     end
 end
 
@@ -232,6 +418,8 @@ end
 state.hide = eqoa.hud.hide("chat")
 
 local function release()
+    close_menu()
+    state.rename = nil
     if state.session then eqoa.windows.close_session(state.session.ref); state.session = nil end
     eqoa.input.capture_text(false)
     eqoa.windows.release("chat_entry")
@@ -243,15 +431,27 @@ eqoa.events.on("render", function()
     local k = math.min(f.scale_x, f.scale_y)
     local dw, dh = ui.GetDisplaySize()
     if k <= 0 or dw <= 0 then return end
-    if state.session then eqoa.input.capture_text(true) end
+    local want = state.session ~= nil or state.rename ~= nil
+    if want ~= state.capturing then
+        state.capturing = want
+        eqoa.input.capture_text(want)
+    end
     local tab = active_tab()
     local list = visible_lines(tab)
     local entry_h = state.session and 40 or 0
-    local Ht = H + entry_h
-    local x0 = f.offset_x + 4 * f.scale_x
-    local y0 = math.min(dh - Ht * k, f.offset_y + (448 - Ht - 24) * f.scale_y)
+    local W, H, ROWS, Ht, x0, y0
+    local function layout()
+        W, H = state.w, state.h
+        ROWS = math.max(2, math.floor((H - HEAD - 22) / LINE))
+        Ht = H + entry_h
+        local ly = state.ly or (448 - Ht - 24)
+        x0 = clamp(f.offset_x + state.lx * f.scale_x, 0, math.max(0, dw - W * k))
+        y0 = clamp(f.offset_y + ly * f.scale_y, 0, math.max(0, dh - Ht * k))
+        state.eff_ly = ly
+        state.rect = { x = x0, y = y0, w = W * k, h = Ht * k }
+    end
+    layout()
     local function at(x, y) return ImVec2.new(x0 + x * k, y0 + y * k) end
-    state.rect = { x = x0, y = y0, w = W * k, h = Ht * k }
 
     ui.SetNextWindowPos(0, 0)
     ui.SetNextWindowSize(dw, dh)
@@ -259,6 +459,28 @@ eqoa.events.on("render", function()
         + ImGuiWindowFlags.NoMove + ImGuiWindowFlags.NoResize + ImGuiWindowFlags.NoScrollbar
         + ImGuiWindowFlags.NoSavedSettings + ImGuiWindowFlags.NoInputs)
     ui.SetWindowFontScale(k * 10 / 13)
+    -- follow a press that took the move strip or the corner to its release (ImGui's own mouse state)
+    local d = state.drag
+    if d then
+        d.age = d.age + 1
+        if ui.IsMouseDown(0) then
+            d.seen = true
+            local p = eqoa.input.pointer()
+            local dx, dy = p.x - d.px, p.y - d.py
+            if d.kind == "move" then
+                state.lx = d.lx + dx / f.scale_x
+                state.ly = d.ly + dy / f.scale_y
+            else
+                state.w = clamp(d.w + dx / k, MIN_W, MAX_W)
+                state.h = clamp(d.h + dy / k, MIN_H, MAX_H)
+            end
+            layout()
+        elseif d.seen or d.age > 5 then
+            -- let go (or ImGui never saw the press): the place is kept
+            state.drag = nil
+            persist()
+        end
+    end
     local dl = ui.GetWindowDrawList()
     local c = {
         text = ui.GetColorU32(.91, .91, .91, 1), muted = ui.GetColorU32(.55, .55, .55, 1),
@@ -273,6 +495,7 @@ eqoa.events.on("render", function()
         value = tostring(value)
         while maxw and #value > 0 and ui.CalcTextSize(value) > maxw * k do
             value = value:match("^(.*)[%z\1-\127\194-\244][\128-\191]*$") or ""
+            state.cuts = state.cuts + 1
         end
         dl:AddText(at(x, y), color or c.text, value)
     end
@@ -282,21 +505,56 @@ eqoa.events.on("render", function()
     frame(0, 0, W, Ht, c.border)
     state.hits = {}
     -- the tab strip
+    local function tag(h, id, ctx) h.id, h.ctx = id, ctx; return h end
     local tx = 2
-    for _, t in ipairs(tabs()) do
-        local tw = ui.CalcTextSize(t.label) / k + 8
-        if tx + tw > W - 40 then break end
-        fill(tx, 2, tw, 12, t.id == state.tab and c.on or c.raised)
-        frame(tx, 2, tw, 12, c.border)
-        text(tx + 4, 2, t.label, t.id == state.tab and c.white or c.muted)
-        state.hits[#state.hits + 1] = hit(tx, 2, tw, 12, function() state.tab, state.scroll = t.id, 0 end)
-        tx = tx + tw + 2
+    local limit = state.own_tabs and W - 40 or W - 54
+    if state.rename then
+        -- a tab being renamed: its name is typed here (Enter keeps it, Esc drops it)
+        fill(2, HEAD + 2, W - 44, 12, c.raised)
+        frame(2, HEAD + 2, W - 44, 12, c.white)
+        text(6, HEAD + 2, "Rename: " .. state.rename.text .. "_   (Enter, Esc)", c.white, W - 52)
+    else
+        for _, t in ipairs(tabs()) do
+            local tw = ui.CalcTextSize(t.label) / k + 8
+            if tx + tw > limit then break end
+            fill(tx, HEAD + 2, tw, 12, t.id == state.tab and c.on or c.raised)
+            frame(tx, HEAD + 2, tw, 12, c.border)
+            text(tx + 4, HEAD + 2, t.label, t.id == state.tab and c.white or c.muted)
+            -- a click chooses the tab; a right click (the styles' tabs) opens its menu
+            local entry = t.entry
+            state.hits[#state.hits + 1] = tag(hit(tx, HEAD + 2, tw, 12, function() state.tab, state.scroll = t.id, 0 end),
+                "tab:" .. t.id, entry and function(d) state.menu = { x = d.x, y = d.y, entry = entry } end or nil)
+            tx = tx + tw + 2
+        end
+        if not state.own_tabs then
+            -- the small + (always there, beside Styles) makes a new tab
+            fill(W - 52, HEAD + 2, 12, 12, c.raised)
+            frame(W - 52, HEAD + 2, 12, 12, c.border)
+            text(W - 49, HEAD + 2, "+", c.muted)
+            state.hits[#state.hits + 1] = tag(hit(W - 52, HEAD + 2, 12, 12, new_tab), "tab:new")
+        end
+        if not state.own_tabs and tx < limit then
+            -- the empty strip beside the tabs: a right click there offers New tab and Reset tabs
+            state.hits[#state.hits + 1] = tag(hit(tx, HEAD + 2, limit - tx, 12, function() end), "strip",
+                function(d) state.menu = { x = d.x, y = d.y } end)
+        end
     end
     local mode = state.own_tabs and "Mine" or "Styles"
-    fill(W - 38, 2, 36, 12, c.raised)
-    frame(W - 38, 2, 36, 12, c.border)
-    text(W - 34, 2, mode, c.muted)
-    state.hits[#state.hits + 1] = hit(W - 38, 2, 36, 12, function() state.own_tabs, state.tab, state.scroll = not state.own_tabs, "all", 0 end)
+    fill(W - 38, HEAD + 2, 36, 12, c.raised)
+    frame(W - 38, HEAD + 2, 36, 12, c.border)
+    text(W - 34, HEAD + 2, mode, c.muted)
+    state.hits[#state.hits + 1] = tag(hit(W - 38, HEAD + 2, 36, 12, function()
+        close_menu()
+        state.own_tabs, state.tab, state.scroll = not state.own_tabs, "all", 0
+    end), "mode")
+
+    -- the strip beside the tabs moves the window; the corner sizes it
+    state.hits[#state.hits + 1] = { x = x0, y = y0, w = W * k, h = HEAD * k, drag = "move", id = "move" }
+    text(W / 2 - 20, 0, "drag to move", c.muted, 60)
+    state.hits[#state.hits + 1] = { x = x0 + (W - 12) * k, y = y0 + (H - 12) * k, w = 12 * k, h = 12 * k, drag = "size" }
+    fill(W - 8, H - 3, 6, 1, c.muted)
+    fill(W - 6, H - 6, 4, 1, c.muted)
+    fill(W - 4, H - 9, 2, 1, c.muted)
 
     -- the lines, newest at the bottom; the wheel scrolls back
     local most = math.max(0, #list - ROWS)
@@ -305,7 +563,7 @@ eqoa.events.on("render", function()
         local index = #list - state.scroll - (ROWS - row)
         local l = list[index]
         if l then
-            local y = 18 + (row - 1) * LINE
+            local y = HEAD + 18 + (row - 1) * LINE
             local body = l.text
             local color = l.kind == "notice" and c.warn or c.text
             if l.color and l.color.r then color = ui.GetColorU32(l.color.r, l.color.g, l.color.b, 1) end
@@ -324,7 +582,7 @@ eqoa.events.on("render", function()
             end
         end
     end
-    if tab.notices and #list == 0 then text(PAD, 18, "Nothing to report", c.muted) end
+    if tab.notices and #list == 0 then text(PAD, HEAD + 18, "Nothing to report", c.muted) end
 
     -- the entry line while the player is typing
     if state.session then
@@ -357,6 +615,67 @@ eqoa.events.on("render", function()
     end
 
     eqoa.input.claim_pointer({ x = x0, y = y0, width = W * k, height = Ht * k })
+
+    -- the open tab menu, over everything (it may reach past the window, so it is claimed too)
+    state.menu_hits = {}
+    local m = state.menu
+    if m and m.entry and not index_of(m.entry) then close_menu(); m = nil end
+    if m then
+        local rows = {}
+        local function add(label, run, enabled, check, header)
+            rows[#rows + 1] = { label = label, run = run, enabled = enabled ~= false, check = check, header = header }
+        end
+        local e = m.entry
+        if e then
+            local at_i, count = index_of(e), #edited_tabs()
+            add("Rename", function() close_menu(); begin_rename(e) end)
+            add("Move left", function() close_menu(); move_tab(e, -1) end, at_i > 1)
+            add("Move right", function() close_menu(); move_tab(e, 1) end, at_i < count)
+            if not e.all then add("Delete", function() close_menu(); delete_tab(e) end) end
+            if not e.all then
+                add("Show in this tab", nil, false, nil, true)
+                for _, kind in ipairs(STYLE_ORDER) do
+                    add(STYLE_LABELS[kind], function() toggle_kind(e, kind) end, true, (e.kinds and e.kinds[kind]) and true or false)
+                end
+            end
+        end
+        add("New tab", function() close_menu(); new_tab() end)
+        add("Reset tabs", function() close_menu(); reset_tabs() end)
+        local mw, mh = 104 * k, (#rows * LINE + 4) * k
+        local mx = clamp(m.x, 0, math.max(0, dw - mw))
+        local my = clamp(m.y, 0, math.max(0, dh - mh))
+        dl:AddRectFilled(ImVec2.new(mx, my), ImVec2.new(mx + mw, my + mh), c.raised)
+        dl:AddRect(ImVec2.new(mx, my), ImVec2.new(mx + mw, my + mh), c.white)
+        for i, r in ipairs(rows) do
+            local ry = my + (2 + (i - 1) * LINE) * k
+            local label = (r.check ~= nil and (r.check and "[x] " or "[ ] ") or "") .. r.label
+            while #label > 0 and ui.CalcTextSize(label) > mw - 10 * k do
+                label = label:match("^(.*)[%z\1-\127\194-\244][\128-\191]*$") or ""
+                state.menu_cuts = state.menu_cuts + 1
+            end
+            local color = r.header and c.muted or (r.enabled and c.white or c.muted)
+            dl:AddText(ImVec2.new(mx + 5 * k, ry), color, label)
+            state.menu_hits[#state.menu_hits + 1] = { x = mx, y = ry, w = mw, h = LINE * k, run = r.enabled and r.run or nil,
+                id = "menu:" .. r.label, enabled = r.enabled, check = r.check }
+        end
+        eqoa.input.claim_pointer({ x = mx, y = my, width = mw, height = mh })
+    end
     ui.SetWindowFontScale(1)
     ui.End()
 end)
+
+-- what a test reads: the tabs, what the open one shows, and the hit areas by name
+chat_probe = {
+    state = state,
+    visible = function() return #visible_lines(active_tab()) end,
+    names = function()
+        local out = {}
+        for _, t in ipairs(tabs()) do out[#out + 1] = t.label end
+        return out
+    end,
+    hit = function(id)
+        for _, h in ipairs(state.menu and state.menu_hits or state.hits) do
+            if h.id == id then return h end
+        end
+    end,
+}

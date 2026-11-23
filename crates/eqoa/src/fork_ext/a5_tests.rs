@@ -401,6 +401,51 @@ fn a5_mastery_buy_from_a_mod_window_asks_first_and_the_yes_sends_it_once() {
     assert_eq!(result_code(&host), "none");
 }
 
+/// Owner test 2026-11-23: a Yes that came while the server's last answer was still awaited was refused with "a class
+/// mastery request is still pending", and the purchase only went through on a retry. The game's window waits behind
+/// its box for one request at a time, so the Yes now waits for the answer (or the 10 s give-up) and then sends.
+/// Negative control: before this, the Yes was answered at once with sent = false and nothing was bought.
+#[test]
+fn a5_mastery_yes_during_a_pending_request_waits_for_the_answer_then_sends() {
+    let (mut p, host) = rig();
+    open_mastery_session(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.mastery_browse(100)");
+    p.cm.pending = 0;
+    receive(&mut p, node_reply(100, 0, 1, 0, 1, "Ironhide"));
+    ask(&mut p, &host, "return eqoa.actions.mastery_buy(100)");
+    assert!(confirm::is_open());
+    let before = mastery_requests(&p).len();
+    // another request is on its way when the player says Yes (a browse of another skill, its answer not here yet)
+    p.cm.pending = 5;
+    // control: carrying the step out at once, as a Yes used to, is refused with the owner's red line
+    let act = confirm::Act::Mastery { skill_id: 100, name: "Ironhide".into(), refund: false, class: 1, parent: 0 };
+    assert_eq!(a5::carry_out(&mut p, &act), Err("a class mastery request is still pending".to_string()));
+    yes(&mut p, &host);
+    step(&mut p, &host);
+    assert_eq!(mastery_requests(&p).len(), before, "nothing is sent while the last request is awaited");
+    host.execute("assert(#closed == 0, 'the Yes is not refused: it waits')").unwrap();
+    // the answer comes: the purchase goes, once
+    receive(&mut p, node_reply(100, 0, 1, 0, 1, "Ironhide"));
+    assert_eq!(p.cm.pending, 0);
+    step(&mut p, &host);
+    assert_eq!(mastery_requests(&p).get(before..), Some(&[2u8][..]), "the held Yes sends the purchase once");
+    host.execute("assert(closed[1].answer == 'yes' and closed[1].detail.sent == true)").unwrap();
+    step(&mut p, &host);
+    assert_eq!(mastery_requests(&p).get(before..), Some(&[2u8][..]), "never replayed");
+    // the other way out: the game gives the wait up (10 s) and the Yes goes then
+    receive(&mut p, node_reply(100, 0, 1, 0, 1, "Ironhide"));
+    p.cm.skills[0].on = false;
+    ask(&mut p, &host, "return eqoa.actions.mastery_buy(100)");
+    p.cm.pending = 4;
+    yes(&mut p, &host);
+    let held = mastery_requests(&p).len();
+    let mut since = None;
+    crate::classmastery::expire_wait(&mut p.cm.pending, &mut since, 5_000);
+    crate::classmastery::expire_wait(&mut p.cm.pending, &mut since, 5_000 + crate::classmastery::WAIT_MS);
+    step(&mut p, &host);
+    assert_eq!(mastery_requests(&p).get(held..), Some(&[2u8][..]), "sent after the give-up");
+}
+
 /// Switching off an owned skill asks too; the skill must be owned. A Yes after the list changed under the question
 /// (the skill is no longer owned) sends nothing.
 #[test]

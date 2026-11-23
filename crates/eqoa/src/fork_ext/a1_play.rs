@@ -194,6 +194,10 @@ pub(crate) fn tick(play: &mut Play) {
     // the game's own window opens from plain play with the game's camera only (`pass` below)
     let passable = plain && play.mode == 0;
     window_sessions::set_env(Env { plain, dead, away, passable });
+    // a Yes to a Class Mastery step that waited for the server's last answer (`a5_capture::hold`)
+    for p in super::api_capture::a5::take_released(play) {
+        finish_answer(play, &p);
+    }
     if !window_sessions::is_active() && !confirm::has_work() && !window_takeover::has_activity() {
         return;
     }
@@ -228,9 +232,19 @@ pub(crate) fn tick(play: &mut Play) {
     }
     confirm::expire();
     for p in confirm::take_answered() {
-        match carry_out(play, &p) {
-            Ok(()) => confirm::report_done(&p, "yes", json!({"sent": true})),
-            Err(reason) => confirm::report_done(&p, "yes", json!({"sent": false, "reason": reason})),
+        // the game's window waits behind its box for one request at a time: a Yes that comes while the last answer
+        // is awaited waits for it (or the 10 s give-up) instead of being refused
+        if matches!(p.act, Act::Mastery { .. }) && play.cm.pending != 0 {
+            super::api_capture::a5::hold(p);
+            continue;
         }
+        finish_answer(play, &p);
+    }
+}
+
+fn finish_answer(play: &mut Play, p: &Pending) {
+    match carry_out(play, p) {
+        Ok(()) => confirm::report_done(p, "yes", json!({"sent": true})),
+        Err(reason) => confirm::report_done(p, "yes", json!({"sent": false, "reason": reason})),
     }
 }

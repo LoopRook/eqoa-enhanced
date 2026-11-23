@@ -12,7 +12,7 @@ moves over the slots, confirm opens the item's menu (and presses a row), back cl
 The window shows the 40 pack slots as item icons with stack counts and a green
 **E** on worn items, the tunar you carry and used/capacity at the bottom.
 Tabs: **All**, **Usable**, **Equipment**, **Charged**, **Misc** (the game's own
-item-page tabs) and **Bank** (the bank's contents and its tunar, readable anywhere). Hover an item for its card: name, level, class ("All classes" or "Class: Paladin, Cleric"),
+item-page tabs) and **Bank** (the bank's contents and its tunar, readable anywhere). Hover an item for its card: name, level, and for gear (items with a wear slot) class ("All classes" or "Class: Paladin, Cleric"),
 race (only when the item is shut to some races), slot, stats, HP and
 durability, value, and its description at the bottom in grey (wrapped, at most three lines).
 When your class, race or level rule the item out, only that line turns red, with a red "You can't use this"

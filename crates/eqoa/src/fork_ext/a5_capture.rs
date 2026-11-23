@@ -207,6 +207,42 @@ pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
     }
 }
 
+thread_local! {
+    /// Yes answers to a mastery step that came while the server's last answer was still awaited, with when each came.
+    static HELD: std::cell::RefCell<Vec<(confirm::Pending, std::time::Instant)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// How long a held Yes waits: past the window's own 10 s give-up (`classmastery::WAIT_MS`) with room for a frame.
+const HOLD: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// A Yes that came while a request is awaited waits for the answer (or the game's give-up) and is then carried out as
+/// any Yes, after the same checks again; the game's window shows its box over the lists meanwhile and ignores keys.
+pub(crate) fn hold(p: confirm::Pending) {
+    HELD.with(|h| h.borrow_mut().push((p, std::time::Instant::now())));
+}
+
+/// The held Yes answers that can go on now: the last request answered or given up. One whose wait outlasts [`HOLD`]
+/// is let through too, so its refusal is told to the mod.
+pub(crate) fn take_released(play: &Play) -> Vec<confirm::Pending> {
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        if h.is_empty() || (play.cm.pending != 0 && h.iter().all(|(_, at)| at.elapsed() < HOLD)) {
+            return Vec::new();
+        }
+        let waited_out = play.cm.pending != 0;
+        let mut go = Vec::new();
+        h.retain(|(p, at)| {
+            if !waited_out || at.elapsed() >= HOLD {
+                go.push(p.clone());
+                false
+            } else {
+                true
+            }
+        });
+        go
+    })
+}
+
 /// What the mod's Class Mastery session has done on the game's list.
 #[derive(Clone, Copy, Default)]
 struct MasterySession {
@@ -264,4 +300,5 @@ pub(crate) fn tick(play: &mut Play) {
 #[cfg(test)]
 pub(crate) fn reset_for_test() {
     MASTERY.with(|c| c.set(MasterySession::default()));
+    HELD.with(|h| h.borrow_mut().clear());
 }

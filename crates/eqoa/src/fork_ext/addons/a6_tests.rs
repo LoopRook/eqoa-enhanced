@@ -510,6 +510,327 @@ fn a6_chat_mod_has_all_and_a_tab_per_style_and_sends_on_the_picked_channel() {
     assert!(!window_takeover::is_taken(TakeoverKind::ChatEntry));
 }
 
+/// Owner test 2026-11-23: the chat window could not be moved or sized like the other mod windows. Its top strip moves it,
+/// its corner sizes it (within limits), and where it ends up is kept in the mod's settings and comes back.
+/// Negative controls: a press and drag on the lines moves nothing; the window starts where it always did; a size is
+/// clamped to the smallest.
+#[test]
+fn a6_chat_window_moves_and_sizes_with_the_pointer_and_keeps_its_place() {
+    use super::{native_settings, pointer_api};
+    use std::{cell::RefCell, rc::Rc};
+    fresh();
+    ships("eqoa_chat");
+    let mut context = context();
+    // each frame is a new frame of the client's (a pointer claim lasts one frame, the old one is dropped)
+    let ticks = |host: &Host, bridge: &Bridge, context: &mut Context, n: usize| {
+        for _ in 0..n {
+            CORE.with(|c| c.borrow_mut().frame += 1);
+            frames(host, bridge, context, 1);
+        }
+    };
+    let host = Host::for_addon(&addon("eqoa_chat")).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let saved: Rc<RefCell<Vec<serde_json::Value>>> = Rc::default();
+    let sink = saved.clone();
+    native_settings::configure(&host, None, Rc::new(move |v| {
+        sink.borrow_mut().push(v.clone());
+        Ok(())
+    }));
+    host.run_addon(&addon("eqoa_chat")).unwrap();
+    let vm = native_events::bus(&host.lua).borrow().vm;
+    ticks(&host, &bridge, &mut context, 3);
+    // the window's box, found by what its pointer claim covers
+    let box_of = |vm: u64| -> (f64, f64, f64, f64) {
+        pointer_api::position([0.0, 0.0], true, (1024, 768));
+        let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        let mut y = 0.0;
+        while y < 768.0 {
+            let mut x = 0.0;
+            while x < 1024.0 {
+                if pointer_api::point_in_vm_claim(vm, x, y) {
+                    (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+                }
+                x += 2.0;
+            }
+            y += 2.0;
+        }
+        (x0, y0, x1, y1)
+    };
+    let boxed = || box_of(vm);
+    let drag = |host: &Host, context: &mut Context, bridge: &Bridge, from: (f64, f64), to: (f64, f64)| {
+        pointer_api::position([from.0 as f32, from.1 as f32], true, (1024, 768));
+        context.io_mut().add_mouse_pos_event([from.0 as f32, from.1 as f32]);
+        CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": from.0, "y": from.1, "inside_window": true, "button": "left"})));
+        context.io_mut().add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+        ticks(host, bridge, context, 2);
+        pointer_api::position([to.0 as f32, to.1 as f32], true, (1024, 768));
+        context.io_mut().add_mouse_pos_event([to.0 as f32, to.1 as f32]);
+        ticks(host, bridge, context, 2);
+        context.io_mut().add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+        ticks(host, bridge, context, 3);
+    };
+    let start = boxed();
+    assert!(start.2 > start.0 && start.3 > start.1, "the window is up and claims its place: {start:?}");
+    // control: a press on the lines moves nothing
+    drag(&host, &mut context, &bridge, (start.0 + 40.0, start.1 + 70.0), (start.0 + 240.0, start.1 - 30.0));
+    let after = boxed();
+    assert_eq!((after.0, after.1, after.2, after.3), (start.0, start.1, start.2, start.3), "control: the lines are not a handle");
+    // the top strip moves it: 120 right, 60 up
+    drag(&host, &mut context, &bridge, (start.0 + 40.0, start.1 + 3.0), (start.0 + 160.0, start.1 - 57.0));
+    let moved = boxed();
+    assert!((moved.0 - (start.0 + 120.0)).abs() <= 4.0 && (moved.1 - (start.1 - 60.0)).abs() <= 4.0, "moved: {start:?} -> {moved:?}");
+    assert!(((moved.2 - moved.0) - (start.2 - start.0)).abs() <= 2.0, "moving keeps the size");
+    // the corner sizes it: 90 wider, 40 taller
+    drag(&host, &mut context, &bridge, (moved.2 - 3.0, moved.3 - 3.0), (moved.2 + 87.0, moved.3 + 37.0));
+    let sized = boxed();
+    assert!(((sized.2 - sized.0) - (moved.2 - moved.0 + 90.0)).abs() <= 4.0, "wider: {moved:?} -> {sized:?}");
+    assert!(((sized.3 - sized.1) - (moved.3 - moved.1 + 40.0)).abs() <= 4.0, "taller: {moved:?} -> {sized:?}");
+    // control: it cannot be made smaller than the smallest
+    drag(&host, &mut context, &bridge, (sized.2 - 3.0, sized.3 - 3.0), (sized.2 - 1500.0, sized.3 - 1500.0));
+    let small = boxed();
+    assert!((small.2 - small.0) > 100.0 && (small.3 - small.1) > 30.0, "clamped to the smallest: {small:?}");
+    // the place is kept in the settings, and a fresh start takes it back
+    let last = saved.borrow().last().cloned().expect("saved at the end of a drag");
+    let text = last.to_string();
+    assert!(["\"x\"", "\"y\"", "\"w\"", "\"h\""].iter().all(|k| text.contains(k)), "the place and size are saved: {text}");
+    drop(bridge);
+    drop(host);
+    fresh();
+    let host2 = Host::for_addon(&addon("eqoa_chat")).unwrap();
+    let bridge2 = Bridge::install(&host2).unwrap();
+    native_settings::configure(&host2, Some(last.clone()), Rc::new(|_| Ok(())));
+    host2.run_addon(&addon("eqoa_chat")).unwrap();
+    // the manager hands the saved value over when the mod is first enabled
+    let value = super::profile::decode(&host2.lua, &last).unwrap();
+    host2.callback(3, value).unwrap();
+    let vm2 = native_events::bus(&host2.lua).borrow().vm;
+    ticks(&host2, &bridge2, &mut context, 3);
+    let back = box_of(vm2);
+    assert!((back.0 - small.0).abs() <= 4.0 && (back.1 - small.1).abs() <= 4.0 && (back.2 - small.2).abs() <= 4.0 && (back.3 - small.3).abs() <= 4.0, "the saved place came back: {small:?} vs {back:?}");
+    assert!((back.0 - start.0).abs() > 20.0 || (back.1 - start.1).abs() > 20.0, "control: not the default place");
+}
+
+/// Owner request 2026-11-23 (item 8): tabs are edited inside the chat window. A right click on a tab opens Rename, Move
+/// left, Move right, Delete and "Show in this tab" with a check per style; a right click on the empty strip (or the +)
+/// makes a New tab that starts with nothing ticked; All can be renamed and moved, never deleted; the tabs are kept in
+/// the mod's settings and Reset tabs brings the default set back; the game's own Chat Tabs ("Mine") are not touched.
+/// Negative controls are inline: a left click opens no menu, All has no Delete or style rows, the first tab's Move left
+/// is off, Escape drops a rename, a new tab shows nothing while All shows the lines, "Mine" has no menu.
+#[test]
+fn a6_chat_tabs_are_edited_inside_the_window_and_kept() {
+    use super::{native_settings, pointer_api};
+    use std::{cell::RefCell, rc::Rc};
+    fresh();
+    ships("eqoa_chat");
+    let mut context = context();
+    for (text, color) in [("Dab: hi", [1.0f32; 4]), ("You hit a rat for 3 points of damage.", [1.0; 4])] {
+        native_core::observe_text(text, color);
+    }
+    native_core::flush_deferred();
+    native_a6::set_chat_info(native_a6::ChatInfo { tabs: vec![(0, "Main".into(), vec!["say", "combat"])], reply_to: String::new() });
+    let host = Host::for_addon(&addon("eqoa_chat")).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let saved: Rc<RefCell<Vec<serde_json::Value>>> = Rc::default();
+    let sink = saved.clone();
+    native_settings::configure(&host, None, Rc::new(move |v| {
+        sink.borrow_mut().push(v.clone());
+        Ok(())
+    }));
+    host.run_addon(&addon("eqoa_chat")).unwrap();
+    let ticks = |context: &mut Context, n: usize| {
+        for _ in 0..n {
+            CORE.with(|c| c.borrow_mut().frame += 1);
+            frames(&host, &bridge, context, 1);
+        }
+    };
+    ticks(&mut context, 3);
+    // wide enough for every tab and some empty strip
+    host.execute("chat_probe.state.w = 640").unwrap();
+    ticks(&mut context, 2);
+    pointer_api::position([0.0, 0.0], true, (1024, 768));
+    let names = |host: &Host| -> Vec<String> { host.lua.load("return chat_probe.names()").eval().unwrap() };
+    let center = |id: &str| -> Option<(f64, f64)> {
+        let (x, y): (f64, f64) = host
+            .lua
+            .load(format!("local h = chat_probe.hit('{id}'); if not h then return -1, -1 end; return h.x + h.w / 2, h.y + h.h / 2"))
+            .eval()
+            .unwrap();
+        (x >= 0.0).then_some((x, y))
+    };
+    let enabled = |id: &str| -> Option<bool> { host.lua.load(format!("local h = chat_probe.hit('{id}'); if not h then return nil end; return h.enabled ~= false")).eval().unwrap() };
+    let press = |context: &mut Context, at: (f64, f64), button: &str| {
+        pointer_api::position([at.0 as f32, at.1 as f32], true, (1024, 768));
+        CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": at.0, "y": at.1, "inside_window": true, "button": button})));
+        ticks(context, 2);
+    };
+    let click = |context: &mut Context, id: &str, button: &str| {
+        let at = center(id).unwrap_or_else(|| panic!("{id} has a place: {:?}", names(&host)));
+        press(context, at, button);
+    };
+    let visible = || -> i64 { host.lua.load("return chat_probe.visible()").eval().unwrap() };
+    let cuts = || -> i64 { host.lua.load("return chat_probe.state.menu_cuts").eval().unwrap() };
+    let typed = |context: &mut Context, text: &str| {
+        for c in text.chars() {
+            key(&host, &c.to_string(), &c.to_string());
+        }
+        ticks(context, 1);
+    };
+
+    // the default set: All, a tab per style, Notices
+    let start = names(&host);
+    assert_eq!(start.first().map(String::as_str), Some("All"));
+    assert_eq!(start.last().map(String::as_str), Some("Notices"));
+    assert!(start.len() >= 4 && start.iter().any(|n| n == "Say"), "{start:?}");
+    // control: a left click chooses the tab and opens no menu
+    click(&mut context, "tab:say", "left");
+    assert!(center("menu:Rename").is_none(), "a left click opens no menu");
+    assert_eq!(visible(), 1, "the Say tab shows the one say line");
+    // a right click on a style's tab: its menu
+    click(&mut context, "tab:say", "right");
+    for row in ["Rename", "Move left", "Move right", "Delete", "Show in this tab", "Say", "Group", "Guild", "Shout", "Tell", "Combat", "Loot", "Rolls", "XP", "System", "New tab", "Reset tabs"] {
+        assert!(center(&format!("menu:{row}")).is_some(), "the menu has {row}");
+    }
+    assert_eq!(cuts(), 0, "the menu's text fits (nothing cut)");
+    // ticking Combat in Say's tab adds the combat line; the menu stays open for more
+    click(&mut context, "menu:Combat", "left");
+    assert!(center("menu:Rename").is_some(), "ticking a style keeps the menu open");
+    assert_eq!(host.lua.load("return chat_probe.hit('menu:Combat').check").eval::<bool>().unwrap(), true);
+    assert_eq!(visible(), 2, "Say now shows the combat line too");
+    click(&mut context, "menu:Combat", "left");
+    assert_eq!(visible(), 1, "unticked: back to the say line");
+    // a click outside closes the menu (and does nothing else)
+    press(&mut context, (1000.0, 5.0), "left");
+    assert!(center("menu:Rename").is_none(), "a click away closes the menu");
+    // All: renamed and moved, never deleted, no styles to tick
+    click(&mut context, "tab:all", "right");
+    assert!(center("menu:Rename").is_some() && center("menu:Move right").is_some());
+    assert!(center("menu:Delete").is_none() && center("menu:Say").is_none(), "control: All has no Delete and no styles");
+    assert_eq!(enabled("menu:Move left"), Some(false), "control: the first tab cannot move left");
+    click(&mut context, "menu:Move left", "left");
+    assert_eq!(names(&host), start, "a disabled row does nothing");
+    // move All to the right: it is no longer first, and it still shows everything
+    click(&mut context, "menu:Move right", "left");
+    let moved = names(&host);
+    assert_eq!(moved[1], "All");
+    assert_eq!(moved[0], start[1]);
+    // and back
+    click(&mut context, "tab:all", "right");
+    click(&mut context, "menu:Move left", "left");
+    assert_eq!(names(&host), start);
+    // rename: Escape drops it (control), Enter keeps it, twelve characters at most
+    click(&mut context, "tab:say", "right");
+    click(&mut context, "menu:Rename", "left");
+    typed(&mut context, "xyz");
+    key(&host, "escape", "");
+    ticks(&mut context, 2);
+    assert_eq!(names(&host), start, "Escape keeps the old name");
+    click(&mut context, "tab:say", "right");
+    click(&mut context, "menu:Rename", "left");
+    for _ in 0..6 {
+        key(&host, "backspace", "");
+    }
+    typed(&mut context, "Talking all day long");
+    key(&host, "enter", "");
+    ticks(&mut context, 2);
+    let renamed = names(&host);
+    assert_eq!(renamed[start.iter().position(|n| n == "Say").unwrap()], "Talking all", "twelve characters (the trailing space is trimmed): {renamed:?}");
+    assert_eq!(renamed.len(), start.len());
+    // All renamed too
+    click(&mut context, "tab:all", "right");
+    click(&mut context, "menu:Rename", "left");
+    for _ in 0..4 {
+        key(&host, "backspace", "");
+    }
+    typed(&mut context, "Everything");
+    key(&host, "enter", "");
+    ticks(&mut context, 2);
+    assert_eq!(names(&host)[0], "Everything");
+    // delete the renamed tab; the others stay
+    click(&mut context, "tab:say", "right");
+    click(&mut context, "menu:Delete", "left");
+    let after_delete = names(&host);
+    assert_eq!(after_delete.len(), start.len() - 1);
+    assert!(!after_delete.iter().any(|n| n == "Talking all"));
+    // New tab from the +: starts with nothing ticked, so it shows nothing while All shows the lines
+    click(&mut context, "tab:new", "left");
+    let with_new = names(&host);
+    assert_eq!(with_new.len(), after_delete.len() + 1);
+    assert!(with_new.iter().any(|n| n == "New"));
+    assert_eq!(visible(), 0, "a new tab starts with nothing ticked");
+    click(&mut context, "tab:all", "left");
+    assert_eq!(visible(), 2, "control: All shows the lines");
+    // New tab from a right click on the empty strip: only New tab and Reset tabs
+    let strip = center("strip").expect("there is empty strip beside the tabs");
+    press(&mut context, strip, "right");
+    assert!(center("menu:New tab").is_some() && center("menu:Reset tabs").is_some());
+    assert!(center("menu:Rename").is_none(), "control: the strip's menu has no tab rows");
+    click(&mut context, "menu:New tab", "left");
+    assert_eq!(names(&host).len(), with_new.len() + 1);
+    // dragging the window afterwards keeps the tabs in what is saved (the drag's save is the whole snapshot)
+    let grip = center("move").expect("the move strip has a place");
+    pointer_api::position([grip.0 as f32, grip.1 as f32], true, (1024, 768));
+    context.io_mut().add_mouse_pos_event([grip.0 as f32, grip.1 as f32]);
+    CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": grip.0, "y": grip.1, "inside_window": true, "button": "left"})));
+    context.io_mut().add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+    ticks(&mut context, 2);
+    pointer_api::position([grip.0 as f32 + 30.0, grip.1 as f32 - 20.0], true, (1024, 768));
+    context.io_mut().add_mouse_pos_event([grip.0 as f32 + 30.0, grip.1 as f32 - 20.0]);
+    ticks(&mut context, 2);
+    context.io_mut().add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+    ticks(&mut context, 3);
+    assert!(saved.borrow().last().is_some_and(|v| v.to_string().contains("\"tabs\"")), "the drag's save keeps the tabs");
+    // the tabs were saved after each change, and come back in a fresh start
+    let last = saved.borrow().last().cloned().expect("the tabs are saved");
+    let want = names(&host);
+    drop(bridge);
+    drop(host);
+    fresh();
+    native_a6::set_chat_info(native_a6::ChatInfo { tabs: vec![(0, "Main".into(), vec!["say", "combat"])], reply_to: String::new() });
+    let host2 = Host::for_addon(&addon("eqoa_chat")).unwrap();
+    let bridge2 = Bridge::install(&host2).unwrap();
+    native_settings::configure(&host2, Some(last.clone()), Rc::new(|_| Ok(())));
+    host2.run_addon(&addon("eqoa_chat")).unwrap();
+    let value = super::profile::decode(&host2.lua, &last).unwrap();
+    host2.callback(3, value).unwrap();
+    for _ in 0..3 {
+        CORE.with(|c| c.borrow_mut().frame += 1);
+        frames(&host2, &bridge2, &mut context, 1);
+    }
+    assert_eq!(names(&host2), want, "the edited tabs come back");
+    // Reset tabs brings the default set back (and that is what is kept)
+    pointer_api::position([0.0, 0.0], true, (1024, 768));
+    let (x, y): (f64, f64) = host2.lua.load("local h = chat_probe.hit('tab:all'); return h.x + h.w / 2, h.y + h.h / 2").eval().unwrap();
+    pointer_api::position([x as f32, y as f32], true, (1024, 768));
+    CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": x, "y": y, "inside_window": true, "button": "right"})));
+    for _ in 0..2 {
+        CORE.with(|c| c.borrow_mut().frame += 1);
+        frames(&host2, &bridge2, &mut context, 1);
+    }
+    let (rx, ry): (f64, f64) = host2.lua.load("local h = chat_probe.hit('menu:Reset tabs'); return h.x + h.w / 2, h.y + h.h / 2").eval().unwrap();
+    CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": rx, "y": ry, "inside_window": true, "button": "left"})));
+    for _ in 0..3 {
+        CORE.with(|c| c.borrow_mut().frame += 1);
+        frames(&host2, &bridge2, &mut context, 1);
+    }
+    let reset = names(&host2);
+    assert_eq!(reset, start, "Reset tabs restores All and one tab per style");
+    // the game's own tabs ("Mine") are not edited here: no menu on a right click
+    let (mx, my): (f64, f64) = host2.lua.load("local h = chat_probe.hit('mode'); return h.x + h.w / 2, h.y + h.h / 2").eval().unwrap();
+    CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": mx, "y": my, "inside_window": true, "button": "left"})));
+    for _ in 0..2 {
+        CORE.with(|c| c.borrow_mut().frame += 1);
+        frames(&host2, &bridge2, &mut context, 1);
+    }
+    assert_eq!(names(&host2), vec!["All".to_string(), "Main".to_string(), "Notices".to_string()], "Mine: the game's own tabs");
+    let (tx, ty): (f64, f64) = host2.lua.load("local h = chat_probe.hit('tab:own0'); return h.x + h.w / 2, h.y + h.h / 2").eval().unwrap();
+    CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": tx, "y": ty, "inside_window": true, "button": "right"})));
+    for _ in 0..2 {
+        CORE.with(|c| c.borrow_mut().frame += 1);
+        frames(&host2, &bridge2, &mut context, 1);
+    }
+    assert!(host2.lua.load("return chat_probe.hit('menu:Rename') == nil").eval::<bool>().unwrap(), "control: no menu on the game's own tabs");
+}
+
 #[test]
 fn a6_chat_mod_tabs_are_all_plus_one_per_style_or_the_players_own() {
     fresh();
