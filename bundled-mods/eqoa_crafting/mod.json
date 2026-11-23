@@ -30,5 +30,8 @@
     "eqoa.input.capture_text",
     "eqoa.events.on",
     "eqoa.imgui"
+  ],
+  "commands": [
+    "open"
   ]
 }

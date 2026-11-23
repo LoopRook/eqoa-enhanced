@@ -172,6 +172,10 @@ end
 eqoa.input.bind({id = "open", label = "Bag viewer", default_key = "shift+b"}, function()
     if B.open then close() else open() end
 end)
+-- the Start menu (or another mod) asks for the window
+eqoa.events.on("mod.command", function(e)
+    if e.data.command == "open" then open() end
+end)
 -- The loot log is the one thing kept while the window is closed, from events only.
 B.load_junk()
 HP.load()

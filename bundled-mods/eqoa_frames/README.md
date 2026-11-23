@@ -5,7 +5,7 @@ Three draggable windows:
 
 - **Effects**: your effects with the time left. Click one to take it off, where the game lets you (only effects the server
   calls removable). Needs a server that offers the buff window and **Buff Window** on in Options; otherwise it lists the
-  game's own effects with no times. Your pet's effects appear below when the server sends them. Hold the pointer on an
+  game's own effects with no times. Your pet's effects are never buttons: they are the dimmer **Pet:** lines at the bottom, once each, when the server sends them (from its buff list, or from the pet strip). Hold the pointer on an
   effect to see what it does (the description of the ability you have with that name; an effect of someone else's spell
   that you do not have says the game does not tell), the time left, and "click to take it off" where that is allowed.
 - **Casting**: a bar for your own cast and one for your target's. Melee rounds are not casts and show no bar. The client
