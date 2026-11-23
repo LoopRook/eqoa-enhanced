@@ -39,6 +39,17 @@ pub(crate) const FRAME_EVENTS: &[&str] = &["buffs.changed", "cast.started", "cas
 /// `a1_tests::a1_every_new_event_reaches_lua_with_its_declared_fields_and_the_records_match`.
 pub(crate) const A1_EVENTS: &[&str] = &["windows.session", "windows.key", "confirm.closed"];
 
+/// Round A7's events (friends, ignore, guild, who, group search), driven in
+/// `a7_play_tests::a7_every_new_event_reaches_lua_with_its_declared_fields_and_the_records_match`.
+pub(crate) const A7_EVENTS: &[&str] = &[
+    "friends.changed",
+    "ignored.changed",
+    "guild.changed",
+    "who.result",
+    "lfg.result",
+    "lfg.changed",
+];
+
 /// Events the host's own services emit, driven in `round7c_host_service_events_reach_lua_from_their_producers`.
 const SERVICE_EVENTS: &[&str] = &[
     "timer",
@@ -211,8 +222,16 @@ fn round7c_supported_event_inventory_has_fixture_coverage() {
     use std::collections::BTreeSet;
 
     let host = Host::new().unwrap();
-    let fixtures = PLAY_EVENTS.iter().chain(SERVICE_EVENTS).chain(MANAGER_EVENTS).chain(FRAME_EVENTS).chain(A1_EVENTS)
-        .copied().chain(["loot.changed", "merchant.changed"]).collect::<BTreeSet<_>>();
+    let fixtures = PLAY_EVENTS
+        .iter()
+        .chain(SERVICE_EVENTS)
+        .chain(MANAGER_EVENTS)
+        .chain(FRAME_EVENTS)
+        .chain(A1_EVENTS)
+        .chain(A7_EVENTS)
+        .copied()
+        .chain(["loot.changed", "merchant.changed"])
+        .collect::<BTreeSet<_>>();
     let rows: mlua::Table = host.lua.load("return eqoa.capabilities.list('eqoa.events')").eval().unwrap();
     let events = rows.sequence_values::<mlua::Table>().map(|row| row.unwrap())
         .filter(|row| row.get::<String>("status").unwrap() == "supported")

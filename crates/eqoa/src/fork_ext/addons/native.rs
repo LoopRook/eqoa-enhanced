@@ -983,6 +983,16 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             "craft_list craft_inspect craft_tray_add craft_tray_remove craft_tray_clear craft_fill craft_combine craft_keep",
             8,
         ),
+        // round A7: community (friends, ignore, guild, who, group search)
+        ("social", "friends ignored friend_request", 8),
+        ("guild", "get invite", 8),
+        ("who", "get request", 8),
+        ("lfg", "get search register unregister", 8),
+        (
+            "actions",
+            "friend_add friend_remove friend_accept friend_refuse ignore_add ignore_remove guild_invite guild_promote guild_demote guild_kick guild_set_motd guild_accept guild_refuse",
+            8,
+        ),
         // round A5
         ("factions", "list", 8),
         ("combat", "record", 8),
@@ -1130,6 +1140,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_a3::install(host)?;
     super::native_a1::install(host)?;
     super::native_a8::install(host)?;
+    super::native_a7::install(host)?;
     super::native_a5::install(host)?;
     super::frame_actions::install(host)?;
     super::raid_strips::install(host)?;
@@ -1292,6 +1303,9 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.craft.State", "notice") => Some("eqoa.craft.Notice"),
         ("eqoa.craft.Detail", "ingredients") => Some("eqoa.craft.Ingredient"),
         ("eqoa.craft.Detail", "tools") => Some("eqoa.craft.Tool"),
+        ("eqoa.guild.Guild", "members") => Some("eqoa.guild.GuildMember"),
+        ("eqoa.who.WhoState", "entries") => Some("eqoa.who.WhoEntry"),
+        ("eqoa.lfg.LfgState", "entries") => Some("eqoa.lfg.LfgEntry"),
         _ => None,
     }
 }

@@ -254,11 +254,54 @@ pub(crate) fn dispatch(play: &mut Play, action: &FrameAction) -> DispatchOutcome
         return refuse("not_ready", format!("cannot do this while a window is up (mode {})", play.mode));
     }
     match action {
-        FrameAction::GroupInvite => {
+        FrameAction::GroupInvite { id: None, name: None } => {
             if let Some((code, reason)) = invite_refusal(play) {
                 return refuse(code, reason);
             }
             play.group_action(0x0701_0000);
+            sent()
+        }
+        FrameAction::GroupInvite { id, name } => {
+            let Some(name) = name.as_deref() else {
+                return refuse("invalid_argument", "player name is required");
+            };
+            let resolved_id = id.or_else(|| {
+                play.entities
+                    .slots
+                    .iter()
+                    .flatten()
+                    .find(|e| e.creature.as_ref().is_some_and(|c| c.name.eq_ignore_ascii_case(name)))
+                    .map(|e| e.id)
+                    .or_else(|| play.who.list.iter().find(|r| r.name.eq_ignore_ascii_case(name)).map(|r| r.x1c))
+                    .or_else(|| play.live.part.found.iter().find(|r| r.name.eq_ignore_ascii_case(name)).map(|r| r.id))
+                    .or_else(|| {
+                        play.buddies
+                            .map
+                            .values()
+                            .find(|b| b.name.eq_ignore_ascii_case(name) && b.id >= 0)
+                            .map(|b| b.id as u32)
+                    })
+                    .or_else(|| {
+                        play.guild
+                            .members
+                            .values()
+                            .find(|m| m.name.eq_ignore_ascii_case(name) && m.id >= 0)
+                            .map(|m| m.id as u32)
+                    })
+            });
+            let Some(id) = resolved_id else {
+                return refuse("not_found", format!("no player id known for '{name}'"));
+            };
+            if Some(id) == play.self_id32() || play.player.name.eq_ignore_ascii_case(name) {
+                return refuse("invalid_argument", "cannot invite yourself");
+            }
+            if !(!play.group.in_group || play.group.leader || play.members_invite()) {
+                return refuse("not_ready", "only the group's leader can invite");
+            }
+            if play.group.members.iter().take(play.group.count()).any(|m| m.id == id) {
+                return refuse("not_ready", "that player is already in the group");
+            }
+            play.invite_to_group(id, name);
             sent()
         }
         FrameAction::PetAttack | FrameAction::PetBackOff => {

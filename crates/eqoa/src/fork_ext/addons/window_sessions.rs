@@ -21,10 +21,23 @@ use crate::input::bit;
 use serde_json::json;
 use std::cell::{Cell, RefCell};
 
-/// The windows a mod may open for itself (a view: the game's window of that name stays where it is). Round A8 adds
+/// The windows a mod may open for itself (views: the game's window of that name stays where it is). Round A8 adds
 /// the crafting book and the experiment: while a mod holds one, the client reads the server's crafting replies
 /// (`native_a8`, `fork_ext/a8_play.rs`).
-pub(crate) const OWN_KINDS: [&str; 7] = ["inventory", "spellbook", "quest_log", "trainer", "mastery", "recipe_book", "experiment"];
+pub(crate) const OWN_KINDS: [&str; 12] = [
+    "inventory",
+    "spellbook",
+    "quest_log",
+    "trainer",
+    "mastery",
+    "buddy_list",
+    "ignore_list",
+    "guild",
+    "who",
+    "group_search",
+    "recipe_book",
+    "experiment",
+];
 /// Most sessions one mod may hold at once.
 const MAX_PER_VM: usize = 8;
 
@@ -200,7 +213,10 @@ pub(crate) fn open(
             if TakeoverKind::parse(kind).is_ok() {
                 format!("the '{kind}' window is opened by the server: hold it with eqoa.windows.takeover instead")
             } else {
-                format!("a mod cannot open its own '{kind}' window in this version (only 'inventory', 'spellbook', 'quest_log', 'trainer', 'mastery', 'recipe_book' and 'experiment')")
+                format!(
+                    "a mod cannot open its own '{kind}' window in this version (only {})",
+                    OWN_KINDS.join(", ")
+                )
             },
         ));
     }
@@ -411,6 +427,42 @@ pub(crate) fn sync_held(holders: [Option<(u64, String)>; 3]) {
                         emit_opened(&session);
                     });
                 }
+            }
+        }
+    }
+}
+
+/// Synchronizes a held server request session (`FriendRequest` or `GuildInvite`) with `window_sessions`.
+pub(crate) fn sync_held_request(kind: TakeoverKind, want: Option<(u64, String)>, close_reason: &str) {
+    if !is_active() && want.is_none() {
+        return;
+    }
+    let have = with(|s| s.sessions.iter().find(|x| x.held == Some(kind)).cloned());
+    match (have, want) {
+        (Some(h), Some((vm, _))) if h.vm == vm => {}
+        (have, want) => {
+            if let Some(h) = have {
+                let reason = take_pass_reason(h.vm, kind).unwrap_or(close_reason);
+                end_where(reason, |x| x.id == h.id);
+            }
+            if let Some((vm, addon)) = want {
+                with(|s| {
+                    s.next_id += 1;
+                    s.next_revision += 1;
+                    let session = Session {
+                        id: format!("ws-{}", s.next_id),
+                        kind: kind.name().into(),
+                        vm,
+                        addon,
+                        origin: "server",
+                        opened_from: "request".into(),
+                        revision: s.next_revision,
+                        held: Some(kind),
+                        data: serde_json::Value::Null,
+                    };
+                    s.sessions.push(session.clone());
+                    emit_opened(&session);
+                });
             }
         }
     }

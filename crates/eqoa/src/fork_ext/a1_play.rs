@@ -157,6 +157,9 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
             play.session.send(&m);
             Ok(())
         }
+        Act::GuildKick { .. } | Act::FriendAccept { .. } | Act::GuildAccept { .. } => {
+            super::a7_play::carry_out(play, &p.act)
+        }
         // round A5: the character window's steps are carried out where they are judged (`a5_capture`)
         Act::TrainStats { .. } | Act::Mastery { .. } => super::api_capture::a5::carry_out(play, &p.act),
     }
@@ -197,6 +200,14 @@ pub(crate) fn tick(play: &mut Play) {
     ]);
     // a pass: the game's own window for a held session, as the server's reply would have opened it
     for (vm, kind) in window_sessions::take_passes() {
+        if matches!(kind, TakeoverKind::FriendRequest | TakeoverKind::GuildInvite) {
+            if play.mode != 0 || !super::a7_play::pass_request(play, vm, kind) {
+                window_sessions::cancel_pass(vm, kind);
+                continue;
+            }
+            window_sessions::finish_pass(vm, kind);
+            continue;
+        }
         if play.mode != 0 || !window_takeover::hand_back(vm, kind) {
             window_sessions::cancel_pass(vm, kind);
             continue;

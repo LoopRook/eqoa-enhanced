@@ -43,6 +43,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_dialogs",
     "eqoa_turnin",
     "eqoa_crafting",
+    "eqoa_social",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -695,6 +696,21 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         package: "eqoa_frames",
         data: include_bytes!("../../../../bundled-mods/eqoa_frames/README.md"),
     },
+    BundledFile {
+        path: "eqoa_social/mod.json",
+        package: "eqoa_social",
+        data: include_bytes!("../../../../bundled-mods/eqoa_social/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_social/main.lua",
+        package: "eqoa_social",
+        data: include_bytes!("../../../../bundled-mods/eqoa_social/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_social/README.md",
+        package: "eqoa_social",
+        data: include_bytes!("../../../../bundled-mods/eqoa_social/README.md"),
+    },
 ];
 
 pub fn bundled_registry_path(config_dir: &Path) -> PathBuf {
@@ -1281,7 +1297,8 @@ mod tests {
                 "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin",
-                "eqoa_crafting"
+                "eqoa_crafting",
+                "eqoa_social"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1582,7 +1599,8 @@ mod tests {
                 "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin",
-                "eqoa_crafting"
+                "eqoa_crafting",
+                "eqoa_social"
             ]
         );
 
@@ -1636,7 +1654,8 @@ mod tests {
                 "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin",
-                "eqoa_crafting"
+                "eqoa_crafting",
+                "eqoa_social"
             ]
         );
 
@@ -1664,7 +1683,8 @@ mod tests {
                 "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin",
-                "eqoa_crafting"
+                "eqoa_crafting",
+                "eqoa_social"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1758,7 +1778,8 @@ mod tests {
                 "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin",
-                "eqoa_crafting"
+                "eqoa_crafting",
+                "eqoa_social"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );
