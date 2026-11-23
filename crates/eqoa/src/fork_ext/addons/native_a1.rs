@@ -25,6 +25,8 @@ use serde_json::json;
 pub(crate) enum A1Action {
     /// Asks the player first. `count` none is the whole stack.
     Destroy { item: ResolvedItemSpec, count: Option<i64> },
+    /// Bag Viewer multi-select: asks once about several whole stacks (`destroy_many`).
+    DestroyMany { items: Vec<ResolvedItemSpec> },
     LinkItem { item: ResolvedItemSpec },
     HideLook { item: ResolvedItemSpec, hide: bool },
     /// Round A2: `dialog_answer(ref, option)` (`Some`, 1-based) or `close_window(ref)` (`None`) on a dialog or offer
@@ -36,6 +38,7 @@ impl A1Action {
     pub(crate) const fn name(&self) -> &'static str {
         match self {
             Self::Destroy { .. } => "destroy",
+            Self::DestroyMany { .. } => "destroy_many",
             Self::LinkItem { .. } => "link_item",
             Self::HideLook { .. } => "hide_look",
             Self::SessionAnswer { option: Some(_), .. } => "dialog_answer",
@@ -281,5 +284,40 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             })?,
         )?;
     }
+    // Bag Viewer multi-select: one question for a list of whole stacks (never more than the pack holds at once)
+    const MAX_DESTROY_MANY: usize = 64;
+    bind(
+        lua,
+        "actions",
+        "destroy_many",
+        lua.create_function(|lua, items: Value| {
+            enqueue_lua_with(lua, "eqoa.actions.destroy_many", || {
+                let Value::Table(list) = items else {
+                    return Err(("invalid_argument", "items must be a list of inventory item handles".into()));
+                };
+                let n = list.raw_len();
+                if n == 0 || n > MAX_DESTROY_MANY {
+                    return Err(("invalid_argument", format!("items must hold 1 to {MAX_DESTROY_MANY} item handles")));
+                }
+                let mut specs: Vec<ResolvedItemSpec> = Vec::with_capacity(n);
+                for i in 1..=n {
+                    let handle: Value =
+                        list.raw_get(i).map_err(|_| ("invalid_argument", "items must be a plain list".to_string()))?;
+                    let spec = resolve_item_handle(&handle)?;
+                    if spec.list != "inventory" {
+                        return Err((
+                            "invalid_argument",
+                            format!("destroy_many requires inventory item handles, got '{}'", spec.list),
+                        ));
+                    }
+                    if specs.iter().any(|s| s.inv_index == spec.inv_index) {
+                        return Err(("invalid_argument", "the same item is listed twice".into()));
+                    }
+                    specs.push(spec);
+                }
+                Ok(ActionKind::A1(A1Action::DestroyMany { items: specs }))
+            })
+        })?,
+    )?;
     Ok(())
 }

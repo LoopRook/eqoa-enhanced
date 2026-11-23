@@ -1882,6 +1882,7 @@
         "eqoa.actions.craft_tray_remove",
         "eqoa.actions.cycle_target",
         "eqoa.actions.destroy",
+        "eqoa.actions.destroy_many",
         "eqoa.actions.dialog_answer",
         "eqoa.actions.drop_quest",
         "eqoa.actions.emote",
@@ -2421,6 +2422,14 @@
     {
       "children": [],
       "path": "eqoa.actions.destroy",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.destroy_many",
       "reason": null,
       "revision": 1,
       "round": 2,
@@ -6913,6 +6922,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.pointer.pressed.data.alt",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.pointer.pressed.data.button",
       "reason": null,
       "revision": 1,
@@ -6921,7 +6938,23 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.pointer.pressed.data.ctrl",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.pointer.pressed.data.inside_window",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.pointer.pressed.data.shift",
       "reason": null,
       "revision": 1,
       "round": 4,
@@ -6953,7 +6986,31 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.pointer.wheel.data.alt",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.pointer.wheel.data.ctrl",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.pointer.wheel.data.inside_window",
+      "reason": null,
+      "revision": 1,
+      "round": 4,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.pointer.wheel.data.shift",
       "reason": null,
       "revision": 1,
       "round": 4,
