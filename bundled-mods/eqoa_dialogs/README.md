@@ -23,8 +23,12 @@ appear in the mod's window instead of the game's dialog window.
   resurrection never is: the game's own **Are you sure?** appears and only your own Yes there sends it. Declining
   always goes at once. Turn the option off and the game shows these itself.
 
-Only one mod can hold the NPC dialogs. **EQOA Dialog Window** and **EQOA Quest Turn-in Helper** both want them, so
-use one at a time: the second one to start is told it is busy (a warning in the game's log and Mods & Addons).
+- **Quest hand-ins** (options **Highlight quest hand-ins**, on by default, and **Answer quest hand-ins
+  automatically**, off by default, in the mod's options): an answer whose words name a quest in your journal (the
+  whole title, any capitals, the longest title wins) has a green frame and a **Hand in** button beside it. Clicking
+  either sends that answer, as the number key does. Only the answer's own words count, never its position. With
+  the automatic option on, a dialog whose only real answer (the game's own More, Back and Close do not count) names
+  a quest is answered at once. A dialog that offers any choice is only marked: your click answers it.
 
 It uses the window sessions of `eqoa/1` (`eqoa.windows.takeover` with `scope = "all"` for `text_dialog`,
 `response_dialog`, `group_invite`, `revive_offer`, `summon_offer`; `eqoa.windows.session`, `pass`, and

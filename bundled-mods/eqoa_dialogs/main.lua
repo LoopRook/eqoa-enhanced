@@ -1,7 +1,10 @@
 -- Dialog window: NPC dialogs (and, if you like, group invitations, summons and resurrection offers) in a window of
 -- the mod's own, in place of the game's. Pressing Escape or the x gives the dialog back to the game's own window.
+-- An answer that names a quest in your journal is marked and has a Hand in button; with the option on, a dialog whose
+-- only real answer is such a hand-in is answered by itself.
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 local ui = eqoa.imgui
+local match = require("match")
 
 local DIALOG_KINDS = { "response_dialog", "text_dialog" }
 local OFFER_KINDS = { "group_invite", "summon_offer", "revive_offer" }
@@ -12,6 +15,12 @@ local RECLAIM_FRAMES, RETRY_FRAMES = 120, 30
 local DIGITS = { "1", "2", "3", "4", "5", "6", "7", "8", "9" }
 
 eqoa.options.toggle({ id = "offers", label = "Show invitations, summons and resurrection offers", default = true })
+eqoa.options.toggle({ id = "highlight", label = "Highlight quest hand-ins", default = true })
+eqoa.options.toggle({ id = "auto_answer", label = "Answer quest hand-ins automatically", default = false })
+
+-- The game's own paging entries: never a real answer.
+local GAME_ENTRIES = { more = true, back = true, close = true }
+local HAND_W = 56
 
 local state = {
     frame = 0,
@@ -20,6 +29,7 @@ local state = {
     page = 0, page_ref = nil,
     hits = {}, keys = {}, result = nil, retry = {},
     offers_on = true,
+    auto_ref = nil,     -- ref of the dialog the automatic hand-in already judged
 }
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
@@ -76,6 +86,40 @@ local function pass(ref)
         say(err and err.message or "Could not hand the dialog back yet", false)
         note("debug", "pass refused: " .. tostring(err and err.code))
     end
+end
+
+-- The answers that name a quest in the journal: option index -> quest (the option's words only, never its position).
+local function hand_ins(options)
+    local found = {}
+    for _, m in ipairs(match.matches(options, eqoa.quests.list() or {})) do found[m.index] = m.quest end
+    return found
+end
+
+-- The one real answer of a dialog: the only option that is not the game's own More / Back / Close. nil when the
+-- dialog offers a choice (or nothing).
+local function only_answer(options)
+    local index
+    for i, text in ipairs(options) do
+        if not GAME_ENTRIES[match.norm(text)] then
+            if index then return nil end
+            index = i
+        end
+    end
+    return index
+end
+
+-- Answers a hand-in by itself, once per dialog, only when it is the dialog's single real answer.
+local function auto_hand_in(s)
+    if state.auto_ref == s.ref then return end
+    state.auto_ref = s.ref
+    if s.kind ~= "response_dialog" or not eqoa.options.get("auto_answer") then return end
+    local options = (s.data or {}).options or {}
+    local index = only_answer(options)
+    if not index then return end
+    local quest = hand_ins(options)[index]
+    if not quest then return end
+    note("info", "handing in " .. tostring(quest.title) .. " automatically")
+    answer(s.ref, index, "Hand in " .. tostring(quest.title))
 end
 
 local function wrap(text, maxw, k)
@@ -194,6 +238,7 @@ local function draw_dialog(s, f, k, dw, dh)
     local first = state.page * PAGE
     local last = math.min(#options, first + PAGE)
     local lines = wrap(data.text or "", W - 2 * PAD, k)
+    local hints = (response and eqoa.options.get("highlight") ~= false) and hand_ins(options) or {}
     local rows = response and (last - first) or 1
     local more, back = state.page < pages - 1, state.page > 0
     rows = rows + (more and 1 or 0) + (back and 1 or 0)
@@ -219,7 +264,15 @@ local function draw_dialog(s, f, k, dw, dh)
             local n = i - first
             local option = i
             local run = function() answer(s.ref, option, "Answer") end
-            t.button(PAD, y, W - 2 * PAD, n .. ". " .. tostring(options[i]), run)
+            local quest = hints[i]
+            if quest then
+                -- a quest hand-in: the answer is marked and has its own Hand in button beside it
+                t.button(PAD, y, W - 2 * PAD - HAND_W - 4, n .. ". " .. tostring(options[i]), run, true)
+                t.button(W - PAD - HAND_W, y, HAND_W, "Hand in",
+                    function() answer(s.ref, option, "Hand in " .. tostring(quest.title)) end, true)
+            else
+                t.button(PAD, y, W - 2 * PAD, n .. ". " .. tostring(options[i]), run)
+            end
             keys[DIGITS[n]] = run
             y = y + 20
         end
@@ -285,6 +338,7 @@ eqoa.events.on("render", function()
         local s = eqoa.windows.session(kind)
         if s and not dialog then dialog = s end
     end
+    if dialog then auto_hand_in(dialog) end
     local offer
     for _, kind in ipairs(OFFER_KINDS) do
         local s = eqoa.windows.session(kind)

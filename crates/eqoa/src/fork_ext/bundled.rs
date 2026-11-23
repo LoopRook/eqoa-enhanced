@@ -41,7 +41,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_quest_journal",
     "eqoa_character",
     "eqoa_dialogs",
-    "eqoa_turnin",
+
     "eqoa_crafting",
     "eqoa_social",
     "eqoa_start_menu",
@@ -285,29 +285,14 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         data: include_bytes!("../../../../bundled-mods/eqoa_dialogs/main.lua"),
     },
     BundledFile {
+        path: "eqoa_dialogs/modules/match.lua",
+        package: "eqoa_dialogs",
+        data: include_bytes!("../../../../bundled-mods/eqoa_dialogs/modules/match.lua"),
+    },
+    BundledFile {
         path: "eqoa_dialogs/README.md",
         package: "eqoa_dialogs",
         data: include_bytes!("../../../../bundled-mods/eqoa_dialogs/README.md"),
-    },
-    BundledFile {
-        path: "eqoa_turnin/mod.json",
-        package: "eqoa_turnin",
-        data: include_bytes!("../../../../bundled-mods/eqoa_turnin/mod.json"),
-    },
-    BundledFile {
-        path: "eqoa_turnin/main.lua",
-        package: "eqoa_turnin",
-        data: include_bytes!("../../../../bundled-mods/eqoa_turnin/main.lua"),
-    },
-    BundledFile {
-        path: "eqoa_turnin/modules/match.lua",
-        package: "eqoa_turnin",
-        data: include_bytes!("../../../../bundled-mods/eqoa_turnin/modules/match.lua"),
-    },
-    BundledFile {
-        path: "eqoa_turnin/README.md",
-        package: "eqoa_turnin",
-        data: include_bytes!("../../../../bundled-mods/eqoa_turnin/README.md"),
     },
     BundledFile {
         path: "eqoa_crafting/mod.json",
@@ -1328,7 +1313,7 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-                "eqoa_turnin",
+
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
@@ -1632,7 +1617,7 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-                "eqoa_turnin",
+
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
@@ -1689,7 +1674,7 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-                "eqoa_turnin",
+
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
@@ -1720,7 +1705,7 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-                "eqoa_turnin",
+
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
@@ -1817,7 +1802,7 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-                "eqoa_turnin",
+
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
