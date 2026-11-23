@@ -449,7 +449,7 @@ ImGui.GetForegroundDrawList ImGui.GetMouseDragDelta ImGui.GetMousePos ImGui.GetM
 ImGui.GetMouseWheel ImGui.IsMouseClicked ImGui.IsMouseDoubleClicked ImGui.IsMouseDown ImGui.IsMousePosValid \
 ImGui.IsMouseReleased ImGui.PopItemWidth ImGui.PopStyleVar ImGui.PushItemWidth ImGui.PushStyleVar \
 ImGui.ResetMouseDragDelta ImGui.SetMouseCursor ImGui.SetMousePos ImGui.SetNextWindowFocus ImGui.SetWindowFocus \
-eqoa.actions.buttons eqoa.actions.look eqoa.actions.mastery_buy eqoa.actions.mastery_refund eqoa.actions.move eqoa.fonts.default eqoa.fonts.game \
+eqoa.actions.buttons eqoa.actions.look eqoa.actions.move eqoa.fonts.default eqoa.fonts.game \
 eqoa.fonts.load eqoa.fonts.release eqoa.hud.hidden_by eqoa.hud.hide eqoa.hud.show eqoa.icons.class \
 eqoa.icons.disposition eqoa.icons.info eqoa.icons.resource eqoa.icons.ui eqoa.imgui.BeginItemTooltip \
 eqoa.imgui.BeginTooltip eqoa.imgui.EndTooltip eqoa.imgui.GetForegroundDrawList eqoa.imgui.GetMouseDragDelta \
