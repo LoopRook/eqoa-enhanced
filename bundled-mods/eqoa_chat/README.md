@@ -9,8 +9,9 @@ A chat window of this mod's own, bottom left. The game's chat box is hidden whil
   own chat tabs from the game's Options (Extended > UI > Chat Tabs): **Main** and the tabs you made, each showing the
   kinds you gave it. **Notices** holds this mod's own messages (a line it could not send, and why). The wheel over the
   window scrolls back.
-- **Enter** (the controller's R3, the `/` key, and the **R** and **T** keys) opens the mod's entry line instead of the
-  game's. Type, press **Enter** to send, **Esc** to cancel. An empty Enter just closes it.
+- **Enter** (and the `/` key, and the **R** and **T** keys) opens the mod's entry line instead of the game's. On a
+  **controller**, R3 still opens the game's own line (it has the pad's soft keyboard and a cancel button; a mod's line
+  would take the whole pad while you type). Type, press **Enter** to send, **Esc** to cancel. An empty Enter just closes it.
 - **Channel picker.** **Say, Group, Guild, Shout, Tell, Reply** under the window while you type; click one or press
   **Tab** to go round. Say, Group, Guild and Shout also set the game's chat mode (what Community > Chat Modes sets),
   so the game and this window agree. **Tell**: type the player's name, a space, then the message. **Reply** goes to

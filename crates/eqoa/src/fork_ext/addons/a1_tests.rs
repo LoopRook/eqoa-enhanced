@@ -416,7 +416,7 @@ fn a1_every_new_event_reaches_lua_with_its_declared_fields_and_the_records_match
             assert(eqoa.events.on(name, function(e) seen[name] = e; round7c_note(name, e) end))
         end
         s = assert(eqoa.windows.open_session('inventory', {opened_from = 'key'}))
-        fields('windows.Session', s, 'data')
+        fields('windows.Session', s)
         assert(eqoa.windows.focus(s.ref))
         "#,
     )

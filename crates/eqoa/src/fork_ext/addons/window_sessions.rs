@@ -52,7 +52,7 @@ pub(crate) struct Session {
     pub held: Option<TakeoverKind>,
     /// Round A6: what belongs to this one opening (the Start menu's entries, the chat line's start), for the
     /// kinds the client opens itself (`open_client`). None for every other session.
-    pub data: Option<serde_json::Value>,
+    pub data: serde_json::Value,
 }
 
 impl Session {
@@ -66,10 +66,14 @@ impl Session {
             "revision": self.revision,
             "focused": focused,
         });
-        if let Some(data) = &self.data {
-            out["data"] = data.clone();
-        }
+        out["data"] = self.data_json();
         out
+    }
+
+    /// `data` is always a table: the kind's own fields (the Start menu's entries, the chat line's start), empty for
+    /// every other window.
+    pub(crate) fn data_json(&self) -> serde_json::Value {
+        if self.data.is_null() { json!({}) } else { self.data.clone() }
     }
 }
 
@@ -233,7 +237,7 @@ pub(crate) fn open(
             opened_from: opened_from.into(),
             revision: s.next_revision,
             held: None,
-            data: None,
+            data: serde_json::Value::Null,
         };
         s.sessions.push(session.clone());
         emit_opened(&session);
@@ -258,7 +262,7 @@ pub(crate) fn open_client(
         let revision = s.next_revision;
         if let Some(existing) = s.sessions.iter_mut().find(|x| x.vm == vm && x.kind == kind) {
             existing.revision = revision;
-            existing.data = Some(data);
+            existing.data = data;
             let session = existing.clone();
             emit_changed(&session);
             return session;
@@ -273,7 +277,7 @@ pub(crate) fn open_client(
             opened_from: opened_from.into(),
             revision,
             held: None,
-            data: Some(data),
+            data,
         };
         s.sessions.push(session.clone());
         emit_opened(&session);
@@ -299,7 +303,7 @@ pub(crate) fn set_data(id: &str, data: serde_json::Value) -> bool {
         let revision = s.next_revision;
         let x = &mut s.sessions[at];
         x.revision = revision;
-        x.data = Some(data);
+        x.data = data;
         let session = x.clone();
         emit_changed(&session);
         true
@@ -422,6 +426,17 @@ pub(crate) fn mods_stopped(reason: &str) {
     release_focus_all(reason);
 }
 
+/// A mod's handler for its window failed (a `render`, `windows.key` or `windows.session` that raised): the windows the
+/// client opened for it (the Start menu, the chat line) end now and the mod is told `closed` (`reason`), so a mod that
+/// keeps running does not hold on to a window it can no longer draw; every other session of it goes silently, as in
+/// `end_vm`.
+pub(crate) fn end_vm_told(vm: u64, reason: &str) {
+    if is_active() {
+        end_where(reason, |x| x.vm == vm && CLIENT_KINDS.contains(&x.kind.as_str()));
+    }
+    end_vm(vm);
+}
+
 /// `vm` is gone (disabled, reloaded, crashed): its sessions, its focus and its question go with it, told to no one.
 pub(crate) fn end_vm(vm: u64) {
     if is_active() {
@@ -465,7 +480,7 @@ pub(crate) fn sync_held(holders: [Option<(u64, String)>; 3]) {
                             opened_from: "npc".into(),
                             revision: s.next_revision,
                             held: Some(kind),
-                            data: None,
+                            data: serde_json::Value::Null,
                         };
                         s.sessions.push(session.clone());
                         emit_opened(&session);

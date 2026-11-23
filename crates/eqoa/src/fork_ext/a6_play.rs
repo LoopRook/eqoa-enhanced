@@ -36,6 +36,8 @@ const MSG_ITEMS: u32 = 0x0200_0000;
 const CHAT_PURPOSE: u32 = 0x0B0F_0000;
 
 thread_local! {
+    /// A chat line of the game's was open at the last step (one open before a mod claimed the kind stays the game's).
+    static CHAT_WAS_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The game's own menu is wanted for the next open (a mod's menu entry for a page it cannot show).
     static PASS_ONCE: Cell<bool> = const { Cell::new(false) };
     /// Link offers made so far (a session's `offer.seq`).
@@ -191,14 +193,21 @@ fn chat_info(play: &Play) -> ChatInfo {
 
 /// Each step's work for the Start menu and the chat line (`begin_iteration`).
 pub(crate) fn tick(play: &mut Play) {
+    native_a6::next_frame();
     if crate::fork_ext::addons::native_core::capture_requested() {
         native_a6::set_chat_info(chat_info(play));
+    }
+    // seen every step, held or not, so a line open before a mod claimed the kind is known to have been open
+    let open_now = play.mode == 2 && play.edit.purpose == CHAT_PURPOSE;
+    let fresh = open_now && !CHAT_WAS_OPEN.with(|c| c.replace(open_now));
+    if !open_now {
+        CHAT_WAS_OPEN.with(|c| c.set(false));
     }
     if !window_takeover::has_activity() && !window_sessions::is_active() {
         return;
     }
     start_menu(play);
-    chat_entry(play);
+    chat_entry(play, fresh);
 }
 
 /// A mod's window of a client-opened kind ends when nobody holds the kind any more (released, disabled, the
@@ -259,13 +268,20 @@ fn start_menu(play: &mut Play) {
     }
 }
 
-fn chat_entry(play: &mut Play) {
+fn chat_entry(play: &mut Play, fresh: bool) {
     drop_if_not_held(TakeoverKind::ChatEntry);
     let Some((vm, addon)) = holder(TakeoverKind::ChatEntry) else { return };
-    // the chat purpose only, and not a Who list's Tell (it goes back to the list)
-    if play.mode != 2 || play.edit.purpose != CHAT_PURPOSE || play.who_tell.is_some() || !may_divert() {
+    // an opening made since the last step (a line already open when the mod claimed the kind stays the game's until
+    // it closes); the chat purpose only, and not a Who list's Tell (it goes back to the list)
+    if !fresh || play.mode != 2 || play.edit.purpose != CHAT_PURPOSE || play.who_tell.is_some() || !may_divert() {
         return;
     }
+    // a pad press opened it: the game's line has the pad's soft keyboard and a cancel button; a mod's line takes the
+    // whole pad away while it types (`capture_text`), so a pad player is never given one
+    if native_a6::pad_recent() {
+        return;
+    }
+    CHAT_WAS_OPEN.with(|c| c.set(false));
     let data = chat_data(play, None);
     play.edit.clear();
     play.edit.title.clear();
@@ -303,7 +319,7 @@ pub(crate) fn offer_link(play: &mut Play, idx: usize) -> Option<DispatchOutcome>
     let offer = json!({"seq": seq, "name": name, "list": "inventory", "key": it.inv_index});
     match window_sessions::of_kind("chat_entry") {
         Some(s) if s.vm == vm => {
-            let mut data = s.data.clone().unwrap_or_else(|| json!({}));
+            let mut data = s.data_json();
             data["offer"] = offer;
             window_sessions::set_data(&s.id, data);
         }
@@ -356,7 +372,7 @@ fn start_menu_command(play: &mut Play, vm: u64, session: &str, command: &str) ->
     if crate::fork_ext::addons::window_actions::report_guard(&json!({}), Some(command), None).is_some() {
         return refuse("permission_denied", "report routes are forbidden");
     }
-    let entries = s.data.as_ref().map_or(Value::Null, |d| d["entries"].clone());
+    let entries = s.data["entries"].clone();
     let Some(entry) = find_entry(&entries, command) else {
         return refuse("unsupported", format!("'{command}' is not a command of this menu"));
     };
@@ -403,9 +419,22 @@ fn chat_line(play: &mut Play, route: Route, to: Option<&str>, text: &str, links:
             return refuse("stale_handle", "a linked item is no longer where the link says");
         }
     }
-    let prefix = match (route, to) {
-        (Route::Tell, Some(name)) => format!("{} {name} ", route.command()),
-        _ => format!("{} ", route.command()),
+    // on the channel plain text already goes to, the game's Enter sends the text alone (one message); another channel
+    // goes as the game's command for it
+    let current = match route {
+        Route::Say => 0,
+        Route::Group => 2,
+        Route::Shout => 3,
+        Route::Guild => 4,
+        Route::Tell | Route::Reply => u8::MAX,
+    };
+    let prefix = if current == play.channel {
+        String::new()
+    } else {
+        match (route, to) {
+            (Route::Tell, Some(name)) => format!("{} {name} ", route.command()),
+            _ => format!("{} ", route.command()),
+        }
     };
     let shift = prefix.encode_utf16().count();
     let whole = format!("{prefix}{text}");

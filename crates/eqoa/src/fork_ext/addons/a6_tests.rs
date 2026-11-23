@@ -129,7 +129,7 @@ fn a6_a_client_session_carries_its_data_and_changes_are_told() {
     h.execute("assert(eqoa.windows.close_session(s.ref) == true); assert(eqoa.windows.session('start_menu') == nil)").unwrap();
     // control: a session the mod's window opened itself has no data
     let own = ws::open(vm, "reader", "inventory", "key").unwrap();
-    assert!(own.json(false).get("data").is_none());
+    assert_eq!(own.json(false)["data"], json!({}), "data is always a table: empty for every other window");
 }
 
 #[test]
@@ -179,9 +179,9 @@ fn a6_a_chat_message_says_what_kind_of_line_it_is() {
 }
 
 #[test]
-fn a6_chat_line_checks_its_arguments_and_needs_only_the_chat_capability() {
+fn a6_chat_line_checks_its_arguments() {
     fresh();
-    let h = host_with("sender", &["eqoa.actions.chat"], &[]);
+    let h = host_with("sender", &["eqoa.actions.chat", "eqoa.actions.command"], &[]);
     h.execute(
         r#"
         local function bad(code, ...)
@@ -213,6 +213,27 @@ fn a6_chat_line_checks_its_arguments_and_needs_only_the_chat_capability() {
     .unwrap();
     assert_eq!(action_broker::queued_count_for_test(), 7);
     assert!(action_broker::queued_kinds_for_test().iter().all(|k| *k == "chat_line"));
+    // the frozen slash rule: every channel but say goes as a slash command and needs `command`; say needs `chat`
+    let chat_only = host_with("chat_only", &["eqoa.actions.chat"], &[]);
+    chat_only.execute(
+        r#"
+        assert(eqoa.actions.chat_line('say', 'hello'), 'say is an ordinary line')
+        for _, c in ipairs({'group', 'guild', 'shout', 'reply'}) do
+            local r, e = eqoa.actions.chat_line(c, 'hello'); assert(r == nil and e.code == 'permission_denied', c .. ': ' .. tostring(e and e.code))
+        end
+        local r, e = eqoa.actions.chat_line('tell', 'hello', {to = 'Wil'}); assert(r == nil and e.code == 'permission_denied', e and e.code)
+    "#,
+    )
+    .unwrap();
+    let command_only = host_with("command_only", &["eqoa.actions.command"], &[]);
+    command_only.execute(
+        r#"
+        assert(eqoa.actions.chat_line('group', 'hello'))
+        local r, e = eqoa.actions.chat_line('say', 'hello'); assert(r == nil and e.code == 'permission_denied', e and e.code)
+    "#,
+    )
+    .unwrap();
+    action_broker::reset_all_for_test();
     // the negative control: without the chat capability nothing is queued, and the refusal says which
     let none = host_with("mute", &["eqoa.actions.command"], &[]);
     none.execute("local r, e = eqoa.actions.chat_line('say', 'hi'); assert(r == nil and e.code == 'permission_denied', e and e.code)").unwrap();
@@ -499,4 +520,42 @@ fn a6_chat_mod_tabs_are_all_plus_one_per_style_or_the_players_own() {
     for kind in ["say", "tells", "group", "guild", "shouts", "combat", "loot", "rolls", "experience", "system"] {
         assert!(source.contains(&format!("{kind} = \"")), "a label for the {kind} style");
     }
+}
+
+#[test]
+fn a6_a_failing_handler_releases_its_windows_and_is_told_they_closed() {
+    fresh();
+    let h = host_with("faulty", TAKEOVER, &["start_menu", "chat_entry"]);
+    let other = host_with("steady", TAKEOVER, &["raid_ready"]);
+    h.execute(
+        r#"
+        assert(eqoa.windows.takeover('start_menu', {scope = 'all'}))
+        assert(eqoa.windows.takeover('chat_entry', {scope = 'all'}))
+        log = {}
+        eqoa.events.on('windows.session', function(e) log[#log + 1] = e.data.phase .. ':' .. e.data.kind .. ':' .. tostring(e.data.reason) end)
+        eqoa.events.on('windows.session', function(e) if e.data.phase == 'opened' then error('boom') end end)
+    "#,
+    )
+    .unwrap();
+    other.execute("assert(eqoa.windows.takeover('raid_ready', {scope = 'all'}))").unwrap();
+    let vm = native_events::bus(&h.lua).borrow().vm;
+    ws::open_client(vm, "faulty", "start_menu", "key", json!({"entries": []}));
+    native_core::flush_deferred();
+    native_events::dispatch(&h).unwrap();
+    assert!(!window_takeover::is_taken(TakeoverKind::StartMenu), "released with the failure");
+    assert!(!window_takeover::is_taken(TakeoverKind::ChatEntry), "every kind it held");
+    assert!(window_takeover::is_taken(TakeoverKind::RaidReady), "another mod's claim stays");
+    native_core::flush_deferred();
+    native_events::dispatch(&h).unwrap();
+    h.execute("assert(log[2] == 'closed:start_menu:failed', tostring(log[2]))").unwrap();
+    assert!(ws::get(vm, "start_menu").is_none());
+    // the control: a healthy mod keeps what it holds
+    let fine = host_with("fine", TAKEOVER, &["start_menu"]);
+    fine.execute("assert(eqoa.windows.takeover('start_menu', {scope = 'all'})); eqoa.events.on('windows.session', function() end)").unwrap();
+    let vm2 = native_events::bus(&fine.lua).borrow().vm;
+    ws::open_client(vm2, "fine", "start_menu", "key", json!({"entries": []}));
+    native_core::flush_deferred();
+    native_events::dispatch(&fine).unwrap();
+    assert!(window_takeover::is_taken(TakeoverKind::StartMenu));
+    assert!(ws::get(vm2, "start_menu").is_some());
 }

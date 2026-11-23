@@ -141,7 +141,7 @@ fn a6_the_start_key_opens_the_mods_menu_and_the_games_never_shows() {
     assert!(p.race_frame_due.is_empty(), "the character was never framed, so no camera is put back");
     let s = ws::get(vm, "start_menu").expect("the mod has a session");
     assert_eq!((s.origin, s.opened_from.as_str()), ("player", "key"));
-    let data = s.data.unwrap();
+    let data = s.data;
     let entries = data["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 3);
     assert_eq!(entries[0]["text"], "Character");
@@ -362,14 +362,14 @@ fn a6_the_enter_key_opens_the_mods_chat_line_and_only_for_chat() {
     assert_eq!(p.mode, 0, "the game's box was undone");
     assert!(p.edit.text.is_empty() && p.edit.purpose == 0);
     let s = ws::get(vm, "chat_entry").expect("the mod has a session");
-    let d = s.data.unwrap();
+    let d = s.data;
     assert_eq!((d["text"].as_str(), d["channel"].as_str()), (Some(""), Some("guild")));
     // R and T open the line with the command typed
     p.reply_name = "Dab".into();
     ws::reset_for_test();
     p.chat_key("/reply ", false);
     step(&mut p, &h);
-    let d = ws::get(vm, "chat_entry").unwrap().data.unwrap();
+    let d = ws::get(vm, "chat_entry").unwrap().data;
     assert_eq!((d["text"].as_str(), d["reply_to"].as_str()), (Some("/reply "), Some("Dab")));
     // a line kept with an item link comes with it
     ws::reset_for_test();
@@ -377,7 +377,7 @@ fn a6_the_enter_key_opens_the_mods_chat_line_and_only_for_chat() {
     p.link_draft = Some((name.clone(), vec![crate::editbox::TextLink { start: 0, len: name.len(), list: 0, key: 11 }]));
     p.open_chat_line();
     step(&mut p, &h);
-    let d = ws::get(vm, "chat_entry").unwrap().data.unwrap();
+    let d = ws::get(vm, "chat_entry").unwrap().data;
     assert_eq!(d["links"][0]["name"], "Rusty Sword");
     assert_eq!((d["links"][0]["start"].as_u64(), d["links"][0]["list"].as_str(), d["links"][0]["key"].as_u64()), (Some(1), Some("inventory"), Some(11)));
     assert!(p.link_draft.is_none(), "the mod's line owns it now");
@@ -412,14 +412,39 @@ fn a6_a_chat_line_goes_as_the_games_own_line_does() {
         h.execute(&format!("req, err = {code}; assert(req ~= nil, err and err.message)")).unwrap();
         step(p, &h);
     };
-    // each channel against the game's line
-    for (route, line) in [("say", "/say hello"), ("group", "/g hello"), ("guild", "/gu hello"), ("shout", "/s hello"), ("reply", "/r hello")] {
+    // each channel against the game's line: the channel plain text already goes to sends the text alone, as the
+    // game's Enter does (one message); another goes as the game's command for it
+    for (route, line) in [("group", "/g hello"), ("guild", "/gu hello"), ("shout", "/s hello"), ("reply", "/r hello")] {
         ask(&mut mine, &format!("eqoa.actions.chat_line('{route}', 'hello')"));
         native.chat_line(line);
         let (a, b) = (sent(&mut mine), sent(&mut native));
         assert!(!a.is_empty(), "{route} sent something");
         assert_eq!(a, b, "{route}: the bytes are the game's own line's");
     }
+    // on the current channel (say here): the text alone, one message, as the Enter key's line sends it; the control is
+    // that the command form (`/say`) is three messages
+    ask(&mut mine, "eqoa.actions.chat_line('say', 'hello')");
+    native.chat_line("hello");
+    let (a, b) = (sent(&mut mine), sent(&mut native));
+    assert_eq!(a, b, "say on the say channel is the game's plain line");
+    assert_eq!(a.len(), 1, "one message");
+    native.chat_line("/say hello");
+    assert_eq!(sent(&mut native).len(), 3, "the control: the command form is the channel switch around the line");
+    for (route, code) in [("group", 2u8), ("shout", 3), ("guild", 4)] {
+        mine.channel = code;
+        native.channel = code;
+        ask(&mut mine, &format!("eqoa.actions.chat_line('{route}', 'hello')"));
+        native.chat_line("hello");
+        let (a, b) = (sent(&mut mine), sent(&mut native));
+        assert_eq!(a, b, "{route} on its own channel is the game's plain line");
+        assert_eq!(a.len(), 1);
+    }
+    mine.channel = 0;
+    native.channel = 0;
+    // text is taken as passed: a leading space does not move a link
+    ask(&mut mine, "eqoa.actions.chat_line('say', '  look Rusty Sword', {links = {{start = 8, len = 11, list = 'inventory', key = 11}}})");
+    native.chat_line_linked("  look Rusty Sword", &[crate::editbox::TextLink { start: 7, len: 11, list: 0, key: 11 }]);
+    assert_eq!(sent(&mut mine), sent(&mut native), "the link is where the text says");
     ask(&mut mine, "eqoa.actions.chat_line('tell', 'hello', {to = 'Wil'})");
     native.chat_line("/t Wil hello");
     assert_eq!(sent(&mut mine), sent(&mut native), "a tell");
@@ -484,12 +509,12 @@ fn a6_link_item_goes_to_the_mods_line_when_it_holds_the_chat_and_to_the_games_ot
     let out = offer_link(&mut p, 0).expect("held: the mod's");
     assert!(matches!(out, DispatchOutcome::Completed { .. }));
     assert_eq!(p.mode, 0, "the game's line stayed shut");
-    let d = ws::get(vm, "chat_entry").unwrap().data.unwrap();
+    let d = ws::get(vm, "chat_entry").unwrap().data;
     assert_eq!((d["offer"]["name"].as_str(), d["offer"]["key"].as_u64(), d["offer"]["seq"].as_u64()), (Some("Rusty Sword"), Some(11), Some(1)));
     // a second offer into the open line is a new seq on the same session
     let again = offer_link(&mut p, 0);
     assert!(again.is_some());
-    assert_eq!(ws::get(vm, "chat_entry").unwrap().data.unwrap()["offer"]["seq"], 2);
+    assert_eq!(ws::get(vm, "chat_entry").unwrap().data["offer"]["seq"], 2);
     // a server with no item links refuses
     p.session.item_links_offer = false;
     p.agree_item_links();
@@ -520,4 +545,84 @@ fn a6_a_link_in_a_chat_line_opens_the_games_item_card() {
     let (a, b) = (sent(&mut p), sent(&mut native));
     assert!(!a.is_empty(), "the server was asked for the item");
     assert_eq!(a, b, "as a click on the link asks it");
+}
+
+// ---- fix round ----
+
+#[test]
+fn a6_a_pad_press_opens_the_games_line_with_its_soft_keyboard_and_never_a_mod_line() {
+    let mut p = ready();
+    let h = host();
+    let vm = hold(&h, TakeoverKind::ChatEntry);
+    // the pad's R3 (key 147): its button went down this frame (`prepare_controls` notes it before the game reads it)
+    native_a6::note_pad(crate::input::bit::R3);
+    p.open_chat_line();
+    step(&mut p, &h);
+    assert!(p.mode == 2 && p.edit.purpose == CHAT_PURPOSE, "the game's own line (the pad can type and cancel in it)");
+    assert!(ws::get(vm, "chat_entry").is_none(), "a mod's line would have taken the whole pad away while it types");
+    // the same for the Start menu's chat entry reached with the pad
+    p.mode = 0;
+    p.edit.clear();
+    step(&mut p, &h);
+    native_a6::note_pad(0);
+    // the control: no pad button, a keyboard's Enter, a few steps later: the mod's line
+    for _ in 0..5 {
+        step(&mut p, &h);
+    }
+    p.open_chat_line();
+    step(&mut p, &h);
+    assert_eq!(p.mode, 0);
+    assert!(ws::get(vm, "chat_entry").is_some(), "the keyboard's Enter opens the mod's line");
+}
+
+#[test]
+fn a6_a_chat_line_already_open_when_the_mod_claims_the_kind_stays_the_games() {
+    let mut p = ready();
+    let h = host();
+    p.open_chat_line();
+    step(&mut p, &h);
+    assert_eq!(p.mode, 2, "no holder: the game's line");
+    let vm = hold(&h, TakeoverKind::ChatEntry);
+    step(&mut p, &h);
+    step(&mut p, &h);
+    assert!(p.mode == 2 && p.edit.purpose == CHAT_PURPOSE, "typing goes on in the game's box");
+    assert!(ws::get(vm, "chat_entry").is_none());
+    // closed, and opened again: the mod's
+    p.mode = 0;
+    p.edit.clear();
+    step(&mut p, &h);
+    p.open_chat_line();
+    step(&mut p, &h);
+    assert_eq!(p.mode, 0);
+    assert!(ws::get(vm, "chat_entry").is_some());
+}
+
+#[test]
+fn a6_a_holder_whose_handler_fails_gives_the_keys_back_to_the_game_at_once() {
+    for kind in [TakeoverKind::StartMenu, TakeoverKind::ChatEntry] {
+        let mut p = ready();
+        with_menus(&mut p);
+        let h = host();
+        let vm = hold(&h, kind);
+        h.execute("eqoa.events.on('windows.session', function(e) if e.data.phase == 'opened' then error('boom') end end)").unwrap();
+        let open = |p: &mut Play| match kind {
+            TakeoverKind::StartMenu => p.open_start_menu(true),
+            _ => p.open_chat_line(),
+        };
+        open(&mut p);
+        step(&mut p, &h);
+        native_core::flush_deferred();
+        native_events::dispatch(&h).unwrap();
+        assert!(!window_takeover::is_taken(kind), "{kind:?}: the failed mod no longer holds it");
+        assert!(ws::get(vm, kind.name()).is_none(), "{kind:?}: and has no window");
+        // the next press is the game's
+        p.mode = 0;
+        p.edit.clear();
+        step(&mut p, &h);
+        open(&mut p);
+        step(&mut p, &h);
+        let want = if kind == TakeoverKind::StartMenu { 13 } else { 2 };
+        assert_eq!(p.mode, want, "{kind:?}: the game's own window opens");
+        // the negative control is the same press with the handler healthy: it stays the mod's (the tests above)
+    }
 }

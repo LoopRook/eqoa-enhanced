@@ -733,9 +733,12 @@ fn deliver_data(
             shared.borrow_mut().subscriptions.retain(|s| s.token != t);
             // round A1 fix: a mod whose window code or key handling just failed has no working window; the
             // controller and its held sessions are the game's again at once, not at some later disable
-            if matches!(e.name.as_str(), "render" | "windows.key") {
+            if matches!(e.name.as_str(), "render" | "windows.key" | "windows.session") {
                 let vm = shared.borrow().vm;
-                super::window_sessions::end_vm(vm);
+                // round A6: the windows it holds are the game's again at once (the Start key and Enter open the
+                // game's own menu and line), as when it is disabled, and it is told its client-opened windows closed
+                super::window_takeover::release_vm(vm);
+                super::window_sessions::end_vm_told(vm, "failed");
             }
         }
     }

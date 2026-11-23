@@ -116,9 +116,32 @@ struct StashedLinks {
 const KNOWN_MOST: usize = 2048;
 
 thread_local! {
+    /// Steps counted, and the step a pad button last went down (`note_pad`): see `pad_recent`.
+    static FRAME: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static PAD_AT: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+    static PAD_LAST: std::cell::Cell<u16> = const { std::cell::Cell::new(0) };
     static CHAT: RefCell<Option<ChatInfo>> = const { RefCell::new(None) };
     static STASH: RefCell<StashedLinks> = RefCell::new(StashedLinks::default());
     static KNOWN: RefCell<std::collections::VecDeque<u32>> = const { RefCell::new(std::collections::VecDeque::new()) };
+}
+
+/// One game step (`a6_play::tick`).
+pub(crate) fn next_frame() {
+    FRAME.with(|f| f.set(f.get() + 1));
+}
+
+/// The pad report of this frame (`fork_ext::prepare_controls`, before the game and before a mod's text capture
+/// takes the report): a button that just went down is remembered.
+pub(crate) fn note_pad(buttons: u16) {
+    let before = PAD_LAST.with(|b| b.replace(buttons));
+    if buttons & !before != 0 {
+        PAD_AT.with(|p| p.set(Some(FRAME.with(|f| f.get()))));
+    }
+}
+
+/// A pad button went down in the last few steps: what opened the window now being opened was the pad, not the keyboard.
+pub(crate) fn pad_recent() -> bool {
+    PAD_AT.with(|p| p.get()).is_some_and(|at| FRAME.with(|f| f.get()).saturating_sub(at) <= 3)
 }
 
 /// A game event carrying item links arrived (`Event::ChatLinks`): they belong to the line the next event makes.
@@ -190,6 +213,9 @@ pub(crate) fn set_chat_info(info: ChatInfo) {
 pub(crate) fn reset_for_test() {
     CHAT.with(|c| *c.borrow_mut() = None);
     STASH.with(|s| *s.borrow_mut() = StashedLinks::default());
+    FRAME.with(|f| f.set(0));
+    PAD_AT.with(|p| p.set(None));
+    PAD_LAST.with(|b| b.set(0));
     KNOWN.with(|k| k.borrow_mut().clear());
 }
 
@@ -367,15 +393,18 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         "chat_line",
         lua.create_function(|lua, (channel, text, opts): (Value, Value, Option<Value>)| {
             const SYMBOL: &str = "eqoa.actions.chat_line";
-            // judged by the line the player could have typed: an ordinary line (spec section 8, rule 4)
-            enqueue_lua_with_grant(lua, SYMBOL, "eqoa.actions.chat", || {
-                let route = str_arg(&channel).as_deref().and_then(Route::parse).ok_or((
+            // judged by the line that is sent (spec section 8, rule 4): plain `say` is an ordinary line; every other
+            // channel goes as the game's slash command (`/g`, `/gu`, `/s`, `/t`, `/r`), which needs `command`
+            let parsed = str_arg(&channel).as_deref().and_then(Route::parse);
+            let grant = if matches!(parsed, None | Some(Route::Say)) { "eqoa.actions.chat" } else { "eqoa.actions.command" };
+            enqueue_lua_with_grant(lua, SYMBOL, grant, || {
+                let route = parsed.ok_or((
                     "invalid_argument",
                     "channel must be 'say', 'group', 'guild', 'shout', 'tell' or 'reply'".to_string(),
                 ))?;
                 let text = str_arg(&text).ok_or(("invalid_argument", "text must be a string".to_string()))?;
-                let text = text.trim().to_string();
-                if text.is_empty() {
+                // as passed: a link's `start` counts characters of this very text
+                if text.trim().is_empty() {
                     return Err(("invalid_argument", "message text is empty".into()));
                 }
                 if text.contains(['\0', '\r', '\n']) {
