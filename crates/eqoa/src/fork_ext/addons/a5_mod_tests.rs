@@ -60,7 +60,7 @@ fn a5_mods_and_addons_says_what_the_character_mod_can_do() {
         "{lines:?}"
     );
     assert!(
-        lines.contains(&"Actions: can act on its own (ask for faction standings, ask for the combat record)".to_string()),
+        lines.contains(&"Actions: can act on its own (mastery_browse, ask for faction standings, ask for the combat record)".to_string()),
         "{lines:?}"
     );
     // the label never says the three steps act on their own
@@ -346,6 +346,7 @@ fn a5_character_no_text_exceeds_the_window_on_any_tab() {
     );
     assert!(!check(&w).0, "control: a text past the window's edge is caught");
     // control: ordinary names are not cut at all
+    drop(w);
     let mut w = window();
     CORE.with(|c| c.borrow_mut().view.mastery_skills = Some(vec![skill(1, "Ironhide", true, false, 1)]));
     native_a5::set_factions(1, || Some(page(1, 1, &[("Qeynos Guard", 1500)])));
