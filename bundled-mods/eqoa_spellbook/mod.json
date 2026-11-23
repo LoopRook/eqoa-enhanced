@@ -24,6 +24,8 @@
     "eqoa.input.claim",
     "eqoa.input.pointer",
     "eqoa.input.claim_pointer",
+    "eqoa.input.capture_text",
+    "eqoa.icons.resource",
     "eqoa.events.on",
     "eqoa.imgui"
   ]

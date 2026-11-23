@@ -27,7 +27,7 @@ pub(crate) fn imgui(lua: &Lua, imgui: &Table) -> Result<()> {
     }
     // Not in the bounded ImGui bridge of `eqoa/1`, and not scheduled: each answers `unsupported` with what
     // to use instead.
-    const MOUSE: &str = "the ImGui bridge does not expose mouse state; use eqoa.input.pointer() and the pointer.pressed and pointer.wheel events";
+    const MOUSE: &str = "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events";
     const NOT_BRIDGED: &str = "not part of the ImGui bridge in eqoa/1";
     for (name, reason) in [
         ("BeginTooltip", NOT_BRIDGED),
@@ -36,11 +36,8 @@ pub(crate) fn imgui(lua: &Lua, imgui: &Table) -> Result<()> {
         ("GetMousePos", MOUSE),
         ("GetMousePosOnOpeningCurrentPopup", MOUSE),
         ("GetMouseWheel", MOUSE),
-        ("GetMouseDragDelta", MOUSE),
         ("ResetMouseDragDelta", MOUSE),
-        ("IsMouseDown", MOUSE),
         ("IsMouseClicked", MOUSE),
-        ("IsMouseReleased", MOUSE),
         ("IsMouseDoubleClicked", MOUSE),
         ("IsMousePosValid", MOUSE),
         ("SetMousePos", MOUSE),
