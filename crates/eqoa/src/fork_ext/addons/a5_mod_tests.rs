@@ -254,7 +254,7 @@ fn a5_character_closing_ends_every_session() {
     ws::set_env(ws::Env::default());
 }
 
-fn page(n: i32, pages: i32, entries: &[(&str, i32)]) -> serde_json::Value {
+fn page<S: ToString>(n: i32, pages: i32, entries: &[(S, i32)]) -> serde_json::Value {
     native_a5::page_json(n - 1, pages, entries.iter().map(|(a, b)| (a.to_string(), *b)).collect())
 }
 

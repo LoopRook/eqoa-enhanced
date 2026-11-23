@@ -101,8 +101,7 @@ fn declared_covers_used(id: &str) {
     // a mod may keep its code in modules (round A5: the Character mod): what they call counts as the mod's
     if let Ok(dir) = std::fs::read_dir(root(id).join("modules")) {
         for entry in dir.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "lua")) {
-            src.push('
-');
+            src.push('\n');
             src.push_str(&std::fs::read_to_string(entry.path()).unwrap());
         }
     }
