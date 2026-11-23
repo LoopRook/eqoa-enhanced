@@ -169,7 +169,7 @@ local function open()
     escape = eqoa.input.claim("Escape", true)
 end
 
-eqoa.input.bind({id = "open", label = "Bag viewer", default_key = "b"}, function()
+eqoa.input.bind({id = "open", label = "Bag viewer", default_key = "shift+b"}, function()
     if B.open then close() else open() end
 end)
 -- The loot log is the one thing kept while the window is closed, from events only.

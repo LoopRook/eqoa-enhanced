@@ -439,7 +439,7 @@ fn a1_owner_fix_a_key_that_cannot_open_a_window_logs_a_note_not_a_mod_error() {
     for (id, key, combo) in [
         ("eqoa_spellbook", "k", "shift+k"),
         ("eqoa_quest_journal", "j", "shift+j"),
-        ("eqoa_bag_viewer", "b", "b"),
+        ("eqoa_bag_viewer", "b", "shift+b"),
     ] {
         fixture();
         let host = Host::for_addon(&addon(id)).unwrap();

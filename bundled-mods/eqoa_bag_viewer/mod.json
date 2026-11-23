@@ -8,7 +8,7 @@
   "entryMode": "once",
   "enabled": false,
   "provides": [
-    "Bags window (B)"
+    "Bags window (Shift+B)"
   ],
   "replaces": [
     "loot",

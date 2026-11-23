@@ -372,18 +372,21 @@ fn a1_mods_and_addons_says_what_a_mod_provides_before_it_is_enabled() {
 fn a1_the_three_windows_take_their_keys_and_the_stats_box_gives_up_b() {
     use crate::fork_ext::bindpage;
     bindpage::reset_in_memory();
-    for (addon, default) in [("eqoa_stats_box", "y"), ("eqoa_bag_viewer", "b"), ("eqoa_spellbook", "shift+k"), ("eqoa_quest_journal", "shift+j")] {
+    for (addon, default) in [("eqoa_stats_box", "y"), ("eqoa_bag_viewer", "shift+b"), ("eqoa_spellbook", "shift+k"), ("eqoa_quest_journal", "shift+j")] {
         let manifest = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods").join(addon).join(if addon == "eqoa_bag_viewer" { "main.lua" } else { "main.lua" })).unwrap();
         assert!(manifest.contains(&format!("default_key = \"{default}\"")), "{addon} declares {default}");
         bindpage::register(addon, if addon == "eqoa_stats_box" { "toggle" } else { "open" }, default, addon);
     }
     assert_eq!(bindpage::get_key("eqoa_stats_box", "toggle").as_deref(), Some("y"));
-    assert_eq!(bindpage::get_key("eqoa_bag_viewer", "open").as_deref(), Some("b"));
+    assert_eq!(bindpage::get_key("eqoa_bag_viewer", "open").as_deref(), Some("shift+b"));
     assert_eq!(bindpage::get_key("eqoa_spellbook", "open").as_deref(), Some("shift+k"));
     assert_eq!(bindpage::get_key("eqoa_quest_journal", "open").as_deref(), Some("shift+j"));
     // a game key always wins: plain K is the camera's, so a mod default on it gets an empty row
     bindpage::register("eqoa_x", "k", "k", "Plain K");
     assert_eq!(bindpage::get_key("eqoa_x", "k").as_deref(), Some(""), "the game's camera key is not a mod's");
+    // plain I is Camera up (why Bags is not on I), and B is upstream's Controls-page key: Bags is on Shift+B
+    bindpage::register("eqoa_i", "i", "i", "Plain I");
+    assert_eq!(bindpage::get_key("eqoa_i", "i").as_deref(), Some(""), "I is the game's camera key");
     // two mods wanting the same free key: one has it, the other's row is empty (never both)
     bindpage::register("eqoa_y", "dup", "shift+j", "Second journal");
     let holders = ["eqoa_quest_journal", "eqoa_y"].map(|a| bindpage::get_key(a, if a == "eqoa_y" { "dup" } else { "open" }).unwrap());

@@ -1,6 +1,6 @@
 # EQOA Bag Viewer
 
-Off by default. Enable it in Mods & Addons (it shows **Provides: Bags window (B)**), then press **B**
+Off by default. Enable it in Mods & Addons (it shows **Provides: Bags window (Shift+B)**), then press **Shift+B**
 (the Controls page has a **Bag viewer** row, so you can move it; a key the game, a macro or another mod
 already has leaves the row empty and says why). The key opens and closes the Bags window; Escape and
 turning the mod off close it too, and so do zoning, dying and the **Use the game's windows** switch (the

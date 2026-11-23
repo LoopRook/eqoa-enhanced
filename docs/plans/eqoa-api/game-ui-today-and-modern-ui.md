@@ -132,7 +132,7 @@ window up (`fork_ext/addons/input.rs:338`, `fork_ext/play.rs:5419-5427`). The ma
 | Session | One opening of a window, with a handle that actions belong to. In A1: every opening of a mod's Bags, Spellbook or Journal, and every corpse, merchant and bank the Bag Viewer holds. A confirm ("destroy?") and the server's "which slot?" question belong to a session. A2's dialogs are the same thing | not built |
 | Pass | "Not mine, show the game's window" for one opening. In A1 it applies to corpse, merchant and bank; the three new windows hide nothing, so there is nothing to pass | not built |
 | Focus | While a mod window is open it may take the controller's d-pad, confirm and back (and hold movement if it asks), so a window can be used with a controller once it is open. Ends on close, error, disable | not built |
-| Label | Mods & Addons shows two lines per mod before it is enabled: **Provides: Bags (B), Spellbook, Journal** (new, from a `provides` list in the manifest) and **Replaces game windows: Loot, Merchant, Bank** (exists) | half built |
+| Label | Mods & Addons shows two lines per mod before it is enabled: **Provides: Bags (Shift+B), Spellbook, Journal** (new, from a `provides` list in the manifest) and **Replaces game windows: Loot, Merchant, Bank** (exists) | half built |
 | The switch | "Use the game's windows" gives back every game window a mod hides, at once. The three new windows hide nothing: the game's own pages are always there in the Start menu. Proposed: the switch also closes open mod windows | exists; the proposal is new |
 
 **Upstream lines.** The old design's seams 1 and 2 (one line at the start of `draw_hud`, `play.rs:10244`, and one
@@ -183,7 +183,7 @@ any Shift, Ctrl or Alt combination. **The owner's examples are not free:** K is 
 ### Proposed defaults
 | Window | Default | Note |
 |---|---|---|
-| Bags (A1) | **B** | Free in the game. The Stats Box moves to **Y**. A player who put the Stats Box on B themselves keeps it; Bags then has no key and its row says why |
+| Bags (A1) | **Shift+B** | Plain B is upstream's key for the Controls page (owner, 2026-11-23: left as it is) and I is Camera up, so Bags takes Shift+B. The Stats Box moves to **Y**. A player who put another control on Shift+B keeps it; Bags then has no key and its row says why |
 | Spellbook (A1) | **Shift+K** | K alone is the game's camera key and would do nothing for a mod |
 | Journal (A1) | **Shift+J** | Same reason |
 | Later: Character (A5), Friends and Guild (A7), Crafting (A8) | Shift+C, Shift+F, Shift+G, Shift+R | The plain letters are the game's (chat history, assist, attack, reply) |
@@ -197,7 +197,7 @@ held Shift for anything else in play was not searched *(not verified)*.
 
 A1, in the modern design:
 
-1. Three windows on keys: **B** Bags, **Shift+K** Spellbook, **Shift+J** Journal. Press again or Escape to close;
+1. Three windows on keys: **Shift+B** Bags, **Shift+K** Spellbook, **Shift+J** Journal. Press again or Escape to close;
    you can keep walking. The Start menu and its Items, Abilities and Quests pages stay exactly as they are.
 2. Each key has a row on the Controls page and can be changed. A game key always wins: a mod key that is taken
    shows an empty row that says why. The Stats Box moves from B to Y.
