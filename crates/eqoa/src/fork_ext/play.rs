@@ -19,6 +19,14 @@ mod api_capture;
 #[path = "a1_play.rs"]
 mod a1_play;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "a7_play.rs"]
+mod a7_play;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "a7_play_tests.rs"]
+mod a7_play_tests;
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "map_mod_tests.rs"]
 mod map_mod_tests;
@@ -102,6 +110,7 @@ pub(crate) enum BrokerReply {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct GameEventCapture {
     api: api_capture::ChangeCapture,
+    a7: a7_play::EventNote,
     broker_reply: Option<BrokerReply>,
     loot_inv_add: Option<(i64, i64)>,
 }
@@ -110,6 +119,7 @@ pub(crate) struct GameEventCapture {
 pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> GameEventCapture {
     MODE_BEFORE_EVENT.with(|m| m.set(play.mode));
     let api = api_capture::begin_game_event(play, event);
+    let a7 = a7_play::begin_event(play, event);
     if let net::session::Event::MasterLoot(m) = event {
         crate::fork_ext::addons::action_broker::set_master_loot(m.is_some());
         crate::fork_ext::addons::raid_strips::set_master_loot_detail(m.clone());
@@ -245,6 +255,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
     };
     GameEventCapture {
         api,
+        a7,
         broker_reply,
         loot_inv_add,
     }
@@ -254,6 +265,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
 pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
     MODE_BEFORE_EVENT.with(|m| m.set(-1));
     api_capture::end_game_event(play, capture.api);
+    a7_play::end_event(play, capture.a7);
     if let Some((item_id, qty)) = capture.loot_inv_add {
         api_capture::items::note_loot_inv_add(item_id, qty);
     }
@@ -510,7 +522,11 @@ pub(crate) fn window_taken(play: &Play, mode: i32) -> bool {
         let observed_target = match kind {
             TakeoverKind::Loot => crate::fork_ext::loot_source::peek_single(),
             TakeoverKind::Merchant => play.npcw.shop.id,
-            TakeoverKind::Bank | TakeoverKind::RaidReady | TakeoverKind::RaidRoll => None,
+            TakeoverKind::Bank
+            | TakeoverKind::RaidReady
+            | TakeoverKind::RaidRoll
+            | TakeoverKind::FriendRequest
+            | TakeoverKind::GuildInvite => None,
         };
         let fallback_player_target = (play.target != u32::MAX).then_some(play.target);
         let decision = window_takeover::decide_open(
@@ -664,7 +680,10 @@ fn close_hidden_session(
             tlog!("takeover: bank hidden session closed ({})", owed.reason);
             play.bank.state = 0;
         }
-        TakeoverKind::RaidReady | TakeoverKind::RaidRoll => {}
+        TakeoverKind::RaidReady
+        | TakeoverKind::RaidRoll
+        | TakeoverKind::FriendRequest
+        | TakeoverKind::GuildInvite => {}
     }
 }
 
@@ -796,7 +815,9 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         sync_hidden_sessions(_play);
+        a7_play::hide_taken_requests(_play);
         a1_play::tick(_play);
+        a7_play::tick(_play);
         if crate::fork_ext::addons::native_core::capture_requested()
             || crate::fork_ext::addons::window_takeover::has_activity()
         {
@@ -1018,9 +1039,13 @@ pub(super) fn dropped(_play: &mut Play) {
     // a mod disabled since the last game step: its pins go before the world does (a logout)
     #[cfg(not(target_arch = "wasm32"))]
     drain_released_waypoints(_play);
-    // round A1: no mod window, question or controller focus outlives the world
+    // round A1 / A7: no mod window, held request, question or controller focus outlives the world
     #[cfg(not(target_arch = "wasm32"))]
-    a1_play::play_dropped(_play.quit || _play.disconnected.is_some());
+    {
+        let leaving = _play.quit || _play.disconnected.is_some();
+        a7_play::play_dropped(_play, leaving);
+        a1_play::play_dropped(leaving);
+    }
 }
 
 /// Clears the pins disabled mods still own, once the map has read the window's pins; until then the
@@ -3189,6 +3214,7 @@ fn dispatch_broker_action(
         }
         ActionKind::Frame(action) => api_capture::a3::dispatch(play, action),
         ActionKind::A1(action) => a1_play::dispatch(play, action),
+        ActionKind::A7(action) => a7_play::dispatch(play, action),
         ActionKind::DropQuest { .. }
         | ActionKind::MasteryShare { .. }
         | ActionKind::MasteryBrowse { .. }
@@ -4369,6 +4395,7 @@ fn weapon_sets_requests(play: &mut Play, ready: bool) {
 pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        a7_play::hide_taken_requests(play);
         let options_closed =
             if crate::fork_ext::addons::take_close_options_on_open() && play.mode == 34 {
                 play.mode = 0;

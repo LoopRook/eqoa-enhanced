@@ -41,18 +41,22 @@ pub(crate) enum TakeoverKind {
     Bank = 2,
     RaidReady = 3,
     RaidRoll = 4,
+    FriendRequest = 5,
+    GuildInvite = 6,
 }
 
 impl TakeoverKind {
     /// The three server-window kinds (loot, merchant, bank) that carry hidden server sessions and batch hooks.
     pub(crate) const ALL: [Self; 3] = [Self::Loot, Self::Merchant, Self::Bank];
-    /// Every takeover kind, including server-pushed raid strips (`raid_ready`, `raid_roll`).
-    pub(crate) const ALL_KINDS: [Self; 5] = [
+    /// Every takeover kind, including server-pushed raid strips and social request prompts.
+    pub(crate) const ALL_KINDS: [Self; 7] = [
         Self::Loot,
         Self::Merchant,
         Self::Bank,
         Self::RaidReady,
         Self::RaidRoll,
+        Self::FriendRequest,
+        Self::GuildInvite,
     ];
 
     pub(crate) const fn name(self) -> &'static str {
@@ -62,6 +66,8 @@ impl TakeoverKind {
             Self::Bank => "bank",
             Self::RaidReady => "raid_ready",
             Self::RaidRoll => "raid_roll",
+            Self::FriendRequest => "friend_request",
+            Self::GuildInvite => "guild_invite",
         }
     }
 
@@ -72,17 +78,19 @@ impl TakeoverKind {
             "bank" => Ok(Self::Bank),
             "raid_ready" => Ok(Self::RaidReady),
             "raid_roll" => Ok(Self::RaidRoll),
+            "friend_request" => Ok(Self::FriendRequest),
+            "guild_invite" => Ok(Self::GuildInvite),
             _ if super::window_kinds::is_window(s) => Err((
                 "unsupported",
                 format!(
                     "the game's '{s}' window cannot be taken over in this version (only 'loot', 'merchant', \
-                     'bank', 'raid_ready' and 'raid_roll'); more windows follow the window-replacement roadmap"
+                     'bank', 'raid_ready', 'raid_roll', 'friend_request' and 'guild_invite'); more windows follow the window-replacement roadmap"
                 ),
             )),
             _ => Err((
                 "invalid_argument",
                 format!(
-                    "window takeover kind must be 'loot', 'merchant', 'bank', 'raid_ready', or 'raid_roll', got '{s}'"
+                    "window takeover kind must be 'loot', 'merchant', 'bank', 'raid_ready', 'raid_roll', 'friend_request', or 'guild_invite', got '{s}'"
                 ),
             )),
         }
@@ -206,7 +214,7 @@ struct TakeoverState {
     /// The merchant's list still owed for the mod's last sale or buy when its hidden session ended (the
     /// sale's answer can follow the action's end): held hidden for `LIST_GRACE`, then closed again quietly.
     grace_merchant: Option<ListGrace>,
-    holders: [Option<Holder>; 5],
+    holders: [Option<Holder>; 7],
     pending_opens: [Option<PendingOpen>; 3],
     /// Why a kind's hidden session is to end (set by release, the mod finishing, the holder going).
     pending_close: [Option<&'static str>; 3],
@@ -726,7 +734,10 @@ pub(crate) fn decide_open(
                             TakeoverKind::Merchant => observed_target,
                             TakeoverKind::Loot if !pending.foreign => Some(pending.target_id),
                             TakeoverKind::Loot => observed_target,
-                            TakeoverKind::RaidReady | TakeoverKind::RaidRoll => None,
+                            TakeoverKind::RaidReady
+                            | TakeoverKind::RaidRoll
+                            | TakeoverKind::FriendRequest
+                            | TakeoverKind::GuildInvite => None,
                         };
                         known == Some(pending.target_id)
                     }

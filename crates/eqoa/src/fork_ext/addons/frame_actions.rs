@@ -22,7 +22,8 @@ pub(crate) const EMOTES: [&str; 4] = ["wave", "bow", "point", "cheer"];
 /// What the broker carries for the actions of round A3.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum FrameAction {
-    GroupInvite,
+    /// No args: invite the current target (A3). With `id`/`name`: invite that player directly (`invite_to_group`, A7).
+    GroupInvite { id: Option<u32>, name: Option<String> },
     PetAttack,
     PetBackOff,
     Emote { index: usize },
@@ -34,7 +35,7 @@ pub(crate) enum FrameAction {
 impl FrameAction {
     pub(crate) const fn name(&self) -> &'static str {
         match self {
-            Self::GroupInvite => "group_invite",
+            Self::GroupInvite { .. } => "group_invite",
             Self::PetAttack => "pet_attack",
             Self::PetBackOff => "pet_back_off",
             Self::Emote { .. } => "emote",
@@ -49,8 +50,61 @@ pub(crate) const NAMES: [&str; 6] = ["group_invite", "pet_attack", "pet_back_off
 
 pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
+    bind(
+        lua,
+        "actions",
+        "group_invite",
+        lua.create_function(|lua, (a, b): (Option<Value>, Option<Value>)| {
+            enqueue_lua_with(lua, "eqoa.actions.group_invite", || {
+                let parse_u32 = |v: &Value| -> std::result::Result<u32, (&'static str, String)> {
+                    match v {
+                        Value::Integer(n) if *n >= 0 && *n <= u32::MAX as i64 => Ok(*n as u32),
+                        Value::Number(n) if n.is_finite() && n.fract() == 0.0 && *n >= 0.0 && *n <= u32::MAX as f64 => {
+                            Ok(*n as u32)
+                        }
+                        _ => Err(("invalid_argument", "player id must be a non-negative integer".into())),
+                    }
+                };
+                let parse_name = |v: &Value| -> std::result::Result<String, (&'static str, String)> {
+                    let Some(s) = v.as_string().and_then(|s| s.to_str().ok().map(|s| s.trim().to_string())) else {
+                        return Err(("invalid_argument", "player name must be a non-empty string".into()));
+                    };
+                    if s.is_empty() || s.len() > 24 || s.chars().any(char::is_control) {
+                        return Err(("invalid_argument", "player name must be 1..=24 printable bytes".into()));
+                    }
+                    Ok(s)
+                };
+                match (a, b) {
+                    (None | Some(Value::Nil), None | Some(Value::Nil)) => {
+                        Ok(ActionKind::Frame(FrameAction::GroupInvite { id: None, name: None }))
+                    }
+                    (Some(Value::String(s)), None | Some(Value::Nil)) => {
+                        let name = parse_name(&Value::String(s))?;
+                        Ok(ActionKind::Frame(FrameAction::GroupInvite { id: None, name: Some(name) }))
+                    }
+                    (Some(v_id), Some(v_name)) if !matches!(v_name, Value::Nil) => {
+                        let id = parse_u32(&v_id)?;
+                        let name = parse_name(&v_name)?;
+                        Ok(ActionKind::Frame(FrameAction::GroupInvite { id: Some(id), name: Some(name) }))
+                    }
+                    (Some(Value::Table(t)), None | Some(Value::Nil)) => {
+                        let name_val = t.get::<Value>("name").map_err(|_| ("invalid_argument", "invalid name".into()))?;
+                        let name = parse_name(&name_val)?;
+                        let id = match t.get::<Value>("id").map_err(|_| ("invalid_argument", "invalid id".into()))? {
+                            Value::Nil => None,
+                            v => Some(parse_u32(&v)?),
+                        };
+                        Ok(ActionKind::Frame(FrameAction::GroupInvite { id, name: Some(name) }))
+                    }
+                    _ => Err((
+                        "invalid_argument",
+                        "group_invite takes (), (name), (id, name), or ({id?, name})".into(),
+                    )),
+                }
+            })
+        })?,
+    )?;
     for (name, action) in [
-        ("group_invite", FrameAction::GroupInvite),
         ("pet_attack", FrameAction::PetAttack),
         ("pet_back_off", FrameAction::PetBackOff),
         ("jump", FrameAction::Jump),

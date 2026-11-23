@@ -168,6 +168,8 @@ pub(crate) enum ActionKind {
     Frame(super::frame_actions::FrameAction),
     /// Round A1: destroy (asks the player first), link item, hide look.
     A1(super::native_a1::A1Action),
+    /// Round A7: friends, ignore, guild, who, group search.
+    A7(super::native_a7::A7Action),
     /// `eqoa.actions.ready_check_answer`: answer an open raid ready check.
     ReadyCheckAnswer { id: u32, ready: bool },
     /// `eqoa.actions.loot_roll`: answer an open raid loot roll (0=pass, 1=need, 2=greed).
@@ -228,6 +230,7 @@ impl ActionKind {
             Self::ClearWaypoint { .. } => "clear_waypoint",
             Self::Frame(action) => action.name(),
             Self::A1(action) => action.name(),
+            Self::A7(action) => action.name(),
             Self::ReadyCheckAnswer { .. } => "ready_check_answer",
             Self::LootRoll { .. } => "loot_roll",
             Self::LootAssign { .. } => "loot_assign",
@@ -284,6 +287,7 @@ impl ActionKind {
             | Self::ClearWaypoint { .. }
             | Self::Frame(_)
             | Self::A1(_)
+            | Self::A7(_)
             | Self::ReadyCheckAnswer { .. }
             | Self::LootRoll { .. } => None,
         }

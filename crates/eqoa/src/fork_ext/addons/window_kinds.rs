@@ -61,7 +61,8 @@ pub(crate) const SEARCH: (&str, &str) = ("search", "Player Search");
 pub(crate) const TYPING: (&str, &str) = ("typing", "Chat");
 pub(crate) const RAID_READY: (&str, &str) = ("raid_ready", "Ready Check");
 pub(crate) const RAID_ROLL: (&str, &str) = ("raid_roll", "Loot Roll");
-const OVERLAYS: [(&str, &str); 6] = [INVENTORY, MAP, SEARCH, TYPING, RAID_READY, RAID_ROLL];
+pub(crate) const FRIEND_REQUEST: (&str, &str) = ("friend_request", "Friend Request");
+const OVERLAYS: [(&str, &str); 7] = [INVENTORY, MAP, SEARCH, TYPING, RAID_READY, RAID_ROLL, FRIEND_REQUEST];
 
 /// The `eqoa` mode name of a native mode ID; `"other"` for an ID no window owns.
 pub(crate) fn mode_name(mode: i32) -> &'static str {
@@ -105,6 +106,11 @@ pub(super) fn is_view(kind: &str) -> bool {
 /// Server-pushed raid strips have no helper (`own`) session; a mod replaces them with scope `"all"`.
 pub(super) fn is_strip(kind: &str) -> bool {
     matches!(kind, "raid_ready" | "raid_roll")
+}
+
+/// Server-pushed social prompts (friend request, guild invitation) require scope `"all"`.
+pub(super) fn is_request(kind: &str) -> bool {
+    matches!(kind, "friend_request" | "guild_invite")
 }
 
 #[cfg(test)]

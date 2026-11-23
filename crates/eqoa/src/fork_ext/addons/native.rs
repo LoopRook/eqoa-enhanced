@@ -976,6 +976,16 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ("player", "training breath", 8),
         ("quests", "goals", 8),
         ("target", "info", 8),
+        // round A7: community (friends, ignore, guild, who, group search)
+        ("social", "friends ignored friend_request", 8),
+        ("guild", "get invite", 8),
+        ("who", "get request", 8),
+        ("lfg", "get search register unregister", 8),
+        (
+            "actions",
+            "friend_add friend_remove friend_accept friend_refuse ignore_add ignore_remove guild_invite guild_promote guild_demote guild_kick guild_set_motd guild_accept guild_refuse",
+            8,
+        ),
     ] {
         let module_path = format!("eqoa.{module}");
         let backing = match modules.get::<Value>(module)? {
@@ -1118,6 +1128,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_r6a::install(host)?;
     super::native_a3::install(host)?;
     super::native_a1::install(host)?;
+    super::native_a7::install(host)?;
     super::frame_actions::install(host)?;
     super::raid_strips::install(host)?;
     super::map_views::install(host)?;
@@ -1267,6 +1278,9 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.windows.Window", "rows") => Some("eqoa.windows.MenuRow"),
         ("eqoa.windows.Window", "hints") => Some("eqoa.windows.ButtonHint"),
         ("eqoa.windows.Window", "dialog") => Some("eqoa.windows.Dialog"),
+        ("eqoa.guild.Guild", "members") => Some("eqoa.guild.GuildMember"),
+        ("eqoa.who.WhoState", "entries") => Some("eqoa.who.WhoEntry"),
+        ("eqoa.lfg.LfgState", "entries") => Some("eqoa.lfg.LfgEntry"),
         _ => None,
     }
 }

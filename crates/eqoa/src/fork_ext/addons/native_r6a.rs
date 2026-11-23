@@ -457,6 +457,14 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             if scope == TakeoverScope::Own && super::window_kinds::is_strip(&kind_str) {
                 return error(lua, "eqoa.windows.takeover", "invalid_argument", "a raid strip requires scope 'all'");
             }
+            if scope == TakeoverScope::Own && super::window_kinds::is_request(&kind_str) {
+                return error(
+                    lua,
+                    "eqoa.windows.takeover",
+                    "invalid_argument",
+                    "a server request prompt requires scope 'all'",
+                );
+            }
             let parsed = match TakeoverKind::parse(&kind_str) {
                 Ok(k) => k,
                 Err((code, msg)) => return error(lua, "eqoa.windows.takeover", code, &msg),
@@ -547,6 +555,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 tbl.set("bank", window_takeover::is_taken(TakeoverKind::Bank))?;
                 tbl.set("raid_ready", window_takeover::is_taken(TakeoverKind::RaidReady))?;
                 tbl.set("raid_roll", window_takeover::is_taken(TakeoverKind::RaidRoll))?;
+                tbl.set("friend_request", window_takeover::is_taken(TakeoverKind::FriendRequest))?;
+                tbl.set("guild_invite", window_takeover::is_taken(TakeoverKind::GuildInvite))?;
                 tbl.set("holders", holders)?;
                 lua.pack_multi((tbl, Value::Nil))
             }

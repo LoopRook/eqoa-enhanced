@@ -36,6 +36,10 @@ pub(crate) enum Act {
     /// `inv_index` is the game's slot for the item (what the destroy message names), `count` how many.
     Destroy { inv_index: u32, name: String, count: i64 },
     DropQuest { index: usize, title: String, stamp: u32, revision: u64 },
+    /// Round A7: guild kick, accepting a friend request, accepting a guild invitation.
+    GuildKick { member_id: i32, name: String },
+    FriendAccept { request_id: u32, name: String },
+    GuildAccept { inviter_id: u32, inviter: String, guild: String },
 }
 
 impl Act {
@@ -43,6 +47,9 @@ impl Act {
         match self {
             Self::Destroy { .. } => "destroy",
             Self::DropQuest { .. } => "drop_quest",
+            Self::GuildKick { .. } => "guild_kick",
+            Self::FriendAccept { .. } => "friend_accept",
+            Self::GuildAccept { .. } => "guild_accept",
         }
     }
 }
@@ -213,6 +220,15 @@ pub(crate) fn cancel_for_session(session: &str, reason: &str) {
     STATE.with(|s| s.borrow_mut().answered.retain(|p| p.session.as_deref() != Some(session)));
 }
 
+/// Cancels any open or queued confirm of `kind` (e.g. a 45 s request timeout cancelling a pending accept prompt).
+pub(crate) fn cancel_kind(kind: &str, reason: &str) {
+    let hit = STATE.with(|s| s.borrow().current.as_ref().is_some_and(|p| p.act.kind() == kind));
+    if hit {
+        finish(false, reason);
+    }
+    STATE.with(|s| s.borrow_mut().answered.retain(|p| p.act.kind() != kind));
+}
+
 pub(crate) fn cancel_for_vm(vm: u64) {
     // a mod that is gone is told nothing; its question and any Yes not yet carried out go with it
     STATE.with(|s| {
@@ -284,6 +300,18 @@ pub(crate) fn destroy_text(name: &str, count: i64, worn: bool, quick_slot: bool,
 
 pub(crate) fn drop_quest_text(title: &str) -> String {
     format!("Drop the quest \"{title}\"? Its progress is lost.")
+}
+
+pub(crate) fn guild_kick_text(name: &str) -> String {
+    format!("Kick \"{name}\" from the guild?")
+}
+
+pub(crate) fn friend_accept_text(name: &str) -> String {
+    format!("Accept friend request from \"{name}\"?")
+}
+
+pub(crate) fn guild_accept_text(inviter: &str, guild: &str) -> String {
+    format!("Join the guild \"{guild}\" (invited by \"{inviter}\")?")
 }
 
 #[cfg(test)]

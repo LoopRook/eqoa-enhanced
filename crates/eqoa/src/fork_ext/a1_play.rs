@@ -148,6 +148,9 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
             play.session.send(&m);
             Ok(())
         }
+        Act::GuildKick { .. } | Act::FriendAccept { .. } | Act::GuildAccept { .. } => {
+            super::a7_play::carry_out(play, &p.act)
+        }
     }
 }
 
@@ -186,6 +189,14 @@ pub(crate) fn tick(play: &mut Play) {
     ]);
     // a pass: the game's own window for a held session, as the server's reply would have opened it
     for (vm, kind) in window_sessions::take_passes() {
+        if matches!(kind, TakeoverKind::FriendRequest | TakeoverKind::GuildInvite) {
+            if play.mode != 0 || !super::a7_play::pass_request(play, vm, kind) {
+                window_sessions::cancel_pass(vm, kind);
+                continue;
+            }
+            window_sessions::finish_pass(vm, kind);
+            continue;
+        }
         if play.mode != 0 || !window_takeover::hand_back(vm, kind) {
             window_sessions::cancel_pass(vm, kind);
             continue;
@@ -195,8 +206,11 @@ pub(crate) fn tick(play: &mut Play) {
             TakeoverKind::Loot => crate::play::npcw::fork_pass::show_loot(play),
             TakeoverKind::Merchant => crate::play::npcw::fork_pass::show_merchant(play),
             TakeoverKind::Bank => crate::play::bankplay::fork_pass::show_bank(play),
-            // the raid strips are not held sessions: nothing of theirs is passed
-            TakeoverKind::RaidReady | TakeoverKind::RaidRoll => {}
+            // the raid strips and social requests are handled above or not held here
+            TakeoverKind::RaidReady
+            | TakeoverKind::RaidRoll
+            | TakeoverKind::FriendRequest
+            | TakeoverKind::GuildInvite => {}
         }
         window_sessions::finish_pass(vm, kind);
     }
