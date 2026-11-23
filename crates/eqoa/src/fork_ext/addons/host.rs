@@ -806,6 +806,16 @@ impl Host {
                 budget, budget
             )));
         }
+        self.recover_from_memory_error(res)
+    }
+
+    /// A call that ran into the memory limit leaves its half-built allocation as garbage that keeps the VM at the
+    /// limit until the collector next runs. Collect it now, so the mod's next call (and the next mod) starts with
+    /// room instead of failing on the leftovers of the call that failed.
+    fn recover_from_memory_error<T>(&self, res: Result<T>) -> Result<T> {
+        if res.as_ref().err().is_some_and(super::native::fatal_memory) {
+            let _ = self.lua.gc_collect();
+        }
         res
     }
 
@@ -844,7 +854,7 @@ impl Host {
                 Self::INSTRUCTION_BUDGET
             )));
         }
-        res
+        self.recover_from_memory_error(res)
     }
 }
 
@@ -873,14 +883,15 @@ mod tests {
     #[test]
     fn forge_host_limits_memory_and_rejects_native_modules() {
         let host = Host::new().unwrap();
+        // no collection of its own: only the host's recovery after the memory error can free the failed call's garbage
+        host.lua.gc_stop();
         assert!(
             host.execute("x = string.rep('x', 32 * 1024 * 1024)")
                 .is_err()
         );
-        // The failed allocation leaves its partial buffer as garbage that fills the 8 MiB limit until the
-        // collector next runs (the merged surface shifted when it runs); collect so the check is about
-        // recovery, not about GC timing.
-        host.lua.gc_collect().unwrap();
+        // The host collects the failed allocation's garbage itself: no manual gc_collect here. Allocate again to
+        // show the room really came back.
+        host.execute("y = string.rep('y', 1024 * 1024); y = nil").unwrap();
         host.execute("assert(package.loadlib == nil); assert(require('frontiers_forge.util').IsInGame() == 0)").unwrap();
         assert!(host.execute("require('ffi')").is_err());
     }
