@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_social",
+  "name": "EQOA Social",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "provides": [
+    "Friends (Shift+F)",
+    "Guild (Shift+G)"
+  ],
+  "replaces": [
+    "friend_request",
+    "guild_invite"
+  ],
+  "capabilities": [
+    "eqoa.actions.command",
+    "eqoa.actions.group_invite",
+    "eqoa.actions.friend_add",
+    "eqoa.actions.friend_remove",
+    "eqoa.actions.friend_accept",
+    "eqoa.actions.friend_refuse",
+    "eqoa.actions.ignore_add",
+    "eqoa.actions.ignore_remove",
+    "eqoa.actions.guild_invite",
+    "eqoa.actions.guild_promote",
+    "eqoa.actions.guild_demote",
+    "eqoa.actions.guild_kick",
+    "eqoa.actions.guild_set_motd",
+    "eqoa.actions.guild_accept",
+    "eqoa.actions.guild_refuse",
+    "eqoa.who.request",
+    "eqoa.lfg.search",
+    "eqoa.lfg.register",
+    "eqoa.lfg.unregister",
+    "eqoa.windows.session",
+    "eqoa.windows.takeover",
+    "eqoa.log.write",
+    "eqoa.input.bind",
+    "eqoa.input.claim",
+    "eqoa.input.capture_text",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ]
+}
