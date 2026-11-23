@@ -1,8 +1,8 @@
 // Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
-//! Round A2: the two bundled example mods, the Dialog Window and the Quest Turn-in Helper. Each ships off, declares
-//! what it calls, holds its kinds with scope all, and reacts to a dialog session the client starts (the registry the
-//! packets feed: `dialog_sessions`). The turn-in helper matches an option by the quest's own words and gives every
-//! dialog it does not recognise back to the game's window at once.
+//! Round A2: the bundled Dialog Window mod. It ships off, declares what it calls, holds its kinds with scope all, and
+//! reacts to a dialog session the client starts (the registry the packets feed: `dialog_sessions`). The quest
+//! hand-in helper is part of it: an answer is marked by the quest's own words, and the automatic option answers only
+//! a dialog whose single real answer is a hand-in.
 use super::{
     action_broker,
     bridge::Bridge,
@@ -130,7 +130,7 @@ fn assert_holds(vm: u64, kinds: &[window_takeover::TakeoverKind]) {
 
 #[test]
 fn a2_manifests_declare_what_the_mods_call() {
-    for id in ["eqoa_dialogs", "eqoa_turnin"] {
+    for id in ["eqoa_dialogs"] {
         let m = manifest(id);
         let declared: Vec<String> = m["capabilities"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()).collect();
         let src = std::fs::read_to_string(root(id).join("main.lua")).unwrap();
@@ -165,81 +165,103 @@ fn a2_mods_and_addons_labels_the_dialog_mods() {
         "{dialogs:?}"
     );
     assert!(dialogs.contains(&"Provides: NPC dialog window".to_string()), "{dialogs:?}");
-    let turnin = lines("eqoa_turnin");
-    assert!(turnin.contains(&"Can answer NPC dialogs".to_string()), "{turnin:?}");
-    assert!(turnin.iter().any(|l| l == "Replaces game windows: Dialog"), "{turnin:?}");
+    assert!(crate::fork_ext::bundled::PACKAGES.iter().all(|p| *p != "eqoa_turnin"), "the separate helper is gone");
     // the control: a mod that answers nothing says nothing of the kind
     assert!(!lines("eqoa_stats_box").contains(&"Can answer NPC dialogs".to_string()));
 }
 
+/// Vertices drawn for one dialog with these answers, with the highlight option on or off (the same words either
+/// way, so a difference is only the mark and the Hand in button).
+fn drawn_with(options: &[&str], highlight: bool) -> usize {
+    let mut r = rig("eqoa_dialogs");
+    options::set_toggle("eqoa_dialogs", "highlight", highlight);
+    r.frames(2);
+    r.dialog(1, "Well?", options);
+    r.frames(3)
+}
+
 #[test]
-fn a2_turnin_holds_the_dialogs_shows_a_matching_quest_and_passes_everything_else_at_once() {
-    let mut r = rig("eqoa_turnin");
+fn a2_dialogs_mark_an_answer_that_names_a_quest_by_its_words_and_pass_nothing() {
+    let mut r = rig("eqoa_dialogs");
     r.frames(3);
-    assert_holds(r.vm, &[window_takeover::TakeoverKind::TextDialog, window_takeover::TakeoverKind::ResponseDialog]);
-    // a dialog that names a quest in the journal: a box, no pass, nothing answered
+    assert_eq!(options::get_toggle("eqoa_dialogs", "highlight"), Some(true), "highlight is on by default");
+    assert_eq!(options::get_toggle("eqoa_dialogs", "auto_answer"), Some(false), "automatic answers are off by default");
     r.dialog(1, "Well?", &["Tell me about the weather", "I have brought the bat eyes you wanted", "Goodbye"]);
-    let vertices = r.frames(3);
-    assert!(vertices > 0, "the hand-in box is drawn: {:?}", r.host.drain_logs());
-    assert!(dialog_sessions::take_passes().is_empty(), "a recognised dialog is not passed back");
+    assert!(r.frames(3) > 0, "the dialog is drawn: {:?}", r.host.drain_logs());
+    assert!(dialog_sessions::take_passes().is_empty(), "a hand-in dialog is not passed back");
     assert!(action_broker::queued_kinds_for_test().is_empty(), "and nothing is answered without the player's click");
     drop(r);
-    // a dialog it does not recognise: passed at once (negative control: the matched one above was not)
-    let mut r = rig("eqoa_turnin");
-    r.frames(2);
-    r.dialog(2, "Hello there", &["Where is the inn?", "Goodbye"]);
-    r.frames(2);
-    assert_eq!(dialog_sessions::take_passes().len(), 1, "an unknown dialog goes back to the game's window");
-    drop(r);
-    // plain text is never its business either
-    let mut r = rig("eqoa_turnin");
-    r.frames(2);
-    dialog_sessions::hold(Item::Text { text: wide("Hail, bat eyes"), talked_to: None }, None);
-    assert!(dialog_sessions::start_next(true, None).is_some());
-    r.frames(2);
-    assert_eq!(dialog_sessions::take_passes().len(), 1, "a text dialog is passed");
+    let quest = ["Tell me about the weather", "I have brought the bat eyes you wanted", "Goodbye"];
+    let on = drawn_with(&quest, true);
+    // negative control: with the option off the same dialog draws no mark and no Hand in button
+    assert!(on > drawn_with(&quest, false), "the hand-in is marked only when the option is on");
 }
 
 #[test]
-fn a2_turnin_matches_on_the_options_words_never_on_their_position() {
-    let mut r = rig("eqoa_turnin");
-    r.frames(2);
-    // the same words in another order and place: still a match, and the box names the quest
-    r.dialog(3, "Well?", &["Goodbye", "Not now", "About The Militia: I am done", "Tell me more"]);
-    assert!(r.frames(3) > 0);
-    assert!(dialog_sessions::take_passes().is_empty());
-    // option text that only looks like a hand-in by position is not one
-    drop(r);
-    let mut r = rig("eqoa_turnin");
-    r.frames(2);
-    r.dialog(4, "Hand in?", &["Option 1", "Option 2", "Option 3"]);
-    r.frames(2);
-    assert_eq!(dialog_sessions::take_passes().len(), 1);
+fn a2_dialogs_match_on_the_options_words_never_on_their_position() {
+    // the same words in another place are still a match
+    let moved = ["Goodbye", "Not now", "About The Militia: I am done", "Tell me more"];
+    assert!(drawn_with(&moved, true) > drawn_with(&moved, false), "a quest named in the third answer is marked");
+    // answers that only look like hand-ins by position, or name no journal quest, are not marked
+    for unknown in [
+        ["Option 1", "Option 2", "Option 3", "Option 4"],
+        ["Where is the inn?", "Goodbye", "Not now", "Tell me more"],
+    ] {
+        assert_eq!(drawn_with(&unknown, true), drawn_with(&unknown, false), "{unknown:?} is not marked");
+    }
 }
 
 #[test]
-fn a2_turnin_answers_by_itself_only_when_told_to_and_never_between_two_matches() {
-    let mut r = rig("eqoa_turnin");
+fn a2_dialogs_answer_a_hand_in_by_themselves_only_when_told_to_and_only_with_one_real_answer() {
+    let mut r = rig("eqoa_dialogs");
     r.frames(2);
-    assert_eq!(options::get_toggle("eqoa_turnin", "auto_answer"), Some(false), "off by default");
-    r.dialog(5, "Well?", &["Goodbye", "Here is the bat eyes quest done"]);
+    assert_eq!(options::get_toggle("eqoa_dialogs", "auto_answer"), Some(false), "off by default");
+    r.dialog(5, "Well?", &["Here is the bat eyes quest done"]);
     r.frames(3);
     assert!(action_broker::queued_kinds_for_test().is_empty(), "off: no answer");
     drop(r);
-    let mut r = rig("eqoa_turnin");
-    options::set_toggle("eqoa_turnin", "auto_answer", true);
+    // on: the single real answer is sent (the game's own More / Back / Close entries do not count as answers)
+    let mut r = rig("eqoa_dialogs");
+    options::set_toggle("eqoa_dialogs", "auto_answer", true);
     r.frames(2);
-    r.dialog(6, "Well?", &["Goodbye", "Here is the bat eyes quest done"]);
+    r.dialog(6, "Well?", &["Here is the bat eyes quest done", "More", "Close"]);
     r.frames(3);
-    assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "on: the one matching answer is sent");
-    // two matches: it never guesses
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "on: the one real answer is sent");
     drop(r);
-    let mut r = rig("eqoa_turnin");
-    options::set_toggle("eqoa_turnin", "auto_answer", true);
+    // a farewell is not a choice: a hand-in beside Goodbye / Farewell is still the one real answer (owner, 2026-11-23)
+    for farewell in ["Goodbye", "Farewell."] {
+        let mut r = rig("eqoa_dialogs");
+        options::set_toggle("eqoa_dialogs", "auto_answer", true);
+        r.frames(2);
+        r.dialog(7, "Well?", &[farewell, "Here is the bat eyes quest done"]);
+        r.frames(3);
+        assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "{farewell} beside a hand-in: answered");
+        drop(r);
+    }
+    // a dialog that offers a real choice (a path quest's two ways, say) is only marked (negative control: the ones
+    // above were answered)
+    let mut r = rig("eqoa_dialogs");
+    options::set_toggle("eqoa_dialogs", "auto_answer", true);
     r.frames(2);
-    r.dialog(7, "Well?", &["Bat Eyes is done", "The Militia is done"]);
+    r.dialog(7, "Well?", &["Here is the bat eyes quest done", "I will walk the other path", "Goodbye"]);
+    r.frames(3);
+    assert!(action_broker::queued_kinds_for_test().is_empty(), "a choice is left to the player");
+    drop(r);
+    // two quests named: still a choice
+    let mut r = rig("eqoa_dialogs");
+    options::set_toggle("eqoa_dialogs", "auto_answer", true);
+    r.frames(2);
+    r.dialog(8, "Well?", &["Bat Eyes is done", "The Militia is done"]);
     r.frames(3);
     assert!(action_broker::queued_kinds_for_test().is_empty(), "two quests match: nothing is answered for the player");
+    drop(r);
+    // one real answer that names no quest: not answered
+    let mut r = rig("eqoa_dialogs");
+    options::set_toggle("eqoa_dialogs", "auto_answer", true);
+    r.frames(2);
+    r.dialog(9, "Well?", &["Tell me about the weather"]);
+    r.frames(3);
+    assert!(action_broker::queued_kinds_for_test().is_empty(), "no quest named: nothing is answered");
 }
 
 #[test]
