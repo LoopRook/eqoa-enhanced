@@ -194,7 +194,7 @@ def cmd_status(args):
     started = time.time()
     while True:
         view = json.loads(run(["gh", "run", "view", str(found["databaseId"]), "--repo", REPO, "--json",
-                               "status,conclusion,url,createdAt,updatedAt,jobs"]).stdout)
+                               "status,conclusion,url,createdAt,updatedAt,jobs,headBranch,headSha"]).stdout)
         if view["status"] == "completed" or args.no_wait:
             break
         if time.time() - started > args.timeout * 60:
@@ -202,6 +202,7 @@ def cmd_status(args):
         print(f"... {view['status']} ({int(time.time() - started)}s)", flush=True)
         time.sleep(args.poll)
     print(f"run: {view['url']}")
+    print(f"branch: {view.get('headBranch')}  commit: {(view.get('headSha') or '')[:10]}")
     print(f"result: {view.get('conclusion') or view['status']}  started {view['createdAt']}  ended {view['updatedAt']}")
     print(format_status(view.get("jobs", []), fetch_summaries(found["databaseId"]) if view["status"] == "completed" else []))
     return 0 if view.get("conclusion") == "success" else 1
