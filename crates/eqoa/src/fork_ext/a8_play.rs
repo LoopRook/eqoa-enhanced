@@ -92,6 +92,11 @@ fn on_open(play: &mut Play) {
 /// step or an action sees it first.
 fn sync_open(play: &mut Play) -> bool {
     let open = mod_window_open();
+    // the game's own recipe book or experiment owns the crafting state while it is up (its tray, its waiting request):
+    // nothing here touches it until it closes, and the transition then runs once
+    if game_window_up(play) {
+        return open;
+    }
     let was = LOCAL.with(|l| l.borrow().was_open);
     if open && !was {
         on_open(play);
@@ -103,11 +108,39 @@ fn sync_open(play: &mut Play) -> bool {
     open
 }
 
-/// Each step's work: the window's opening and closing, and the snapshot a mod reads.
-pub(crate) fn tick(play: &mut Play, game_step: bool) {
-    if !sync_open(play) {
+/// A row the game's Experiment lists: a component (`p54 > 0`) that is not of type 8 (`craftwnd.rs` `refresh`).
+fn listed(it: &net::dump::NetItem) -> bool {
+    it.item.p54 > 0 && it.item.p4c != 8
+}
+
+fn bag_key(list: &net::dump::ItemList) -> Vec<(u32, i64, i64)> {
+    list.items.iter().map(|i| (i.inv_index, i.item.id, i.quantity)).collect()
+}
+
+/// The game's Experiment cannot go stale (it holds the player in place); a mod's window can (the character walks,
+/// loots, sells, destroys). While nothing is pending, the tray's copy of the bags follows the real bags, and a tray
+/// entry the player no longer holds is dropped. A request out keeps the copy as the game's replies have updated it.
+fn refresh_items(play: &mut Play) {
+    if play.craft.pending != 0 || bag_key(&play.craft.items) == bag_key(&play.dump.inventory) {
         return;
     }
+    play.craft.items = play.dump.inventory.clone();
+    let mut kept: Vec<net::dump::NetItem> = Vec::new();
+    for t in std::mem::take(&mut play.craft.combine) {
+        let have = play.craft.items.items.iter().find(|i| i.item.id == t.item.id && listed(i)).map_or(0, |i| i.quantity);
+        if (kept.iter().filter(|k| k.item.id == t.item.id).count() as i64) < have {
+            kept.push(t);
+        }
+    }
+    play.craft.combine = kept;
+}
+
+/// Each step's work: the window's opening and closing, and the snapshot a mod reads.
+pub(crate) fn tick(play: &mut Play, game_step: bool) {
+    if !sync_open(play) || game_window_up(play) {
+        return;
+    }
+    refresh_items(play);
     if game_step || native_a8::current().is_none() {
         native_a8::publish(snapshot(play));
     }
@@ -221,7 +254,7 @@ fn snapshot(play: &Play) -> Json {
         .items
         .iter()
         .enumerate()
-        .filter(|(_, it)| it.item.p54 != 0)
+        .filter(|(_, it)| listed(it))
         .map(|(i, it)| {
             json!({
                 "slot": i + 1,
@@ -319,8 +352,12 @@ fn dispatch_inner(play: &mut Play, action: &A8Action) -> DispatchOutcome {
         return refuse("busy", "the game's own crafting window is up");
     }
     sync_open(play);
+    refresh_items(play);
     let words = words_of(play);
     match action {
+        A8Action::List { .. } | A8Action::Inspect { .. } if LOCAL.with(|l| l.borrow().question.is_some()) => {
+            refuse("busy", "answer the keep-this-recipe question first, as the game's window asks")
+        }
         A8Action::List { skill } => {
             let Some(m) = play.craft.send6(*skill as i32) else {
                 return refuse("busy", "the last crafting request has not been answered yet");
@@ -422,7 +459,7 @@ fn tray_add(craft: &mut Craft, slot: usize, id: i64, words: &vi::strtab::StringT
     if it.item.id != id {
         return Err(refuse("stale_handle", "that row holds a different item now"));
     }
-    if it.item.p54 == 0 {
+    if !listed(it) {
         return Err(refuse("invalid_argument", "that item is not a crafting component"));
     }
     let before = craft.combine.len();

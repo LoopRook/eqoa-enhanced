@@ -421,6 +421,11 @@ fn a8_the_keep_recipe_question_shows_and_only_an_explicit_answer_sends_anything(
     assert!(p.craft_outs.is_empty() || p.craft_outs.iter().all(|o| !matches!(o, CraftOut::Ask(..))), "the game's window gets no question");
     // nothing was answered by merely asking
     assert_eq!(sent().len(), 1);
+    // so are a list and a detail (the game's box holds its whole window)
+    let before = sent().len();
+    let (ok, c, _) = act(&mut p, &host, "return eqoa.actions.craft_list(3)");
+    assert!(!ok && c == "busy", "{c}");
+    assert_eq!(sent().len(), before);
     // a combine is held until the player answers, as the game's box holds its window
     p.craft.combine = vec![item(900_002, "Iron Ore", 12, 1, true)];
     let (ok, c, _) = act(&mut p, &host, "return eqoa.actions.craft_combine()");
@@ -521,6 +526,90 @@ fn a8_dead_or_out_of_the_world_nothing_is_sent() {
     // the world is let go: nothing is left to read
     super::dropped();
     assert!(native_a8::current().is_none());
+}
+
+#[test]
+fn a8_a_mod_window_opening_or_closing_leaves_the_games_own_crafting_state_alone() {
+    let (mut p, host) = rig();
+    // the game's own Experiment is up with a combine out and a filled tray
+    p.mode = 37;
+    p.craft.pending = 4;
+    p.craft.combine = vec![item(900_002, "Iron Ore", 12, 1, true)];
+    p.craft.items = p.dump.inventory.clone();
+    host.execute("s = assert(eqoa.windows.open_session('experiment'))").unwrap();
+    step(&mut p, &host);
+    assert_eq!((p.craft.pending, p.craft.combine.len()), (4, 1), "opening a mod window under the game's own does not clear its request or its tray");
+    assert!(native_a8::current().is_none(), "and nothing is read for the mod yet");
+    // the game's window closes: now the mod's window opens, as the game's own Use would
+    p.mode = 0;
+    step(&mut p, &host);
+    assert_eq!((p.craft.pending, p.craft.combine.len()), (0, 0), "control: with no game window up the opening does clear them");
+    assert!(native_a8::current().is_some());
+    // closing under the game's window: the tray the game's window holds stays
+    p.mode = 37;
+    p.craft.pending = 4;
+    p.craft.combine = vec![item(900_002, "Iron Ore", 12, 1, true)];
+    host.execute("assert(eqoa.windows.close_session(s.ref))").unwrap();
+    step(&mut p, &host);
+    assert_eq!((p.craft.pending, p.craft.combine.len()), (4, 1));
+    p.mode = 0;
+    step(&mut p, &host);
+    assert!(p.craft.combine.is_empty(), "control: with the game's window gone the close empties the tray");
+}
+
+#[test]
+fn a8_only_the_rows_the_games_experiment_lists_are_offered() {
+    let (mut p, host) = rig();
+    let mut tool = item(900_010, "Tool Kit", 20, 1, true);
+    tool.item.p54 = 2;
+    tool.item.p4c = 8;
+    let mut odd = item(900_011, "Odd Thing", 21, 1, true);
+    odd.item.p54 = -1;
+    p.dump.inventory.items.push(tool);
+    p.dump.inventory.items.push(odd);
+    open(&mut p, &host, "experiment");
+    let names: Vec<String> = snapshot_json()["items"].as_array().unwrap().iter().map(|i| i["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(names, vec!["Iron Ore", "Pine Log", "Silk"], "no tool (type 8), no negative p54; the control rows are there");
+    for (slot, id) in [(5, 900_010), (6, 900_011)] {
+        let (ok, c, _) = act(&mut p, &host, &format!("return eqoa.actions.craft_tray_add({{slot = {slot}, id = {id}}})"));
+        assert!(!ok && c == "invalid_argument", "{c}");
+        let (ok, c, _) = act(&mut p, &host, &format!("return eqoa.actions.craft_fill({{{{slot = {slot}, id = {id}}}}})"));
+        assert!(!ok && c == "invalid_argument", "{c}");
+    }
+    assert!(p.craft.combine.is_empty());
+    // the control: a listed row goes in
+    let (ok, ..) = act(&mut p, &host, "return eqoa.actions.craft_tray_add({slot = 2, id = 900002})");
+    assert!(ok);
+}
+
+#[test]
+fn a8_the_tray_follows_the_real_bags_while_the_window_is_open() {
+    let (mut p, host) = rig();
+    open(&mut p, &host, "experiment");
+    host.execute("c = assert(eqoa.craft.get()); iron, silk = c.items[1], c.items[3]").unwrap();
+    assert!(act(&mut p, &host, "return eqoa.actions.craft_fill({{slot = iron.slot, id = iron.id}, {slot = silk.slot, id = silk.id}})").0);
+    assert_eq!(p.craft.combine.len(), 2);
+    // the character sells the Silk and loots some Tin with the window open: no reopening
+    p.dump.inventory.items.retain(|i| i.item.name != "Silk");
+    p.dump.inventory.items.push(item(900_005, "Tin", 15, 4, true));
+    step(&mut p, &host);
+    let names: Vec<String> = snapshot_json()["items"].as_array().unwrap().iter().map(|i| i["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(names, vec!["Iron Ore", "Pine Log", "Tin"]);
+    assert_eq!(p.craft.combine.iter().map(|i| i.item.id).collect::<Vec<_>>(), vec![900_002], "the sold Silk left the tray");
+    // adding what is gone is stale, what was just looted works
+    let (ok, c, _) = act(&mut p, &host, "return eqoa.actions.craft_tray_add({slot = silk.slot, id = silk.id})");
+    assert!(!ok && c == "stale_handle", "{c}");
+    let (ok, ..) = act(&mut p, &host, "return eqoa.actions.craft_tray_add({slot = 4, id = 900005})");
+    assert!(ok);
+    // the control: with a request out the copy is left as the game's replies updated it
+    p.craft.pending = 4;
+    p.dump.inventory.items.retain(|i| i.item.name != "Tin");
+    step(&mut p, &host);
+    assert!(snapshot_json()["items"].as_array().unwrap().iter().any(|i| i["name"] == "Tin"));
+    p.craft.pending = 0;
+    step(&mut p, &host);
+    assert!(!snapshot_json()["items"].as_array().unwrap().iter().any(|i| i["name"] == "Tin"));
+    assert_eq!(p.craft.combine.len(), 1);
 }
 
 #[test]
@@ -724,9 +813,9 @@ mod e2e {
         // the bags hold five Iron Ore; make the recipe want two Silk and take the Silk away (the control: with it, the
         // tray fills in the test above)
         r.p.dump.inventory.items.retain(|i| i.item.name != "Silk");
-        r.p.craft.items = r.p.dump.inventory.clone();
         assert!(reply(&mut r.p, &detail_reply(2)));
-        r.frames(2);
+        // no hand copy of the tray's list: the client follows the bags itself (the next step)
+        r.settle();
         let before = sent().len();
         r.tap(30.0, 304.0);
         assert!(r.p.craft.combine.is_empty());
