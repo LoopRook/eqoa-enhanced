@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_dialogs",
+  "name": "EQOA Dialog Window",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "provides": [
+    "NPC dialog window"
+  ],
+  "replaces": [
+    "text_dialog",
+    "response_dialog",
+    "group_invite",
+    "revive_offer",
+    "summon_offer"
+  ],
+  "capabilities": [
+    "eqoa.windows.takeover",
+    "eqoa.windows.session",
+    "eqoa.actions.dialog_answer",
+    "eqoa.log.write",
+    "eqoa.hud.frame",
+    "eqoa.input.claim",
+    "eqoa.input.pointer",
+    "eqoa.input.claim_pointer",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ]
+}
