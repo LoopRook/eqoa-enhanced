@@ -438,7 +438,9 @@ pub struct Play {
     /// while held; and `mob_shown_at`, when the answer came (the session's
     /// clock), the window up for [`MOB_INFO_MS`] from then however short the
     /// press was.
-    mob_info: Option<(u32, u8, String)>,
+    /// (layout 2, entry 680: the lines under its level, the player's own
+    /// merc's `/merc` commands)
+    mob_info: Option<(u32, u8, String, Vec<String>)>,
     talk_held: bool,
     mob_shown_at: Option<u32>,
     /// `m_petId` and `m_petName` (filled from the entity once it is seen).
@@ -3732,7 +3734,7 @@ impl Play {
                 Event::RaidState(st) => self.raid_state(st),
                 // a server's word on a monster with nothing to say
                 // (`world.mob_info`): its name and level, for the info window
-                Event::MobInfo { id, level, name } => self.mob_info_shown(id, level, name, now),
+                Event::MobInfo { id, level, name, extra } => self.mob_info_shown(id, level, name, extra, now),
                 Event::RaidRoll(r) => self.raid_roll(r),
                 Event::ReadyCheck(c) => self.ready_check(c),
                 Event::MasterLoot(m) => self.master_loot(m),
@@ -4279,7 +4281,9 @@ impl Play {
                     self.stood_sent = false;
                     let (arrival, heading, here) = (player.pos, player.hpr[0], player.world == self.player.world);
                     let far = !here || crate::loading::far(walker_at(walker), arrival);
-                    if player.world != self.player.world {
+                    // a world still being entered: a dump into it is a move
+                    // into it, never a place in the old world's walk
+                    if player.world != self.player.world || self.world_pending() {
                         match crate::s2::get().world_file(player.world) {
                             Some(f) => {
                                 eprintln!("play: the dump's world {} ({f}) at {:?}", player.world, player.pos);
@@ -4293,6 +4297,10 @@ impl Play {
                         walker.place(player.pos, player.hpr[0]);
                     }
                     self.filters_sent = None;
+                    // Msg000D's `m_wndGame->SetMode(1)`: every window closed,
+                    // the quick-chat menus too (`windows_closed_by_dump`)
+                    self.set_mode_0(walker);
+                    self.windows_closed_by_dump();
                     self.player = player;
                     // Msg000D reads `m_speed` out of the dump (no SetSpeed)
                     self.speed = dump.speed;
@@ -4334,6 +4342,8 @@ impl Play {
         // Pet Effects: the server told what the Extended row says (off, what it
         // sent forgotten)
         self.session.agree_pet_effects(crate::settings::pet_effects());
+        // Group Effects: the same for the members' tiny icons (off, none drawn)
+        self.session.agree_group_effects(crate::settings::group_effects());
         // Power Bars: the server told what its row says (off, what it sent
         // forgotten and the raid list's power not drawn)
         self.session.agree_power_bars(crate::settings::power_bars());
@@ -5642,8 +5652,17 @@ impl Play {
     /// world's number with the old world's place (the reference server answered that
     /// with 0x07D2, "This character has been modified by a customer service
     /// representative").
+    ///
+    /// None either while another world is still to be entered
+    /// (`world_pending`), whatever moved the player there: a respawn's dump
+    /// into another world has no token to wait on, and its 0x40s went out
+    /// with the new world's number at the old world's place for as long as a
+    /// page read the world (petition 5512: the server took the place, moved
+    /// the player back to it with an 0x00B2 once the world was in, and that
+    /// place, off the new world's ground, fell for five minutes). The PS2's
+    /// frame stops in `EnterWorld`, which sends nothing.
     fn position_due(&mut self, walk: &vi::walk::WalkPhysics<Ee>, clock: i64) {
-        if self.session.self_id.is_some() && self.arrival.is_empty() && (self.last_send == -1 || clock - self.last_send >= i64::from(self.send_interval)) {
+        if self.session.self_id.is_some() && self.arrival.is_empty() && !self.world_pending() && (self.last_send == -1 || clock - self.last_send >= i64::from(self.send_interval)) {
             self.send_position(walk, clock);
         }
     }
@@ -5700,7 +5719,12 @@ impl Play {
         self.following = false;
         // no jump before a report from the arrival stands (`stood_sent`)
         self.stood_sent = false;
-        let moving = if world as i64 != self.player.world {
+        // A world still being entered (its file read, or the world change
+        // not taken yet) is entered at this place instead: a move into it
+        // while it loads is never a place in the old world's walk (petition
+        // 5512: the server's move back to where the old world's walk had
+        // been reported put the new world's walk there, off its ground).
+        let moving = if world as i64 != self.player.world || self.world_pending() {
             // the world table: the disc's six, or the server's patch's
             // (`s2`: the reference server's eight)
             match crate::s2::get().world_file(world as i64) {
@@ -5718,8 +5742,11 @@ impl Play {
                     self.fade.set(1.0, 0.0);
                     self.player.world = world as i64;
                     self.player.pos = pos;
-                    // the walker is built again there (`world_entered`)
-                    self.cam_carry = Some((walker.cam.camera_mode, Some(crate::camstyle::save(&walker.cam))));
+                    // the walker is built again there (`world_entered`); a
+                    // move while one is under way keeps the camera it carries
+                    if self.cam_carry.is_none() {
+                        self.cam_carry = Some((walker.cam.camera_mode, Some(crate::camstyle::save(&walker.cam))));
+                    }
                     true
                 }
                 None => {
@@ -6791,6 +6818,24 @@ impl Play {
         self.quit = true;
     }
 
+    /// A move into another world that could not be opened (its file
+    /// unreadable: entry 1323's WORLD14.ESF in a page): never left on the
+    /// loading screen. The server is told the player logs out (0x09B0, so it
+    /// ends the session cleanly, the character where the server has it), and
+    /// the client goes back to the game's screens saying why: in a page its
+    /// login screen again, which builds the world anew.
+    pub fn world_change_failed(&mut self, file: &str, why: &str) {
+        self.session.send(&net::stream::Writer::op(0x09B0).data);
+        self.session.flush();
+        let text = format!("The move into {file} failed ({why}). You were logged out where the server has you: log in again.");
+        eprintln!("play: {text}");
+        #[cfg(target_arch = "wasm32")]
+        if !self.booted {
+            crate::web::disconnected(&text);
+        }
+        self.quit = true;
+    }
+
     /// Quit answered yes (`m_p2EC28`, `Process`'s LOGOUT): 0x09B0 to the
     /// server, sent now, then `Disconnect(9, 1)`: in a page its login screen
     /// again, saying word 820 ("Logged out."), as the console goes back to
@@ -6815,9 +6860,11 @@ impl Play {
     /// asked of the walk, which takes off at its next frame if the client and
     /// the walk allow (`controls::Client::may_jump`, `Walker::ask_jump`). On a
     /// server that never offered it (the reference server's, eqoa.live's) nothing at all.
+    /// A froglok (its race in the MemoryDump, 10) jumps twice as high
+    /// (`walker::JumpArc::of`).
     pub fn jump_key(&mut self, walker: &mut Walker) {
         if self.session.jumps {
-            walker.ask_jump();
+            walker.ask_jump_as(crate::walker::JumpArc::of(self.dump.player.race));
         }
     }
 
@@ -7560,6 +7607,21 @@ impl Play {
         } else {
             self.mode = 0;
         }
+    }
+
+    /// `Msg000D` in play (a respawn, a server's restart resumed where the
+    /// player stands): `m_wndGame->SetMode(1)` closes every window, the
+    /// quick-chat menus (`m_menu4`) among them, and play has the keys. This
+    /// client closed the others with the mode (`set_mode_0`) but kept the
+    /// quick-chat menus open where they stood, their branch and its pressed
+    /// direction: a press after the dump went on where the menus were left,
+    /// and a pet's Passive was sent where the player meant the root's choice
+    /// (petition 2618, at a server's keep restart). The menus closed here,
+    /// the keys they held dropped, as a pointer's hold on one of them.
+    fn windows_closed_by_dump(&mut self) {
+        self.set_mode_zero();
+        self.quick.close();
+        self.quick_held = None;
     }
 
     /// What the start menu asked of the camera since it was last looked at,
@@ -8922,8 +8984,13 @@ impl Play {
     /// quick-chat menus over the root's set, with the keys (mode 30; the
     /// effects' bar goes while they are up). In mode 30 the key reaches the
     /// menus, which pass it up to close them.
+    ///
+    /// Not while the loading screen is up: the game's frame stops there (no
+    /// key reaches a window), and here the menus are neither run nor drawn
+    /// under it, so a menu opened then took every key unseen and ran them
+    /// all at once as the screen came down (petition 2618).
     pub fn open_quick_chat(&mut self) {
-        if self.mode == 0 && self.quick.open() {
+        if self.mode == 0 && !self.loading.up() && self.quick.open() {
             self.mode = 30;
         }
     }
@@ -10310,7 +10377,7 @@ impl Play {
                 .filter(|m| Some(m.id) != me && m.active)
                 .map(|m| {
                     let flags = find(Some(m.id)).and_then(|e| e.creature.as_ref()).map_or(0, |c| c.flags262);
-                    crate::hud::MemberState { id: m.id, name: m.name.clone(), is_target: m.id == self.target, hp: (m.hp_known != 0).then_some((m.hp, flags & 4 != 0, flags & 8 != 0)), marks: self.raid_marks(m.id), power: self.session.power_of(m.id) }
+                    crate::hud::MemberState { id: m.id, name: m.name.clone(), is_target: m.id == self.target, hp: (m.hp_known != 0).then_some((m.hp, flags & 4 != 0, flags & 8 != 0)), marks: self.raid_marks(m.id), power: self.session.power_of(m.id), effects: self.member_effects(m.id) }
                 })
                 .collect(),
             raid: self.raid_rows(me, power_bars),
@@ -10773,6 +10840,18 @@ impl Play {
         self.session.pet_effects_left(self.session.now()).into_iter().map(|(icon, _)| icon).collect()
     }
 
+    /// The effects on group member `id` the server sent (`Session::agree_group_effects`,
+    /// which each frame tells it what Extended's Group Effects says): their icons in
+    /// their order, drawn tiny beside the member's gauges (`hud::member_effects_pieces`).
+    /// None with the row off or from a server that sends none; the game shows
+    /// another's effects nowhere.
+    fn member_effects(&self, id: u32) -> Vec<u32> {
+        if !crate::settings::group_effects() {
+            return Vec::new();
+        }
+        self.session.effects_of(id).to_vec()
+    }
+
     /// Number Colors: the server told to tag the numbers while a row is not
     /// Default, and to stop when every one is (`numcolor::wanted`).
     fn agree_number_tags(&mut self) {
@@ -11132,7 +11211,7 @@ impl Play {
     /// however short the press (a tap is let go before the answer comes), and
     /// as long as the press is held (`m_p678`, as on a player). An answer for
     /// another than the target is nothing.
-    pub fn mob_info_shown(&mut self, id: u32, level: u8, name: String, now: u32) {
+    pub fn mob_info_shown(&mut self, id: u32, level: u8, name: String, extra: Vec<String>, now: u32) {
         if self.target != id {
             return;
         }
@@ -11140,7 +11219,7 @@ impl Play {
             self.info_up = true;
         }
         self.mob_shown_at = Some(now);
-        self.mob_info = Some((id, level, name));
+        self.mob_info = Some((id, level, name, extra));
     }
 
     /// The target box's level (Live petition 5130): the target's, a creature's
@@ -11169,7 +11248,10 @@ impl Play {
         let race = crate::racelabel::long(&c.name).unwrap_or_else(|| word(race));
         let class = word(if c.class < 15 { 165 + c.class as i32 } else { 165 });
         let level = format!("{} {}", word(503), c.level);
-        match c.p256 {
+        // the server's lines under the level (`OP_MOB_INFO`'s layout 2, entry
+        // 680: the player's own merc's `/merc` commands), for this one alone
+        let under: String = self.mob_info.as_ref().filter(|m| m.0 == e.id).map_or_else(String::new, |m| m.3.iter().map(|l| format!("\n{l}")).collect());
+        let text = match c.p256 {
             2 => {
                 let (guild, title) = if self.target_info.is_some() { (self.target_guild.as_str(), self.target_title.as_str()) } else { ("", "") };
                 let rank = if title.is_empty() { class.as_str() } else { title };
@@ -11191,8 +11273,9 @@ impl Play {
             }),
             // a monster the server said has nothing to say (`mob_info`): its
             // name and level as the server holds them, as a pet's are drawn
-            _ => self.mob_info.as_ref().filter(|m| m.0 == e.id).map(|(_, lv, name)| format!("{name}\n{} {lv}", word(503))),
-        }
+            _ => self.mob_info.as_ref().filter(|m| m.0 == e.id).map(|(_, lv, name, _)| format!("{name}\n{} {lv}", word(503))),
+        };
+        text.map(|t| if c.p256 == 2 { t } else { t + &under })
     }
 
     /// The target's name, for the screen.
@@ -11536,6 +11619,20 @@ mod commands {
         Play::new(s, Player::default(), dump)
     }
 
+    /// A world change that failed (entry 1323) logs out (0x09B0 sent) and
+    /// leaves the world; the control: a play that had none stays, nothing sent.
+    #[test]
+    fn a_failed_world_change_logs_out() {
+        let mut p = play();
+        p.session.record = Some(Vec::new());
+        assert!(!p.quit);
+        assert!(p.session.record.as_ref().unwrap().is_empty(), "the control: nothing sent before");
+        p.world_change_failed("WORLD14.ESF", "NotFoundError");
+        assert!(p.quit, "back to the game's screens, never the loading screen");
+        let sent: Vec<Vec<u8>> = p.session.record.take().unwrap().into_iter().map(|(_, m)| m).collect();
+        assert_eq!(sent.iter().filter(|m| m[..2] == [0xB0, 0x09]).count(), 1, "0x09B0 once: {sent:?}");
+    }
+
     /// A preview of the Sound page's Battle Music playing when the Options
     /// window closes under it (a teleport's `mode = 0`, petition 2129) is
     /// ended by `Play`'s frame, once. The control: the window still the mode
@@ -11568,6 +11665,79 @@ mod commands {
         assert_eq!(p.sound_ops, vec![OptionsUp::PreviewEnd], "ended with the window");
         p.end_options_preview();
         assert_eq!(p.sound_ops.len(), 1, "once");
+    }
+
+    /// Petition 2618: a player's quick chat as the server keeps it (the
+    /// root's Up "Sendpet" is |30, the pet's attack on the target; Left is
+    /// Options, its Left Pet Command, whose Up is Passive, |24), the menus
+    /// left open on Pet Command as a server's keep restart resumes with a
+    /// MemoryDump where the player stands. The dump closes them, as
+    /// `Msg000D`'s `SetMode(1)` does, so the next press of the d-pad's up
+    /// sends nothing and L2 then up sends the root's Sendpet. The control:
+    /// without the dump's close, the same up sends the pet's Passive (0x0041
+    /// command 1), the stray command the server logged.
+    #[test]
+    fn a_dump_closes_the_quick_chat_menus() {
+        use crate::pointer::key;
+        use crate::pointer::testing::{NullRaster, vui};
+        crate::settings::testing::reset(false);
+        let vui = vui();
+        let mut r = NullRaster;
+        let set = |id: i64, e: [(&str, &str); 4]| net::dump::TextSet { id, entries: e.iter().enumerate().map(|(k, &(label, text))| net::dump::TextEntry { id: k as i64, text: text.into(), label: label.into() }).collect() };
+        let sets = vec![
+            set(0, [("Sendpet", "|30"), ("Options", " "), ("Group", " "), ("Communicate", " ")]),
+            set(5, [("Chat Mode", " "), ("Pet Command", " "), ("Grouping", " "), ("Chat Filter", " ")]),
+            set(22, [("Passive", "|24"), ("More Pet Commands", " "), ("Defensive", "|25"), ("Aggressive", "|26")]),
+        ];
+        let mut p = play_with(Box::new(net::dump::MemoryDump { text_sets: sets, ..Default::default() }));
+        p.take_abilities();
+        // the world entry's loading screen down
+        assert!(p.loading.end(true, i64::MAX).is_some());
+        p.pet_id = 0x200;
+        p.target = 0x300;
+        p.session.record = Some(Vec::new());
+        let tap = |p: &mut Play, r: &mut NullRaster, k: i32| {
+            p.quick_key(k, true);
+            p.quick_key(k, false);
+            let outs = p.run_quick(&vui, r);
+            p.quick_outs(outs);
+        };
+        // the pet's commands sent (0x0041's command byte)
+        let pet = |p: &mut Play| -> Vec<u8> { std::mem::take(p.session.record.as_mut().unwrap()).into_iter().map(|(_, m)| m).filter(|m| m.len() >= 3 && m[0] == 0x41 && m[1] == 0).map(|m| m[2]).collect() };
+        let on_pet_command = |p: &mut Play, r: &mut NullRaster| {
+            p.open_quick_chat();
+            tap(p, r, key::LEFT);
+            tap(p, r, key::LEFT);
+            assert_eq!(p.mode, 30, "the menus up on Pet Command");
+        };
+        on_pet_command(&mut p, &mut r);
+        tap(&mut p, &mut r, key::UP);
+        assert_eq!((pet(&mut p), p.mode), (vec![1], 0), "the control: up there sends Passive");
+        on_pet_command(&mut p, &mut r);
+        p.windows_closed_by_dump();
+        assert!(p.mode == 0 && !p.quick.visible(), "the dump closed them");
+        tap(&mut p, &mut r, key::UP);
+        assert_eq!(pet(&mut p), Vec::<u8>::new(), "up after the dump sends nothing");
+        p.open_quick_chat();
+        tap(&mut p, &mut r, key::UP);
+        assert_eq!((pet(&mut p), p.mode), (vec![8], 0), "L2 then up: Sendpet, the root's");
+    }
+
+    /// Petition 2618: L2 under the loading screen opens no quick-chat menu,
+    /// which would take every key unseen (the menus are not run under it)
+    /// and run them all as it came down. The control: once it is down, L2
+    /// opens them.
+    #[test]
+    fn the_quick_chat_does_not_open_under_the_loading_screen() {
+        crate::settings::testing::reset(false);
+        let mut p = play();
+        // the world entry's own loading screen up, as it comes
+        assert!(p.loading.up());
+        p.open_quick_chat();
+        assert_eq!((p.mode, p.quick.visible()), (0, false), "under the loading screen");
+        assert!(p.loading.end(true, i64::MAX).is_some());
+        p.open_quick_chat();
+        assert_eq!((p.mode, p.quick.visible()), (30, true), "the control: once it is down");
     }
 
     /// A character wears the cape the server's set names for its id
@@ -12175,6 +12345,86 @@ mod commands {
             assert!(!p.loading());
             assert_eq!(there.cam.walk.committed.position, before);
             assert_eq!(sent(&mut p), [answer(4)]);
+        });
+    }
+
+    /// Petition 5512 ("upon death I stayed floating in blue space"): a
+    /// respawn's move into another world carries no token, and while a page
+    /// read the world its 0x40s went out with the new world's number at the
+    /// old world's place; the server took that place and, once the world was
+    /// in, moved the player back to it with an 0x00B2, which the client took
+    /// as a move within the new world, off its ground, falling for minutes.
+    /// Now nothing is sent until the world is entered, and a move into the
+    /// world being entered goes to it (a world change again, at its place),
+    /// never to the old world's walk; then the answer and the 0x40 from the
+    /// arrival, in the new world. Controls: a 0x40 every update before, and
+    /// again after.
+    #[test]
+    fn nothing_is_sent_from_the_old_world_while_another_is_entered() {
+        let iso = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso");
+        if !iso.exists() {
+            eprintln!("SKIP: no run/eqoa.iso");
+            return;
+        }
+        crate::s2::with_rules(crate::s2::Rules::retail(), || {
+            let mut p = play();
+            p.session.record = Some(Vec::new());
+            let sent = |p: &mut Play| std::mem::take(p.session.record.as_mut().unwrap());
+            let positions = |d: &[(u8, Vec<u8>)]| d.iter().filter(|m| m.0 == 0x40).count();
+            let answer = |token: i64| {
+                let mut w = net::stream::Writer::op(0x0049);
+                w.signed(token);
+                (drdp::TYPE_GUARANTEED, w.data)
+            };
+            let (a, b) = ((25275.115f32, 15766.627f32), (23533.45f32, 18890.77f32));
+            let mut lib = Library::new();
+            let w = lib.add("TUNARIA.ESF", crate::stream::open_file(&iso, "TUNARIA.ESF").unwrap());
+            let mut src = crate::stream::FileZones::open(&iso, "TUNARIA.ESF").unwrap();
+            crate::stream::fill(&mut lib, w, a.0, a.1, &mut src);
+            let tunaria = || vi::world::World::load(&lib, w).unwrap();
+            let mut walker = Walker::arrive(tunaria(), Spawn::ground(a.0, a.1, 0.0));
+            p.loading_step(&mut walker, true);
+            let mut now = 0i64;
+            let mut tick = |p: &mut Play, walker: &Walker, n: u32| {
+                for _ in 0..n {
+                    now = now.max(p.session.timer()) + i64::from(p.send_interval);
+                    p.position_due(&walker.cam.walk.committed, now);
+                }
+            };
+            let ago = |p: &Play| p.session.now() as i64 - crate::loading::FAR_HOLD_MS;
+            tick(&mut p, &walker, 2);
+            assert_eq!(positions(&sent(&mut p)), 2, "the control: a position every update in play");
+
+            // the respawn's move into world 1 (no token, as a dump's)
+            let bind = [8792.4f32, 62.1, 7355.0];
+            assert!(p.teleport(&mut walker, 1, bind, [0.0; 3], ago(&p)));
+            assert!(p.world_pending());
+            let (file, _) = p.take_world_change().expect("a world change");
+            tick(&mut p, &walker, 5);
+            assert_eq!(sent(&mut p), [], "nothing while the new world is read: it would carry world 1 at the old world's place");
+
+            // the server's move to a place of world 1 while it is read: the
+            // world change goes there, the old world's walk untouched
+            let old = walker.cam.walk.committed.position;
+            let back = [b.0, 60.0, b.1];
+            p.msg_00b2(&mut walker, 1, back, [0.5, 0.0, 0.0], 7, ago(&p));
+            assert_eq!(walker.cam.walk.committed.position, old, "the old world's walk not moved");
+            let (again, spawn) = p.take_world_change().expect("the move goes to the world being entered");
+            assert_eq!((again, spawn.pos), (file, back));
+            tick(&mut p, &walker, 3);
+            assert_eq!(sent(&mut p), [], "still nothing");
+
+            // entered there (Tunaria's geometry standing in): the answer and
+            // the 0x40 from the arrival, world 1
+            let mut there = Walker::arrive(tunaria(), spawn);
+            p.world_entered(&mut there);
+            p.loading_step(&mut there, true);
+            let at = vi::selfstate::encode(1, &there.cam.walk.committed, 0, p.target);
+            assert_eq!(sent(&mut p), [answer(7), (0x40, at)], "answered from the arrival, in world 1");
+            let c = there.cam.walk.committed.position;
+            assert!((c.x.0 - back[0]).abs() < 0.01 && (c.z.0 - back[2]).abs() < 0.01, "{c:?}");
+            tick(&mut p, &there, 2);
+            assert_eq!(positions(&sent(&mut p)), 2, "the control: positions again after");
         });
     }
 
@@ -14207,6 +14457,34 @@ mod commands {
         crate::racelabel::clear();
     }
 
+    /// The server's lines under the level (`OP_MOB_INFO` layout 2, entry 680):
+    /// the player's own merc's `/merc` commands drawn one per line under its
+    /// class and level, and under a monster's level too; the controls: an
+    /// answer with no lines (layout 1) draws the level last, and lines for
+    /// another id are not drawn.
+    #[test]
+    fn the_info_window_draws_the_servers_lines_under_the_level() {
+        let mut p = play();
+        p.words = Some(crate::groupsearch::tests::numbered());
+        let creature = |id: u32, name: &str, p256: u8| net::entity::Entity {
+            id,
+            p19: 255,
+            creature: Some(net::entity::Creature { name: name.into(), level: 20, p256, ..Default::default() }),
+            ..Default::default()
+        };
+        p.entities.slots[0] = Some(creature(0x40, "Karn", 3));
+        p.entities.slots[1] = Some(creature(0x41, "moss snake", 0));
+        p.target = 0x40;
+        assert_eq!(p.target_info_text().as_deref(), Some("Karn\nw503 20"), "the control: no lines");
+        p.mob_info_shown(0x40, 20, "Karn".into(), vec!["/merc".into(), "/merc dismiss".into()], 1000);
+        assert!(p.info_wanted());
+        assert_eq!(p.target_info_text().as_deref(), Some("Karn\nw503 20\n/merc\n/merc dismiss"));
+        p.target = 0x41;
+        assert!(p.target_info_text().is_none(), "the lines were the merc's: another is not shown them");
+        p.mob_info_shown(0x41, 3, "moss snake".into(), Vec::new(), 2000);
+        assert_eq!(p.target_info_text().as_deref(), Some("moss snake\nw503 3"), "layout 1: the level last");
+    }
+
     /// A monster the server says has nothing to say (go-eqoa-server's
     /// `world.mob_info`, petition 1459): its name and the server's level alone in
     /// the info window, as a pet's are drawn; with the press still held at the
@@ -14232,7 +14510,7 @@ mod commands {
         p.interact_with_target(); // Q down: a talk sent
         p.drop_stale_mob_info(1000);
         assert!(!p.info_wanted() && p.target_info_text().is_none(), "the control: no answer yet, nothing");
-        p.mob_info_shown(0x20, 3, "moss snake".into(), 1000);
+        p.mob_info_shown(0x20, 3, "moss snake".into(), Vec::new(), 1000);
         p.drop_stale_mob_info(1000);
         assert!(p.info_up && p.info_wanted(), "the answer with the press held: the window up");
         assert_eq!(p.target_info_text().as_deref(), Some("moss snake\nw503 3"), "the name and the server's level, nothing else");
@@ -14242,12 +14520,12 @@ mod commands {
         assert!(!p.info_wanted(), "let go: closed");
 
         p.interact_with_target();
-        p.mob_info_shown(0x21, 2, "fruit bat".into(), 9000);
+        p.mob_info_shown(0x21, 2, "fruit bat".into(), Vec::new(), 9000);
         p.drop_stale_mob_info(9000);
         assert!(!p.info_wanted(), "an answer for another than the target shows nothing");
         assert_ne!(p.target_info_text().as_deref(), Some("fruit bat\nw503 2"), "and is not kept");
 
-        p.mob_info_shown(0x20, 3, "moss snake".into(), 9100);
+        p.mob_info_shown(0x20, 3, "moss snake".into(), Vec::new(), 9100);
         assert!(p.info_wanted());
         p.target = 0x21; // Tab with Q still held
         p.drop_stale_mob_info(9200);
@@ -14255,7 +14533,7 @@ mod commands {
         p.target = 0x20;
         assert_eq!(p.target_info_text(), None, "and back: the answer was gone with its target");
 
-        p.mob_info_shown(0x20, 3, "moss snake".into(), 9300);
+        p.mob_info_shown(0x20, 3, "moss snake".into(), Vec::new(), 9300);
         p.entities.slots[0].as_mut().unwrap().p19 = 0; // it died
         p.drop_stale_mob_info(9400);
         assert_eq!(p.target_info_text(), None, "a dead monster: nothing");
@@ -14289,7 +14567,7 @@ mod commands {
         p.entities.slots[0] = Some(creature(0x30, "moss snake"));
         p.entities.slots[1] = Some(creature(0x31, "fruit bat"));
         let shown = |p: &Play| p.info_wanted() && p.target_info_text().is_some();
-        let snake = |p: &mut Play, at: u32| p.mob_info_shown(0x30, 3, "moss snake".into(), at);
+        let snake = |p: &mut Play, at: u32| p.mob_info_shown(0x30, 3, "moss snake".into(), Vec::new(), at);
         p.target = 0x30;
         p.interact_with_target(); // Q down
         p.info_let_go(); // and up, before the answer
