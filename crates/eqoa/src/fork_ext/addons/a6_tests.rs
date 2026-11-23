@@ -766,6 +766,19 @@ fn a6_chat_tabs_are_edited_inside_the_window_and_kept() {
     assert!(center("menu:Rename").is_none(), "control: the strip's menu has no tab rows");
     click(&mut context, "menu:New tab", "left");
     assert_eq!(names(&host).len(), with_new.len() + 1);
+    // dragging the window afterwards keeps the tabs in what is saved (the drag's save is the whole snapshot)
+    let grip = center("move").expect("the move strip has a place");
+    pointer_api::position([grip.0 as f32, grip.1 as f32], true, (1024, 768));
+    context.io_mut().add_mouse_pos_event([grip.0 as f32, grip.1 as f32]);
+    CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": grip.0, "y": grip.1, "inside_window": true, "button": "left"})));
+    context.io_mut().add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+    ticks(&mut context, 2);
+    pointer_api::position([grip.0 as f32 + 30.0, grip.1 as f32 - 20.0], true, (1024, 768));
+    context.io_mut().add_mouse_pos_event([grip.0 as f32 + 30.0, grip.1 as f32 - 20.0]);
+    ticks(&mut context, 2);
+    context.io_mut().add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+    ticks(&mut context, 3);
+    assert!(saved.borrow().last().is_some_and(|v| v.to_string().contains("\"tabs\"")), "the drag's save keeps the tabs");
     // the tabs were saved after each change, and come back in a fresh start
     let last = saved.borrow().last().cloned().expect("the tabs are saved");
     let want = names(&host);

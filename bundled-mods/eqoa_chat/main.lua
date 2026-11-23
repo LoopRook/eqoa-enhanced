@@ -478,7 +478,7 @@ eqoa.events.on("render", function()
         elseif d.seen or d.age > 5 then
             -- let go (or ImGui never saw the press): the place is kept
             state.drag = nil
-            eqoa.settings.save({ x = state.lx, y = state.ly, w = state.w, h = state.h })
+            persist()
         end
     end
     local dl = ui.GetWindowDrawList()
@@ -549,7 +549,7 @@ eqoa.events.on("render", function()
     end), "mode")
 
     -- the strip beside the tabs moves the window; the corner sizes it
-    state.hits[#state.hits + 1] = { x = x0, y = y0, w = W * k, h = HEAD * k, drag = "move" }
+    state.hits[#state.hits + 1] = { x = x0, y = y0, w = W * k, h = HEAD * k, drag = "move", id = "move" }
     text(W / 2 - 20, 0, "drag to move", c.muted, 60)
     state.hits[#state.hits + 1] = { x = x0 + (W - 12) * k, y = y0 + (H - 12) * k, w = 12 * k, h = 12 * k, drag = "size" }
     fill(W - 8, H - 3, 6, 1, c.muted)
