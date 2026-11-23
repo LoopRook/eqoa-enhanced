@@ -637,11 +637,13 @@ mod e2e {
 
     fn rig_with_mod() -> Rig {
         let p = rig_play();
+        // the ImGui context first: the bridge binds to the one that exists when it is installed
+        let context = context();
         let host = Host::for_addon(&addon()).unwrap();
         let bridge = Bridge::install(&host).unwrap();
         host.run_addon(&addon()).unwrap();
         host.execute("results = {}; eqoa.events.on('action.result', function(e) results[#results + 1] = e.data end)").unwrap();
-        let mut r = Rig { p, host, bridge, context: context(), k: 1.0, x0: 0.0, y0: 0.0 };
+        let mut r = Rig { p, host, bridge, context, k: 1.0, x0: 0.0, y0: 0.0 };
         CORE.with(|c| {
             c.borrow_mut().emit("input.key", json!({"key": "r", "combo": "shift+r", "down": true, "repeat": false, "synthetic": false, "text": ""}))
         });

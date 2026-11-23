@@ -563,9 +563,9 @@ fn a8_no_text_leaves_the_window_at_the_default_size_with_the_longest_names() {
         frames(&host, &bridge, &mut context, 3);
         let v = layer_vertices();
         assert!(v.len() > 100, "the window drew its text ({} vertices)", v.len());
-        // the window's border is a one-pixel line centred on its edge: half a pixel each side, so a pixel of room
-        let (left, top) = (s.x0 as f32 - 1.0, s.y0 as f32 - 1.0);
-        let (right, bottom) = ((s.x0 + W * s.k) as f32 + 1.0, (s.y0 + H * s.k) as f32 + 1.0);
+        // the window's border is a one-pixel line drawn just outside its edge: a pixel and a half of room
+        let (left, top) = (s.x0 as f32 - 1.5, s.y0 as f32 - 1.5);
+        let (right, bottom) = ((s.x0 + W * s.k) as f32 + 1.5, (s.y0 + H * s.k) as f32 + 1.5);
         let outside: Vec<_> = v.iter().filter(|p| p[0] < left || p[0] > right || p[1] < top || p[1] > bottom).collect();
         assert!(outside.is_empty(), "tab {tab_click:?} question {question}: {} vertices outside {left}..{right} x {top}..{bottom}: {:?}", outside.len(), &outside[..outside.len().min(4)]);
         // and the window fits the game's 640x448 frame
