@@ -142,7 +142,10 @@ fn rig_with(live: bool) -> (Play, Host) {
         results, closed, ev = {}, {}, {}
         eqoa.events.on("action.result", function(e) results[#results + 1] = e.data end)
         eqoa.events.on("confirm.closed", function(e) closed[#closed + 1] = e.data end)
-        eqoa.events.on("windows.session", function(e) ev[#ev + 1] = e.data.phase .. ":" .. e.data.kind .. ":" .. tostring(e.data.reason) end)
+        eqoa.events.on("windows.session", function(e)
+            ev[#ev + 1] = e.data.phase .. ":" .. e.data.kind .. ":" .. tostring(e.data.reason)
+            if e.data.phase == "opened" then last_open = e.data.data end
+        end)
         eqoa.input.bind({ id = "go", label = "Go", default_key = "9" }, function() last_req, last_err = next_fn() end)
         "#,
     )
@@ -232,6 +235,8 @@ fn a2_pass_shows_the_same_dialog_in_the_games_window() {
     hold(vm_of(&host), &[TakeoverKind::ResponseDialog, TakeoverKind::TextDialog]);
     dialog(&mut p, 5, "Choose", &OPTIONS[..3]);
     assert_eq!(p.mode, 0);
+    native_events::dispatch(&host).unwrap();
+    host.execute("assert(ev[1] == 'opened:response_dialog:nil', tostring(ev[1])); assert(last_open.text == 'Choose' and #last_open.options == 3, 'the opened event carries the data')").unwrap();
     host.execute("s = eqoa.windows.session('response_dialog'); assert(s ~= nil and #s.data.options == 3 and s.data.text == 'Choose'); assert(eqoa.windows.pass(s.ref))").unwrap();
     pump(&mut p);
     assert_eq!(p.mode, 7, "the game's window opens for it (negative control: no pass leaves mode 0)");
