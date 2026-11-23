@@ -31,7 +31,7 @@ fn addon(id: &str) -> DiscoveredAddon {
         entry: root(id).join("main.lua"),
         script_root: root(id),
         package_root: root(id),
-        module_dirs: vec![root(id)],
+        module_dirs: std::iter::once(root(id)).chain(root(id).join("modules").canonicalize().ok()).collect(),
         resource_dirs: vec![root(id)],
         api: Some("eqoa/1".into()),
         entry_mode: EntryMode::Once,
@@ -430,4 +430,80 @@ fn a1_fix1_no_mod_tooltip_popup_or_window_is_drawn_above_the_question() {
     }
     assert!(drawn_back_to_front(&mut context).iter().any(|n| n.starts_with("##Tooltip")));
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Owner test 2026-11-23: with "Use the game's windows" on, the key must not raise a mod error (the mods' "did not
+/// open" note used to call `eqoa.log.write` without a level). Each of the three mods writes a leveled note instead.
+#[test]
+fn a1_owner_fix_a_key_that_cannot_open_a_window_logs_a_note_not_a_mod_error() {
+    for (id, key, combo) in [
+        ("eqoa_spellbook", "k", "shift+k"),
+        ("eqoa_quest_journal", "j", "shift+j"),
+        ("eqoa_bag_viewer", "b", "b"),
+    ] {
+        fixture();
+        let host = Host::for_addon(&addon(id)).unwrap();
+        let _bridge = Bridge::install(&host).unwrap();
+        host.run_addon(&addon(id)).unwrap();
+        host.drain_logs().unwrap();
+        window_takeover::set_use_game_windows(true);
+        press(&host, key, combo);
+        let logs = format!("{:?}", host.drain_logs().unwrap());
+        window_takeover::set_use_game_windows(false);
+        assert!(!logs.contains("invalid_argument"), "{id}: no mod error when the window cannot open: {logs}");
+        assert!(logs.contains("did not open"), "{id}: says why it did not open: {logs}");
+    }
+}
+
+fn click(host: &Host, x: f64, y: f64, button: &str) {
+    CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": x, "y": y, "inside_window": true, "button": button})));
+    native_events::dispatch(host).unwrap();
+}
+
+fn ability(n: i64, slot: Option<i64>) -> serde_json::Value {
+    json!({"ref": {"$ref": "ability", "key": n.to_string(), "generation": 0, "incarnation": 1}, "id": n,
+        "name": format!("Skill {n:02}"), "description": "", "display_key": n, "spellbook_slot": slot, "usable": true,
+        "level": n, "range": 5.0, "cast_time": 1.0, "power_cost": 3, "scope": 0, "cooldown": 0.0, "equipment_mask": 0, "lockout": 0.0})
+}
+
+/// Owner test 2026-11-23: the Spellbook's scroll bar takes a click (it only drew before) and Memorize is a button,
+/// with the game's refusal (an ability already memorized) said and nothing sent. The window's geometry is the
+/// mod's (HUD pixels: list at y 24, 13 rows of 13; slots from y 201; buttons at y 342).
+#[test]
+fn a1_owner_fix_spellbook_scrollbar_click_and_memorize_button() {
+    let id = "eqoa_spellbook";
+    fixture();
+    // 20 abilities (more than the 13 rows), the first memorized in slot 1
+    CORE.with(|c| c.borrow_mut().view.abilities = (1..=20).map(|n| ability(n, (n == 1).then_some(1))).collect());
+    let mut context = context();
+    let host = Host::for_addon(&addon(id)).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon(id)).unwrap();
+    press(&host, "k", "shift+k");
+    frames(&host, &bridge, &mut context, 3);
+    let (k, ox, oy): (f64, f64, f64) = host
+        .lua
+        .load("local f = eqoa.hud.frame(); return math.min(f.scale_x, f.scale_y), f.offset_x, f.offset_y")
+        .eval()
+        .unwrap();
+    let (w, h) = (332.0, 370.0);
+    let x0 = (1024.0 - w * k).min(ox + (640.0 - w) / 2.0 * k).max(0.0);
+    let y0 = (768.0 - h * k).min(oy + (448.0 - h) / 2.0 * k).max(0.0);
+    let at = |x: f64, y: f64| (x0 + x * k, y0 + y * k);
+    let mut tap = |x: f64, y: f64, button: &str| {
+        let (px, py) = at(x, y);
+        click(&host, px, py, button);
+        frames(&host, &bridge, &mut context, 2);
+    };
+    // the first row is Skill 01, memorized in slot 1: chosen, Memorize is refused (no button) and so is a slot click
+    tap(60.0, 30.0, "left");
+    tap(14.0, 350.0, "left");
+    tap(8.0 + 2.0 * 32.0 + 5.0, 201.0 + 5.0, "left"); // slot 3
+    assert!(action_broker::queued_kinds_for_test().is_empty(), "a memorized ability is not memorized again");
+    // a click near the foot of the scroll bar (x 325..331, y 24..193) jumps the list down: Skill 08 is first now
+    tap(328.0, 24.0 + 169.0 * 0.95, "left");
+    tap(60.0, 30.0, "left");
+    tap(14.0, 350.0, "left"); // the Memorize button
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["assign_ability"], "the scrolled-to ability is memorized");
+    assert_eq!(host.drain_logs().unwrap().len(), 0);
 }

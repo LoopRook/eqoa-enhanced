@@ -90,7 +90,7 @@ local function open()
     local s, err = eqoa.windows.open_session("inventory", {opened_from = "key"})
     if not s then
         -- the client says why (the player is using the game's windows, dead, out of the world)
-        eqoa.log.write("Bag viewer did not open: " .. tostring(err and err.message))
+        eqoa.log.write("warn", "Bag viewer did not open: " .. tostring(err and err.message))
         return
     end
     session = s
