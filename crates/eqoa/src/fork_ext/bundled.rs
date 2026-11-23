@@ -41,7 +41,6 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_quest_journal",
     "eqoa_character",
     "eqoa_dialogs",
-
     "eqoa_crafting",
     "eqoa_social",
     "eqoa_start_menu",
@@ -1313,7 +1312,6 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
@@ -1617,7 +1615,6 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
@@ -1674,7 +1671,6 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
@@ -1705,7 +1701,6 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
@@ -1802,7 +1797,6 @@ mod tests {
                 "eqoa_quest_journal",
                 "eqoa_character",
                 "eqoa_dialogs",
-
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
