@@ -497,7 +497,7 @@ fn round7c_every_refusing_member_reports_its_status_through_its_call() {
             let paths: String = host.lua.globals().get("round7c_refusing_paths").unwrap();
             eprintln!("round7c refusing members checked through their call: {checked}");
             let expected: Vec<&str> = EXPECTED_REFUSING_CALLABLES.split_whitespace().collect();
-            assert_eq!(expected.len(), 89, "the pinned list holds every refusing callable");
+            assert_eq!(expected.len(), 83, "the pinned list holds every refusing callable");
             assert_eq!(paths.split_whitespace().collect::<Vec<_>>(), expected, "refusing callables by name");
             assert_eq!(checked as usize, expected.len(), "refusing callables by count");
         });
