@@ -1869,8 +1869,21 @@
         "eqoa.actions.emote",
         "eqoa.actions.equip",
         "eqoa.actions.follow",
+        "eqoa.actions.friend_accept",
+        "eqoa.actions.friend_add",
+        "eqoa.actions.friend_refuse",
+        "eqoa.actions.friend_remove",
         "eqoa.actions.group_invite",
+        "eqoa.actions.guild_accept",
+        "eqoa.actions.guild_demote",
+        "eqoa.actions.guild_invite",
+        "eqoa.actions.guild_kick",
+        "eqoa.actions.guild_promote",
+        "eqoa.actions.guild_refuse",
+        "eqoa.actions.guild_set_motd",
         "eqoa.actions.hide_look",
+        "eqoa.actions.ignore_add",
+        "eqoa.actions.ignore_remove",
         "eqoa.actions.input_text",
         "eqoa.actions.interact",
         "eqoa.actions.jump",
@@ -2360,7 +2373,95 @@
     },
     {
       "children": [],
+      "path": "eqoa.actions.friend_accept",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.friend_add",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.friend_refuse",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.friend_remove",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.actions.group_invite",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.guild_accept",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.guild_demote",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.guild_invite",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.guild_kick",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.guild_promote",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.guild_refuse",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.guild_set_motd",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -2372,6 +2473,22 @@
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.ignore_add",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.ignore_remove",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -5234,6 +5351,38 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.friends.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.friends.changed.data.after",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.friends.changed.data.before",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.friends.changed.data.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.group.changed",
       "reason": null,
       "revision": 1,
@@ -5314,6 +5463,38 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.guild.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.guild.changed.data.after",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.guild.changed.data.before",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.guild.changed.data.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.hotbar.changed",
       "reason": null,
       "revision": 1,
@@ -5342,6 +5523,38 @@
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.ignored.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.ignored.changed.data.after",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.ignored.changed.data.before",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.ignored.changed.data.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -5462,6 +5675,62 @@
       "reason": null,
       "revision": 1,
       "round": 5,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.lfg.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.lfg.changed.data.after",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.lfg.changed.data.before",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.lfg.changed.data.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.lfg.result",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.lfg.result.data.count",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.lfg.result.data.entries",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -6062,6 +6331,38 @@
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.who.result",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.who.result.data.count",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.who.result.data.entries",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.who.result.data.received",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -6862,6 +7163,306 @@
     {
       "children": [],
       "path": "eqoa.group.raid_roles",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.guild.Guild",
+        "eqoa.guild.GuildInvite",
+        "eqoa.guild.GuildMember",
+        "eqoa.guild.get",
+        "eqoa.guild.invite"
+      ],
+      "path": "eqoa.guild",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.guild.Guild.can_invite",
+        "eqoa.guild.Guild.can_set_motd",
+        "eqoa.guild.Guild.in_guild",
+        "eqoa.guild.Guild.members",
+        "eqoa.guild.Guild.motd",
+        "eqoa.guild.Guild.name",
+        "eqoa.guild.Guild.self_rank",
+        "eqoa.guild.Guild.self_rank_name",
+        "eqoa.guild.Guild.show_chat"
+      ],
+      "path": "eqoa.guild.Guild",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.Guild.can_invite",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.Guild.can_set_motd",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.Guild.in_guild",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.Guild.members",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.Guild.motd",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.Guild.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.Guild.self_rank",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.Guild.self_rank_name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.Guild.show_chat",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.guild.GuildInvite.duration",
+        "eqoa.guild.GuildInvite.guild",
+        "eqoa.guild.GuildInvite.inviter",
+        "eqoa.guild.GuildInvite.inviter_id",
+        "eqoa.guild.GuildInvite.seconds_remaining"
+      ],
+      "path": "eqoa.guild.GuildInvite",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildInvite.duration",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildInvite.guild",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildInvite.inviter",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildInvite.inviter_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildInvite.seconds_remaining",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.guild.GuildMember.can_demote",
+        "eqoa.guild.GuildMember.can_kick",
+        "eqoa.guild.GuildMember.can_promote",
+        "eqoa.guild.GuildMember.class_id",
+        "eqoa.guild.GuildMember.class_name",
+        "eqoa.guild.GuildMember.id",
+        "eqoa.guild.GuildMember.level",
+        "eqoa.guild.GuildMember.name",
+        "eqoa.guild.GuildMember.online",
+        "eqoa.guild.GuildMember.race_id",
+        "eqoa.guild.GuildMember.race_name",
+        "eqoa.guild.GuildMember.rank",
+        "eqoa.guild.GuildMember.rank_name"
+      ],
+      "path": "eqoa.guild.GuildMember",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildMember.can_demote",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildMember.can_kick",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildMember.can_promote",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildMember.class_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildMember.class_name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildMember.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildMember.level",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildMember.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildMember.online",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildMember.race_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildMember.race_name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildMember.rank",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.GuildMember.rank_name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.get",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.guild.invite",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -10407,6 +11008,224 @@
     },
     {
       "children": [
+        "eqoa.lfg.LfgEntry",
+        "eqoa.lfg.LfgState",
+        "eqoa.lfg.get",
+        "eqoa.lfg.register",
+        "eqoa.lfg.search",
+        "eqoa.lfg.unregister"
+      ],
+      "path": "eqoa.lfg",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.lfg.LfgEntry.class_id",
+        "eqoa.lfg.LfgEntry.class_name",
+        "eqoa.lfg.LfgEntry.id",
+        "eqoa.lfg.LfgEntry.level",
+        "eqoa.lfg.LfgEntry.name",
+        "eqoa.lfg.LfgEntry.position",
+        "eqoa.lfg.LfgEntry.race_id",
+        "eqoa.lfg.LfgEntry.race_name",
+        "eqoa.lfg.LfgEntry.world_id"
+      ],
+      "path": "eqoa.lfg.LfgEntry",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgEntry.class_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgEntry.class_name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgEntry.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgEntry.level",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgEntry.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgEntry.position",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgEntry.race_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgEntry.race_name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgEntry.world_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.lfg.LfgState.available",
+        "eqoa.lfg.LfgState.busy",
+        "eqoa.lfg.LfgState.default_max_level",
+        "eqoa.lfg.LfgState.default_min_level",
+        "eqoa.lfg.LfgState.entries",
+        "eqoa.lfg.LfgState.invites_open",
+        "eqoa.lfg.LfgState.members_invite",
+        "eqoa.lfg.LfgState.registered"
+      ],
+      "path": "eqoa.lfg.LfgState",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgState.available",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgState.busy",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgState.default_max_level",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgState.default_min_level",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgState.entries",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgState.invites_open",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgState.members_invite",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.LfgState.registered",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.get",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.register",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.search",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.lfg.unregister",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
         "eqoa.log.write"
       ],
       "path": "eqoa.log",
@@ -13126,6 +13945,207 @@
     },
     {
       "children": [
+        "eqoa.social.Friend",
+        "eqoa.social.FriendRequest",
+        "eqoa.social.Ignored",
+        "eqoa.social.friend_request",
+        "eqoa.social.friends",
+        "eqoa.social.ignored"
+      ],
+      "path": "eqoa.social",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.social.Friend.class_id",
+        "eqoa.social.Friend.class_name",
+        "eqoa.social.Friend.id",
+        "eqoa.social.Friend.level",
+        "eqoa.social.Friend.name",
+        "eqoa.social.Friend.online",
+        "eqoa.social.Friend.race_id",
+        "eqoa.social.Friend.race_name",
+        "eqoa.social.Friend.world"
+      ],
+      "path": "eqoa.social.Friend",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.Friend.class_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.Friend.class_name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.Friend.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.Friend.level",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.Friend.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.Friend.online",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.Friend.race_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.Friend.race_name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.Friend.world",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.social.FriendRequest.duration",
+        "eqoa.social.FriendRequest.id",
+        "eqoa.social.FriendRequest.name",
+        "eqoa.social.FriendRequest.seconds_remaining"
+      ],
+      "path": "eqoa.social.FriendRequest",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.FriendRequest.duration",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.FriendRequest.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.FriendRequest.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.FriendRequest.seconds_remaining",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.social.Ignored.id",
+        "eqoa.social.Ignored.name"
+      ],
+      "path": "eqoa.social.Ignored",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.Ignored.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.Ignored.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.friend_request",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.friends",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.social.ignored",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
         "eqoa.sound.is_playing",
         "eqoa.sound.load",
         "eqoa.sound.play",
@@ -13410,6 +14430,143 @@
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.who.WhoEntry",
+        "eqoa.who.WhoState",
+        "eqoa.who.get",
+        "eqoa.who.request"
+      ],
+      "path": "eqoa.who",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.who.WhoEntry.class_id",
+        "eqoa.who.WhoEntry.class_name",
+        "eqoa.who.WhoEntry.id",
+        "eqoa.who.WhoEntry.level",
+        "eqoa.who.WhoEntry.name",
+        "eqoa.who.WhoEntry.race_id",
+        "eqoa.who.WhoEntry.race_name"
+      ],
+      "path": "eqoa.who.WhoEntry",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.who.WhoEntry.class_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.who.WhoEntry.class_name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.who.WhoEntry.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.who.WhoEntry.level",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.who.WhoEntry.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.who.WhoEntry.race_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.who.WhoEntry.race_name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.who.WhoState.entries",
+        "eqoa.who.WhoState.pending",
+        "eqoa.who.WhoState.received"
+      ],
+      "path": "eqoa.who.WhoState",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.who.WhoState.entries",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.who.WhoState.pending",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.who.WhoState.received",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.who.get",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.who.request",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -17517,7 +18674,7 @@
   "metadata": {
     "client_version": "0.7.0",
     "commit": "unstamped local build",
-    "generated_utc": "2026-11-22",
+    "generated_utc": "2026-11-23",
     "platform": "windows-x86_64"
   },
   "schema_version": 1
