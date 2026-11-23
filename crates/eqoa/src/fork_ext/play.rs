@@ -22,6 +22,8 @@ mod a1_play;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "a2_play.rs"]
 mod a2_play;
+
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "a8_play.rs"]
 mod a8_play;
 
