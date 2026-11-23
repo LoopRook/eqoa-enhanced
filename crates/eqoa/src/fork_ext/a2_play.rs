@@ -47,7 +47,14 @@ struct Pre {
 }
 
 thread_local! {
+    static WAS_DEAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static PRE: RefCell<Option<Pre>> = const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_for_test() {
+    WAS_DEAD.with(|d| d.set(false));
+    PRE.with(|p| *p.borrow_mut() = None);
 }
 
 fn pos(play: &Play) -> Option<[f32; 3]> {
@@ -97,10 +104,13 @@ pub(crate) fn post_event(play: &mut Play) {
     };
     let at = pos(play);
     let talked = talked_to(play);
+    // the game's own rules for a dead character stay the game's: nothing is held for a conversation the dead cannot
+    // answer (an offer, a resurrection, still is)
+    let alive = !play.is_dead();
     let mut taken: Vec<Item> = Vec::new();
 
     // plain text: opened now (mode 0 before), or queued behind a window (taken out of the game's queue)
-    if held(TakeoverKind::TextDialog) {
+    if alive && held(TakeoverKind::TextDialog) {
         if pre.mode == 0 && play.mode == 9 {
             let text = play.priv_chat.read_text().to_vec();
             play.mode = 0;
@@ -113,7 +123,7 @@ pub(crate) fn post_event(play: &mut Play) {
     }
     // a dialog with answers: opened now (the game set it in its window: every option is on its first page), or
     // waiting in the game's one place
-    if held(TakeoverKind::ResponseDialog) {
+    if alive && held(TakeoverKind::ResponseDialog) {
         if pre.mode == 0 && play.mode == 7 {
             let (text, options, _) = play.response.read_state();
             let text = text.to_vec();
@@ -128,7 +138,7 @@ pub(crate) fn post_event(play: &mut Play) {
         }
     }
     // a group invitation: parked out of the game's list so it does not ask again each step
-    if held(TakeoverKind::GroupInvite) && play.group.invites.len() > pre.invites {
+    if alive && held(TakeoverKind::GroupInvite) && play.group.invites.len() > pre.invites {
         while play.group.invites.len() > pre.invites {
             let Some(i) = play.group.invites.pop() else { break };
             if pre.mode == 0 && play.mode == 14 && play.mbox.p2 == 0x702_0000 {
@@ -222,7 +232,19 @@ fn give(play: &mut Play, item: Item) {
 
 /// Each step: what the mod passed, what a released claim, a disabled mod or the idle limit ends, the player's walk.
 pub(crate) fn tick(play: &mut Play) {
+    // the step the character dies: the game closed its dialogs and refused its invitations (`msg_005e`)
+    let died = play.is_dead() && !WAS_DEAD.with(|d| d.replace(true));
+    if !play.is_dead() {
+        WAS_DEAD.with(|d| d.set(false));
+    }
     if !dialog_sessions::is_busy() {
+        return;
+    }
+    if died {
+        for id in dialog_sessions::death() {
+            play.session.send_msg(0x0624, id, 3);
+        }
+        log("takeover: held dialogs and invitations ended (the character died, as the game closes them)".into());
         return;
     }
     dialog_sessions::reconcile();
@@ -268,6 +290,10 @@ pub(crate) fn dispatch_answer(play: &mut Play, session: &str, choice: Choice) ->
     let Some(active) = dialog_sessions::find(session).filter(|a| a.vm == vm) else {
         return refuse("stale_handle", "the dialog or offer is gone");
     };
+    // a dead character has no conversation to answer; only an offer is made to the dead (a resurrection)
+    if play.is_dead() && !matches!(active.item, Item::Offer { .. }) {
+        return refuse("not_ready", "cannot answer a dialog while dead");
+    }
     let option = match choice {
         Choice::Option(n) => n,
         Choice::Close => 0,

@@ -733,9 +733,12 @@ fn deliver_data(
             shared.borrow_mut().subscriptions.retain(|s| s.token != t);
             // round A1 fix: a mod whose window code or key handling just failed has no working window; the
             // controller and its held sessions are the game's again at once, not at some later disable
-            if matches!(e.name.as_str(), "render" | "windows.key") {
+            // round A2 fix: and its claims go with them (as a disable does), so the next NPC dialog or offer shows in
+            // the game's own window at once, not hidden for a mod that can no longer show it
+            if matches!(e.name.as_str(), "render" | "windows.key" | "windows.session") {
                 let vm = shared.borrow().vm;
                 super::window_sessions::end_vm(vm);
+                super::window_takeover::release_vm(vm);
             }
         }
     }

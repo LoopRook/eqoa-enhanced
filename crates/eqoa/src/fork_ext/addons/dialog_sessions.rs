@@ -361,6 +361,39 @@ pub(crate) fn vm_gone(vm: u64) {
     });
 }
 
+/// The character died. The game closes an open dialog or box without answering it (`Play::msg_005e` ends in
+/// `set_mode_0`) and refuses every invitation with 3: the same here. Everything held or waiting is dropped, each
+/// session ended `death`. Returns the invitations to refuse (shown, waiting).
+pub(crate) fn death() -> Vec<u32> {
+    if !is_busy() {
+        return Vec::new();
+    }
+    let (ended, invites) = with(|s| {
+        let mut ids = Vec::new();
+        let mut refuse = Vec::new();
+        for a in [s.slot.take(), s.offer.take()].into_iter().flatten() {
+            if let Item::Invite { id, .. } = &a.item {
+                refuse.push(*id);
+            }
+            ids.push(a.id);
+        }
+        for i in s.invites.drain(..).chain(s.give_back.drain(..).filter(|i| matches!(i, Item::Invite { .. }))) {
+            if let Item::Invite { id, .. } = i {
+                refuse.push(id);
+            }
+        }
+        s.texts.clear();
+        s.boxed = None;
+        s.give_back.clear();
+        s.passes.clear();
+        (ids, refuse)
+    });
+    for id in ended {
+        window_sessions::end_dialog_session(&id, "death");
+    }
+    invites
+}
+
 /// The world changed: the old world's dialogs and offers are gone (the game does not carry them over).
 pub(crate) fn world_changed() {
     if !is_busy() {

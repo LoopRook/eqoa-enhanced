@@ -24,6 +24,7 @@ fn ready(live: bool) -> Play {
     native_core::fixture_demand(true);
     action_broker::reset_all_for_test();
     ws::reset_for_test();
+    super::super::a2_play::reset_for_test();
     window_takeover::reset_all_for_test();
     window_takeover::take_log_for_test();
     r6a::forget();
@@ -457,6 +458,8 @@ fn a2_a_group_invitation_is_a_session_accepted_and_declined_through_the_games_bo
 fn a2_a_resurrection_is_accepted_only_through_the_players_own_yes() {
     let (mut p, host) = rig_with(true);
     p.death = Some(crate::death::DeathCam::new([0.; 3], [0., 0., 1.], [0.; 3]));
+    // the step that notices the death comes first; the offer is made to the dead character after it
+    pump(&mut p);
     let vm = vm_of(&host);
     hold(vm, &[TakeoverKind::ReviveOffer, TakeoverKind::SummonOffer]);
     deliver(&mut p, Event::SummonPrompt { name: "Healer".into(), kind: 1 });
@@ -575,4 +578,64 @@ fn a2_an_invitation_withdrawn_while_parked_ends_its_session() {
     deliver(&mut p, Event::GroupInviteGone(3002));
     assert!(session_of("group_invite").is_none());
     assert_eq!((p.mode, p.group.invites.len()), (0, 0), "nothing is left to ask about");
+}
+
+fn die(p: &mut Play) {
+    p.death = Some(crate::death::DeathCam::new([0.; 3], [0., 0., 1.], [0.; 3]));
+}
+
+#[test]
+fn a2_death_closes_held_dialogs_as_the_game_does_and_a_dead_character_answers_nothing() {
+    let mut p = ready(true);
+    hold(VM, &[TakeoverKind::ResponseDialog, TakeoverKind::TextDialog, TakeoverKind::GroupInvite]);
+    dialog(&mut p, 5, "Choose", &OPTIONS[..3]);
+    text(&mut p, "Waiting words");
+    deliver(&mut p, Event::GroupInvite { id: 3003, x: 0, name: "Ally".into() });
+    assert!(session_of("response_dialog").is_some(), "control: alive, the dialog is held");
+    let id = session_of("response_dialog").unwrap().id;
+    // dead, before the step that notices: an answer is refused (negative control: it was sent, bypassing the dead check)
+    die(&mut p);
+    let got = action_broker::with_dispatch_for_test(VM, "mod", || {
+        super::super::a2_play::dispatch_answer(&mut p, &id, super::super::a2_play::Choice::Option(1))
+    });
+    assert!(matches!(got, action_broker::DispatchOutcome::Refused { code: "not_ready", .. }), "{}", show(&got));
+    assert!(sent(&mut p).is_empty(), "nothing went to the server for a dead character");
+    // the step after: closed without an answer (the game's `set_mode_0`), invitations refused with 3
+    pump(&mut p);
+    assert!(session_of("response_dialog").is_none(), "the session ended");
+    assert_eq!((p.mode, p.dialogs.len(), p.pending_box.is_some()), (0, 0, false), "and is not given back to the game either");
+    assert_eq!(dialog_sessions::waiting_for_test(), (0, false, 0));
+    let out = sent(&mut p);
+    let mut refuse = Writer::op(0x0624);
+    refuse.u32(3003).u8(3);
+    assert_eq!(out, vec![refuse.data], "only the invitation is refused, with 3, as the game does");
+    // a dialog that arrives while dead is the game's own
+    text(&mut p, "Words for the dead");
+    assert_eq!(p.mode, 9, "the game shows it (nothing is held for a dead character)");
+}
+
+#[test]
+fn a2_a_mod_that_fails_loses_its_claims_and_the_next_dialog_shows_at_once() {
+    // control: a healthy mod keeps the claim and the dialog stays hidden
+    let (mut p, host) = rig();
+    hold(vm_of(&host), &[TakeoverKind::ResponseDialog]);
+    host.execute("eqoa.events.on('windows.session', function() end)").unwrap();
+    dialog(&mut p, 1, "First", &OPTIONS[..2]);
+    native_events::dispatch(&host).unwrap();
+    pump(&mut p);
+    assert!(window_takeover::is_taken(TakeoverKind::ResponseDialog));
+    assert_eq!(p.mode, 0, "control: held and hidden");
+    drop((p, host));
+    // a mod whose handler fails: the dialog goes back, the claim is released, the next one is the game's at once
+    let (mut p, host) = rig();
+    hold(vm_of(&host), &[TakeoverKind::ResponseDialog]);
+    host.execute("eqoa.events.on('windows.session', function() error('boom') end)").unwrap();
+    dialog(&mut p, 1, "First", &OPTIONS[..2]);
+    native_events::dispatch(&host).unwrap();
+    pump(&mut p);
+    assert!(!window_takeover::is_taken(TakeoverKind::ResponseDialog), "the failed mod holds nothing (negative control: it still did)");
+    assert_eq!(p.mode, 7, "the dialog it could not show is the game's window");
+    p.dialog_key(Key::Escape);
+    dialog(&mut p, 2, "Second", &OPTIONS[..2]);
+    assert_eq!(p.mode, 7, "the next dialog shows at once, not hidden for 120 s");
 }
