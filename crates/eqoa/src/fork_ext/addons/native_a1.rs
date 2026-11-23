@@ -62,7 +62,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
     // the record shapes
     for (path, fields) in [
-        ("eqoa.windows.Session", "ref kind title origin opened_from revision focused"),
+        ("eqoa.windows.Session", "ref kind title origin opened_from revision focused data"),
         ("eqoa.windows.Confirm", "id kind text"),
     ] {
         describe(lua, path, "supported", Some(ROUND), "");

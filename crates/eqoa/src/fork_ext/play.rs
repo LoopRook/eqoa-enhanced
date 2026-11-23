@@ -18,6 +18,8 @@ mod api_capture;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "a1_play.rs"]
 mod a1_play;
+#[path = "a6_play.rs"]
+mod a6_play;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "map_mod_tests.rs"]
@@ -109,6 +111,13 @@ pub(crate) struct GameEventCapture {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> GameEventCapture {
     MODE_BEFORE_EVENT.with(|m| m.set(play.mode));
+    // round A6: the item links a chat line carries are told with the event before it
+    if let net::session::Event::ChatLinks(links) = event {
+        let spans: Vec<(u16, u16, u32)> = links.iter().map(|l| (l.start, l.len, l.id)).collect();
+        crate::fork_ext::addons::native_a6::stash_links(&spans);
+    } else {
+        crate::fork_ext::addons::native_a6::event_boundary();
+    }
     let api = api_capture::begin_game_event(play, event);
     if let net::session::Event::MasterLoot(m) = event {
         crate::fork_ext::addons::action_broker::set_master_loot(m.is_some());
@@ -510,7 +519,11 @@ pub(crate) fn window_taken(play: &Play, mode: i32) -> bool {
         let observed_target = match kind {
             TakeoverKind::Loot => crate::fork_ext::loot_source::peek_single(),
             TakeoverKind::Merchant => play.npcw.shop.id,
-            TakeoverKind::Bank | TakeoverKind::RaidReady | TakeoverKind::RaidRoll => None,
+            TakeoverKind::Bank
+            | TakeoverKind::RaidReady
+            | TakeoverKind::RaidRoll
+            | TakeoverKind::StartMenu
+            | TakeoverKind::ChatEntry => None,
         };
         let fallback_player_target = (play.target != u32::MAX).then_some(play.target);
         let decision = window_takeover::decide_open(
@@ -664,7 +677,7 @@ fn close_hidden_session(
             tlog!("takeover: bank hidden session closed ({})", owed.reason);
             play.bank.state = 0;
         }
-        TakeoverKind::RaidReady | TakeoverKind::RaidRoll => {}
+        TakeoverKind::RaidReady | TakeoverKind::RaidRoll | TakeoverKind::StartMenu | TakeoverKind::ChatEntry => {}
     }
 }
 
@@ -797,6 +810,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     {
         sync_hidden_sessions(_play);
         a1_play::tick(_play);
+        a6_play::tick(_play);
         if crate::fork_ext::addons::native_core::capture_requested()
             || crate::fork_ext::addons::window_takeover::has_activity()
         {
@@ -3189,6 +3203,7 @@ fn dispatch_broker_action(
         }
         ActionKind::Frame(action) => api_capture::a3::dispatch(play, action),
         ActionKind::A1(action) => a1_play::dispatch(play, action),
+        ActionKind::A6(action) => a6_play::dispatch(play, action),
         ActionKind::DropQuest { .. }
         | ActionKind::MasteryShare { .. }
         | ActionKind::MasteryBrowse { .. }

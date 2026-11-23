@@ -168,6 +168,8 @@ pub(crate) enum ActionKind {
     Frame(super::frame_actions::FrameAction),
     /// Round A1: destroy (asks the player first), link item, hide look.
     A1(super::native_a1::A1Action),
+    /// Round A6: a Start menu entry of the mod's menu, the game's chat channel, a chat line with item links.
+    A6(super::native_a6::A6Action),
     /// `eqoa.actions.ready_check_answer`: answer an open raid ready check.
     ReadyCheckAnswer { id: u32, ready: bool },
     /// `eqoa.actions.loot_roll`: answer an open raid loot roll (0=pass, 1=need, 2=greed).
@@ -228,6 +230,7 @@ impl ActionKind {
             Self::ClearWaypoint { .. } => "clear_waypoint",
             Self::Frame(action) => action.name(),
             Self::A1(action) => action.name(),
+            Self::A6(action) => action.name(),
             Self::ReadyCheckAnswer { .. } => "ready_check_answer",
             Self::LootRoll { .. } => "loot_roll",
             Self::LootAssign { .. } => "loot_assign",
@@ -284,6 +287,7 @@ impl ActionKind {
             | Self::ClearWaypoint { .. }
             | Self::Frame(_)
             | Self::A1(_)
+            | Self::A6(_)
             | Self::ReadyCheckAnswer { .. }
             | Self::LootRoll { .. } => None,
         }
@@ -3187,7 +3191,7 @@ pub(crate) fn enqueue_lua_with(
     enqueue_lua_with_grant(lua, symbol, symbol, build)
 }
 
-fn enqueue_lua_with_grant(
+pub(crate) fn enqueue_lua_with_grant(
     lua: &Lua,
     symbol: &str,
     capability: &str,

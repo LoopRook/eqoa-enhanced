@@ -115,6 +115,9 @@ pub(crate) mod native_r6a;
 pub(crate) mod native_a3;
 pub(crate) mod frame_actions;
 pub(crate) mod native_a1;
+pub(crate) mod native_a6;
+#[cfg(test)]
+mod a6_tests;
 #[cfg(test)]
 mod a1_tests;
 #[cfg(test)]

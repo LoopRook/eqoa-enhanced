@@ -50,11 +50,14 @@ pub(crate) struct Session {
     pub revision: u64,
     /// The takeover kind this session mirrors (held corpse, merchant or bank).
     pub held: Option<TakeoverKind>,
+    /// Round A6: what belongs to this one opening (the Start menu's entries, the chat line's start), for the
+    /// kinds the client opens itself (`open_client`). None for every other session.
+    pub data: Option<serde_json::Value>,
 }
 
 impl Session {
     pub(crate) fn json(&self, focused: bool) -> serde_json::Value {
-        json!({
+        let mut out = json!({
             "ref": self.id,
             "kind": self.kind,
             "title": super::window_kinds::title(&self.kind).unwrap_or(""),
@@ -62,7 +65,11 @@ impl Session {
             "opened_from": self.opened_from,
             "revision": self.revision,
             "focused": focused,
-        })
+        });
+        if let Some(data) = &self.data {
+            out["data"] = data.clone();
+        }
+        out
     }
 }
 
@@ -181,6 +188,12 @@ pub(crate) fn open(
     if !super::window_kinds::is_window(kind) {
         return Err(("invalid_argument", format!("'{kind}' is not a window the game has")));
     }
+    if CLIENT_KINDS.contains(&kind) {
+        return Err((
+            "invalid_argument",
+            format!("the '{kind}' window is opened by the player's key: hold it with eqoa.windows.takeover and the session arrives when the player presses it"),
+        ));
+    }
     if !OWN_KINDS.contains(&kind) {
         return Err((
             if TakeoverKind::parse(kind).is_ok() { "invalid_argument" } else { "unsupported" },
@@ -220,11 +233,99 @@ pub(crate) fn open(
             opened_from: opened_from.into(),
             revision: s.next_revision,
             held: None,
+            data: None,
         };
         s.sessions.push(session.clone());
         emit_opened(&session);
         Ok(session)
     })
+}
+
+/// The kinds the client opens itself for the mod that holds them (round A6): the Start key's menu and the chat line.
+pub(crate) const CLIENT_KINDS: [&str; 2] = ["start_menu", "chat_entry"];
+
+/// The client opens (or, if it is already open, refreshes) `vm`'s session of a client-opened kind with its data.
+/// `opened_from` is `"key"` (the player's key or pad button) or `"game"` (a game window returning to it).
+pub(crate) fn open_client(
+    vm: u64,
+    addon: &str,
+    kind: &str,
+    opened_from: &str,
+    data: serde_json::Value,
+) -> Session {
+    with(|s| {
+        s.next_revision += 1;
+        let revision = s.next_revision;
+        if let Some(existing) = s.sessions.iter_mut().find(|x| x.vm == vm && x.kind == kind) {
+            existing.revision = revision;
+            existing.data = Some(data);
+            let session = existing.clone();
+            emit_changed(&session);
+            return session;
+        }
+        s.next_id += 1;
+        let session = Session {
+            id: format!("ws-{}", s.next_id),
+            kind: kind.into(),
+            vm,
+            addon: addon.into(),
+            origin: "player",
+            opened_from: opened_from.into(),
+            revision,
+            held: None,
+            data: Some(data),
+        };
+        s.sessions.push(session.clone());
+        emit_opened(&session);
+        session
+    })
+}
+
+/// A session of `kind`, whoever holds it.
+pub(crate) fn of_kind(kind: &str) -> Option<Session> {
+    if !is_active() {
+        return None;
+    }
+    with(|s| s.sessions.iter().find(|x| x.kind == kind).cloned())
+}
+
+/// Replaces a session's data (a new revision, told to its mod as `windows.session` with `phase = "changed"`).
+pub(crate) fn set_data(id: &str, data: serde_json::Value) -> bool {
+    with(|s| {
+        let Some(at) = s.sessions.iter().position(|x| x.id == id) else {
+            return false;
+        };
+        s.next_revision += 1;
+        let revision = s.next_revision;
+        let x = &mut s.sessions[at];
+        x.revision = revision;
+        x.data = Some(data);
+        let session = x.clone();
+        emit_changed(&session);
+        true
+    })
+}
+
+/// Ends every session of `kind` (told to its mod with `reason`).
+pub(crate) fn end_kind(kind: &str, reason: &str) -> usize {
+    if !is_active() {
+        return 0;
+    }
+    end_where(reason, |x| x.kind == kind)
+}
+
+fn emit_changed(s: &Session) {
+    let event = json!({
+        "owner": s.vm,
+        "phase": "changed",
+        "ref": s.id,
+        "kind": s.kind,
+        "origin": s.origin,
+        "opened_from": s.opened_from,
+        "revision": s.revision,
+        "reason": serde_json::Value::Null,
+    });
+    queue_event("windows.session", event);
 }
 
 /// `vm`'s session of `kind`, its own window or the corpse, merchant or bank it holds.
@@ -364,6 +465,7 @@ pub(crate) fn sync_held(holders: [Option<(u64, String)>; 3]) {
                             opened_from: "npc".into(),
                             revision: s.next_revision,
                             held: Some(kind),
+                            data: None,
                         };
                         s.sessions.push(session.clone());
                         emit_opened(&session);

@@ -547,6 +547,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 tbl.set("bank", window_takeover::is_taken(TakeoverKind::Bank))?;
                 tbl.set("raid_ready", window_takeover::is_taken(TakeoverKind::RaidReady))?;
                 tbl.set("raid_roll", window_takeover::is_taken(TakeoverKind::RaidRoll))?;
+                tbl.set("start_menu", window_takeover::is_taken(TakeoverKind::StartMenu))?;
+                tbl.set("chat_entry", window_takeover::is_taken(TakeoverKind::ChatEntry))?;
                 tbl.set("holders", holders)?;
                 lua.pack_multi((tbl, Value::Nil))
             }

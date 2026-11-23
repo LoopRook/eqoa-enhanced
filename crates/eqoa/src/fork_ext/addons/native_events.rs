@@ -172,7 +172,7 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("cooldown.ended", "ability ability_id display_key lockout"),
         (
             "chat.message",
-            "seq time text color channel channel_code sender outgoing",
+            "seq time text color channel channel_code sender outgoing kind links",
         ),
         ("chat.history_scroll", "active steps"),
         (

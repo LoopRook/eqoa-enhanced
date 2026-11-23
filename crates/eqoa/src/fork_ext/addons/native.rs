@@ -1118,6 +1118,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_r6a::install(host)?;
     super::native_a3::install(host)?;
     super::native_a1::install(host)?;
+    super::native_a6::install(host)?;
     super::frame_actions::install(host)?;
     super::raid_strips::install(host)?;
     super::map_views::install(host)?;
@@ -1240,6 +1241,13 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.items.Item", "stats") => Some("eqoa.items.ItemStat"),
         ("eqoa.hotbar.Hotbar", "slots") => Some("eqoa.hotbar.HotbarSlot"),
         ("eqoa.chat.ChatMessage", "color") => Some("eqoa.Color"),
+        ("eqoa.chat.ChatMessage", "links") => Some("eqoa.chat.ChatLink"),
+        ("eqoa.windows.Session", "data") => Some("eqoa.windows.SessionData"),
+        ("eqoa.windows.SessionData", "entries") => Some("eqoa.windows.StartEntry"),
+        ("eqoa.windows.StartEntry", "entries") => Some("eqoa.windows.StartEntry"),
+        ("eqoa.windows.SessionData", "links") => Some("eqoa.windows.ChatLink"),
+        ("eqoa.windows.SessionData", "offer") => Some("eqoa.windows.LinkOffer"),
+        ("eqoa.chat.ChatTabs", "tabs") => Some("eqoa.chat.ChatTab"),
         ("eqoa.input.InputState", "pad") => Some("eqoa.input.Pad"),
         ("eqoa.input.Pad", "left" | "right") => Some("eqoa.Vec2"),
         ("eqoa.input.Pad", "raw_left" | "raw_right") => Some("eqoa.input.RawAxes"),
@@ -1361,7 +1369,7 @@ fn install_fields(lua: &Lua) {
         ("eqoa.effects.Effect", "index icon name"),
         (
             "eqoa.chat.ChatMessage",
-            "seq time text color channel channel_code sender outgoing",
+            "seq time text color channel channel_code sender outgoing kind links",
         ),
         (
             "eqoa.combat.CombatHit",

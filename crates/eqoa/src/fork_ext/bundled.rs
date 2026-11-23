@@ -39,6 +39,8 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_target_frame_demo",
     "eqoa_spellbook",
     "eqoa_quest_journal",
+    "eqoa_start_menu",
+    "eqoa_chat",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -58,6 +60,36 @@ pub struct InstallResult {
 }
 
 pub const EMBEDDED_FILES: &[BundledFile] = &[
+    BundledFile {
+        path: "eqoa_start_menu/mod.json",
+        package: "eqoa_start_menu",
+        data: include_bytes!("../../../../bundled-mods/eqoa_start_menu/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_start_menu/main.lua",
+        package: "eqoa_start_menu",
+        data: include_bytes!("../../../../bundled-mods/eqoa_start_menu/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_start_menu/README.md",
+        package: "eqoa_start_menu",
+        data: include_bytes!("../../../../bundled-mods/eqoa_start_menu/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_chat/mod.json",
+        package: "eqoa_chat",
+        data: include_bytes!("../../../../bundled-mods/eqoa_chat/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_chat/main.lua",
+        package: "eqoa_chat",
+        data: include_bytes!("../../../../bundled-mods/eqoa_chat/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_chat/README.md",
+        package: "eqoa_chat",
+        data: include_bytes!("../../../../bundled-mods/eqoa_chat/README.md"),
+    },
     BundledFile {
         path: "eqoa_round_minimap/main.lua",
         package: "eqoa_round_minimap",

@@ -61,7 +61,9 @@ pub(crate) const SEARCH: (&str, &str) = ("search", "Player Search");
 pub(crate) const TYPING: (&str, &str) = ("typing", "Chat");
 pub(crate) const RAID_READY: (&str, &str) = ("raid_ready", "Ready Check");
 pub(crate) const RAID_ROLL: (&str, &str) = ("raid_roll", "Loot Roll");
-const OVERLAYS: [(&str, &str); 6] = [INVENTORY, MAP, SEARCH, TYPING, RAID_READY, RAID_ROLL];
+/// Round A6: the chat line the Enter key opens, as a window a mod can hold (the game's edit box, chat purpose only).
+pub(crate) const CHAT_ENTRY: (&str, &str) = ("chat_entry", "Chat Entry");
+const OVERLAYS: [(&str, &str); 7] = [INVENTORY, MAP, SEARCH, TYPING, RAID_READY, RAID_ROLL, CHAT_ENTRY];
 
 /// The `eqoa` mode name of a native mode ID; `"other"` for an ID no window owns.
 pub(crate) fn mode_name(mode: i32) -> &'static str {
@@ -98,7 +100,7 @@ pub(super) fn is_view(kind: &str) -> bool {
     matches!(
         kind,
         "inventory" | "spellbook" | "quest_log" | "trainer" | "mastery"
-            | "recipe_book" | "experiment" | "start_menu" | "map"
+            | "recipe_book" | "experiment" | "start_menu" | "map" | "chat_entry"
     )
 }
 
