@@ -23,8 +23,20 @@ mod a1_play;
 mod a6_play;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "a7_play.rs"]
+mod a7_play;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "a7_play_tests.rs"]
+mod a7_play_tests;
+
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "a2_play.rs"]
 mod a2_play;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "a8_play.rs"]
+mod a8_play;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "map_mod_tests.rs"]
@@ -109,6 +121,7 @@ pub(crate) enum BrokerReply {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct GameEventCapture {
     api: api_capture::ChangeCapture,
+    a7: a7_play::EventNote,
     broker_reply: Option<BrokerReply>,
     loot_inv_add: Option<(i64, i64)>,
 }
@@ -126,6 +139,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
     // round A2: what a dialog or offer this packet brings looks like before the game handles it
     a2_play::pre_event(play, event);
     let api = api_capture::begin_game_event(play, event);
+    let a7 = a7_play::begin_event(play, event);
     if let net::session::Event::MasterLoot(m) = event {
         crate::fork_ext::addons::action_broker::set_master_loot(m.is_some());
         crate::fork_ext::addons::raid_strips::set_master_loot_detail(m.clone());
@@ -261,6 +275,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
     };
     GameEventCapture {
         api,
+        a7,
         broker_reply,
         loot_inv_add,
     }
@@ -279,6 +294,7 @@ pub(crate) fn divert_event(_: &mut Play) {}
 pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
     MODE_BEFORE_EVENT.with(|m| m.set(-1));
     api_capture::end_game_event(play, capture.api);
+    a7_play::end_event(play, capture.a7);
     if let Some((item_id, qty)) = capture.loot_inv_add {
         api_capture::items::note_loot_inv_add(item_id, qty);
     }
@@ -821,9 +837,12 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         sync_hidden_sessions(_play);
+        a7_play::hide_taken_requests(_play);
         a1_play::tick(_play);
         a6_play::tick(_play);
+        a7_play::tick(_play);
         a2_play::tick(_play);
+        a8_play::tick(_play, _game_step);
         api_capture::a5::tick(_play);
         if crate::fork_ext::addons::native_core::capture_requested()
             || crate::fork_ext::addons::window_takeover::has_activity()
@@ -1046,9 +1065,29 @@ pub(super) fn dropped(_play: &mut Play) {
     // a mod disabled since the last game step: its pins go before the world does (a logout)
     #[cfg(not(target_arch = "wasm32"))]
     drain_released_waypoints(_play);
-    // round A1: no mod window, question or controller focus outlives the world
+    // round A1 / A7: no mod window, held request, question or controller focus outlives the world
     #[cfg(not(target_arch = "wasm32"))]
-    a1_play::play_dropped(_play.quit || _play.disconnected.is_some());
+    {
+        let leaving = _play.quit || _play.disconnected.is_some();
+        a7_play::play_dropped(_play, leaving);
+        a1_play::play_dropped(leaving);
+    }
+    // round A8: nothing of a mod's crafting window is left to read
+    #[cfg(not(target_arch = "wasm32"))]
+    a8_play::dropped();
+}
+
+/// Round A8: the server's crafting reply (0x1102), offered to a mod's crafting window before the game's own
+/// reading, which takes it only while the game's recipe book or experiment is up (`a8_play::reply`). True when a
+/// mod's window took it.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn craft_reply(play: &mut Play, data: &[u8]) -> bool {
+    a8_play::reply(play, data)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn craft_reply(_: &mut Play, _: &[u8]) -> bool {
+    false
 }
 
 /// Clears the pins disabled mods still own, once the map has read the window's pins; until then the
@@ -3240,6 +3279,8 @@ fn dispatch_broker_action(
         ActionKind::Frame(action) => api_capture::a3::dispatch(play, action),
         ActionKind::A1(action) => a1_play::dispatch(play, action),
         ActionKind::A6(action) => a6_play::dispatch(play, action),
+        ActionKind::A8(action) => a8_play::dispatch(play, action),
+        ActionKind::A7(action) => a7_play::dispatch(play, action),
         ActionKind::A5(action) => api_capture::a5::dispatch(play, action),
         ActionKind::DropQuest { .. }
         | ActionKind::MasteryShare { .. }
@@ -4423,6 +4464,7 @@ fn weapon_sets_requests(play: &mut Play, ready: bool) {
 pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        a7_play::hide_taken_requests(play);
         let options_closed =
             if crate::fork_ext::addons::take_close_options_on_open() && play.mode == 34 {
                 play.mode = 0;

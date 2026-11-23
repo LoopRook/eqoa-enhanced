@@ -3867,6 +3867,7 @@ impl Play {
                 }
                 Event::Opcode { op: 0x007C, data } => self.quests.recv_add(&data),
                 // VIClientPart3834C::Recv1102
+                Event::Opcode { op: 0x1102, data } if fork_hooks::craft_reply(self, &data) => {}
                 Event::Opcode { op: 0x1102, data } => {
                     let modes = crate::craft::Modes { recipe: self.mode == 6, experiment: self.mode == 37 };
                     let words = self.words.clone().unwrap_or_default();

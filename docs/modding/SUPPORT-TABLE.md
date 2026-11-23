@@ -52,6 +52,14 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.chat_line` | supported | 2 |  |
 | `eqoa.actions.close_window` | supported | 6 |  |
 | `eqoa.actions.command` | supported | 6 |  |
+| `eqoa.actions.craft_combine` | supported | 8 |  |
+| `eqoa.actions.craft_fill` | supported | 8 |  |
+| `eqoa.actions.craft_inspect` | supported | 8 |  |
+| `eqoa.actions.craft_keep` | supported | 8 |  |
+| `eqoa.actions.craft_list` | supported | 8 |  |
+| `eqoa.actions.craft_tray_add` | supported | 8 |  |
+| `eqoa.actions.craft_tray_clear` | supported | 8 |  |
+| `eqoa.actions.craft_tray_remove` | supported | 8 |  |
 | `eqoa.actions.cycle_target` | supported | 6 |  |
 | `eqoa.actions.destroy` | supported | 2 |  |
 | `eqoa.actions.dialog_answer` | supported | 6 |  |
@@ -59,8 +67,21 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.emote` | supported | 8 |  |
 | `eqoa.actions.equip` | supported | 6 |  |
 | `eqoa.actions.follow` | supported | 6 |  |
+| `eqoa.actions.friend_accept` | supported | 8 |  |
+| `eqoa.actions.friend_add` | supported | 8 |  |
+| `eqoa.actions.friend_refuse` | supported | 8 |  |
+| `eqoa.actions.friend_remove` | supported | 8 |  |
 | `eqoa.actions.group_invite` | supported | 8 |  |
+| `eqoa.actions.guild_accept` | supported | 8 |  |
+| `eqoa.actions.guild_demote` | supported | 8 |  |
+| `eqoa.actions.guild_invite` | supported | 8 |  |
+| `eqoa.actions.guild_kick` | supported | 8 |  |
+| `eqoa.actions.guild_promote` | supported | 8 |  |
+| `eqoa.actions.guild_refuse` | supported | 8 |  |
+| `eqoa.actions.guild_set_motd` | supported | 8 |  |
 | `eqoa.actions.hide_look` | supported | 2 |  |
+| `eqoa.actions.ignore_add` | supported | 8 |  |
+| `eqoa.actions.ignore_remove` | supported | 8 |  |
 | `eqoa.actions.input_text` | supported | 6 |  |
 | `eqoa.actions.interact` | supported | 6 |  |
 | `eqoa.actions.jump` | supported | 8 |  |
@@ -186,6 +207,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.cooldowns` | supported | 2 |  |
 | `eqoa.cooldowns.get` | supported | 2 |  |
 
+## eqoa.craft
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.craft` | supported | 8 |  |
+| `eqoa.craft.get` | supported | 8 |  |
+
 ## eqoa.effects
 
 | Path | Status | Since round | Reason |
@@ -270,6 +298,14 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.group` | supported | 2 |  |
 | `eqoa.group.get` | supported | 2 |  |
 | `eqoa.group.raid_roles` | supported | 8 |  |
+
+## eqoa.guild
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.guild` | supported | 8 |  |
+| `eqoa.guild.get` | supported | 8 |  |
+| `eqoa.guild.invite` | supported | 8 |  |
 
 ## eqoa.hotbar
 
@@ -400,6 +436,16 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.items.stats.str` | supported | 5 |  |
 | `eqoa.items.stats.wis` | supported | 5 |  |
 
+## eqoa.lfg
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.lfg` | supported | 8 |  |
+| `eqoa.lfg.get` | supported | 8 |  |
+| `eqoa.lfg.register` | supported | 8 |  |
+| `eqoa.lfg.search` | supported | 8 |  |
+| `eqoa.lfg.unregister` | supported | 8 |  |
+
 ## eqoa.log
 
 | Path | Status | Since round | Reason |
@@ -523,6 +569,15 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.settings.on_save` | supported | 2 |  |
 | `eqoa.settings.save` | supported | 2 |  |
 
+## eqoa.social
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.social` | supported | 8 |  |
+| `eqoa.social.friend_request` | supported | 8 |  |
+| `eqoa.social.friends` | supported | 8 |  |
+| `eqoa.social.ignored` | supported | 8 |  |
+
 ## eqoa.sound
 
 | Path | Status | Since round | Reason |
@@ -561,6 +616,14 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.textures.load` | supported | 2 |  |
 | `eqoa.textures.release` | supported | 2 |  |
 | `eqoa.textures.rgba` | supported | 2 |  |
+
+## eqoa.who
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.who` | supported | 8 |  |
+| `eqoa.who.get` | supported | 8 |  |
+| `eqoa.who.request` | supported | 8 |  |
 
 ## eqoa.windows
 
@@ -611,12 +674,17 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.entity.changed` | supported | 2 |  |
 | `eqoa.events.entity.removed` | supported | 2 |  |
 | `eqoa.events.events.dropped` | supported | 2 |  |
+| `eqoa.events.friends.changed` | supported | 8 |  |
 | `eqoa.events.group.changed` | supported | 2 |  |
 | `eqoa.events.guide.lost` | supported | 4 |  |
+| `eqoa.events.guild.changed` | supported | 8 |  |
 | `eqoa.events.hotbar.changed` | supported | 2 |  |
+| `eqoa.events.ignored.changed` | supported | 8 |  |
 | `eqoa.events.input.key` | supported | 2 |  |
 | `eqoa.events.input.pad` | supported | 2 |  |
 | `eqoa.events.inventory.changed` | supported | 5 |  |
+| `eqoa.events.lfg.changed` | supported | 8 |  |
+| `eqoa.events.lfg.result` | supported | 8 |  |
 | `eqoa.events.loot.changed` | supported | 5 |  |
 | `eqoa.events.map.changed` | supported | 4 |  |
 | `eqoa.events.mastery.changed` | supported | 6 |  |
@@ -636,6 +704,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.state.reset` | supported | 2 |  |
 | `eqoa.events.target.changed` | supported | 2 |  |
 | `eqoa.events.timer` | supported | 2 |  |
+| `eqoa.events.who.result` | supported | 8 |  |
 | `eqoa.events.windows.changed` | supported | 6 |  |
 | `eqoa.events.windows.key` | supported | 8 |  |
 | `eqoa.events.windows.session` | supported | 8 |  |
@@ -795,6 +864,64 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.cooldowns.Cooldown.estimated_remaining` | supported | 2 |  |
 | `eqoa.cooldowns.Cooldown.lockout` | supported | 2 |  |
 | `eqoa.cooldowns.Cooldown.started_at` | supported | 2 |  |
+| `eqoa.craft.Detail` | supported | 8 |  |
+| `eqoa.craft.Detail.count` | supported | 8 |  |
+| `eqoa.craft.Detail.description` | supported | 8 |  |
+| `eqoa.craft.Detail.ingredients` | supported | 8 |  |
+| `eqoa.craft.Detail.level` | supported | 8 |  |
+| `eqoa.craft.Detail.name` | supported | 8 |  |
+| `eqoa.craft.Detail.rarity` | supported | 8 |  |
+| `eqoa.craft.Detail.recipe` | supported | 8 |  |
+| `eqoa.craft.Detail.tools` | supported | 8 |  |
+| `eqoa.craft.Ingredient` | supported | 8 |  |
+| `eqoa.craft.Ingredient.have` | supported | 8 |  |
+| `eqoa.craft.Ingredient.name` | supported | 8 |  |
+| `eqoa.craft.Ingredient.need` | supported | 8 |  |
+| `eqoa.craft.Item` | supported | 8 |  |
+| `eqoa.craft.Item.id` | supported | 8 |  |
+| `eqoa.craft.Item.in_tray` | supported | 8 |  |
+| `eqoa.craft.Item.name` | supported | 8 |  |
+| `eqoa.craft.Item.quantity` | supported | 8 |  |
+| `eqoa.craft.Item.slot` | supported | 8 |  |
+| `eqoa.craft.Notice` | supported | 8 |  |
+| `eqoa.craft.Notice.seq` | supported | 8 |  |
+| `eqoa.craft.Notice.text` | supported | 8 |  |
+| `eqoa.craft.Question` | supported | 8 |  |
+| `eqoa.craft.Question.recipe` | supported | 8 |  |
+| `eqoa.craft.Question.text` | supported | 8 |  |
+| `eqoa.craft.Recipe` | supported | 8 |  |
+| `eqoa.craft.Recipe.component` | supported | 8 |  |
+| `eqoa.craft.Recipe.component_name` | supported | 8 |  |
+| `eqoa.craft.Recipe.difficulty` | supported | 8 |  |
+| `eqoa.craft.Recipe.difficulty_name` | supported | 8 |  |
+| `eqoa.craft.Recipe.id` | supported | 8 |  |
+| `eqoa.craft.Recipe.level` | supported | 8 |  |
+| `eqoa.craft.Recipe.name` | supported | 8 |  |
+| `eqoa.craft.Recipe.order` | supported | 8 |  |
+| `eqoa.craft.Recipe.skill` | supported | 8 |  |
+| `eqoa.craft.Skill` | supported | 8 |  |
+| `eqoa.craft.Skill.id` | supported | 8 |  |
+| `eqoa.craft.Skill.level` | supported | 8 |  |
+| `eqoa.craft.Skill.name` | supported | 8 |  |
+| `eqoa.craft.Skill.rank` | supported | 8 |  |
+| `eqoa.craft.State` | supported | 8 |  |
+| `eqoa.craft.State.detail` | supported | 8 |  |
+| `eqoa.craft.State.items` | supported | 8 |  |
+| `eqoa.craft.State.listed_skill` | supported | 8 |  |
+| `eqoa.craft.State.notice` | supported | 8 |  |
+| `eqoa.craft.State.pending` | supported | 8 |  |
+| `eqoa.craft.State.question` | supported | 8 |  |
+| `eqoa.craft.State.recipes` | supported | 8 |  |
+| `eqoa.craft.State.revision` | supported | 8 |  |
+| `eqoa.craft.State.skills` | supported | 8 |  |
+| `eqoa.craft.State.tray` | supported | 8 |  |
+| `eqoa.craft.Tool` | supported | 8 |  |
+| `eqoa.craft.Tool.have` | supported | 8 |  |
+| `eqoa.craft.Tool.name` | supported | 8 |  |
+| `eqoa.craft.TrayItem` | supported | 8 |  |
+| `eqoa.craft.TrayItem.id` | supported | 8 |  |
+| `eqoa.craft.TrayItem.name` | supported | 8 |  |
+| `eqoa.craft.TrayItem.slot` | supported | 8 |  |
 | `eqoa.effects.Buff` | supported | 8 |  |
 | `eqoa.effects.Buff.description` | supported | 8 |  |
 | `eqoa.effects.Buff.icon` | supported | 8 |  |
@@ -963,6 +1090,9 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.events.dropped.data.first_seq` | supported | 2 |  |
 | `eqoa.events.events.dropped.data.last_seq` | supported | 2 |  |
 | `eqoa.events.events.dropped.data.streams` | supported | 2 |  |
+| `eqoa.events.friends.changed.data.after` | supported | 8 |  |
+| `eqoa.events.friends.changed.data.before` | supported | 8 |  |
+| `eqoa.events.friends.changed.data.changed` | supported | 8 |  |
 | `eqoa.events.group.changed.data.after` | supported | 2 |  |
 | `eqoa.events.group.changed.data.before` | supported | 2 |  |
 | `eqoa.events.group.changed.data.changed` | supported | 2 |  |
@@ -971,9 +1101,15 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.guide.lost.data.owner` | supported | 4 |  |
 | `eqoa.events.guide.lost.data.reason` | supported | 4 |  |
 | `eqoa.events.guide.lost.data.world_id` | supported | 4 |  |
+| `eqoa.events.guild.changed.data.after` | supported | 8 |  |
+| `eqoa.events.guild.changed.data.before` | supported | 8 |  |
+| `eqoa.events.guild.changed.data.changed` | supported | 8 |  |
 | `eqoa.events.hotbar.changed.data.after` | supported | 2 |  |
 | `eqoa.events.hotbar.changed.data.before` | supported | 2 |  |
 | `eqoa.events.hotbar.changed.data.changed` | supported | 2 |  |
+| `eqoa.events.ignored.changed.data.after` | supported | 8 |  |
+| `eqoa.events.ignored.changed.data.before` | supported | 8 |  |
+| `eqoa.events.ignored.changed.data.changed` | supported | 8 |  |
 | `eqoa.events.input.key.data.combo` | supported | 7 |  |
 | `eqoa.events.input.key.data.down` | supported | 2 |  |
 | `eqoa.events.input.key.data.key` | supported | 2 |  |
@@ -986,6 +1122,11 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.inventory.changed.data.before` | supported | 5 |  |
 | `eqoa.events.inventory.changed.data.cause` | supported | 5 |  |
 | `eqoa.events.inventory.changed.data.changed` | supported | 5 |  |
+| `eqoa.events.lfg.changed.data.after` | supported | 8 |  |
+| `eqoa.events.lfg.changed.data.before` | supported | 8 |  |
+| `eqoa.events.lfg.changed.data.changed` | supported | 8 |  |
+| `eqoa.events.lfg.result.data.count` | supported | 8 |  |
+| `eqoa.events.lfg.result.data.entries` | supported | 8 |  |
 | `eqoa.events.loot.changed.data.after` | supported | 5 |  |
 | `eqoa.events.loot.changed.data.before` | supported | 5 |  |
 | `eqoa.events.loot.changed.data.cause` | supported | 5 |  |
@@ -1039,6 +1180,9 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.target.changed.data.after` | supported | 2 |  |
 | `eqoa.events.target.changed.data.before` | supported | 2 |  |
 | `eqoa.events.timer.data.token` | supported | 2 |  |
+| `eqoa.events.who.result.data.count` | supported | 8 |  |
+| `eqoa.events.who.result.data.entries` | supported | 8 |  |
+| `eqoa.events.who.result.data.received` | supported | 8 |  |
 | `eqoa.events.windows.changed.data.after` | supported | 6 |  |
 | `eqoa.events.windows.changed.data.before` | supported | 6 |  |
 | `eqoa.events.windows.changed.data.changed` | supported | 6 |  |
@@ -1111,6 +1255,36 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.group.RaidRole.merc` | supported | 8 |  |
 | `eqoa.group.RaidRole.name` | supported | 8 |  |
 | `eqoa.group.RaidRole.role` | supported | 8 |  |
+| `eqoa.guild.Guild` | supported | 8 |  |
+| `eqoa.guild.Guild.can_invite` | supported | 8 |  |
+| `eqoa.guild.Guild.can_set_motd` | supported | 8 |  |
+| `eqoa.guild.Guild.in_guild` | supported | 8 |  |
+| `eqoa.guild.Guild.members` | supported | 8 |  |
+| `eqoa.guild.Guild.motd` | supported | 8 |  |
+| `eqoa.guild.Guild.name` | supported | 8 |  |
+| `eqoa.guild.Guild.self_rank` | supported | 8 |  |
+| `eqoa.guild.Guild.self_rank_name` | supported | 8 |  |
+| `eqoa.guild.Guild.show_chat` | supported | 8 |  |
+| `eqoa.guild.GuildInvite` | supported | 8 |  |
+| `eqoa.guild.GuildInvite.duration` | supported | 8 |  |
+| `eqoa.guild.GuildInvite.guild` | supported | 8 |  |
+| `eqoa.guild.GuildInvite.inviter` | supported | 8 |  |
+| `eqoa.guild.GuildInvite.inviter_id` | supported | 8 |  |
+| `eqoa.guild.GuildInvite.seconds_remaining` | supported | 8 |  |
+| `eqoa.guild.GuildMember` | supported | 8 |  |
+| `eqoa.guild.GuildMember.can_demote` | supported | 8 |  |
+| `eqoa.guild.GuildMember.can_kick` | supported | 8 |  |
+| `eqoa.guild.GuildMember.can_promote` | supported | 8 |  |
+| `eqoa.guild.GuildMember.class_id` | supported | 8 |  |
+| `eqoa.guild.GuildMember.class_name` | supported | 8 |  |
+| `eqoa.guild.GuildMember.id` | supported | 8 |  |
+| `eqoa.guild.GuildMember.level` | supported | 8 |  |
+| `eqoa.guild.GuildMember.name` | supported | 8 |  |
+| `eqoa.guild.GuildMember.online` | supported | 8 |  |
+| `eqoa.guild.GuildMember.race_id` | supported | 8 |  |
+| `eqoa.guild.GuildMember.race_name` | supported | 8 |  |
+| `eqoa.guild.GuildMember.rank` | supported | 8 |  |
+| `eqoa.guild.GuildMember.rank_name` | supported | 8 |  |
 | `eqoa.hotbar.Hotbar` | supported | 2 |  |
 | `eqoa.hotbar.Hotbar.index` | supported | 2 |  |
 | `eqoa.hotbar.Hotbar.kind` | supported | 2 |  |
@@ -1284,6 +1458,25 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.items.Tab.index` | supported | 5 |  |
 | `eqoa.items.Tab.key` | supported | 5 |  |
 | `eqoa.items.Tab.label` | supported | 5 |  |
+| `eqoa.lfg.LfgEntry` | supported | 8 |  |
+| `eqoa.lfg.LfgEntry.class_id` | supported | 8 |  |
+| `eqoa.lfg.LfgEntry.class_name` | supported | 8 |  |
+| `eqoa.lfg.LfgEntry.id` | supported | 8 |  |
+| `eqoa.lfg.LfgEntry.level` | supported | 8 |  |
+| `eqoa.lfg.LfgEntry.name` | supported | 8 |  |
+| `eqoa.lfg.LfgEntry.position` | supported | 8 |  |
+| `eqoa.lfg.LfgEntry.race_id` | supported | 8 |  |
+| `eqoa.lfg.LfgEntry.race_name` | supported | 8 |  |
+| `eqoa.lfg.LfgEntry.world_id` | supported | 8 |  |
+| `eqoa.lfg.LfgState` | supported | 8 |  |
+| `eqoa.lfg.LfgState.available` | supported | 8 |  |
+| `eqoa.lfg.LfgState.busy` | supported | 8 |  |
+| `eqoa.lfg.LfgState.default_max_level` | supported | 8 |  |
+| `eqoa.lfg.LfgState.default_min_level` | supported | 8 |  |
+| `eqoa.lfg.LfgState.entries` | supported | 8 |  |
+| `eqoa.lfg.LfgState.invites_open` | supported | 8 |  |
+| `eqoa.lfg.LfgState.members_invite` | supported | 8 |  |
+| `eqoa.lfg.LfgState.registered` | supported | 8 |  |
 | `eqoa.map.Bounds` | supported | 4 |  |
 | `eqoa.map.Bounds.x_max` | supported | 4 |  |
 | `eqoa.map.Bounds.x_min` | supported | 4 |  |
@@ -1526,6 +1719,24 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.raid.ReadyCheckSession.kind` | supported | 7 |  |
 | `eqoa.raid.ReadyCheckSession.origin` | supported | 7 |  |
 | `eqoa.raid.ReadyCheckSession.revision` | supported | 7 |  |
+| `eqoa.social.Friend` | supported | 8 |  |
+| `eqoa.social.Friend.class_id` | supported | 8 |  |
+| `eqoa.social.Friend.class_name` | supported | 8 |  |
+| `eqoa.social.Friend.id` | supported | 8 |  |
+| `eqoa.social.Friend.level` | supported | 8 |  |
+| `eqoa.social.Friend.name` | supported | 8 |  |
+| `eqoa.social.Friend.online` | supported | 8 |  |
+| `eqoa.social.Friend.race_id` | supported | 8 |  |
+| `eqoa.social.Friend.race_name` | supported | 8 |  |
+| `eqoa.social.Friend.world` | supported | 8 |  |
+| `eqoa.social.FriendRequest` | supported | 8 |  |
+| `eqoa.social.FriendRequest.duration` | supported | 8 |  |
+| `eqoa.social.FriendRequest.id` | supported | 8 |  |
+| `eqoa.social.FriendRequest.name` | supported | 8 |  |
+| `eqoa.social.FriendRequest.seconds_remaining` | supported | 8 |  |
+| `eqoa.social.Ignored` | supported | 8 |  |
+| `eqoa.social.Ignored.id` | supported | 8 |  |
+| `eqoa.social.Ignored.name` | supported | 8 |  |
 | `eqoa.target.Consider` | supported | 8 |  |
 | `eqoa.target.Consider.code` | supported | 8 |  |
 | `eqoa.target.Consider.color` | supported | 8 |  |
@@ -1539,6 +1750,18 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.textures.TextureInfo.height` | supported | 2 |  |
 | `eqoa.textures.TextureInfo.texture` | supported | 2 |  |
 | `eqoa.textures.TextureInfo.width` | supported | 2 |  |
+| `eqoa.who.WhoEntry` | supported | 8 |  |
+| `eqoa.who.WhoEntry.class_id` | supported | 8 |  |
+| `eqoa.who.WhoEntry.class_name` | supported | 8 |  |
+| `eqoa.who.WhoEntry.id` | supported | 8 |  |
+| `eqoa.who.WhoEntry.level` | supported | 8 |  |
+| `eqoa.who.WhoEntry.name` | supported | 8 |  |
+| `eqoa.who.WhoEntry.race_id` | supported | 8 |  |
+| `eqoa.who.WhoEntry.race_name` | supported | 8 |  |
+| `eqoa.who.WhoState` | supported | 8 |  |
+| `eqoa.who.WhoState.entries` | supported | 8 |  |
+| `eqoa.who.WhoState.pending` | supported | 8 |  |
+| `eqoa.who.WhoState.received` | supported | 8 |  |
 | `eqoa.windows.ButtonHint` | supported | 6 |  |
 | `eqoa.windows.ButtonHint.button` | supported | 6 |  |
 | `eqoa.windows.ButtonHint.label` | supported | 6 |  |

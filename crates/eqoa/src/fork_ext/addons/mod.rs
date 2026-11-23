@@ -1,6 +1,6 @@
 // Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 //! Native-only, explicitly opted-in Forge feasibility host.
-mod bridge;
+pub(crate) mod bridge;
 #[path = "../modtools.rs"]
 pub mod modtools;
 mod capture;
@@ -118,12 +118,17 @@ pub(crate) mod native_a1;
 pub(crate) mod native_a6;
 #[cfg(test)]
 mod a6_tests;
+pub(crate) mod native_a8;
+#[cfg(test)]
+mod a8_tests;
+pub(crate) mod native_a7;
 pub(crate) mod native_a5;
 #[cfg(test)]
 mod a1_tests;
 #[cfg(test)]
 mod a1_mod_tests;
 #[cfg(test)]
+mod a7_mod_tests;
 mod a2_mod_tests;
 mod a5_mod_tests;
 pub(crate) mod window_sessions;

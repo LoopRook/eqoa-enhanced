@@ -132,6 +132,12 @@ const EVENTS: &[&str] = &[
     "windows.session",
     "windows.key",
     "confirm.closed",
+    "friends.changed",
+    "ignored.changed",
+    "guild.changed",
+    "who.result",
+    "lfg.result",
+    "lfg.changed",
 ];
 fn install_event_fields(lua: &mlua::Lua) {
     for (name, fields) in [
@@ -201,6 +207,12 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("windows.session", "owner phase ref kind origin opened_from revision reason data"),
         ("windows.key", "owner ref key down"),
         ("confirm.closed", "owner confirm kind answer detail"),
+        ("friends.changed", "before after changed"),
+        ("ignored.changed", "before after changed"),
+        ("guild.changed", "before after changed"),
+        ("who.result", "entries count received"),
+        ("lfg.result", "entries count"),
+        ("lfg.changed", "before after changed"),
     ] {
         let payload = format!("eqoa.events.{name}.data");
         for field in fields.split_whitespace() {
@@ -230,7 +242,8 @@ fn event_round(name: &str) -> u8 {
         "action.result" | "batch.progress" | "batch.result" | "quests.changed"
         | "camera.changed" | "windows.changed" | "mastery.changed" => 6,
         "buffs.changed" | "cast.started" | "cast.ended" | "quests.goals_changed" | "windows.session"
-        | "windows.key" | "confirm.closed" => 8,
+        | "windows.key" | "confirm.closed" | "friends.changed" | "ignored.changed" | "guild.changed"
+        | "who.result" | "lfg.result" | "lfg.changed" => 8,
         _ => 2,
     }
 }

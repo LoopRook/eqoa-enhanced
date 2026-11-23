@@ -1016,6 +1016,24 @@ fn performance_busy_world_zero_addons_frame_and_packet_allocation_bound() {
             input::observe_report(&mut report, true, true);
         }
     });
+    // the game's own friend request and guild invitation boxes up, no mod loaded: nothing is copied or built for them
+    p.buddies.request = 5;
+    p.buddies.request_name = "Vex".into();
+    p.guild_cmds.inviter = 6;
+    p.guild_cmds.name = "Garr".into();
+    p.guild_cmds.guild = "Silver Hand".into();
+    let mut box_allocs = 0;
+    for mode in [17, 20] {
+        p.mode = mode;
+        let (_, _, a, _) = measure(|| {
+            for _ in 0..300 {
+                begin_iteration(&mut p, true);
+                std::hint::black_box(health_hidden(&p));
+            }
+        });
+        box_allocs += a;
+    }
+    p.mode = 13;
     eprintln!(
         "PERF zero-addons menu_frame_us={:.3} allocs/menu_frame={:.1} bytes/menu_frame={:.1}",
         menu_time.as_secs_f64() * 1e6 / 300.,
@@ -1072,6 +1090,7 @@ fn performance_busy_world_zero_addons_frame_and_packet_allocation_bound() {
     );
     assert_eq!(key_allocs, 0, "zero-addon key allocations");
     assert_eq!(menu_allocs, 0, "zero-addon menu allocations");
+    assert_eq!(box_allocs, 0, "zero-addon request box allocations");
     assert_eq!(frame_allocs, 0, "zero-addon frame allocations");
     assert_eq!(event_allocs, 0, "zero-addon entity packet allocations");
     assert_eq!(chat_allocs, 0, "zero-addon chat allocations");

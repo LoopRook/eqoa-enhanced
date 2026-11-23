@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_crafting",
+  "name": "EQOA Crafting",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "provides": [
+    "Crafting window (Shift+R)"
+  ],
+  "capabilities": [
+    "eqoa.craft.get",
+    "eqoa.actions.craft_list",
+    "eqoa.actions.craft_inspect",
+    "eqoa.actions.craft_tray_add",
+    "eqoa.actions.craft_tray_remove",
+    "eqoa.actions.craft_tray_clear",
+    "eqoa.actions.craft_fill",
+    "eqoa.actions.craft_combine",
+    "eqoa.actions.craft_keep",
+    "eqoa.windows.session",
+    "eqoa.log.write",
+    "eqoa.hud.frame",
+    "eqoa.input.bind",
+    "eqoa.input.claim",
+    "eqoa.input.pointer",
+    "eqoa.input.claim_pointer",
+    "eqoa.input.capture_text",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ]
+}

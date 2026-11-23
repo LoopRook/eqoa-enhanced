@@ -42,6 +42,8 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_character",
     "eqoa_dialogs",
     "eqoa_turnin",
+    "eqoa_crafting",
+    "eqoa_social",
     "eqoa_start_menu",
     "eqoa_chat",
 ];
@@ -306,6 +308,21 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_turnin/README.md",
         package: "eqoa_turnin",
         data: include_bytes!("../../../../bundled-mods/eqoa_turnin/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_crafting/mod.json",
+        package: "eqoa_crafting",
+        data: include_bytes!("../../../../bundled-mods/eqoa_crafting/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_crafting/main.lua",
+        package: "eqoa_crafting",
+        data: include_bytes!("../../../../bundled-mods/eqoa_crafting/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_crafting/README.md",
+        package: "eqoa_crafting",
+        data: include_bytes!("../../../../bundled-mods/eqoa_crafting/README.md"),
     },
     BundledFile {
         path: "eqoa_example_hearts/mod.json",
@@ -710,6 +727,21 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_frames/README.md",
         package: "eqoa_frames",
         data: include_bytes!("../../../../bundled-mods/eqoa_frames/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_social/mod.json",
+        package: "eqoa_social",
+        data: include_bytes!("../../../../bundled-mods/eqoa_social/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_social/main.lua",
+        package: "eqoa_social",
+        data: include_bytes!("../../../../bundled-mods/eqoa_social/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_social/README.md",
+        package: "eqoa_social",
+        data: include_bytes!("../../../../bundled-mods/eqoa_social/README.md"),
     },
 ];
 
@@ -1297,6 +1329,8 @@ mod tests {
                 "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin",
+                "eqoa_crafting",
+                "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat"
             ]
@@ -1599,6 +1633,8 @@ mod tests {
                 "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin",
+                "eqoa_crafting",
+                "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat"
             ]
@@ -1654,6 +1690,8 @@ mod tests {
                 "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin",
+                "eqoa_crafting",
+                "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat"
             ]
@@ -1683,6 +1721,8 @@ mod tests {
                 "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin",
+                "eqoa_crafting",
+                "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat"
             ],
@@ -1778,6 +1818,8 @@ mod tests {
                 "eqoa_character",
                 "eqoa_dialogs",
                 "eqoa_turnin",
+                "eqoa_crafting",
+                "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat"
             ],

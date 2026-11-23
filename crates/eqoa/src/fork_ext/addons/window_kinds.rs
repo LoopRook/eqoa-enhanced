@@ -67,8 +67,10 @@ pub(crate) const CHAT_ENTRY: (&str, &str) = ("chat_entry", "Chat Entry");
 pub(crate) const GROUP_INVITE: (&str, &str) = ("group_invite", "Group Invitation");
 pub(crate) const REVIVE_OFFER: (&str, &str) = ("revive_offer", "Resurrection Offer");
 pub(crate) const SUMMON_OFFER: (&str, &str) = ("summon_offer", "Summons");
-const OVERLAYS: [(&str, &str); 10] =
-    [INVENTORY, MAP, SEARCH, TYPING, RAID_READY, RAID_ROLL, CHAT_ENTRY, GROUP_INVITE, REVIVE_OFFER, SUMMON_OFFER];
+pub(crate) const FRIEND_REQUEST: (&str, &str) = ("friend_request", "Friend Request");
+const OVERLAYS: [(&str, &str); 11] = [
+    INVENTORY, MAP, SEARCH, TYPING, RAID_READY, RAID_ROLL, GROUP_INVITE, REVIVE_OFFER, SUMMON_OFFER, FRIEND_REQUEST, CHAT_ENTRY,
+];
 
 /// The `eqoa` mode name of a native mode ID; `"other"` for an ID no window owns.
 pub(crate) fn mode_name(mode: i32) -> &'static str {
@@ -112,6 +114,12 @@ pub(super) fn is_view(kind: &str) -> bool {
 /// Server-pushed raid strips have no helper (`own`) session; a mod replaces them with scope `"all"`.
 pub(super) fn is_strip(kind: &str) -> bool {
     matches!(kind, "raid_ready" | "raid_roll")
+}
+
+/// Server-pushed social prompts (friend request, guild invitation) require scope `"all"`.
+pub(super) fn is_request(kind: &str) -> bool {
+    matches!(kind, "friend_request" | "guild_invite")
+
 }
 
 /// Round A2: NPC dialogs and offers need scope `"all"`: the wire names no speaker, so a dialog cannot be proven to

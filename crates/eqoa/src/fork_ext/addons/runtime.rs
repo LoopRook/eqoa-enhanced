@@ -931,6 +931,22 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
             if !kinds.contains(&"map waypoint") {
                 kinds.push("map waypoint");
             }
+        } else if cap == "eqoa.who.request" {
+            if !kinds.contains(&"who search") {
+                kinds.push("who search");
+            }
+        } else if cap == "eqoa.lfg.search" {
+            if !kinds.contains(&"group search") {
+                kinds.push("group search");
+            }
+        } else if cap == "eqoa.lfg.register" {
+            if !kinds.contains(&"register for group search") {
+                kinds.push("register for group search");
+            }
+        } else if cap == "eqoa.lfg.unregister" {
+            if !kinds.contains(&"unregister from group search") {
+                kinds.push("unregister from group search");
+            }
         } else if cap == "eqoa.actions.*" {
             if !kinds.contains(&"all actions") {
                 kinds.push("all actions");
@@ -941,8 +957,10 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
                 "command" => "command (slash lines)",
                 // its own line (`TEXT_BOXES_LABEL`)
                 "input_text" => continue,
-                // round A1: these never act on their own: the player's Yes is asked first (`asks_first_label`)
-                "destroy" | "drop_quest" => continue,
+                // round A1 / A7: these never act on their own: the player's Yes is asked first (`asks_first_label`)
+                "destroy" | "drop_quest" | "guild_kick" | "friend_accept" | "guild_accept" => continue,
+                // round A8: their own line (`native_a8::crafting_label`)
+                k if k.starts_with("craft_") => continue,
                 // round A5: the same for spending training points and the two Class Mastery steps
                 "train_stats" | "mastery_buy" | "mastery_refund" => continue,
                 "request_factions" => "ask for faction standings",
@@ -1032,6 +1050,7 @@ pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec
         lines.push(TEXT_BOXES_LABEL.into());
     }
     lines.extend(asks_first_label(caps));
+    lines.extend(super::native_a8::crafting_label(caps));
     lines
 }
 
@@ -1042,6 +1061,9 @@ pub(crate) fn asks_first_label(caps: &[String]) -> Option<String> {
     for (name, words) in [
         ("destroy", "destroy an item"),
         ("drop_quest", "drop a quest"),
+        ("guild_kick", "kick a guild member"),
+        ("friend_accept", "accept a friend request"),
+        ("guild_accept", "accept a guild invitation"),
         ("train_stats", "spend training points"),
         ("mastery_buy", "buy a Class Mastery skill"),
         ("mastery_refund", "refund a Class Mastery skill"),
