@@ -273,12 +273,18 @@ fn chat_entry(play: &mut Play, fresh: bool) {
     let Some((vm, addon)) = holder(TakeoverKind::ChatEntry) else { return };
     // an opening made since the last step (a line already open when the mod claimed the kind stays the game's until
     // it closes); the chat purpose only, and not a Who list's Tell (it goes back to the list)
-    if !fresh || play.mode != 2 || play.edit.purpose != CHAT_PURPOSE || play.who_tell.is_some() || !may_divert() {
+    if !fresh || play.mode != 2 || play.edit.purpose != CHAT_PURPOSE {
+        return;
+    }
+    // a line that stays the game's says why in the log (owner test 2026-11-23: Enter typed in the game's box)
+    if play.who_tell.is_some() || !may_divert() {
+        tlog!("chat line stays the game's: who_tell={} may_divert={}", play.who_tell.is_some(), may_divert());
         return;
     }
     // a pad press opened it: the game's line has the pad's soft keyboard and a cancel button; a mod's line takes the
     // whole pad away while it types (`capture_text`), so a pad player is never given one
     if native_a6::pad_recent() {
+        tlog!("chat line stays the game's: a pad button went down in the last steps");
         return;
     }
     CHAT_WAS_OPEN.with(|c| c.set(false));

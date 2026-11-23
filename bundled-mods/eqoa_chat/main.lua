@@ -5,7 +5,11 @@
 -- own item card; the Bag Viewer's Link button puts an item into the line.
 local ui = eqoa.imgui
 
-local W, H, PAD, LINE, ROWS = 330, 150, 6, 12, 8
+local PAD, LINE = 6, 12
+-- The window's size and place are the player's: drag the strip beside the tabs to move it, the corner to size it. They
+-- are kept in this mod's settings, in HUD units (the 640 by 448 picture).
+local HEAD = 10 -- the strip at the top that moves the window
+local DEF_W, DEF_H, MIN_W, MAX_W, MIN_H, MAX_H = 330, HEAD + 22 + 8 * 12, 200, 640, HEAD + 22 + 2 * 12, 300
 local MAX_LINES = 400
 local CHANNELS = {
     { id = "say", label = "Say" }, { id = "group", label = "Group" }, { id = "guild", label = "Guild" },
@@ -35,7 +39,19 @@ local state = {
     lines = {}, notices = {}, tab = "all", own_tabs = false, scroll = 0,
     session = nil, text = "", channel = "say", links = {}, last_offer = 0, note = nil,
     hits = {}, rect = nil, tokens = {}, claim = nil,
+    w = DEF_W, h = DEF_H, lx = 4, ly = nil, drag = nil,
 }
+
+local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
+
+eqoa.settings.on_save(function() return { x = state.lx, y = state.ly, w = state.w, h = state.h } end)
+eqoa.settings.on_load(function(saved)
+    if type(saved) ~= "table" then return end
+    if type(saved.x) == "number" then state.lx = saved.x end
+    if type(saved.y) == "number" then state.ly = saved.y end
+    if type(saved.w) == "number" then state.w = clamp(saved.w, MIN_W, MAX_W) end
+    if type(saved.h) == "number" then state.h = clamp(saved.h, MIN_H, MAX_H) end
+end)
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
@@ -186,7 +202,14 @@ end
 local function pointer_pressed(d)
     if d.button ~= "left" then return end
     for _, h in ipairs(state.hits) do
-        if inside(d.x, d.y, h) and h.run then h.run(); return end
+        if inside(d.x, d.y, h) then
+            if h.drag then
+                state.drag = { kind = h.drag, px = d.x, py = d.y, lx = state.lx, ly = state.eff_ly or state.ly or 0,
+                    w = state.w, h = state.h, age = 0 }
+                return
+            end
+            if h.run then h.run(); return end
+        end
     end
 end
 
@@ -247,11 +270,19 @@ eqoa.events.on("render", function()
     local tab = active_tab()
     local list = visible_lines(tab)
     local entry_h = state.session and 40 or 0
-    local Ht = H + entry_h
-    local x0 = f.offset_x + 4 * f.scale_x
-    local y0 = math.min(dh - Ht * k, f.offset_y + (448 - Ht - 24) * f.scale_y)
+    local W, H, ROWS, Ht, x0, y0
+    local function layout()
+        W, H = state.w, state.h
+        ROWS = math.max(2, math.floor((H - HEAD - 22) / LINE))
+        Ht = H + entry_h
+        local ly = state.ly or (448 - Ht - 24)
+        x0 = clamp(f.offset_x + state.lx * f.scale_x, 0, math.max(0, dw - W * k))
+        y0 = clamp(f.offset_y + ly * f.scale_y, 0, math.max(0, dh - Ht * k))
+        state.eff_ly = ly
+        state.rect = { x = x0, y = y0, w = W * k, h = Ht * k }
+    end
+    layout()
     local function at(x, y) return ImVec2.new(x0 + x * k, y0 + y * k) end
-    state.rect = { x = x0, y = y0, w = W * k, h = Ht * k }
 
     ui.SetNextWindowPos(0, 0)
     ui.SetNextWindowSize(dw, dh)
@@ -259,6 +290,28 @@ eqoa.events.on("render", function()
         + ImGuiWindowFlags.NoMove + ImGuiWindowFlags.NoResize + ImGuiWindowFlags.NoScrollbar
         + ImGuiWindowFlags.NoSavedSettings + ImGuiWindowFlags.NoInputs)
     ui.SetWindowFontScale(k * 10 / 13)
+    -- follow a press that took the move strip or the corner to its release (ImGui's own mouse state)
+    local d = state.drag
+    if d then
+        d.age = d.age + 1
+        if ui.IsMouseDown(0) then
+            d.seen = true
+            local p = eqoa.input.pointer()
+            local dx, dy = p.x - d.px, p.y - d.py
+            if d.kind == "move" then
+                state.lx = d.lx + dx / f.scale_x
+                state.ly = d.ly + dy / f.scale_y
+            else
+                state.w = clamp(d.w + dx / k, MIN_W, MAX_W)
+                state.h = clamp(d.h + dy / k, MIN_H, MAX_H)
+            end
+            layout()
+        elseif d.seen or d.age > 5 then
+            -- let go (or ImGui never saw the press): the place is kept
+            state.drag = nil
+            eqoa.settings.save({ x = state.lx, y = state.ly, w = state.w, h = state.h })
+        end
+    end
     local dl = ui.GetWindowDrawList()
     local c = {
         text = ui.GetColorU32(.91, .91, .91, 1), muted = ui.GetColorU32(.55, .55, .55, 1),
@@ -286,17 +339,25 @@ eqoa.events.on("render", function()
     for _, t in ipairs(tabs()) do
         local tw = ui.CalcTextSize(t.label) / k + 8
         if tx + tw > W - 40 then break end
-        fill(tx, 2, tw, 12, t.id == state.tab and c.on or c.raised)
-        frame(tx, 2, tw, 12, c.border)
-        text(tx + 4, 2, t.label, t.id == state.tab and c.white or c.muted)
-        state.hits[#state.hits + 1] = hit(tx, 2, tw, 12, function() state.tab, state.scroll = t.id, 0 end)
+        fill(tx, HEAD + 2, tw, 12, t.id == state.tab and c.on or c.raised)
+        frame(tx, HEAD + 2, tw, 12, c.border)
+        text(tx + 4, HEAD + 2, t.label, t.id == state.tab and c.white or c.muted)
+        state.hits[#state.hits + 1] = hit(tx, HEAD + 2, tw, 12, function() state.tab, state.scroll = t.id, 0 end)
         tx = tx + tw + 2
     end
     local mode = state.own_tabs and "Mine" or "Styles"
-    fill(W - 38, 2, 36, 12, c.raised)
-    frame(W - 38, 2, 36, 12, c.border)
-    text(W - 34, 2, mode, c.muted)
-    state.hits[#state.hits + 1] = hit(W - 38, 2, 36, 12, function() state.own_tabs, state.tab, state.scroll = not state.own_tabs, "all", 0 end)
+    fill(W - 38, HEAD + 2, 36, 12, c.raised)
+    frame(W - 38, HEAD + 2, 36, 12, c.border)
+    text(W - 34, HEAD + 2, mode, c.muted)
+    state.hits[#state.hits + 1] = hit(W - 38, HEAD + 2, 36, 12, function() state.own_tabs, state.tab, state.scroll = not state.own_tabs, "all", 0 end)
+
+    -- the strip beside the tabs moves the window; the corner sizes it
+    state.hits[#state.hits + 1] = { x = x0, y = y0, w = W * k, h = HEAD * k, drag = "move" }
+    text(W / 2 - 20, 0, "drag to move", c.muted, 60)
+    state.hits[#state.hits + 1] = { x = x0 + (W - 12) * k, y = y0 + (H - 12) * k, w = 12 * k, h = 12 * k, drag = "size" }
+    fill(W - 8, H - 3, 6, 1, c.muted)
+    fill(W - 6, H - 6, 4, 1, c.muted)
+    fill(W - 4, H - 9, 2, 1, c.muted)
 
     -- the lines, newest at the bottom; the wheel scrolls back
     local most = math.max(0, #list - ROWS)
@@ -305,7 +366,7 @@ eqoa.events.on("render", function()
         local index = #list - state.scroll - (ROWS - row)
         local l = list[index]
         if l then
-            local y = 18 + (row - 1) * LINE
+            local y = HEAD + 18 + (row - 1) * LINE
             local body = l.text
             local color = l.kind == "notice" and c.warn or c.text
             if l.color and l.color.r then color = ui.GetColorU32(l.color.r, l.color.g, l.color.b, 1) end
@@ -324,7 +385,7 @@ eqoa.events.on("render", function()
             end
         end
     end
-    if tab.notices and #list == 0 then text(PAD, 18, "Nothing to report", c.muted) end
+    if tab.notices and #list == 0 then text(PAD, HEAD + 18, "Nothing to report", c.muted) end
 
     -- the entry line while the player is typing
     if state.session then

@@ -4,6 +4,9 @@ Off by default. Enable it in Mods & Addons (F10); it shows **Provides: Chat wind
 
 A chat window of this mod's own, bottom left. The game's chat box is hidden while it is on.
 
+- **Move and size.** Drag the thin strip at the top of the window to move it, and its bottom-right corner to size it;
+  the mod remembers where you left it. (The game's box also opens instead of this one if you press a controller
+  button in the same instant; the log then says why.)
 - **Tabs.** **All** shows every line. Then one tab per chat style: **Say, Tell, Group, Guild, Shout, Combat, Loot,
   Rolls, XP, System**, each with only that style's lines. The small **Styles / Mine** button switches the strip to your
   own chat tabs from the game's Options (Extended > UI > Chat Tabs): **Main** and the tabs you made, each showing the
