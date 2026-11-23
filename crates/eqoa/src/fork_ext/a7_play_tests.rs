@@ -59,6 +59,28 @@ fn clear_recorded(p: &mut Play) {
     }
 }
 
+/// Puts every thread-wide piece of state a test here touched back to its baseline when the test ends (also on a
+/// panic). With `--test-threads=1` all tests share one thread, so what this round's tests leave behind (a held
+/// request, an open question, a mod's takeover, the live-features word, the demand flag, the process-wide key table) reaches the next
+/// test, which may belong to another round and does not reset it.
+struct Baseline;
+
+impl Drop for Baseline {
+    fn drop(&mut self) {
+        confirm::cancel_all("test");
+        native_a7::forget();
+        action_broker::reset_all_for_test();
+        ws::reset_for_test();
+        window_takeover::reset_all_for_test();
+        window_takeover::forget_switch_for_test();
+        native_core::fixture_demand(false);
+        // the key table is one process-wide list: a mod's "9" key left in it blocks the next round's test mod
+        crate::fork_ext::bindpage::reset_in_memory();
+        CORE.with(|c| *c.borrow_mut() = Core::default());
+        crate::live::set_features(crate::live::Features(None));
+    }
+}
+
 fn ready() -> Play {
     CORE.with(|c| *c.borrow_mut() = Core::default());
     native_core::fixture_demand(true);
@@ -68,6 +90,7 @@ fn ready() -> Play {
     window_takeover::forget_switch_for_test();
     confirm::cancel_all("test");
     native_a7::forget();
+    crate::fork_ext::bindpage::reset_in_memory();
     // Reset global live-features flags to retail (non-live) baseline before each test.
     crate::live::set_features(crate::live::Features(None));
     let mut p = super::tests::play();
@@ -294,6 +317,7 @@ fn pkt_0840(rows: &[(&str, u8, i32, i32, u32)]) -> Vec<u8> {
 
 #[test]
 fn a7_friends_read_events_and_wire_byte_parity_with_negative_controls() {
+    let _baseline = Baseline;
     let mut p = ready();
     let host = host_all();
     step(&mut p, &host);
@@ -348,6 +372,7 @@ fn a7_friends_read_events_and_wire_byte_parity_with_negative_controls() {
 
 #[test]
 fn a7_ignore_read_events_and_wire_byte_parity_with_negative_controls() {
+    let _baseline = Baseline;
     let mut p = ready();
     let host = host_all();
     step(&mut p, &host);
@@ -398,6 +423,7 @@ fn a7_ignore_read_events_and_wire_byte_parity_with_negative_controls() {
 
 #[test]
 fn a7_guild_roster_motd_rank_actions_wire_parity_and_no_disband_or_quit() {
+    let _baseline = Baseline;
     let mut p = ready();
     let host = host_all();
     step(&mut p, &host);
@@ -474,6 +500,7 @@ fn a7_guild_roster_motd_rank_actions_wire_parity_and_no_disband_or_quit() {
 
 #[test]
 fn a7_guild_kick_asks_a1_confirm_and_only_players_yes_sends_exact_bytes() {
+    let _baseline = Baseline;
     let mut p = ready();
     let host = host_all();
     deliver_op(&mut p, 0x0468, pkt_0468_info("Iron Dawn", ""));
@@ -517,6 +544,7 @@ fn a7_guild_kick_asks_a1_confirm_and_only_players_yes_sends_exact_bytes() {
 
 #[test]
 fn a7_who_request_and_reply_with_stale_serial_negative_control() {
+    let _baseline = Baseline;
     let mut p = ready();
     let host = host_all();
     step(&mut p, &host);
@@ -552,6 +580,7 @@ fn a7_who_request_and_reply_with_stale_serial_negative_control() {
 
 #[test]
 fn a7_lfg_gated_on_non_live_and_wire_parity_on_live_server() {
+    let _baseline = Baseline;
     let mut p = ready();
     let host = host_all();
     step(&mut p, &host);
@@ -615,6 +644,7 @@ fn a7_lfg_gated_on_non_live_and_wire_parity_on_live_server() {
 
 #[test]
 fn a7_group_invite_optional_args_match_native_invite_to_group_bytes() {
+    let _baseline = Baseline;
     let mut p = ready();
     let host = host_all();
     step(&mut p, &host);
@@ -653,6 +683,7 @@ fn a7_group_invite_optional_args_match_native_invite_to_group_bytes() {
 
 #[test]
 fn a7_friend_request_mod_off_control_takeover_45s_timeout_and_confirmed_accept() {
+    let _baseline = Baseline;
     // 1. Control: mod off (no takeover) -> native mode 17 box opens unchanged
     let mut p = ready();
     let host = host_all();
@@ -773,6 +804,7 @@ fn a7_friend_request_mod_off_control_takeover_45s_timeout_and_confirmed_accept()
 
 #[test]
 fn a7_guild_invite_mod_off_control_takeover_45s_timeout_confirm_and_drop_cleanup() {
+    let _baseline = Baseline;
     // 1. Control: mod off -> native mode 20 opens unchanged
     let mut p = ready();
     let _host = host_all();
@@ -861,6 +893,7 @@ fn a7_guild_invite_mod_off_control_takeover_45s_timeout_confirm_and_drop_cleanup
 
 #[test]
 fn a7_every_new_event_reaches_lua_with_its_declared_fields_and_the_records_match() {
+    let _baseline = Baseline;
     let mut p = ready();
     let host = host_all();
     crate::fork_ext::addons::native_tests::install_field_check(&host).unwrap();

@@ -54,23 +54,24 @@ fn rank_name(play: &Play, rank: i32) -> String {
 
 fn lfg_range(play: &Play) -> (i32, i32) {
     let own = (play.dump.player.level as i32).max(1);
-    let levels: Vec<i32> = if play.group.in_group && play.group.count() > 0 {
-        play.group.members[..play.group.count()]
-            .iter()
-            .map(|m| {
-                play.entities
-                    .slots
-                    .iter()
-                    .flatten()
-                    .find(|e| e.id == m.id)
-                    .and_then(|e| e.creature.as_ref())
-                    .map_or(own, |c| c.level as i32)
-            })
-            .collect()
+    if play.group.in_group && play.group.count() > 0 {
+        // a group is small (eight slots are plenty): no allocation, so the per-step refresh costs nothing when no mod listens
+        let mut levels = [own; 8];
+        let n = play.group.count().min(8);
+        for (slot, m) in levels.iter_mut().zip(&play.group.members[..n]) {
+            *slot = play
+                .entities
+                .slots
+                .iter()
+                .flatten()
+                .find(|e| e.id == m.id)
+                .and_then(|e| e.creature.as_ref())
+                .map_or(own, |c| c.level as i32);
+        }
+        crate::groupsearch::level_range(&levels[..n])
     } else {
-        vec![own]
-    };
-    crate::groupsearch::level_range(&levels)
+        crate::groupsearch::level_range(&[own])
+    }
 }
 
 fn build_friends(play: &Play) -> Vec<FriendEntry> {
@@ -271,6 +272,11 @@ pub(crate) fn begin_event(play: &Play, event: &net::session::Event) -> EventNote
 pub(crate) fn end_event(play: &Play, note: EventNote) {
     if note.reset {
         a7::forget();
+        return;
+    }
+    // no mod listens: nothing is hashed or built (the zero-addon and disabled-VM allocation gates); a mod enabled
+    // later is brought up to date by the next step's refresh in `tick`
+    if !crate::fork_ext::addons::native_core::capture_requested() {
         return;
     }
     match note.op {
@@ -514,7 +520,8 @@ pub(crate) fn tick(play: &mut Play) {
         .then(|| (play.guild_cmds.inviter, play.guild_cmds.name.clone(), play.guild_cmds.guild.clone()));
     a7::sync_native_requests(native_friend, native_guild);
 
-    if !away {
+    // nothing is captured, hashed or built while no mod listens (the zero-addon allocation gate)
+    if !away && crate::fork_ext::addons::native_core::capture_requested() {
         refresh_friends(play);
         refresh_ignored(play);
         refresh_guild(play);
