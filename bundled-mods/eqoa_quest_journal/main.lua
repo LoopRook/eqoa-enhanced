@@ -60,7 +60,7 @@ local function open(opened_from)
     if state.open then return end
     local s, err = eqoa.windows.open_session("quest_log", { opened_from = opened_from or "key" })
     if not s then
-        eqoa.log.write("warn", "Quest Journal did not open: " .. tostring(err and err.message))
+        eqoa.log.write("info", "Quest Journal did not open: " .. tostring(err and err.message))
         return
     end
     state.session, state.open, state.result, state.last_req = s, true, nil, nil

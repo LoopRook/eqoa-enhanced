@@ -2382,10 +2382,19 @@ fn dispatch_broker_action(
                     reason: "ability not found in spellbook".into(),
                 };
             };
-            if found.valid == 0 {
+            // The Abilities page's Memorize (`SpellBook::popup_message`): an ability on a slot already is refused
+            // (the 0x0033 would toggle it off), one the character has not learned (`p14`, set by 0x00FD) is
+            // refused; any other goes onto the slot. `valid` is "on a slot", not "may be memorized".
+            if found.valid != 0 && found.slot >= 0 {
                 return DispatchOutcome::Refused {
                     code: "not_ready",
-                    reason: "ability is not usable".into(),
+                    reason: "ability is already memorized".into(),
+                };
+            }
+            if found.valid == 0 && found.p14 == 0 {
+                return DispatchOutcome::Refused {
+                    code: "not_ready",
+                    reason: "ability is not learned".into(),
                 };
             }
             play.book_actions(vec![crate::spellbook::Out::Send0033(

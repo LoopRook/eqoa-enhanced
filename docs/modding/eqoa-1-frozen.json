@@ -161,6 +161,7 @@
   "eqoa.abilities.Ability.icon_background",
   "eqoa.abilities.Ability.icon_foreground",
   "eqoa.abilities.Ability.id",
+  "eqoa.abilities.Ability.learned",
   "eqoa.abilities.Ability.level",
   "eqoa.abilities.Ability.lockout",
   "eqoa.abilities.Ability.name",
