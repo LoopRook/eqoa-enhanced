@@ -1181,7 +1181,21 @@ mod mods {
         }
 
         fn why(&self) -> String {
-            format!("queued {:?}; logs {:?}; mode {}", action_broker::queued_kinds_for_test(), self.host.drain_logs(), self.p.mode)
+            let sessions: Vec<String> = ws::sessions_for_test().iter().map(|x| format!("{}:{}", x.kind, x.vm)).collect();
+            let form: String = self
+                .host
+                .lua
+                .load("local ok, L = pcall(require, 'auction_list'); if not ok then return 'no module' end; local a = eqoa.auction.get(); return 'form=' .. tostring(L.form and L.form.mode) .. ' frames=' .. tostring(L.form and L.form.frames) .. ' session=' .. tostring(L.session) .. ' auction=' .. tostring(a) .. ' sellable=' .. tostring(a and #a.sellable) .. ' bank=' .. tostring(eqoa.bank.get() and eqoa.bank.get().open)")
+                .eval()
+                .unwrap_or_else(|e| format!("({e})"));
+            format!(
+                "queued {:?}; logs {:?}; mode {}; sessions {sessions:?}; hidden bank {:?}; published {}; {form}",
+                action_broker::queued_kinds_for_test(),
+                self.host.drain_logs(),
+                self.p.mode,
+                window_takeover::hidden_bank_session(),
+                native_a10::current_auction().is_some()
+            )
         }
     }
 
