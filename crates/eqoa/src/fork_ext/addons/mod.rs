@@ -124,6 +124,9 @@ mod a6_tests;
 #[cfg(test)]
 mod a13_tests;
 pub(crate) mod native_a8;
+pub(crate) mod native_a10;
+#[cfg(test)]
+mod a10_tests;
 #[cfg(test)]
 mod a8_tests;
 pub(crate) mod native_a12;
