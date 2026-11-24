@@ -3003,8 +3003,10 @@
     {
       "children": [
         "eqoa.camera.Camera",
+        "eqoa.camera.Projection",
         "eqoa.camera.compass",
-        "eqoa.camera.get"
+        "eqoa.camera.get",
+        "eqoa.camera.project"
       ],
       "path": "eqoa.camera",
       "reason": null,
@@ -3067,6 +3069,60 @@
       "status": "supported"
     },
     {
+      "children": [
+        "eqoa.camera.Projection.behind",
+        "eqoa.camera.Projection.depth",
+        "eqoa.camera.Projection.on_screen",
+        "eqoa.camera.Projection.x",
+        "eqoa.camera.Projection.y"
+      ],
+      "path": "eqoa.camera.Projection",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.behind",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.depth",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.on_screen",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.x",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.y",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
       "children": [],
       "path": "eqoa.camera.compass",
       "reason": null,
@@ -3080,6 +3136,14 @@
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.project",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
