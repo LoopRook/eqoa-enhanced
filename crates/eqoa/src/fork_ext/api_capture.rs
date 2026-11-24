@@ -486,6 +486,9 @@ pub(crate) mod a5;
 #[path = "a3_tests.rs"]
 mod a3_tests;
 #[cfg(test)]
+#[path = "perf_core_step_tests.rs"]
+mod perf_core_step_tests;
+#[cfg(test)]
 #[path = "items_tests.rs"]
 mod items_tests;
 #[cfg(test)]

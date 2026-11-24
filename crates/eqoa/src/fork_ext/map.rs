@@ -6,6 +6,8 @@ use render::wgpu;
 pub(crate) fn draw_minimap(map: &crate::map::Map, device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, depth: &wgpu::TextureView, window: (u32,u32), size:(u32,u32), _format: wgpu::TextureFormat) {
     #[cfg(not(target_arch="wasm32"))]
     crate::fork_ext::addons::map_views::draw(map,device,enc,target,depth,window,size,_format);
+    #[cfg(not(target_arch="wasm32"))]
+    crate::fork_ext::addons::map_terrain::draw(map,device,enc);
     #[cfg(target_arch="wasm32")]
     map.draw_mini(device,enc,target,depth,window,size);
 }

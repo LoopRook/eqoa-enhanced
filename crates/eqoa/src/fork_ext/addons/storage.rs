@@ -464,6 +464,10 @@ impl Storage {
     pub(crate) fn save_encoded(&self, key: &str, value: &Json) -> Result<(), String> {
         self.prepare_encoded(key, value)?.commit()
     }
+    /// `save_encoded` with the sync on the background thread (same refusals, same file in place at return).
+    pub(crate) fn save_encoded_deferred_sync(&self, key: &str, value: &Json, owner: Option<&str>) -> Result<(), String> {
+        self.prepare_encoded(key, value)?.commit_deferred_sync(owner)
+    }
     /// Everything `save_encoded` does except the disk write: the quota check and the encoding, so the same
     /// refusals come back at once. The caller commits the result itself or hands it to the background writer.
     pub(crate) fn prepare_encoded(&self, key: &str, value: &Json) -> Result<PreparedWrite, String> {
@@ -755,6 +759,11 @@ pub(crate) struct PreparedWrite {
 }
 
 impl PreparedWrite {
+    /// The write with the file's sync left to the background thread (`deferred_sync.rs`): the file is in place
+    /// when this returns, so a read right after sees it.
+    pub(crate) fn commit_deferred_sync(self, owner: Option<&str>) -> Result<(), String> {
+        super::deferred_sync::atomic_replace_deferred(&self.path, &self.bytes, owner).map_err(|e| e.to_string())
+    }
     /// The atomic replace (temporary file, write, `sync_all`, rename). This is the slow part.
     pub(crate) fn commit(self) -> Result<(), String> {
         atomic_replace(&self.path, &self.bytes).map_err(|e| e.to_string())

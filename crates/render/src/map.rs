@@ -230,6 +230,8 @@ impl MapLayer {
         }
     }
 
+    /// A texture itself, if it is there (a mod's terrain layer samples the overview, `fork_ext`).
+    pub fn texture_of(&self, tex: usize) -> Option<&wgpu::Texture> { self.textures.get(tex)?.as_ref().map(|t| &t.tex) }
     /// A texture's size, if it is there.
     pub fn size(&self, tex: usize) -> Option<(u32, u32)> {
         self.textures.get(tex)?.as_ref().map(|t| t.size)
