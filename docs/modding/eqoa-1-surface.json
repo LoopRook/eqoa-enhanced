@@ -1858,6 +1858,14 @@
         "eqoa.actions.assign_ability",
         "eqoa.actions.assist",
         "eqoa.actions.attack",
+        "eqoa.actions.auction_bid",
+        "eqoa.actions.auction_bidders",
+        "eqoa.actions.auction_buyout",
+        "eqoa.actions.auction_my_bids",
+        "eqoa.actions.auction_my_lots",
+        "eqoa.actions.auction_page",
+        "eqoa.actions.auction_search",
+        "eqoa.actions.auction_sell",
         "eqoa.actions.autorun",
         "eqoa.actions.bank_money",
         "eqoa.actions.bank_move",
@@ -1922,6 +1930,11 @@
         "eqoa.actions.loot_all",
         "eqoa.actions.loot_assign",
         "eqoa.actions.loot_roll",
+        "eqoa.actions.mail_delete",
+        "eqoa.actions.mail_read",
+        "eqoa.actions.mail_refresh",
+        "eqoa.actions.mail_send",
+        "eqoa.actions.mail_take",
         "eqoa.actions.mastery_browse",
         "eqoa.actions.mastery_buy",
         "eqoa.actions.mastery_refund",
@@ -2250,6 +2263,70 @@
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.auction_bid",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.auction_bidders",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.auction_buyout",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.auction_my_bids",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.auction_my_lots",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.auction_page",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.auction_search",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.auction_sell",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -2766,6 +2843,46 @@
     },
     {
       "children": [],
+      "path": "eqoa.actions.mail_delete",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.mail_read",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.mail_refresh",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.mail_send",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.mail_take",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.actions.mastery_browse",
       "reason": null,
       "revision": 1,
@@ -3110,6 +3227,462 @@
     },
     {
       "children": [
+        "eqoa.auction.Bid",
+        "eqoa.auction.Bidder",
+        "eqoa.auction.Lot",
+        "eqoa.auction.Own",
+        "eqoa.auction.Sellable",
+        "eqoa.auction.State",
+        "eqoa.auction.get"
+      ],
+      "path": "eqoa.auction",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.auction.Bid.count",
+        "eqoa.auction.Bid.escrow",
+        "eqoa.auction.Bid.lot",
+        "eqoa.auction.Bid.price"
+      ],
+      "path": "eqoa.auction.Bid",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Bid.count",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Bid.escrow",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Bid.lot",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Bid.price",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.auction.Bidder.bid",
+        "eqoa.auction.Bidder.name"
+      ],
+      "path": "eqoa.auction.Bidder",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Bidder.bid",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Bidder.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.auction.Lot.bids",
+        "eqoa.auction.Lot.buyout",
+        "eqoa.auction.Lot.high_bid",
+        "eqoa.auction.Lot.leader",
+        "eqoa.auction.Lot.lot",
+        "eqoa.auction.Lot.min_bid",
+        "eqoa.auction.Lot.mine",
+        "eqoa.auction.Lot.minutes_left",
+        "eqoa.auction.Lot.name",
+        "eqoa.auction.Lot.next_bid",
+        "eqoa.auction.Lot.quantity",
+        "eqoa.auction.Lot.seller"
+      ],
+      "path": "eqoa.auction.Lot",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Lot.bids",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Lot.buyout",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Lot.high_bid",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Lot.leader",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Lot.lot",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Lot.min_bid",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Lot.mine",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Lot.minutes_left",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Lot.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Lot.next_bid",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Lot.quantity",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Lot.seller",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.auction.Own.buyout",
+        "eqoa.auction.Own.lot",
+        "eqoa.auction.Own.minutes_left",
+        "eqoa.auction.Own.name",
+        "eqoa.auction.Own.quantity"
+      ],
+      "path": "eqoa.auction.Own",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Own.buyout",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Own.lot",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Own.minutes_left",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Own.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Own.quantity",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.auction.Sellable.id",
+        "eqoa.auction.Sellable.name",
+        "eqoa.auction.Sellable.quantity",
+        "eqoa.auction.Sellable.slot"
+      ],
+      "path": "eqoa.auction.Sellable",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Sellable.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Sellable.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Sellable.quantity",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Sellable.slot",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.auction.State.banked",
+        "eqoa.auction.State.bidders",
+        "eqoa.auction.State.bidders_lot",
+        "eqoa.auction.State.bids",
+        "eqoa.auction.State.lots",
+        "eqoa.auction.State.minutes",
+        "eqoa.auction.State.mode",
+        "eqoa.auction.State.offered",
+        "eqoa.auction.State.page",
+        "eqoa.auction.State.pending",
+        "eqoa.auction.State.results",
+        "eqoa.auction.State.revision",
+        "eqoa.auction.State.sellable",
+        "eqoa.auction.State.tunar",
+        "eqoa.auction.State.uncertain"
+      ],
+      "path": "eqoa.auction.State",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.banked",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.bidders",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.bidders_lot",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.bids",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.lots",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.minutes",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.mode",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.offered",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.page",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.pending",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.results",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.revision",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.sellable",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.tunar",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.uncertain",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.get",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
         "eqoa.bank.get"
       ],
       "path": "eqoa.bank",
@@ -3156,8 +3729,11 @@
     {
       "children": [
         "eqoa.camera.Camera",
+        "eqoa.camera.Projection",
         "eqoa.camera.compass",
-        "eqoa.camera.get"
+        "eqoa.camera.get",
+        "eqoa.camera.project",
+        "eqoa.camera.project_entity"
       ],
       "path": "eqoa.camera",
       "reason": null,
@@ -3220,6 +3796,60 @@
       "status": "supported"
     },
     {
+      "children": [
+        "eqoa.camera.Projection.behind",
+        "eqoa.camera.Projection.depth",
+        "eqoa.camera.Projection.on_screen",
+        "eqoa.camera.Projection.x",
+        "eqoa.camera.Projection.y"
+      ],
+      "path": "eqoa.camera.Projection",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.behind",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.depth",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.on_screen",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.x",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.y",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
       "children": [],
       "path": "eqoa.camera.compass",
       "reason": null,
@@ -3233,6 +3863,22 @@
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.project",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.project_entity",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -5026,11 +5672,13 @@
         "eqoa.entities.Entity.disposition",
         "eqoa.entities.Entity.disposition_name",
         "eqoa.entities.Entity.entity_type",
+        "eqoa.entities.Entity.head_mark",
         "eqoa.entities.Entity.hp_fraction",
         "eqoa.entities.Entity.id",
         "eqoa.entities.Entity.is_creature",
         "eqoa.entities.Entity.kind",
         "eqoa.entities.Entity.level",
+        "eqoa.entities.Entity.merc_tag",
         "eqoa.entities.Entity.name",
         "eqoa.entities.Entity.npc_flags",
         "eqoa.entities.Entity.poisoned",
@@ -5106,6 +5754,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.entities.Entity.head_mark",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.entities.Entity.hp_fraction",
       "reason": null,
       "revision": 1,
@@ -5142,6 +5798,14 @@
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.entities.Entity.merc_tag",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -12844,6 +13508,379 @@
       "reason": null,
       "revision": 1,
       "round": 5,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.mail.Entry",
+        "eqoa.mail.Message",
+        "eqoa.mail.PackItem",
+        "eqoa.mail.State",
+        "eqoa.mail.get"
+      ],
+      "path": "eqoa.mail",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.mail.Entry.carries",
+        "eqoa.mail.Entry.date",
+        "eqoa.mail.Entry.from",
+        "eqoa.mail.Entry.id",
+        "eqoa.mail.Entry.read",
+        "eqoa.mail.Entry.subject"
+      ],
+      "path": "eqoa.mail.Entry",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Entry.carries",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Entry.date",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Entry.from",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Entry.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Entry.read",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Entry.subject",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.mail.Message.date",
+        "eqoa.mail.Message.from",
+        "eqoa.mail.Message.id",
+        "eqoa.mail.Message.items",
+        "eqoa.mail.Message.returned",
+        "eqoa.mail.Message.subject",
+        "eqoa.mail.Message.text",
+        "eqoa.mail.Message.to",
+        "eqoa.mail.Message.tunar"
+      ],
+      "path": "eqoa.mail.Message",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Message.date",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Message.from",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Message.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Message.items",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Message.returned",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Message.subject",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Message.text",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Message.to",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.Message.tunar",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.mail.PackItem.id",
+        "eqoa.mail.PackItem.name",
+        "eqoa.mail.PackItem.quantity",
+        "eqoa.mail.PackItem.slot"
+      ],
+      "path": "eqoa.mail.PackItem",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.PackItem.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.PackItem.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.PackItem.quantity",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.PackItem.slot",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.mail.State.carries_offer",
+        "eqoa.mail.State.count",
+        "eqoa.mail.State.delivered",
+        "eqoa.mail.State.entries",
+        "eqoa.mail.State.max_items",
+        "eqoa.mail.State.message",
+        "eqoa.mail.State.names",
+        "eqoa.mail.State.new",
+        "eqoa.mail.State.offered",
+        "eqoa.mail.State.pack",
+        "eqoa.mail.State.postage",
+        "eqoa.mail.State.refusal",
+        "eqoa.mail.State.revision",
+        "eqoa.mail.State.status",
+        "eqoa.mail.State.truncated",
+        "eqoa.mail.State.tunar"
+      ],
+      "path": "eqoa.mail.State",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.carries_offer",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.count",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.delivered",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.entries",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.max_items",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.message",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.names",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.new",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.offered",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.pack",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.postage",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.refusal",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.revision",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.status",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.truncated",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.State.tunar",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.mail.get",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {

@@ -5077,6 +5077,7 @@ impl Play {
         let tris = self.rings.frame(lib, walker, aim, me, valid, self.cam_inside, self.mode == 38, view_proj, step);
         // Hide UI (`hideui`): the rings go on easing, none drawn
         let tris = if crate::hideui::hidden() { Vec::new() } else { tris };
+        let tris = if crate::hud::fork_hud::rings_hidden() { Vec::new() } else { tris };
         r.set_overlay(device, queue, view_proj, &tris, &render::library_textures(lib));
     }
 
@@ -5098,6 +5099,7 @@ impl Play {
         if self.loading.up() {
             return out;
         }
+        if crate::hud::fork_hud::plates_hidden() { return out; }
         for (slot, e) in self.entities.slots.iter().enumerate() {
             let (Some(e), Some(Some(p))) = (e, self.puppets.get(slot)) else { continue };
             let (Some(c), Some(at)) = (&e.creature, p.name_at) else { continue };
@@ -10274,6 +10276,7 @@ impl Play {
         }
         if !self.loading.up() {
             let under = self.damage.place(view_proj, size, |id| self.drawn_at(id));
+            let under = if crate::hud::fork_hud::damage_hidden() { Vec::new() } else { under };
             ui.quads.splice(0..0, under);
         }
     }

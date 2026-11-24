@@ -58,10 +58,10 @@ pub(crate) enum TakeoverKind {
     Map = 14,
     /// Round A11: the server's mercenary inventory and spell windows (modes 61, 62), the dye picker (63) and the
     /// fishing window (36), held whole (`all`) as server-opened sessions (`dialog_sessions`, `a11_play`).
-    MercItems = 15,
-    MercSpells = 16,
-    DyePicker = 17,
-    Fishing = 18,
+    MercItems = 20,
+    MercSpells = 21,
+    DyePicker = 22,
+    Fishing = 23,
 }
 
 impl TakeoverKind {
@@ -281,7 +281,7 @@ struct TakeoverState {
     /// The merchant's list still owed for the mod's last sale or buy when its hidden session ended (the
     /// sale's answer can follow the action's end): held hidden for `LIST_GRACE`, then closed again quietly.
     grace_merchant: Option<ListGrace>,
-    holders: [Option<Holder>; 19],
+    holders: [Option<Holder>; 24],
     pending_opens: [Option<PendingOpen>; 3],
     /// Why a kind's hidden session is to end (set by release, the mod finishing, the holder going).
     pending_close: [Option<&'static str>; 3],

@@ -132,7 +132,7 @@ impl Play {
             0x1206 => {
                 // Recv1206: the auction's replies (IsAuctionMode: the search, mode 39)
                 let now = self.session.now() as i64;
-                let (state, notes) = self.bank.auction.recv(&mut self.dump.bank, data, self.mode == 39, now);
+                let (state, notes) = self.bank.auction.recv(&mut self.dump.bank, data, self.mode == 39 || super::fork_hooks::auction_reading(), now);
                 if let Some(st) = state {
                     self.bank.state = st;
                 }

@@ -174,6 +174,8 @@ pub(crate) enum ActionKind {
     A8(super::native_a8::A8Action),
     /// Round A11: the mercenary windows, the dye picker and fishing.
     A11(super::native_a11::A11Action),
+    /// Round A10: mail (inbox, read, delete, send) and the auction (search, pages, bid, buyout, sell).
+    A10(super::native_a10::A10Action),
     /// Round A7: friends, ignore, guild, who, group search.
     A7(super::native_a7::A7Action),
     /// Round A5: spend training points (asks the player first), ask for a faction page or the combat record.
@@ -241,6 +243,7 @@ impl ActionKind {
             Self::A6(action) => action.name(),
             Self::A8(action) => action.name(),
             Self::A11(action) => action.name(),
+            Self::A10(action) => action.name(),
             Self::A7(action) => action.name(),
             Self::A5(action) => action.name(),
             Self::ReadyCheckAnswer { .. } => "ready_check_answer",
@@ -302,6 +305,7 @@ impl ActionKind {
             | Self::A6(_)
             | Self::A8(_)
             | Self::A11(_)
+            | Self::A10(_)
             | Self::A7(_)
             | Self::A5(_)
             | Self::ReadyCheckAnswer { .. }
