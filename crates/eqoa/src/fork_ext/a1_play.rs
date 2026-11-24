@@ -186,6 +186,10 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
         Act::GuildKick { .. } | Act::FriendAccept { .. } | Act::GuildAccept { .. } => {
             super::a7_play::carry_out(play, &p.act)
         }
+        // round A10: mail and the auction
+        Act::MailDelete { .. } | Act::MailSend { .. } | Act::AuctionBid { .. } | Act::AuctionSell { .. } => {
+            super::a10_play::carry_out(play, &p.act)
+        }
         // round A5: the character window's steps are carried out where they are judged (`a5_capture`)
         Act::TrainStats { .. } | Act::Mastery { .. } => super::api_capture::a5::carry_out(play, &p.act),
     }

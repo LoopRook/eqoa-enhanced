@@ -50,6 +50,15 @@ pub(crate) enum Act {
     /// Round A5: buy (`refund` false) or switch off (`refund` true) a Class Mastery skill. `class` and `parent` are
     /// the inspected skill's category and rank below, which the Master Class rule is judged by again at the Yes.
     Mastery { skill_id: i32, name: String, refund: bool, class: u8, parent: i32 },
+    /// Round A10: delete a mail (`subject` is what the question named, checked again at the Yes).
+    MailDelete { id: u32, subject: String },
+    /// Round A10: send a mail that carries tunar or an item: (the game's pack key, the item's id, how many, its name).
+    MailSend { to: String, subject: String, body: String, tunar: u32, item: Option<(u32, i64, i64, String)> },
+    /// Round A10: a bid (`buyout` false) or a buyout (true) on `lot` at `price` each for `count`.
+    AuctionBid { lot: i64, price: i32, count: i32, buyout: bool, name: String },
+    /// Round A10: put a bank item up: its bank record key, its id, how many, the starting price, the buyout, and
+    /// the time in minutes.
+    AuctionSell { key: u32, id: i64, name: String, count: i32, price: i32, buyout: i32, minutes: i32 },
 }
 
 impl Act {
@@ -66,6 +75,11 @@ impl Act {
             Self::TrainStats { .. } => "train_stats",
             Self::Mastery { refund: false, .. } => "mastery_buy",
             Self::Mastery { refund: true, .. } => "mastery_refund",
+            Self::MailDelete { .. } => "mail_delete",
+            Self::MailSend { .. } => "mail_send",
+            Self::AuctionBid { buyout: false, .. } => "auction_bid",
+            Self::AuctionBid { buyout: true, .. } => "auction_buyout",
+            Self::AuctionSell { .. } => "auction_sell",
         }
     }
 }
@@ -435,6 +449,51 @@ pub(crate) fn friend_accept_text(name: &str) -> String {
 
 pub(crate) fn guild_accept_text(inviter: &str, guild: &str) -> String {
     format!("Join the guild \"{guild}\" (invited by \"{inviter}\")?")
+}
+
+/// The question for deleting a mail: what it is, and that what it carries goes with it.
+pub(crate) fn mail_delete_text(from: &str, subject: &str, carries: Option<&str>) -> String {
+    let mut text = format!("Delete the mail \"{subject}\" from {from}? It cannot be undone.");
+    if let Some(c) = carries {
+        text.push_str(&format!(" It still carries {c}."));
+    }
+    text
+}
+
+/// The question for a mail that carries tunar or an item.
+pub(crate) fn mail_send_text(to: &str, subject: &str, tunar: u32, item: Option<(&str, i64)>, postage: u32) -> String {
+    let mut parts = Vec::new();
+    if tunar > 0 {
+        parts.push(format!("{tunar} tunar"));
+    }
+    if let Some((name, count)) = item {
+        parts.push(if count > 1 { format!("{count} x \"{name}\"") } else { format!("\"{name}\"") });
+    }
+    let subject = subject.replace('\n', " ");
+    let mut text = format!("Send {} to {to} in the mail \"{subject}\"?", parts.join(" and "));
+    if postage > 0 {
+        text.push_str(&format!(" The postage is {postage} tunar."));
+    }
+    text
+}
+
+/// The question for a bid or a buyout.
+pub(crate) fn auction_bid_text(name: &str, price: i32, count: i32, buyout: bool, lot_buyout: i64) -> String {
+    let what = if count > 1 { format!("{count} x \"{name}\"") } else { format!("\"{name}\"") };
+    if buyout {
+        format!("Buy out {what} for {price} tunar each? The tunar leaves you at once.")
+    } else {
+        let total = if count > 1 { format!(" ({} in all)", i64::from(price) * i64::from(count)) } else { String::new() };
+        let buy = if lot_buyout > 0 { format!(" Its buyout is {lot_buyout} tunar each.") } else { String::new() };
+        format!("Bid {price} tunar each on {what}{total}? The tunar is held until you are outbid or win.{buy}")
+    }
+}
+
+/// The question for putting an item up at the auction.
+pub(crate) fn auction_sell_text(name: &str, count: i32, price: i32, buyout: i32, minutes: i32) -> String {
+    let what = if count > 1 { format!("{count} x \"{name}\"") } else { format!("\"{name}\"") };
+    let each = if count > 1 { " each" } else { "" };
+    format!("Put {what} up at the auction from {price} tunar{each}, buyout {buyout} tunar{each}, for {} hours? It leaves your bank.", minutes / 60)
 }
 
 /// The question for spending training points: how many, and on which stats.

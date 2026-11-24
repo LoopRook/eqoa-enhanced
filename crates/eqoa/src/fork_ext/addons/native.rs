@@ -984,6 +984,14 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             "craft_list craft_inspect craft_tray_add craft_tray_remove craft_tray_clear craft_fill craft_combine craft_keep",
             8,
         ),
+        // round A10: mail and the auction
+        ("mail", "get", 8),
+        ("auction", "get", 8),
+        (
+            "actions",
+            "mail_refresh mail_read mail_delete mail_take mail_send auction_search auction_page auction_my_lots auction_my_bids auction_bidders auction_bid auction_buyout auction_sell",
+            8,
+        ),
         // round A7: community (friends, ignore, guild, who, group search)
         ("social", "friends ignored friend_request", 8),
         ("guild", "get invite", 8),
@@ -1145,6 +1153,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_a6::install(host)?;
     super::native_a8::install(host)?;
     super::native_a12::install(host)?;
+    super::native_a10::install(host)?;
     super::native_a7::install(host)?;
     super::native_a5::install(host)?;
     super::frame_actions::install(host)?;
@@ -1316,6 +1325,14 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.craft.State", "notice") => Some("eqoa.craft.Notice"),
         ("eqoa.craft.Detail", "ingredients") => Some("eqoa.craft.Ingredient"),
         ("eqoa.craft.Detail", "tools") => Some("eqoa.craft.Tool"),
+        ("eqoa.mail.State", "entries") => Some("eqoa.mail.Entry"),
+        ("eqoa.mail.State", "message") => Some("eqoa.mail.Message"),
+        ("eqoa.mail.State", "pack") => Some("eqoa.mail.PackItem"),
+        ("eqoa.auction.State", "results") => Some("eqoa.auction.Lot"),
+        ("eqoa.auction.State", "lots") => Some("eqoa.auction.Own"),
+        ("eqoa.auction.State", "bids") => Some("eqoa.auction.Bid"),
+        ("eqoa.auction.State", "bidders") => Some("eqoa.auction.Bidder"),
+        ("eqoa.auction.State", "sellable") => Some("eqoa.auction.Sellable"),
         ("eqoa.guild.Guild", "members") => Some("eqoa.guild.GuildMember"),
         ("eqoa.who.WhoState", "entries") => Some("eqoa.who.WhoEntry"),
         ("eqoa.lfg.LfgState", "entries") => Some("eqoa.lfg.LfgEntry"),
