@@ -297,7 +297,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ("eqoa.auction.Bidder", "name bid"),
         ("eqoa.auction.Own", "lot name quantity buyout minutes_left"),
         ("eqoa.auction.Bid", "lot price count escrow"),
-        ("eqoa.auction.Sellable", "slot id name quantity"),
+        ("eqoa.auction.Sellable", "slot id name quantity value"),
     ] {
         describe(lua, path, "supported", Some(ROUND), "");
         for field in fields.split_whitespace() {

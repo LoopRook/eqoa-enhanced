@@ -44,7 +44,7 @@ fn open_menu(menu: &Mod, context: &mut Context, entry: &str, command: &str) {
 }
 
 // (the game's entry text on the disc's tables, its command, the mod that does its job, the session kind that mod opens)
-const ROUTES: [(&str, &str, &str, &str); 12] = [
+const ROUTES: [(&str, &str, &str, &str); 17] = [
     ("Summary", "0x3020000:0", "eqoa_character", "trainer"),
     ("Class Mastery", "0x2080000:0", "eqoa_character", "trainer"),
     ("Quest", "0xb0a0000:0", "eqoa_quest_journal", "quest_log"),
@@ -57,6 +57,11 @@ const ROUTES: [(&str, &str, &str, &str); 12] = [
     ("Ability", "0x8010000:0", "eqoa_spellbook", "spellbook"),
     ("Factions", "0xaa000001:0", "eqoa_character", "trainer"),
     ("Combat Record", "0x7e20001:0", "eqoa_character", "trainer"),
+    ("Inbox", "0xb0b0002:0", "eqoa_mail", "mail_inbox"),
+    ("Compose", "0xb0b0000:0", "eqoa_mail", "mail_compose"),
+    ("Search", "0xa8010000:0", "eqoa_auction", "auction_search"),
+    ("My lots", "0xa8020000:0", "eqoa_auction", "auction_search"),
+    ("My bids", "0xa8030000:0", "eqoa_auction", "auction_search"),
 ];
 
 #[test]

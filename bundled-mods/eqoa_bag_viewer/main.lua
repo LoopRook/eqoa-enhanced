@@ -4,6 +4,8 @@ local ui = eqoa.imgui
 local B = require("bags")
 local HP = require("helpers")
 local X = require("multi") -- multi-select (Ctrl+click, Shift+click): one menu for several items
+local AL = require("auction_list") -- listing a bank item at the auction (the bank item menu, the group menu)
+B.auction_list = AL
 
 -- Sizes are in HUD frame pixels (640x448), scaled as the HUD is.
 local W, PAD, SLOT, GAP, LINE = 318, 8, 36, 2, 12
@@ -33,6 +35,7 @@ local function close(from_client)
     tokens = {}
     if session and not from_client then eqoa.windows.close_session(session.ref) end
     session, pad.on = nil, false
+    AL.close()
     if escape then eqoa.input.release(escape); escape = nil end
     B.drop_pending_npc_open()
     if eqoa.windows and eqoa.windows.release then
@@ -115,6 +118,7 @@ local function open()
     listen("confirm.closed", function(e) B.on_confirm_closed(e.data) end)
     listen("windows.session", function(e)
         local d = e.data
+        AL.on_session(d)
         if session and d.ref == session.ref then
             if d.phase == "closed" then close(true)
             elseif d.phase == "changed" then pad.on = false end -- the system took the focus: the pad is the game's
@@ -271,6 +275,7 @@ eqoa.events.on("disabling", function()
 end)
 
 function draw()
+    AL.tick()
     local grid = B.grid
     if grid == nil or B.is_grid_stale() then
         grid = B.rebuild()
@@ -361,6 +366,11 @@ function draw()
     fill(0, 0, W, H, c.surface)
     frame(0, 0, W, H, c.border)
     text(PAD, 7, "Bags", c.white)
+    -- the Auction window (the EQOA Auction mod, when it is on): its own button, drawn with the other actions below
+    local auction_btn = {x = W - PAD - 46, y = 3, w = 46, h = 15}
+    fill(auction_btn.x, auction_btn.y, auction_btn.w, auction_btn.h, c.raised)
+    frame(auction_btn.x, auction_btn.y, auction_btn.w, auction_btn.h, c.border)
+    text(auction_btn.x + 5, auction_btn.y + 2, "Auction", c.text, auction_btn.w - 6)
 
     tab_hits = {}
     B.tab_hits = tab_hits
@@ -470,6 +480,14 @@ function draw()
 
     action_hits = {}
     B.action_hits = action_hits
+    action_hits[1] = {
+        label = "Auction", x = x0 + auction_btn.x * k, y = y0 + auction_btn.y * k, w = auction_btn.w * k, h = auction_btn.h * k,
+        run = function()
+            if not eqoa.mods.send("eqoa_auction", "open") then
+                B.result = {text = "The Auction window is a mod: turn on EQOA Auction in Mods & Addons", ok = false}
+            end
+        end,
+    }
     -- Row 1: the Auto-loot choice (Off / Everything / Everything but junk), and Stop when a batch is running
     -- (right); the line under it says what the chosen one does.
     local seg_x = PAD

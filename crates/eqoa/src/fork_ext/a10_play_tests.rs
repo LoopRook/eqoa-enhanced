@@ -1074,3 +1074,421 @@ fn a10_l5_one_take_at_a_time_and_l7_a_mail_id_is_the_whole_u32() {
     let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.mail_read(3000000000)");
     assert!(!ok && code == "stale_handle", "{code}");
 }
+
+// ---- the bundled mods (Mail, Auction) and the Bag Viewer's listing, driven against the real game state ----
+
+mod mods {
+    use super::*;
+    use crate::fork_ext::addons::{
+        bridge::Bridge,
+        discovery::{DiscoveredAddon, EntryMode},
+    };
+    use dear_imgui_rs::Context;
+    use serde_json::json;
+    use std::path::PathBuf;
+
+    fn root(id: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods").join(id).canonicalize().unwrap()
+    }
+
+    fn addon(id: &str) -> DiscoveredAddon {
+        let r = root(id);
+        let m: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(r.join("mod.json")).unwrap()).unwrap();
+        DiscoveredAddon {
+            id: id.into(),
+            name: id.into(),
+            entry: r.join("main.lua"),
+            script_root: r.clone(),
+            package_root: r.clone(),
+            module_dirs: vec![r.clone()],
+            resource_dirs: vec![r],
+            api: Some("eqoa/1".into()),
+            entry_mode: EntryMode::Once,
+            capabilities_declared: true,
+            requested_capabilities: m["capabilities"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()).collect(),
+            extensions: Default::default(),
+            initially_enabled: false,
+            mods_root: None,
+        }
+    }
+
+    fn context() -> Context {
+        let mut context = Context::create();
+        context.set_ini_filename::<PathBuf>(None).unwrap();
+        context.io_mut().set_display_size([1024.0, 768.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context.font_atlas().try_claim_legacy_renderer().unwrap().build();
+        context
+    }
+
+    struct Rig {
+        p: Play,
+        host: Host,
+        bridge: Bridge,
+        context: Context,
+        w: f64,
+        h: f64,
+        k: f64,
+        x0: f64,
+        y0: f64,
+    }
+
+    impl Rig {
+        fn frames(&mut self, n: usize) {
+            for _ in 0..n {
+                CORE.with(|c| c.borrow_mut().frame += 1);
+                self.context.frame();
+                self.bridge
+                    .invoke(|| {
+                        native_events::dispatch(&self.host)?;
+                        native_events::render(&self.host)
+                    })
+                    .unwrap();
+                drop(self.context.render_legacy());
+            }
+        }
+
+        fn settle(&mut self) {
+            step(&mut self.p, &self.host);
+            self.frames(2);
+        }
+
+        fn relayout(&mut self) {
+            let (k, sx, sy, ox, oy): (f64, f64, f64, f64, f64) = self
+                .host
+                .lua
+                .load("local f = eqoa.hud.frame(); return math.min(f.scale_x, f.scale_y), f.scale_x, f.scale_y, f.offset_x, f.offset_y")
+                .eval()
+                .unwrap();
+            self.k = k;
+            self.x0 = (1024.0 - self.w * k).min(ox + (640.0 - self.w) / 2.0 * sx).max(0.0);
+            self.y0 = (768.0 - self.h * k).min(oy + (448.0 - self.h) / 2.0 * sy).max(0.0);
+        }
+
+        fn tap(&mut self, x: f64, y: f64) {
+            self.relayout();
+            let (px, py) = (self.x0 + x * self.k, self.y0 + y * self.k);
+            CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": px, "y": py, "inside_window": true, "button": "left"})));
+            native_events::dispatch(&self.host).unwrap();
+            self.settle();
+        }
+
+        fn key(&mut self, key: &str, text: &str) {
+            CORE.with(|c| {
+                c.borrow_mut().emit("input.key", json!({"key": key, "combo": key, "down": true, "repeat": false, "synthetic": false, "text": text}))
+            });
+            native_events::dispatch(&self.host).unwrap();
+            self.frames(1);
+        }
+
+        fn type_text(&mut self, s: &str) {
+            for ch in s.chars() {
+                let t = ch.to_string();
+                self.key(&t, &t);
+            }
+        }
+
+        fn why(&self) -> String {
+            format!("queued {:?}; logs {:?}; mode {}", action_broker::queued_kinds_for_test(), self.host.drain_logs(), self.p.mode)
+        }
+    }
+
+    /// The mod's window open, as its own key opens it.
+    fn rig_with(id: &str, w: f64, h: f64, combo: &str, key: &str, prep: impl FnOnce(&mut Play)) -> Rig {
+        let (mut p, _unused) = super::rig();
+        prep(&mut p);
+        crate::fork_ext::addons::hud_layout::set_window_size(1024, 768);
+        let context = context();
+        let host = Host::for_addon(&addon(id)).unwrap();
+        let bridge = Bridge::install(&host).unwrap();
+        host.run_addon(&addon(id)).unwrap();
+        let mut r = Rig { p, host, bridge, context, w, h, k: 1.0, x0: 0.0, y0: 0.0 };
+        CORE.with(|c| {
+            c.borrow_mut().emit("input.key", json!({"key": key, "combo": combo, "down": true, "repeat": false, "synthetic": false, "text": ""}))
+        });
+        native_events::dispatch(&r.host).unwrap();
+        r.settle();
+        r
+    }
+
+    fn mail_rig(prep: impl FnOnce(&mut Play)) -> Rig {
+        rig_with("eqoa_mail", 360.0, 336.0, "shift+m", "m", prep)
+    }
+
+    fn auction_rig_mod() -> Rig {
+        rig_with("eqoa_auction", 380.0, 336.0, "shift+a", "a", |_| {})
+    }
+
+    #[test]
+    fn mods_mail_reads_a_mail_and_a_delete_asks_first_and_is_sent_only_on_the_yes() {
+        let mut r = mail_rig(|_| {});
+        assert!(ws::any_open_of(&["mail_inbox"]), "Shift+M opened a mail_inbox session; {}", r.why());
+        let mut native = Grams::default();
+        native.request_inbox();
+        assert_eq!(sent(), vec![native.out[0].clone()], "the inbox is asked for as the game's own does");
+        r.p.mail_recv(&inbox_reply(&[header(11, "Ann", "One"), header(12, "Bob", "Two")]));
+        r.settle();
+        // a click on the second mail asks for its text, as the game's inbox does
+        r.tap(60.0, 59.0);
+        let mut g = Grams::default();
+        g.headers = r.p.mail.grams.headers.clone();
+        g.count = 2;
+        g.request_message(12);
+        assert_eq!(sent().last().unwrap(), &g.out[0], "{}", r.why());
+        r.p.mail_recv(&message_reply(12, "hello there"));
+        r.settle();
+        // Delete: the question comes first and nothing is sent
+        let n = sent().len();
+        r.tap(250.0, 304.0);
+        assert_eq!(sent().len(), n, "negative control: the click alone deletes nothing; {}", r.why());
+        let q = confirm::current_for_test().expect("the question is up");
+        assert!(!q.yes && q.text.contains("Two") && q.text.contains("Bob"), "{}", q.text);
+        say_yes();
+        r.settle();
+        let mut g = Grams::default();
+        g.request_inbox();
+        g.recv(&inbox_reply(&[header(11, "Ann", "One"), header(12, "Bob", "Two")]));
+        g.out.clear();
+        g.delete_message(12);
+        assert_eq!(sent().len(), n + 1);
+        assert_eq!(sent().last().unwrap(), &g.out[0]);
+        let logs = r.host.drain_logs().unwrap();
+        assert!(logs.is_empty(), "no diagnostics: {logs:?}");
+    }
+
+    #[test]
+    fn mods_mail_a_mail_that_carries_something_goes_to_one_name_and_asks_first() {
+        let mut r = mail_rig(|p| {
+            p.mail.grams.live = true;
+            p.mail.grams.attach.offer = Some(Offer { items: 1, postage: 15 });
+        });
+        r.p.mail_recv(&inbox_reply(&[header(11, "Ann", "One")]));
+        r.settle();
+        // the Write tab; To, Subject, Text and Tunar typed (Tab moves on)
+        r.tap(110.0, 28.0);
+        assert!(ws::any_open_of(&["mail_compose"]), "{}", r.why());
+        r.tap(30.0, 58.0);
+        r.type_text("Bob, Ann");
+        r.key("tab", "");
+        r.type_text("Hi");
+        r.key("tab", "");
+        r.type_text("yo");
+        r.key("tab", "");
+        r.type_text("10");
+        r.key("escape", "");
+        let n = sent().len();
+        // two names and tunar: the Send button is not there, and nothing is asked or sent
+        r.tap(30.0, 304.0);
+        assert_eq!(sent().len(), n, "{}", r.why());
+        assert!(!confirm::is_open(), "no question for a mail the game's rule refuses");
+        // the control: the same mail without tunar goes at once to both names, as the game's compose sends it
+        r.tap(90.0, 304.0);
+        r.tap(30.0, 58.0);
+        r.type_text("Bob, Ann");
+        r.key("tab", "");
+        r.type_text("Hi");
+        r.key("tab", "");
+        r.type_text("yo");
+        r.key("escape", "");
+        r.tap(30.0, 304.0);
+        let mut g = Grams::default();
+        g.live = true;
+        g.send_gram_live(&[b"Bob".to_vec(), b"Ann".to_vec()], &crate::ui::wide("Hi"), &crate::ui::wide("yo"));
+        assert_eq!(sent().len(), n + 1, "{}", r.why());
+        assert_eq!(sent().last().unwrap(), &g.out[0]);
+        // the answer comes back: the mail is out and the form empties
+        r.p.mail_recv(&[1, 1]);
+        r.settle();
+        // one name and tunar: asks, shows the name, sends once on the Yes
+        r.tap(30.0, 58.0);
+        r.type_text("Bob");
+        r.key("tab", "");
+        r.type_text("Hi");
+        r.key("tab", "");
+        r.type_text("yo");
+        r.key("tab", "");
+        r.type_text("10");
+        r.key("escape", "");
+        let m = sent().len();
+        r.tap(30.0, 304.0);
+        assert_eq!(sent().len(), m, "the question comes first; {}", r.why());
+        let q = confirm::current_for_test().expect("the question is up");
+        assert!(q.text.contains("10 tunar") && q.text.contains("to Bob ") && q.text.contains("postage is 15"), "{}", q.text);
+        say_yes();
+        r.settle();
+        assert_eq!(sent().len(), m + 1);
+        assert_eq!(
+            sent().last().unwrap(),
+            &crate::mailattach::send(&[b"Bob".to_vec()], &crate::ui::wide("Hi"), &crate::ui::wide("yo"), 10, None)
+        );
+        let logs = r.host.drain_logs().unwrap();
+        assert!(logs.is_empty(), "no diagnostics: {logs:?}");
+    }
+
+    #[test]
+    fn mods_auction_a_search_is_the_games_bytes_and_a_bid_or_a_buy_now_asks_first_with_the_price() {
+        let mut r = auction_rig_mod();
+        assert!(ws::any_open_of(&["auction_search"]), "Shift+A opened an auction_search session; {}", r.why());
+        let mut want = r.p.bank.auction.clone();
+        let q = Query {
+            kind: 12,
+            text: "Iron".into(),
+            name: String::new(),
+            p9c: 0xFFFF_FFFF,
+            pa0: 0xFFFF_FFFF,
+            pa4: 1,
+            pa8: crate::s2::get().auction_max_level,
+            pac: 0,
+            pb0: 0x7FFF_FFFF,
+            pb4: -2,
+            pb8: -1,
+            pbc: true,
+        };
+        let expected = want.search(q);
+        r.tap(100.0, 46.0);
+        r.type_text("Iron");
+        r.tap(200.0, 67.0);
+        assert_eq!(sent(), vec![expected], "the search the game's form would send; {}", r.why());
+        // the page: one lot, bid and buy now
+        let page = r.p.bank.auction.page as i64;
+        r.p.bank_opcode(0x1206, &page_reply(page, &[(501, 1, 400)]));
+        r.settle();
+        r.tap(60.0, 90.0);
+        let n = sent().len();
+        r.tap(256.0, 242.0);
+        assert_eq!(sent().len(), n, "negative control: the click alone bids nothing; {}", r.why());
+        let q = confirm::current_for_test().expect("the question is up");
+        assert!(!q.yes && q.text.contains("Bid 10 tunar") && q.text.contains("buyout is 400"), "{}", q.text);
+        say_yes();
+        r.settle();
+        assert_eq!(sent().len(), n + 1);
+        assert_eq!(sent().last().unwrap(), &Auction::bid(501, 10));
+        // answered; buy now asks with its price
+        r.p.bank.state = 0;
+        r.settle();
+        r.tap(330.0, 242.0);
+        let q = confirm::current_for_test().expect("the buy now question is up");
+        assert!(q.text.contains("Buy out") && q.text.contains("400"), "{}", q.text);
+        assert_eq!(sent().len(), n + 1);
+        say_yes();
+        r.settle();
+        assert_eq!(sent().last().unwrap(), &Auction::bid_n(501, 400, 1));
+        let logs = r.host.drain_logs().unwrap();
+        assert!(logs.is_empty(), "no diagnostics: {logs:?}");
+    }
+
+    #[test]
+    fn mods_auction_with_no_auction_on_the_server_the_window_says_so_and_sends_nothing() {
+        let mut r = rig_with("eqoa_auction", 380.0, 336.0, "shift+a", "a", |p| p.dump.bank.p78cc = false);
+        r.settle();
+        r.tap(200.0, 67.0);
+        assert!(sent().is_empty(), "{}", r.why());
+    }
+
+    // ---- the Bag Viewer's listing module, with the real client behind it ----
+
+    fn load_listing(host: &Host) {
+        let src = std::fs::read_to_string(root("eqoa_bag_viewer").join("modules").join("auction_list.lua")).unwrap();
+        host.execute(&format!(
+            r#"
+            B = {{ result = nil, menu = {{ title = "x", fx = 8, fy = 46, rows = {{}} }}, last = nil }}
+            function B.run_asking(label, fn) local r, e = fn(); B.last = {{ r = r, e = e }}; return r, e end
+            function B.dirty() end
+            local require = function() return B end
+            AL = (function() {src} end)()
+            AL.available = function() return true end
+            eqoa.events.on("confirm.closed", function(e) AL.on_confirm_closed(e.data) end)
+            "#
+        ))
+        .unwrap();
+    }
+
+    fn al_step(p: &mut Play, host: &Host) {
+        host.execute("AL.tick()").unwrap();
+        step(p, host);
+    }
+
+    #[test]
+    fn mods_listing_sets_price_buyout_and_time_within_the_games_limits_and_asks_first() {
+        let (mut p, host) = bank_rig();
+        p.dump.bank.items.items[0].item.value = 50;
+        load_listing(&host);
+        let it = "{id = 700001, name = 'Gold Ring', quantity = 1}";
+        // the first look: the client has not published the auction yet
+        host.execute(&format!("AL.begin({it})")).unwrap();
+        assert!(confirm::current_for_test().is_none() && sent().is_empty());
+        step(&mut p, &host);
+        host.execute(&format!("AL.begin({it})")).unwrap();
+        lua_ok(
+            &host,
+            r#"assert(B.menu.title:find('Gold Ring') and #B.menu.rows == 7, B.result and B.result.text)
+            assert(B.menu.rows[1].label:find('Price 50') and B.menu.rows[3].label:find('Buy now 100') and B.menu.rows[5].label:find('12 hours'))"#,
+        );
+        // steps: price up a tenth (50 -> 55), down below its floor stays at the item's value, time round
+        lua_ok(&host, "B.menu.rows[2].run(); assert(B.menu.rows[1].label:find('Price 55'), B.menu.rows[1].label)");
+        lua_ok(&host, "for i = 1, 5 do B.menu.rows[1].run() end; assert(B.menu.rows[1].label:find('Price 50'), B.menu.rows[1].label)");
+        lua_ok(&host, "B.menu.rows[2].run(); B.menu.rows[5].run(); assert(B.menu.rows[5].label:find('24 hours'))");
+        lua_ok(&host, "B.menu.rows[5].run(); B.menu.rows[5].run(); B.menu.rows[5].run(); assert(B.menu.rows[5].label:find('12 hours'), 'round again')");
+        // the buyout never goes under the price
+        lua_ok(&host, "for i = 1, 20 do B.menu.rows[3].run() end; assert(B.menu.rows[3].label:find('Buy now 55'), B.menu.rows[3].label)");
+        lua_ok(&host, "B.menu.rows[4].run(); B.menu.rows[4].run()");
+        let n = sent().len();
+        // List it: only the question, with the price
+        lua_ok(&host, "B.menu.rows[6].run()");
+        step(&mut p, &host);
+        assert_eq!(sent().len(), n, "negative control: the row alone lists nothing");
+        let q = confirm::current_for_test().expect("the client's question is up");
+        assert!(!q.yes && q.text.contains("Gold Ring") && q.text.contains("from 55 tunar"), "{}", q.text);
+        say_yes();
+        step(&mut p, &host);
+        assert_eq!(sent().len(), n + 1);
+        let bytes = sent().last().unwrap().clone();
+        assert_eq!(&bytes[..3], &[0x05, 0x12, 5], "the game's sell request");
+        assert_eq!(bytes[3..7], 77u32.to_le_bytes(), "the banker the bank was opened with");
+        assert_eq!(bytes[7..11], 21u32.to_le_bytes(), "the bank record's key");
+    }
+
+    #[test]
+    fn mods_listing_a_group_is_one_question_a_time_each_with_its_own_price_and_a_no_stops_it() {
+        let (mut p, host) = bank_rig();
+        p.dump.bank.items.items[0].item.value = 50;
+        p.dump.bank.items.items[1].item.no_trade = 0;
+        p.dump.bank.items.items[1].item.value = 80;
+        load_listing(&host);
+        let items = "{{id = 700001, name = 'Gold Ring', quantity = 1}, {id = 700002, name = 'Soul Shard', quantity = 1}}";
+        step(&mut p, &host);
+        host.execute("AL.begin({id = 700001, name = 'x', quantity = 1})").unwrap(); // opens the session
+        step(&mut p, &host);
+        host.execute("B.menu = {rows = {}}; AL.form = nil").unwrap();
+        host.execute(&format!("AL.start_group({items})")).unwrap();
+        al_step(&mut p, &host);
+        let q = confirm::current_for_test().expect("the first question");
+        assert!(q.text.contains("Gold Ring") && q.text.contains("from 50 tunar"), "{}", q.text);
+        let n = sent().len();
+        say_yes();
+        al_step(&mut p, &host);
+        assert_eq!(sent().len(), n + 1, "the first goes on its Yes");
+        // the second waits for the server's answer to the first, then asks with its own price
+        al_step(&mut p, &host);
+        assert!(confirm::current_for_test().is_none(), "one at a time: the second waits for the first's answer");
+        p.bank.state = 0;
+        al_step(&mut p, &host);
+        al_step(&mut p, &host);
+        let q = confirm::current_for_test().expect("the second question");
+        assert!(q.text.contains("Soul Shard") && q.text.contains("from 80 tunar"), "{}", q.text);
+        // a No stops the rest: the question's answer is no, nothing more is asked
+        confirm::reset_for_test();
+        host.execute(&format!("AL.queue = nil; AL.waiting = false; AL.start_group({items})")).unwrap();
+        p.bank.state = 0;
+        al_step(&mut p, &host);
+        al_step(&mut p, &host);
+        assert!(confirm::is_open());
+        let m = sent().len();
+        assert!(confirm::key(&Key::Named(NamedKey::Escape)));
+        for _ in 0..4 {
+            al_step(&mut p, &host);
+        }
+        assert!(!confirm::is_open(), "a No ends the group: no second question");
+        assert_eq!(sent().len(), m);
+    }
+}

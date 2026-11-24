@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_auction",
+  "name": "EQOA Auction",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "provides": [
+    "Auction window (Shift+A)"
+  ],
+  "capabilities": [
+    "eqoa.auction.get",
+    "eqoa.actions.auction_search",
+    "eqoa.actions.auction_page",
+    "eqoa.actions.auction_my_lots",
+    "eqoa.actions.auction_my_bids",
+    "eqoa.actions.auction_bid",
+    "eqoa.actions.auction_buyout",
+    "eqoa.items.slot_info",
+    "eqoa.windows.session",
+    "eqoa.log.write",
+    "eqoa.hud.frame",
+    "eqoa.input.bind",
+    "eqoa.input.claim",
+    "eqoa.input.pointer",
+    "eqoa.input.claim_pointer",
+    "eqoa.input.capture_text",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ],
+  "commands": [
+    "open"
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_mail",
+  "name": "EQOA Mail",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "provides": [
+    "Mail window (Shift+M)"
+  ],
+  "capabilities": [
+    "eqoa.mail.get",
+    "eqoa.actions.mail_refresh",
+    "eqoa.actions.mail_read",
+    "eqoa.actions.mail_delete",
+    "eqoa.actions.mail_take",
+    "eqoa.actions.mail_send",
+    "eqoa.windows.session",
+    "eqoa.log.write",
+    "eqoa.hud.frame",
+    "eqoa.input.bind",
+    "eqoa.input.claim",
+    "eqoa.input.pointer",
+    "eqoa.input.claim_pointer",
+    "eqoa.input.capture_text",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ],
+  "commands": [
+    "open"
+  ]
+}

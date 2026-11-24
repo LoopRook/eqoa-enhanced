@@ -1107,6 +1107,10 @@ function M.build_menu(it, fx, fy)
                 M.run_single("Withdraw", function() return eqoa.actions.bank_move("bank", it.ref, qty) end)
             end)
         end
+        if M.auction_list then
+            local listable, why = M.auction_list.available()
+            add("List on auction...", listable, why, function() M.auction_list.begin(it) end, true)
+        end
         if it.quantity > 1 then
             add("Withdraw 1", can_bank, not can_bank and no_bank or nil,
                 function() return bank_move_or_open(1) end, nil, bank_far and "bank" or nil)
@@ -1243,6 +1247,7 @@ function M.run_asking(label, fn)
 end
 
 function M.on_confirm_closed(d)
+    if M.auction_list and M.auction_list.on_confirm_closed(d) then return end
     if d and d.kind == "destroy_many" and M.multi then M.multi.on_destroy_closed(d); return end
     if not d or d.kind ~= "destroy" then return end
     if d.answer == "yes" then

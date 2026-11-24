@@ -119,3 +119,13 @@ A worn item is never sold, banked or destroyed by a group action (the client ref
 you close the window, zone, change tab, or when the action finishes. The controller does not multi-select (its d-pad and confirm
 work as before). The mod uses `eqoa.actions.destroy_many` and the `ctrl` and `shift` fields of `pointer.pressed` (both
 additions to `eqoa/1`).
+
+## List on auction (at a bank)
+
+With the bank open (the Bank tab), an item's menu has **List on auction...** and the group menu of several selected
+bank items has **List on auction (N)**, on servers that have the auction. The item's menu page lets you set the price
+(from the item's value, as the game's own form), the buy-now price (from the price up) and the time (12, 24, 48 or 72
+hours): click a row to step it. **List it** only asks: the client's own "Are you sure?" shows the item and its price,
+and only your answer lists it. A group is listed one item at a time, each with its own question. Mods & Addons shows
+**Asks you first: put an item up at the auction**. The **Auction** button on the title row opens the EQOA Auction mod's
+window when that mod is on.

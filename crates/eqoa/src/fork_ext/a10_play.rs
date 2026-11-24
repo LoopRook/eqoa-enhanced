@@ -303,7 +303,7 @@ fn auction_snapshot(play: &Play) -> Json {
             .iter()
             .enumerate()
             .filter(|(_, it)| crate::auction::can_sell(it))
-            .map(|(i, it)| json!({"slot": i + 1, "id": it.item.id, "name": it.item.name, "quantity": it.quantity.max(1)}))
+            .map(|(i, it)| json!({"slot": i + 1, "id": it.item.id, "name": it.item.name, "quantity": it.quantity.max(1), "value": it.item.value}))
             .collect()
     } else {
         Vec::new()
