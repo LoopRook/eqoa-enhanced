@@ -27,7 +27,7 @@ local state = {
     terrain = nil, terrain_size = nil,
     hits = {}, rect = nil, drag = nil, held = {},
     menu = nil, note = nil, search = nil, results = {}, focus = nil, capturing = false,
-    markers = {}, markers_world = nil, markers_stale = true,
+    markers = {}, markers_world = nil, markers_stale = true, markers_on = true, marker_calls = 0,
     player = nil, dots = { ids = {}, xs = {}, zs = {} },
     now = 0, message = nil, message_until = 0, overflow = -1e9, expect = {},
 }
@@ -177,7 +177,7 @@ local function finish()
     set_capture(false)
     state.session, state.hits, state.rect, state.drag = nil, {}, nil, nil
     state.menu, state.note, state.search, state.focus, state.held = nil, nil, nil, nil, {}
-    state.results, state.found, state.view = {}, nil, nil
+    state.results, state.found, state.view, state.expect = {}, nil, nil, {}
 end
 
 local function close()
@@ -308,18 +308,7 @@ local function show(session)
     listen("pointer.pressed", function(e) state.on_press(e.data) end)
     listen("pointer.wheel", function(e) state.on_wheel(e.data) end)
     -- what the mod asked of the waypoint is answered later: say what was refused
-    listen("action.result", function(e)
-        local d = e.data
-        local want = d and state.expect[d.request_id]
-        if not want then return end
-        state.expect[d.request_id] = nil
-        if d.ok == false then
-            say("Waypoint: " .. tostring(d.reason or d.code))
-        elseif want == "clear_after" then
-            local req, err = eqoa.map.clear_waypoint()
-            if req then state.expect[req] = "clear" elseif err then say("Waypoint: " .. tostring(err.message)) end
-        end
-    end)
+    listen("action.result", function(e) state.on_result(e.data) end)
 end
 
 eqoa.events.on("windows.session", function(e)
@@ -430,11 +419,11 @@ local function under(area, mx, my, world, map)
     end
     for _, m in ipairs(state.markers) do
         local name = m.label or m.name
-        if name and name ~= "" and m.kind ~= "waypoint" then
+        if name and name ~= "" and m.kind ~= "waypoint" and (state.markers_on or (m.kind ~= "camp" and m.kind ~= "coach" and m.kind ~= "community")) then
             local sx, sy = to_screen(area, m.x, m.z)
             if (sx - mx) ^ 2 + (sy - my) ^ 2 <= 49 then
                 try(m.x, m.z, 7, function()
-                    local lines = { { name, "title" } }
+                    local lines = { { m.kind == "camp" and (m.name or name) or name, "title" } }
                     if m.kind == "quest" then lines[#lines + 1] = { m.step and "Quest step" or "Quest to take", "text" } end
                     local lv = levels(m)
                     if lv then lines[#lines + 1] = { lv, "text" } end
@@ -460,17 +449,32 @@ local function under(area, mx, my, world, map)
     return best
 end
 
+-- A request id is an object: an answer is matched with ==, never by a table key.
+local function expect(req, what) state.expect[#state.expect + 1] = { id = req, what = what } end
+function state.on_result(d)
+    if not d then return end
+    for i, want in ipairs(state.expect) do
+        if d.request_id == want.id then
+            table.remove(state.expect, i)
+            if d.ok == false then
+                say("Waypoint: " .. tostring(d.reason or d.code))
+            elseif want.what == "clear_after" then
+                local req, err = eqoa.map.clear_waypoint()
+                if req then expect(req, "clear") elseif err then say("Waypoint: " .. tostring(err.message)) end
+            end
+            return
+        end
+    end
+end
+
 -- Removing the waypoint: this mod can clear only a pin it placed and still owns. One it did not place (the player's
 -- own, another mod's, one from before a restart) is first set again at the same point, which takes it over, and cleared
 -- when that is answered.
 function state.remove_waypoint(wp)
-    if wp.owner == ID then
-        local req, err = eqoa.map.clear_waypoint()
-        if req then state.expect[req] = "clear" else say("Waypoint: " .. tostring(err and err.message)) end
-        return
-    end
+    -- always set again first, even for a pin this mod placed: `clear_waypoint` clears the pin placed most recently in
+    -- any world, so this one must be the most recent
     local req, err = eqoa.map.set_waypoint({ world_id = wp.world_id, x = wp.x, z = wp.z, label = wp.label, keep = true })
-    if req then state.expect[req] = "clear_after" else say("Waypoint: " .. tostring(err and err.message)) end
+    if req then expect(req, "clear_after") else say("Waypoint: " .. tostring(err and err.message)) end
 end
 
 -- ---------------------------------------------------------------- pointer
@@ -539,10 +543,8 @@ local function colours()
         quest = ui.GetColorU32(1, .9, .3, 1), community = ui.GetColorU32(.6, .9, .6, 1),
         waypoint = ui.GetColorU32(1, .3, .85, 1), group = ui.GetColorU32(1, .5, .05, 1), npc = ui.GetColorU32(.75, .7, .45, 1),
         grid = ui.GetColorU32(1, 1, 1, .08), target = ui.GetColorU32(1, .3, .3, 1),
-        members = {
-            ui.GetColorU32(.35, .75, 1, 1), ui.GetColorU32(.5, .95, .5, 1), ui.GetColorU32(1, .8, .3, 1),
-            ui.GetColorU32(.95, .5, 1, 1), ui.GetColorU32(1, .55, .45, 1), ui.GetColorU32(.6, .6, 1, 1),
-        },
+        -- the game's own (`member_color`), by place in the group with the player 0: 1 green, 2 blue, 3 cyan, the rest yellow
+        members = { ui.GetColorU32(0, 1, 0, 1), ui.GetColorU32(.2, .4, 1, 1), ui.GetColorU32(0, 1, 1, 1), ui.GetColorU32(1, 1, 0, 1) },
     }
 end
 
@@ -554,10 +556,15 @@ function draw(e)
     local dt = clamp(e and e.data and e.data.dt or 1 / 60, 0, 0.1)
     local rect, area = geometry(dw, dh)
     state.rect, state.area = rect, area
-    -- the window is the map's whatever else happens this frame: clicks on it never reach the game
+    ui.SetNextWindowPos(0, 0)
+    ui.SetNextWindowSize(dw, dh)
+    ui.Begin("eqoa_world_map_layer", nil, ImGuiWindowFlags.NoTitleBar + ImGuiWindowFlags.NoBackground + ImGuiWindowFlags.NoMove
+        + ImGuiWindowFlags.NoResize + ImGuiWindowFlags.NoScrollbar + ImGuiWindowFlags.NoSavedSettings + ImGuiWindowFlags.NoInputs)
+    -- the window is the map's whatever else happens this frame: clicks on it never reach the game. Claimed inside the
+    -- ImGui window being built, which is what puts it in the window order (the front one is the one that is clicked).
     eqoa.input.claim_pointer({ x = rect.x, y = rect.y, width = rect.w, height = rect.h })
     local map = eqoa.map.get()
-    if not map then return end
+    if not map then ui.End(); return end
     C = C or colours()
     local c = C
     local pointer = eqoa.input.pointer()
@@ -566,16 +573,20 @@ function draw(e)
     local pl = eqoa.player.get()
     state.player = pl and pl.position or nil
     state.heading = pl and pl.heading
+    state.markers_on = map.markers_on ~= false
     state.self_id = pl and pl.id
     local inp = eqoa.input.get()
-    if inp and inp.focused == false then state.held = {} end
+    -- a key-up the game never delivers (the window lost focus, a game window or a text field took the keyboard) must not
+    -- leave W held
+    local wins = eqoa.windows.get()
+    if (inp and (inp.focused == false or inp.text_capture)) or (wins and wins.busy) then state.held = {} end
     if math.floor(state.now) ~= state.claim_tick then state.claim_tick = math.floor(state.now); claim_keys() end
 
     -- the view: the player's area at the game's opening zoom (or where it was left), following the player until moved
     local v = state.view
     if not v then
         local p = state.player
-        if not p then return end
+        if not p then ui.End(); return end
         v = { x = p.x, z = p.z, scale = state.last_scale }
         state.view = v
         state.following = true
@@ -596,10 +607,6 @@ function draw(e)
     if state.focus or state.note then set_capture(true) else set_capture(false) end
     if v.scale <= 12 then state.dots = eqoa.entities.dots() or state.dots end
 
-    ui.SetNextWindowPos(0, 0)
-    ui.SetNextWindowSize(dw, dh)
-    ui.Begin("eqoa_world_map_layer", nil, ImGuiWindowFlags.NoTitleBar + ImGuiWindowFlags.NoBackground + ImGuiWindowFlags.NoMove
-        + ImGuiWindowFlags.NoResize + ImGuiWindowFlags.NoScrollbar + ImGuiWindowFlags.NoSavedSettings + ImGuiWindowFlags.NoInputs)
     if font then ui.PushFont(font) end
     ui.SetWindowFontScale(12 / 13)
     local dl = ui.GetWindowDrawList()
@@ -641,6 +648,7 @@ function draw(e)
     end
     state.hits = {}
     state.overflow = -1e9
+    state.marker_calls = 0
     local function button(x, y, w, h, label, run, active)
         fill(x, y, w, h, active and c.selected or c.raised)
         frame(x, y, w, h, active and c.red or c.border)
@@ -711,14 +719,15 @@ function draw(e)
             if on_screen(sx2, sy2, 3) and dots.ids[i] ~= state.self_id then dl:AddCircleFilled(V(sx2, sy2), 2, c.npc, 8) end
         end
     end
-    local show_marks = map.markers_on ~= false -- the game's Map Markers setting: camps and coaches
+    local show_marks = state.markers_on -- the game's Map Markers setting: camps, coaches and community marks
     local town_boxes = {}
     for _, m in ipairs(state.markers) do
         local kind = m.kind
-        if kind ~= "waypoint" and ((kind ~= "camp" and kind ~= "coach") or show_marks) then
+        if kind ~= "waypoint" and ((kind ~= "camp" and kind ~= "coach" and kind ~= "community") or show_marks) then
             local sx2, sy2 = to_screen(area, m.x, m.z)
             if on_screen(sx2, sy2, 8) then
                 local name = m.label or m.name
+                state.marker_calls = state.marker_calls + 1
                 if kind == "quest" then
                     -- "!" a quest to take, "?" a step to do
                     local mark = m.step and "?" or "!"
@@ -726,11 +735,10 @@ function draw(e)
                 elseif kind == "coach" then
                     dl:AddCircleFilled(V(sx2, sy2), 5, c.black, 12); dl:AddCircleFilled(V(sx2, sy2), 4, c.coach, 12)
                 elseif kind == "camp" then
-                    local big = name and name:find("(XP camp)", 1, true) and 5 or 3.5
-                    dl:AddTriangleFilled(V(sx2, sy2 - big - 1), V(sx2 + big + 1, sy2), V(sx2, sy2 + big + 1), c.black)
-                    dl:AddTriangleFilled(V(sx2, sy2 - big - 1), V(sx2, sy2 + big + 1), V(sx2 - big - 1, sy2), c.black)
-                    dl:AddTriangleFilled(V(sx2, sy2 - big), V(sx2 + big, sy2), V(sx2, sy2 + big), c.camp)
-                    dl:AddTriangleFilled(V(sx2, sy2 - big), V(sx2, sy2 + big), V(sx2 - big, sy2), c.camp)
+                    -- one diamond a layer: the world in view holds about 280 camps
+                    dl:AddNgonFilled(V(sx2, sy2), 4.8, c.black, 4)
+                    dl:AddNgonFilled(V(sx2, sy2), 3.6, c.camp, 4)
+                    state.marker_calls = state.marker_calls + 2
                 else
                     local col = kind == "group_waypoint" and c.group or c[kind] or c.group
                     dl:AddRectFilled(V(sx2 - 3.5, sy2 - 3.5), V(sx2 + 3.5, sy2 + 3.5), c.black)
@@ -779,7 +787,7 @@ function draw(e)
                 local sx2, sy2 = to_screen(area, mp.x, mp.z)
                 if on_screen(sx2, sy2, 8) then
                     dl:AddCircleFilled(V(sx2, sy2), 5, c.black, 12)
-                    dl:AddCircleFilled(V(sx2, sy2), 3.5, c.members[(i - 1) % #c.members + 1], 12)
+                    dl:AddCircleFilled(V(sx2, sy2), 3.5, c.members[math.min(i, #c.members)], 12)
                 end
             end
         end
@@ -864,7 +872,7 @@ function draw(e)
         local rows = {
             { "Set waypoint here", function()
                 local req, err = eqoa.map.set_waypoint({ world_id = mn.world, x = mn.wx, z = mn.wz, label = "World Map", keep = true })
-                if req then state.expect[req] = "set" elseif err then say("Waypoint: " .. tostring(err.message or err.code)) end
+                if req then expect(req, "set") elseif err then say("Waypoint: " .. tostring(err.message or err.code)) end
             end },
             { "Drop a pin here...", function()
                 local sx2, sy2 = to_screen(area, mn.wx, mn.wz)

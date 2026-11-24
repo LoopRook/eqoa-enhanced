@@ -518,7 +518,7 @@ fn a13_world_map_holds_the_shifted_pan_keys_and_ignores_keys_another_mod_is_typi
 }
 
 #[test]
-fn a13_world_map_waypoint_removal_takes_over_a_pin_it_does_not_own_and_clears_its_own() {
+fn a13_world_map_waypoint_removal_runs_the_whole_round_trip_and_shows_a_refusal() {
     fresh();
     let mut rig = rig([1024.0, 768.0], None);
     // the player's own waypoint (no owner), on the player
@@ -527,15 +527,96 @@ fn a13_world_map_waypoint_removal_takes_over_a_pin_it_does_not_own_and_clears_it
     });
     rig.open();
     rig.frames(2);
-    let (px, py) = (rig.middle().0, rig.middle().1);
-    rig.press((px, py), "right");
-    assert_eq!(action_broker::queued_kinds_for_test(), vec!["set_waypoint"], "not its own: set again first (to take it over), cleared once that is answered");
+    let mid = rig.middle();
+    // 1. set again at the same point (to take it over)
+    rig.press(mid, "right");
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["set_waypoint"], "logs {:?}", rig.host.drain_logs());
+    // 2. the answer arrives: the mod clears it (the control: with the answer never matched, nothing more is asked)
+    assert_eq!(action_broker::dispatch_all_for_test(), vec!["set_waypoint"]);
+    native_core::flush_deferred();
+    rig.frames(2);
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["clear_waypoint"], "the answer was recognised and the pin is cleared");
     action_broker::reset_all_for_test();
-    // a waypoint this mod owns is cleared at once
+    rig.host.execute("assert(#world_map.expect == 1)").unwrap_or(());
+    // a refusal is shown in the footer and nothing is cleared
+    rig.press(mid, "right");
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["set_waypoint"]);
+    action_broker::refuse_all_for_test();
+    native_core::flush_deferred();
+    rig.frames(2);
+    assert!(rig.lua_str("world_map.message").starts_with("Waypoint:"), "the refusal is on screen: {}", rig.lua_str("world_map.message"));
+    assert!(action_broker::queued_kinds_for_test().is_empty(), "and nothing is cleared");
+    assert_eq!(rig.lua_f64("#world_map.expect"), 0.0, "answered requests are forgotten");
+}
+
+#[test]
+fn a13_world_map_removal_always_sets_the_pin_again_for_its_own_world_before_clearing() {
+    fresh();
+    let mut rig = rig([1024.0, 768.0], None);
+    // a pin this mod owns in world 0, while it also placed one in world 1 earlier (clear_waypoint would clear the latest)
     CORE.with(|c| {
         c.borrow_mut().view.map["waypoint"] = json!({"world_id": 0, "x": 25300.0, "z": 15200.0, "label": "World Map", "owner": "eqoa_world_map"});
     });
+    rig.open();
     rig.frames(2);
-    rig.press((px, py), "right");
-    assert_eq!(action_broker::queued_kinds_for_test(), vec!["clear_waypoint"]);
+    let mid = rig.middle();
+    rig.press(mid, "right");
+    let queued = action_broker::queued_actions_for_test();
+    assert_eq!(queued.len(), 1);
+    match &queued[0] {
+        action_broker::ActionKind::SetWaypoint { world, keep, .. } => assert!(*world == 0 && *keep, "set again for world 0, kept"),
+        other => panic!("the mod went straight to {:?}: clear_waypoint would clear the latest pin of any world", other.name()),
+    }
+}
+
+#[test]
+fn a13_world_map_is_in_the_window_order_so_the_click_goes_to_the_window_in_front() {
+    fresh();
+    let mut rig = rig([1024.0, 768.0], None);
+    rig.open();
+    rig.frames(2);
+    let mid = rig.middle();
+    // a claim made inside the ImGui window has a place in ImGui's order; made outside one it has none, and every other
+    // window would always be taken to be in front of the map
+    assert!(pointer_api::front_claim_z(mid.0 as f32, mid.1 as f32).is_some(), "the map's claim has a place in the window order");
+}
+
+#[test]
+fn a13_world_map_hides_camps_with_map_markers_off_even_for_the_hover_and_keeps_the_drawing_cheap() {
+    fresh();
+    let mut rig = rig([1024.0, 768.0], None);
+    rig.open();
+    rig.frames(2);
+    // centre the view on a camp
+    rig.host.execute("local m; for _, k in ipairs(world_map.markers) do if k.kind == 'camp' then m = k; break end end assert(m); world_map.following = false; world_map.view.x, world_map.view.z, world_map.view.scale = m.x, m.z, 4").unwrap();
+    rig.frames(2);
+    let mid = rig.middle();
+    pointer_api::position([mid.0 as f32, mid.1 as f32], true, (1024, 768));
+    rig.frames(2);
+    assert!(rig.lua_str("world_map.card ~= nil") == "true", "Map Markers on: the camp answers the pointer");
+    CORE.with(|c| c.borrow_mut().view.map["markers_on"] = json!(false));
+    rig.frames(2);
+    assert_eq!(rig.lua_str("world_map.card"), "nil", "Map Markers off: no card over empty ground");
+    // the whole world in view: two draw calls a camp at most (it was four triangles and their points)
+    CORE.with(|c| c.borrow_mut().view.map["markers_on"] = json!(true));
+    rig.host.execute("world_map.view.scale = 1e5").unwrap();
+    rig.frames(3);
+    let calls = rig.lua_f64("world_map.marker_calls");
+    let total = rig.lua_f64("#world_map.markers");
+    assert!(calls <= 2.0 * total + 1.0, "{calls} marker draw calls for {total} marks");
+}
+
+#[test]
+fn a13_world_map_lets_go_of_held_keys_when_another_text_field_takes_the_keyboard() {
+    fresh();
+    let mut rig = rig([1024.0, 768.0], None);
+    rig.open();
+    route(&mut rig, "w", true);
+    assert_eq!(rig.lua_str("world_map.held.w"), "true");
+    // a text field somewhere else takes the keyboard while W is down: the key-up never arrives
+    let other = Host::with_test_capabilities(&["eqoa.input.capture_text"]).unwrap();
+    other.execute("eqoa.input.capture_text(true)").unwrap();
+    rig.frames(2);
+    assert_eq!(rig.lua_str("world_map.held.w"), "nil", "W is not held any more: the map does not pan by itself");
+    other.execute("eqoa.input.capture_text(false)").unwrap();
 }
