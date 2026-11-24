@@ -57,13 +57,24 @@ pub(crate) fn clear_view() {
 pub(crate) fn project(view_proj: Mat4, size: (u32, u32), world: [f64; 3]) -> (Option<[f64; 2]>, f64, bool, bool) {
     // in doubles, as `play::labels`: at Freeport's x 25,300 a float steps 2 mm
     let clip = view_proj.as_dmat4() * glam::DVec4::new(world[0], world[1], world[2], 1.0);
+    // a point too large to compute, or so close to the eye's plane that the division overflows, cannot be put on
+    // the screen: it is reported as behind (depth 0), so every field is a finite number, or nil only when behind
+    if !clip.to_array().iter().all(|v| v.is_finite()) {
+        return (None, 0.0, false, true);
+    }
     let behind = clip.w <= 0.0;
     if behind {
         return (None, clip.w, false, true);
     }
     let (nx, ny, nz) = (clip.x / clip.w, clip.y / clip.w, clip.z / clip.w);
+    if ![nx, ny, nz].iter().all(|v| v.is_finite()) {
+        return (None, 0.0, false, true);
+    }
     let x = (nx + 1.0) * 0.5 * size.0 as f64;
     let y = (1.0 - ny) * 0.5 * size.1 as f64;
+    if !x.is_finite() || !y.is_finite() {
+        return (None, 0.0, false, true);
+    }
     let inside = nx.abs() <= 1.0 && ny.abs() <= 1.0 && (0.0..=1.0).contains(&nz);
     (Some([x, y]), clip.w, inside, false)
 }

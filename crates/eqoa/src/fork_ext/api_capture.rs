@@ -173,12 +173,13 @@ impl Play {
         let entities=self.entities.slots.iter().flatten().map(|e|{
             let c=e.creature.as_ref();let code=c.map(|c|c.p256);
             let disposition=(e.id==self.target && CORE.with(|c|c.borrow().disposition_target==Some(self.target))).then_some(self.target_info).flatten();
+            let (head_mark, merc_tag) = self.fork_plate_extras(e);
             let power_val = if Some(e.id) == id {
                 (self.stats.stat[10] > 0).then(|| ee::div(self.stats.stat[9].clamp(0, self.stats.stat[10]) as f32, self.stats.stat[10] as f32))
             } else {
                 self.session.power_of(e.id).map(|p| ee::div(p as f32, 255.0))
             };
-            json!({"world_id":e.world,"entity_type":e.kind,"is_creature":e.kind==net::entity::TYPE_CREATURE,"corpse":e.p18&2!=0,"search_flags":c.map(|c|c.p255),"npc_flags":c.map(|c|c.npc_flags),"id":e.id,"name":c.map_or("",|c|c.name.as_str()),"level":c.map(|c|c.level),"position":vec3(e.pos),"actor_position":vec3(actor_position(e)),"hp_fraction":(e.p19!=0 || Some(e.id)==valid_id(self.target)).then(||ee::div(e.p19 as f32,255.0)),"power":power_val,"kind":match code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":code,"target_id":c.and_then(|c|valid_id(c.target)),"status_flags":c.map(|c|c.flags262),"poisoned":c.map(|c|c.flags262&4!=0),"diseased":c.map(|c|c.flags262&8!=0),"disposition":disposition,"disposition_name":disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None})})
+            json!({"world_id":e.world,"entity_type":e.kind,"is_creature":e.kind==net::entity::TYPE_CREATURE,"corpse":e.p18&2!=0,"search_flags":c.map(|c|c.p255),"npc_flags":c.map(|c|c.npc_flags),"id":e.id,"name":c.map_or("",|c|c.name.as_str()),"level":c.map(|c|c.level),"position":vec3(e.pos),"actor_position":vec3(actor_position(e)),"hp_fraction":(e.p19!=0 || Some(e.id)==valid_id(self.target)).then(||ee::div(e.p19 as f32,255.0)),"power":power_val,"kind":match code{Some(2)=>"player",Some(0|1)=>"npc",Some(3)=>"pet",_=>"other"},"class_code":code,"target_id":c.and_then(|c|valid_id(c.target)),"status_flags":c.map(|c|c.flags262),"poisoned":c.map(|c|c.flags262&4!=0),"diseased":c.map(|c|c.flags262&8!=0),"disposition":disposition,"disposition_name":disposition.and_then(|d|match d{0..=1=>Some("Hostile"),2..=3=>Some("Neutral"),4..=6=>Some("Friendly"),_=>None}),"head_mark":head_mark,"merc_tag":merc_tag})
         }).collect::<Vec<_>>();
         let dots = minimap_dots(self);
         let fighting = id

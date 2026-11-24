@@ -958,11 +958,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.entities.Entity.disposition` | supported | 2 |  |
 | `eqoa.entities.Entity.disposition_name` | supported | 2 |  |
 | `eqoa.entities.Entity.entity_type` | supported | 2 |  |
+| `eqoa.entities.Entity.head_mark` | supported | 8 |  |
 | `eqoa.entities.Entity.hp_fraction` | supported | 2 |  |
 | `eqoa.entities.Entity.id` | supported | 2 |  |
 | `eqoa.entities.Entity.is_creature` | supported | 2 |  |
 | `eqoa.entities.Entity.kind` | supported | 2 |  |
 | `eqoa.entities.Entity.level` | supported | 2 |  |
+| `eqoa.entities.Entity.merc_tag` | supported | 8 |  |
 | `eqoa.entities.Entity.name` | supported | 2 |  |
 | `eqoa.entities.Entity.npc_flags` | supported | 6 |  |
 | `eqoa.entities.Entity.poisoned` | supported | 2 |  |

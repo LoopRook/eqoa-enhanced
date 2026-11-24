@@ -342,3 +342,141 @@ fn a12_project_entity_projects_the_point_the_game_puts_its_plate_at() {
     native_a12::set_plates(vec![]);
     h.execute("local r,e = eqoa.camera.project_entity(7); assert(r==nil and e.code=='not_found')").unwrap();
 }
+
+// ---- fix round: finite results, quest marks and merc tags, guard negative control ----------------------------------
+
+#[test]
+fn a12_project_never_returns_a_value_that_is_not_a_number() {
+    let vp = view_proj(Vec3::ZERO, Vec3::NEG_Z);
+    let all_sane = |name: &str, (at, depth, on, behind): (Option<[f64; 2]>, f64, bool, bool)| {
+        assert!(depth.is_finite(), "{name}: depth {depth}");
+        match at {
+            Some(a) => assert!(a[0].is_finite() && a[1].is_finite() && !behind, "{name}: {a:?}"),
+            None => assert!(behind && !on, "{name}: nil position only when behind"),
+        }
+    };
+    // 1e308 in each way, a point a denormal's width in front of the eye (the division overflows), and the control
+    for (name, p) in [
+        ("1e308", [1e308, 1e308, 1e308]),
+        ("-1e308 mix", [1e308, -1e308, 1e308]),
+        ("1e308 ahead", [0.0, 0.0, -1e308]),
+        ("1e-315 ahead", [0.0, 0.0, -1e-315]),
+        ("1e-315 side", [1e-315, 0.0, -1e-315]),
+    ] {
+        let r = native_a12::project(vp, SIZE, p);
+        all_sane(name, r);
+        assert!(!r.2, "{name}: never on the screen");
+        if name != "1e308 ahead" {
+            assert!(r.3, "{name}: cannot be computed, reported as behind");
+        } else {
+            assert!(!r.3, "{name}: in front, only past the far plane");
+        }
+    }
+    let control = native_a12::project(vp, SIZE, [0.0, 0.0, -10.0]);
+    all_sane("control", control);
+    assert!(!control.3 && control.2, "the control is a point on the screen");
+}
+
+#[test]
+fn a12_project_through_lua_gives_a_number_or_nil_only_when_behind() {
+    let h = in_world_host();
+    native_a12::set_view(view_proj(Vec3::ZERO, Vec3::NEG_Z), SIZE);
+    h.execute(
+        r#"
+        local function check(p)
+          local r, e = eqoa.camera.project(p)
+          assert(r ~= nil, tostring(e and e.code))
+          assert(type(r.depth) == 'number' and r.depth == r.depth and r.depth ~= math.huge and r.depth ~= -math.huge)
+          if r.behind then assert(r.x == nil and r.y == nil and r.on_screen == false)
+          else assert(type(r.x) == 'number' and type(r.y) == 'number') end
+        end
+        check({x=1e308,y=1e308,z=1e308}); check({x=1e308,y=-1e308,z=1e308}); check({x=0,y=0,z=-1e308})
+        check({x=0,y=0,z=-1e-315}); check({x=0,y=0,z=-10}); check({x=0,y=0,z=10})
+        -- not numbers at all: refused
+        for _, bad in ipairs({ {x=1/0,y=0,z=0}, {x=-1/0,y=0,z=0}, {x=0,y=0/0,z=0} }) do
+          local r, e = eqoa.camera.project(bad); assert(r == nil and e.code == 'invalid_argument')
+        end
+        -- an explicit nil second argument is a second argument
+        local r, e = eqoa.camera.project({x=0,y=0,z=0}, nil); assert(r == nil and e.code == 'invalid_argument')
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn a12_the_entity_record_carries_the_plates_quest_mark_and_merc_tag() {
+    crate::settings::testing::reset(false);
+    CORE.with(|c| *c.borrow_mut() = Core::default());
+    let mut p = crate::play::Play::bundled_ui_fixture();
+    let creature = |id: u32, name: &str, p256: u8| net::entity::Entity {
+        id,
+        kind: net::entity::TYPE_CREATURE,
+        p19: 255,
+        creature: Some(net::entity::Creature { name: name.into(), level: 5, p256, ..Default::default() }),
+        ..Default::default()
+    };
+    p.entities.slots[2] = Some(creature(9101, "Quest Giver", 0));
+    p.entities.slots[3] = Some(creature(9102, "Ralthas", 3));
+    p.entities.slots[4] = Some(creature(9103, "Plain Rat", 0));
+    p.session.head_marks_offer = true;
+    p.session.agree_head_marks(true);
+    p.session.head_marks.insert(9101, net::headmarks::TAKE);
+    p.session.head_marks.insert(9102, net::headmarks::STEP);
+    p.session.mercs = Some(net::session::Mercs { own: false, names: vec!["Ralthas".into()], owners: vec!["Lonewulf".into()], ..Default::default() });
+    // what `Play::plates` reads for each is what the record carries (the same two calls)
+    let extras = |id: u32| p.fork_plate_extras(p.entities.slots.iter().flatten().find(|e| e.id == id).unwrap());
+    assert_eq!(extras(9101), (Some("!"), None));
+    assert_eq!(extras(9102), (Some("?"), Some("<Lonewulf's Mercenary>".to_string())));
+    assert_eq!(extras(9103), (None, None), "control: nothing on a plain creature");
+    let h = Host::new().unwrap();
+    h.snapshot.set(p.forge_snapshot(None));
+    h.execute(
+        r#"
+        local by = {}
+        for _, e in ipairs(eqoa.entities.list()) do by[e.id] = e end
+        assert(by[9101].head_mark == '!' and by[9101].merc_tag == nil)
+        assert(by[9102].head_mark == '?' and by[9102].merc_tag == "<Lonewulf's Mercenary>")
+        assert(by[9103].head_mark == nil and by[9103].merc_tag == nil)
+        "#,
+    )
+    .unwrap();
+    // Extended's Quest Markers off: no mark on the plate, none in the record
+    let mut off = crate::settings::client();
+    off.head_marks = false;
+    crate::settings::set_client(off);
+    assert_eq!(extras(9101).0, None, "negative control: the setting that hides marks on the plate hides them here");
+    // and the plate reads them in the way this record does
+    let src = include_str!("../../play.rs").replace("\r\n", "\n");
+    assert!(src.contains("let mark = crate::settings::head_marks().then(|| self.session.head_mark(e.id)).flatten();"));
+    assert!(src.contains("tag: self.merc_tag(c), mark"));
+}
+
+#[test]
+fn a12_the_guard_placement_check_fails_without_the_guards() {
+    // negative control for `a12_the_guard_lines_sit_in_the_games_own_draws`: the same test on play.rs with the
+    // guard lines taken out must fail
+    let src = include_str!("../../play.rs").replace("\r\n", "\n");
+    assert!(guards_ok(&src));
+    for guard in ["fork_hud::plates_hidden()", "fork_hud::rings_hidden()", "fork_hud::damage_hidden()"] {
+        assert!(!guards_ok(&src.replace(guard, "true")), "without {guard} the check must fail");
+    }
+}
+
+fn guards_ok(src: &str) -> bool {
+    let section = |from: &str, to: &str| {
+        let a = src.find(from)?;
+        let b = a + src[a..].find(to)?;
+        Some(src[a..b].to_string())
+    };
+    let ok = || -> Option<bool> {
+        let plates = section("pub fn plates(&self) -> Vec<Plate> {", "        out\n    }")?;
+        let rings = section("pub fn draw_rings(", "r.set_overlay(device, queue, view_proj, &tris")?;
+        let damage = section("let under = self.damage.place(", "ui.quads.splice(0..0, under)")?;
+        Some(
+            plates.find("fork_hud::plates_hidden()")? < plates.find("for (slot, e)")?
+                && rings.find("crate::hideui::hidden()")? < rings.find("fork_hud::rings_hidden()")?
+                && damage.contains("fork_hud::damage_hidden()"),
+        )
+    };
+    ok().unwrap_or(false)
+}
