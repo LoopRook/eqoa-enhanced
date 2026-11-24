@@ -93,7 +93,7 @@ fn a10_arguments_are_checked_before_anything_is_queued() {
         ("eqoa.actions.auction_bid(5)", "invalid_argument"),
         ("eqoa.actions.auction_bid({lot = 5})", "invalid_argument"),
         ("eqoa.actions.auction_bid({lot = 5, price = 0})", "out_of_range"),
-        ("eqoa.actions.auction_bid({lot = 5, price = 2^40})", "invalid_argument"),
+        ("eqoa.actions.auction_bid({lot = 5, price = 2^40})", "out_of_range"),
         ("eqoa.actions.auction_sell({slot = 1, id = 1, price = 5, buyout = 9})", "invalid_argument"),
         ("eqoa.actions.auction_sell({slot = 1, id = 1, price = 5, buyout = 9, hours = 0})", "out_of_range"),
         ("eqoa.actions.auction_sell({slot = 1, id = 1, price = -5, buyout = 9, hours = 1})", "out_of_range"),

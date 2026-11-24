@@ -616,12 +616,13 @@ fn a10_a_lot_of_my_own_or_one_that_has_ended_is_not_bid_on() {
 
 #[test]
 fn a10_the_live_auction_bids_for_a_count_and_buys_out_the_whole_stack() {
+    // the play fixture sets the feature word itself, so the live word is set after it is made
+    let (mut p, host) = auction_rig();
     crate::live::with_features(Some(0x1B), || {
-        let (mut p, host) = auction_rig();
         lot_page(&mut p, &host, &[(501, 20, 400)]);
         let n = sent().len();
-        let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 150, count = 5})");
-        assert!(ok);
+        let (ok, code, reason) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 150, count = 5})");
+        assert!(ok, "{code} {reason}");
         say_yes();
         step(&mut p, &host);
         assert_eq!(sent().len(), n + 1);
