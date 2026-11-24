@@ -294,8 +294,8 @@ function draw()
     -- Row 3 (Restock / Bank marked: only when a mark exists and the merchant or banker is near or open) makes the loot log
     -- one line shorter; Row 4 is the three "do it when I get near" choices (always there: off by default)
     local bank_open_now = eqoa.bank.get() and eqoa.bank.get().open
-    local show_restock = next(HP.keep) ~= nil and (eqoa.merchant.get() ~= nil or B.nearby_npc("merchant") ~= nil)
-    local show_bank = next(HP.bank) ~= nil and (bank_open_now or B.nearby_npc("bank") ~= nil)
+    local show_restock = next(HP.keep) ~= nil and (eqoa.merchant.get() ~= nil or B.nearby_npc("merchant", B.DRAW_TTL) ~= nil)
+    local show_bank = next(HP.bank) ~= nil and (bank_open_now or B.nearby_npc("bank", B.DRAW_TTL) ~= nil)
     local has_row3 = show_restock or show_bank
     local log_n = has_row3 and LOG_LINES_HELPERS or LOG_LINES
     log_shown = log_n
@@ -308,8 +308,8 @@ function draw()
     local has_ctx_btn = is_corpse
         or eqoa.merchant.get() ~= nil
         or eqoa.loot.get() ~= nil
-        or B.nearby_npc("merchant") ~= nil
-        or (is_bank and not (eqoa.bank.get() and eqoa.bank.get().open) and B.nearby_npc("bank") ~= nil)
+        or B.nearby_npc("merchant", B.DRAW_TTL) ~= nil
+        or (is_bank and not (eqoa.bank.get() and eqoa.bank.get().open) and B.nearby_npc("bank", B.DRAW_TTL) ~= nil)
     local row3_y = has_ctx_btn and (bar2_y + 18) or bar2_y
     local row4_y = has_row3 and (row3_y + 18) or row3_y
     local H = row4_y + 17 + PAD
@@ -511,7 +511,8 @@ function draw()
     end
     local loot = eqoa.loot.get()
     local merch = eqoa.merchant.get()
-    local near_corpse = B.nearby_corpse()
+    -- only the corpse buttons read it: a look at the zone is not made for it otherwise
+    local near_corpse = (is_corpse or loot ~= nil) and B.nearby_corpse() or nil
     if is_corpse or loot ~= nil then
         -- "Look at corpse" only shows what is in it; the "Take" buttons take (the green ones)
         local bw, bgap = W - 2 * PAD, 6
@@ -529,8 +530,8 @@ function draw()
         local _, cnt, tunar = B.junk_sell_list()
         local lbl = string.format("Sell junk (%d %s, %s tunar)", cnt, cnt == 1 and "item" or "items", B.tunar(tunar))
         ctx_btn(PAD, W - 2 * PAD, lbl, cnt > 0 and c.text or c.muted, cnt > 0 and c.junk or c.border, B.start_sell_junk)
-    elseif is_bank and not (eqoa.bank.get() and eqoa.bank.get().open) and B.nearby_npc("bank") ~= nil then
-        local far = B.too_far("bank")
+    elseif is_bank and not (eqoa.bank.get() and eqoa.bank.get().open) and B.nearby_npc("bank", B.DRAW_TTL) ~= nil then
+        local far = B.too_far("bank", B.DRAW_TTL)
         if far then
             ctx_btn(PAD, W - 2 * PAD, "Open bank: " .. far, c.muted, c.border, function()
                 B.open_talk_npc("bank", "Open bank", function()
@@ -546,9 +547,9 @@ function draw()
                 end)
             end)
         end
-    elseif B.nearby_npc("merchant") ~= nil then
+    elseif B.nearby_npc("merchant", B.DRAW_TTL) ~= nil then
         local _, cnt = B.junk_sell_list()
-        local far = B.too_far("merchant")
+        local far = B.too_far("merchant", B.DRAW_TTL)
         if far then
             ctx_btn(PAD, W - 2 * PAD, "Sell junk: " .. far, c.muted, c.border, B.start_sell_junk)
         else
@@ -574,7 +575,7 @@ function draw()
             local lbl
             local plan = eqoa.merchant.get() ~= nil and HP.restock_plan_cached() or nil
             local n = plan and #plan.buys or HP.short_count()
-            local far = eqoa.merchant.get() == nil and B.too_far("merchant") or nil
+            local far = eqoa.merchant.get() == nil and B.too_far("merchant", B.DRAW_TTL) or nil
             if far then
                 lbl = "Restock: " .. far
             elseif plan then
@@ -587,7 +588,7 @@ function draw()
         end
         if show_bank then
             local n = HP.bank_count()
-            local far = not bank_open_now and B.too_far("bank") or nil
+            local far = not bank_open_now and B.too_far("bank", B.DRAW_TTL) or nil
             local lbl = far and ("Bank marked: " .. far) or string.format("Bank marked (%d)", n)
             local live = n > 0 and not far
             row3_btn(lbl, live and c.text or c.muted, live and c.worn or c.border, HP.start_bank)

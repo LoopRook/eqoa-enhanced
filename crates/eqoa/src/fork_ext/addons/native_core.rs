@@ -286,10 +286,44 @@ pub(crate) fn presentation() {
     });
 }
 pub(crate) fn iteration(game_step: bool) {
+    GAME_STEP.with(|g| {
+        let (_, pending) = g.get();
+        g.set((true, pending || game_step));
+    });
     CORE.with(|c| {
         let mut c = c.borrow_mut();
         c.tick += u64::from(game_step);
     });
+}
+// (an iteration has been seen, a game step has passed since the state was last rebuilt)
+thread_local! {static GAME_STEP:std::cell::Cell<(bool,bool)>=const{std::cell::Cell::new((false,false))};}
+/// Whether the game stepped since the last call (the fork's per-frame hook `iteration` says so). Where no
+/// iteration was ever run (headless tests) every call is a step, as it was before the gate.
+pub(crate) fn take_game_step() -> bool {
+    GAME_STEP.with(|g| {
+        let (seen, pending) = g.get();
+        g.set((seen, false));
+        !seen || pending
+    })
+}
+/// Whether an event other than the per-frame motion ones (`camera.changed`, `player.changed`) was emitted after
+/// `seq`: the state those events describe must be rebuilt before a mod sees them.
+pub(crate) fn state_event_since(seq: u64) -> bool {
+    CORE.with(|c| {
+        c.borrow()
+            .events
+            .iter()
+            .rev()
+            .take_while(|e| e.seq > seq)
+            .any(|e| !matches!(e.name.as_str(), "camera.changed" | "player.changed"))
+    })
+}
+#[cfg(test)]
+pub(crate) fn reset_game_step_for_test() {
+    GAME_STEP.with(|g| g.set((false, false)));
+}
+pub(crate) fn event_seq() -> u64 {
+    CORE.with(|c| c.borrow().seq)
 }
 pub(crate) fn emit(name: &str, data: Json) {
     CORE.with(|c| c.borrow_mut().emit(name, data));
@@ -935,6 +969,15 @@ fn generation_loss(c: &mut Core, count: u64) {
 }
 pub(crate) fn flush_deferred() {
     super::window_sessions::flush_outbox();
+    // An empty flush (no queued capture, nothing lost, no guide to check) changes nothing: skip the timer, the
+    // CORE borrow and `guides::update`. Runs once per VM per frame, so this is the common case.
+    if DEFERRED.with(|d| {
+        let d = d.borrow();
+        !d.flushing && d.queue.is_empty() && d.lost == 0
+    }) && super::guides::none_set()
+    {
+        return;
+    }
     let _timed = super::addon_perf::section("deferred.flush");
     let batch = DEFERRED.with(|d| {
         let mut d = d.borrow_mut();

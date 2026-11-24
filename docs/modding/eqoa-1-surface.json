@@ -12436,6 +12436,7 @@
         "eqoa.map.open",
         "eqoa.map.set_guide",
         "eqoa.map.set_waypoint",
+        "eqoa.map.terrain",
         "eqoa.map.view",
         "eqoa.map.waypoint"
       ],
@@ -12803,6 +12804,14 @@
       "reason": null,
       "revision": 1,
       "round": 7,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.map.terrain",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
