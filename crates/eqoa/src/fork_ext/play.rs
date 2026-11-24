@@ -21,6 +21,9 @@ mod a1_play;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "a6_play.rs"]
 mod a6_play;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "a13_play.rs"]
+mod a13_play;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "a7_play.rs"]
@@ -851,6 +854,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         a7_play::hide_taken_requests(_play);
         a1_play::tick(_play);
         a6_play::tick(_play);
+        a13_play::tick(_play);
         a7_play::tick(_play);
         a9_play::tick(_play);
         a2_play::tick(_play);
@@ -1034,7 +1038,9 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
             drain_released_waypoints(_play);
             if ready {
                 if reqs.map && crate::settings::map() && _play.addon_input_available() {
-                    _play.map.show();
+                    if !a13_play::open_for_mod(_play) {
+                        _play.map.show();
+                    }
                 }
                 if reqs.assist && matches!(_play.mode, 0 | 38) {
                     _play.assist_target();
@@ -2327,7 +2333,9 @@ fn dispatch_broker_action(
                             reason: "map is disabled in settings".into(),
                         };
                     }
-                    play.map.show();
+                    if !a13_play::open_for_mod(play) {
+                        play.map.show();
+                    }
                 }
                 "abilities" | "spellbook" => play.start_actions(vec![(0x0801_0000, 0)]),
                 "quests" => play.start_actions(vec![(0x0B0A_0000, 0)]),
@@ -3754,10 +3762,25 @@ impl Play {
         }
         api_capture::updates::refresh(self, walker);
         let timed_build = crate::fork_ext::addons::addon_perf::section("snapshot.build");
+        // Between two of the game's 30 Hz steps the last snapshot is reused with the live parts patched in
+        // (input, and the player's position, velocity, heading and the camera-driven fields from the view).
+        if !api_capture::updates::stepped()
+            && let Some(mut snapshot) = api_capture::updates::latest()
+        {
+            drop(timed_build);
+            snapshot.input = crate::fork_ext::addons::input::live_snapshot();
+            crate::fork_ext::addons::native_core::CORE.with(|c| {
+                crate::fork_ext::addons::native_projection::apply(&mut snapshot, &c.borrow().view)
+            });
+            return snapshot;
+        }
         let key = api_capture::updates::key(self, walker);
         if let Some(mut snapshot) = api_capture::updates::cached(key) {
             drop(timed_build);
             snapshot.input = crate::fork_ext::addons::input::live_snapshot();
+            crate::fork_ext::addons::native_core::CORE.with(|c| {
+                crate::fork_ext::addons::native_projection::apply(&mut snapshot, &c.borrow().view)
+            });
             return snapshot;
         }
         let connected = self.session.self_id.is_some() && self.disconnected.is_none() && !self.quit;
@@ -4406,6 +4429,7 @@ impl Play {
             crate::fork_ext::addons::native_projection::apply(&mut snapshot, &c.borrow().view)
         });
         api_capture::updates::cache(key, snapshot);
+        api_capture::updates::note_build();
         snapshot
     }
 }

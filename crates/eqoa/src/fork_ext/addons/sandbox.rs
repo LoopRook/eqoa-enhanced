@@ -107,7 +107,7 @@ impl Mounts {
         let _deleted_guard = lock_parents(&deleted, true)?;
         super::file_io::no_links(&deleted)?;
         check_quota(root, &target, bytes.len())?;
-        super::storage::atomic_replace(&target, bytes).map_err(|e| e.to_string())?;
+        super::deferred_sync::atomic_replace_deferred(&target, bytes, Some(&self.addon.id)).map_err(|e| e.to_string())?;
         if deleted.exists() {
             fs::remove_file(&deleted).map_err(|e| e.to_string())?;
         }
@@ -138,10 +138,10 @@ impl Mounts {
         // Commit the tombstone before removing the overlay: a failure never reveals backing data.
         if !key.starts_with("data") {
             check_quota(root, &deleted, 0)?;
-            super::storage::atomic_replace(&deleted, &[]).map_err(|e| e.to_string())?;
+            super::deferred_sync::atomic_replace_deferred(&deleted, &[], Some(&self.addon.id)).map_err(|e| e.to_string())?;
         }
         if target.exists() {
-            fs::remove_file(&target).map_err(|e| e.to_string())?;
+            super::deferred_sync::remove_file(&target).map_err(|e| e.to_string())?;
         }
         super::exchange::saved(self, &key);
         Ok(true)

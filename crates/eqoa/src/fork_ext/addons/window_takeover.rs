@@ -54,20 +54,22 @@ pub(crate) enum TakeoverKind {
     StartMenu = 12,
     /// Round A6: the chat line the Enter key opens (the chat purpose of the game's edit box only).
     ChatEntry = 13,
+    /// Round A13: the full world map the map key opens. Client-side, no server session: a mod holds it whole (`all`).
+    Map = 14,
     // round A9: the trade request (the game's mode 16), the trade window (15), the duel invitation (43), the duel's
     // wager (44) and the blacksmith (19). Server-pushed, so a mod holds them whole (`all`).
-    TradeAsk = 14,
-    Trade = 15,
-    DuelInvite = 16,
-    Duel = 17,
-    Blacksmith = 18,
+    TradeAsk = 15,
+    Trade = 16,
+    DuelInvite = 17,
+    Duel = 18,
+    Blacksmith = 19,
 }
 
 impl TakeoverKind {
     /// The three server-window kinds (loot, merchant, bank) that carry hidden server sessions and batch hooks.
     pub(crate) const ALL: [Self; 3] = [Self::Loot, Self::Merchant, Self::Bank];
     /// Every takeover kind, including server-pushed raid strips (`raid_ready`, `raid_roll`).
-    pub(crate) const ALL_KINDS: [Self; 19] = [
+    pub(crate) const ALL_KINDS: [Self; 20] = [
         Self::Loot,
         Self::Merchant,
         Self::Bank,
@@ -75,6 +77,7 @@ impl TakeoverKind {
         Self::RaidRoll,
         Self::StartMenu,
         Self::ChatEntry,
+        Self::Map,
         Self::TextDialog,
         Self::ResponseDialog,
         Self::GroupInvite,
@@ -108,6 +111,7 @@ impl TakeoverKind {
             Self::RaidRoll => "raid_roll",
             Self::StartMenu => "start_menu",
             Self::ChatEntry => "chat_entry",
+            Self::Map => "map",
             Self::TextDialog => "text_dialog",
             Self::ResponseDialog => "response_dialog",
             Self::GroupInvite => "group_invite",
@@ -132,6 +136,7 @@ impl TakeoverKind {
             "raid_roll" => Ok(Self::RaidRoll),
             "start_menu" => Ok(Self::StartMenu),
             "chat_entry" => Ok(Self::ChatEntry),
+            "map" => Ok(Self::Map),
             "text_dialog" => Ok(Self::TextDialog),
             "response_dialog" => Ok(Self::ResponseDialog),
             "group_invite" => Ok(Self::GroupInvite),
@@ -148,13 +153,13 @@ impl TakeoverKind {
                 "unsupported",
                 format!(
                     "the game's '{s}' window cannot be taken over in this version (only 'loot', 'merchant', \
-                     'bank', 'raid_ready', 'raid_roll', 'text_dialog', 'response_dialog', 'group_invite',                      'revive_offer', 'summon_offer', 'friend_request', 'guild_invite', 'trade_ask', 'trade', 'duel_invite', 'duel', 'blacksmith', 'start_menu' and 'chat_entry'); more windows follow the window-replacement roadmap"
+                     'bank', 'raid_ready', 'raid_roll', 'text_dialog', 'response_dialog', 'group_invite',                      'revive_offer', 'summon_offer', 'friend_request', 'guild_invite', 'trade_ask', 'trade', 'duel_invite', 'duel', 'blacksmith', 'start_menu', 'chat_entry' and 'map'); more windows follow the window-replacement roadmap"
                 ),
             )),
             _ => Err((
                 "invalid_argument",
                 format!(
-                    "window takeover kind must be 'loot', 'merchant', 'bank', 'raid_ready', 'raid_roll', 'text_dialog', 'response_dialog', 'group_invite', 'revive_offer', 'summon_offer', 'friend_request', 'guild_invite', 'trade_ask', 'trade', 'duel_invite', 'duel', 'blacksmith', 'start_menu' or 'chat_entry', got '{s}'"
+                    "window takeover kind must be 'loot', 'merchant', 'bank', 'raid_ready', 'raid_roll', 'text_dialog', 'response_dialog', 'group_invite', 'revive_offer', 'summon_offer', 'friend_request', 'guild_invite', 'trade_ask', 'trade', 'duel_invite', 'duel', 'blacksmith', 'start_menu', 'chat_entry' or 'map', got '{s}'"
                 ),
             )),
         }
@@ -278,7 +283,7 @@ struct TakeoverState {
     /// The merchant's list still owed for the mod's last sale or buy when its hidden session ended (the
     /// sale's answer can follow the action's end): held hidden for `LIST_GRACE`, then closed again quietly.
     grace_merchant: Option<ListGrace>,
-    holders: [Option<Holder>; 19],
+    holders: [Option<Holder>; 20],
     pending_opens: [Option<PendingOpen>; 3],
     /// Why a kind's hidden session is to end (set by release, the mod finishing, the holder going).
     pending_close: [Option<&'static str>; 3],

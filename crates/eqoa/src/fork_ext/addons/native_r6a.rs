@@ -559,6 +559,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 tbl.set("raid_roll", window_takeover::is_taken(TakeoverKind::RaidRoll))?;
                 tbl.set("start_menu", window_takeover::is_taken(TakeoverKind::StartMenu))?;
                 tbl.set("chat_entry", window_takeover::is_taken(TakeoverKind::ChatEntry))?;
+                tbl.set("map", window_takeover::is_taken(TakeoverKind::Map))?;
                 tbl.set("friend_request", window_takeover::is_taken(TakeoverKind::FriendRequest))?;
                 tbl.set("guild_invite", window_takeover::is_taken(TakeoverKind::GuildInvite))?;
                 for k in TakeoverKind::DIALOGS {

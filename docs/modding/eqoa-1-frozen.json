@@ -1450,6 +1450,7 @@
   "eqoa.map.open",
   "eqoa.map.set_guide",
   "eqoa.map.set_waypoint",
+  "eqoa.map.terrain",
   "eqoa.map.view",
   "eqoa.map.waypoint",
   "eqoa.mastery",
