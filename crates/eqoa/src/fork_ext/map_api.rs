@@ -334,3 +334,23 @@ impl Map {
 #[cfg(test)]
 #[path = "map_render_tests.rs"]
 mod render_tests;
+
+impl Map {
+    /// The player's own world's overview (not the world a Places browse shows), once the map's layer and the world
+    /// are there.
+    pub(crate) fn api_terrain(&self) -> Option<crate::fork_ext::addons::map_terrain::Source<'_>> {
+        let w = self.home.as_ref().or(self.world.as_ref())?;
+        let index = w.overview?;
+        let texture = self.layers.as_ref()?.map.texture_of(index)?;
+        let c = &w.builder.cells;
+        let texels = c.overview_size();
+        if texels.0 == 0 || texels.1 == 0 {
+            return None;
+        }
+        Some(crate::fork_ext::addons::map_terrain::Source { texture, extent: c.extent(), texels, world: w.index, texture_index: index, progress: w.builder.progress() })
+    }
+}
+
+#[cfg(test)]
+#[path = "map_terrain_tests.rs"]
+mod map_terrain_tests;

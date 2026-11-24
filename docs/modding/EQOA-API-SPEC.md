@@ -792,9 +792,9 @@ A mod can keep the game's corpse, merchant or bank window from appearing while i
 
 | Function | Returns |
 |---|---|
-| `eqoa.windows.takeover(kind:string, {scope="own"\|"all"}?)` | `true` when the mod holds the claim. `kind` is `"loot"`, `"merchant"`, `"bank"`, `"raid_ready"`, `"raid_roll"`, (round A2) `"text_dialog"`, `"response_dialog"`, `"group_invite"`, `"revive_offer"`, `"summon_offer"`, (round A7) `"friend_request"` or `"guild_invite"`, or (round A6) `"start_menu"` or `"chat_entry"`. `"raid_ready"`, `"raid_roll"`, the five A2 kinds, the two A7 kinds and the two A6 kinds accept only `scope = "all"` (`invalid_argument` for `"own"`). Calling it again while holding the claim keeps it and renews a running hidden session's idle time. Calling it again with the other scope changes the claim's scope for sessions that start later; a hidden session already running keeps the scope it started with. |
+| `eqoa.windows.takeover(kind:string, {scope="own"\|"all"}?)` | `true` when the mod holds the claim. `kind` is `"loot"`, `"merchant"`, `"bank"`, `"raid_ready"`, `"raid_roll"`, (round A2) `"text_dialog"`, `"response_dialog"`, `"group_invite"`, `"revive_offer"`, `"summon_offer"`, (round A7) `"friend_request"` or `"guild_invite"`, or (round A6) `"start_menu"` or `"chat_entry"`, or (round A13) `"map"`. `"raid_ready"`, `"raid_roll"`, the five A2 kinds, the two A7 kinds, the two A6 kinds and `"map"` accept only `scope = "all"` (`invalid_argument` for `"own"`). Calling it again while holding the claim keeps it and renews a running hidden session's idle time. Calling it again with the other scope changes the claim's scope for sessions that start later; a hidden session already running keeps the scope it started with. |
 | `eqoa.windows.release(kind:string?)` | `true` if the mod held it. With no argument, releases every kind the mod holds. |
-| `eqoa.windows.taken(kind:string?)` | Whether any mod holds a claim on `kind`. With no argument: `{loot:bool, merchant:bool, bank:bool, raid_ready:bool, raid_roll:bool, text_dialog:bool, response_dialog:bool, group_invite:bool, revive_offer:bool, summon_offer:bool, friend_request:bool, guild_invite:bool, start_menu:bool, chat_entry:bool, holders:table}`, where `holders` maps each held kind to the holding mod's id. |
+| `eqoa.windows.taken(kind:string?)` | Whether any mod holds a claim on `kind`. With no argument: `{loot:bool, merchant:bool, bank:bool, raid_ready:bool, raid_roll:bool, text_dialog:bool, response_dialog:bool, group_invite:bool, revive_offer:bool, summon_offer:bool, friend_request:bool, guild_invite:bool, start_menu:bool, chat_entry:bool, map:bool, holders:table}`, where `holders` maps each held kind to the holding mod's id. |
 
 While a mod holds `"raid_ready"` or `"raid_roll"`, that strip is not drawn and takes no native keys or clicks, while its expiration timer keeps running. If the holder releases the claim, is disabled or fails, or the player turns on **Use the game's windows**, the native strip draws and responds again at once.
 
@@ -812,7 +812,7 @@ While a mod holds `"friend_request"` or `"guild_invite"`, an incoming request is
 | The mod declares `eqoa.windows.takeover` | `not_declared` (no `capabilities` list) or `permission_denied` (not in the list) |
 | `kind` names one of the game's windows (a `Window.kind` from the table above, an overlay, or `"raid_ready"` / `"raid_roll"`) and `scope` is `"own"` or `"all"` | `invalid_argument` |
 | Scope `"own"` is not asked for a window that exists only in the client (`inventory`, `spellbook`, `quest_log`, `trainer`, `mastery`, `recipe_book`, `experiment`, `start_menu`, `chat_entry`, `map`) or a server-pushed strip (`raid_ready`, `raid_roll`) or an NPC dialog or offer (`text_dialog`, `response_dialog`, `group_invite`, `revive_offer`, `summon_offer`: the wire names no speaker, so a dialog cannot be proven to answer the mod's own `talk`): there is no session of the mod's own to start, so it can only be replaced whole | `invalid_argument` |
-| This build can replace that window or strip: `loot`, `merchant`, `bank`, `raid_ready`, `raid_roll`, `text_dialog`, `response_dialog`, `group_invite`, `revive_offer`, `summon_offer`, `friend_request`, `guild_invite`, `start_menu` or `chat_entry` | `unsupported` for every other window |
+| This build can replace that window or strip: `loot`, `merchant`, `bank`, `raid_ready`, `raid_roll`, `text_dialog`, `response_dialog`, `group_invite`, `revive_offer`, `summon_offer`, `friend_request`, `guild_invite`, `start_menu`, `chat_entry` or `map` | `unsupported` for every other window |
 | For scope `"all"`: the manifest's `replaces` list names that window | `not_declared` |
 | For scope `"all"`: the player's **Use the game's windows** switch is off | `unavailable` |
 | No other mod holds that kind | `busy` (with a diagnostic naming the holder) |
@@ -961,6 +961,19 @@ A mod can show its own recipe book and experiment tray. It opens a `"recipe_book
 
 **One request at a time, never resent.** Each acting call sends once and reports `sent`, never `confirmed`: the client has no other word than the server's reply. A combine whose reply never comes is not replayed by anything; the mod (or the player) closes and reopens the window, which clears `pending` as the game's own Experiment does, and sends again only on a new call. A mod that declares `craft_tray_add`, `craft_fill`, `craft_combine` or `craft_keep` is shown in Mods & Addons as **Crafting: can fill the crafting tray, combine what is in it, answer the keep-this-recipe question** (only the steps it declares are named). Declaring `eqoa.actions.*` grants all of them. Removing, creating and rearranging recipes (the game's own recipe book menu) are not available to a mod in this version: use the game's window.
 
+### The world map (round A13)
+
+The full map the map key opens (`"map"`) is a window a mod can hold whole. It is a client-side window with no server session, so it is held with scope `"all"` only and the manifest must list it in `replaces` (§2); the claim, the **Use the game's windows** switch, `busy` for a second mod and the release when the mod goes work as for every other kind above.
+
+| Call | What it does |
+|---|---|
+| `eqoa.windows.takeover("map", {scope="all"})` | The map key (the compass, the minimap's click, and `eqoa.map.open()`) opens the mod's map instead of the game's: the player gets a `map` session (`opened_from = "key"`, `origin = "player"`, `data = {}`, title `"Map"`) and the game's map never draws. The key again closes the mod's map, as it closes the game's. |
+| `eqoa.windows.pass(ref)` | On a `map` session: the game's own map opens for that one opening and the mod's session ends (`windows.session` `closed` with reason `"passed"`). `busy` while another window of the game is up. The next key press is the mod's again. |
+| `eqoa.windows.close_session(ref)` | The mod closes its own map. Nothing of the game's is involved. |
+| `eqoa.windows.open_session("map")` | `invalid_argument`: the player's key opens it (a mod that wants it open calls `eqoa.map.open()`, which the holder receives as a session). |
+
+A map already open when the mod claims the kind stays the game's until it closes. With nobody holding the kind, or with the player's switch on, the game's map behaves exactly as before. A claim released, a mod disabled or the player's switch ends the mod's map and gives the game's back. The map's data (`eqoa.map.get`, `markers`, the player's waypoint and guides) is read as always; `eqoa.map.terrain` (below) supplies the ground to draw it over.
+
 ### The map
 
 Reading the map needs no capability.
@@ -970,6 +983,7 @@ Reading the map needs no capability.
 | `eqoa.map.get()` | `MapState`, below. |
 | `eqoa.map.markers(world_id:int)` | `Marker[]` for that world (0..255): what the game's map can show. |
 | `eqoa.map.view({size?, layers?})` | A held minimap picture the mod can draw; see "Minimap views". |
+| `eqoa.map.terrain({size?})` | A held picture of the whole world's ground, with the transform between the world and its pixels (round A13); see "The terrain layer". |
 | `eqoa.map.set_guide(spec)`, `eqoa.map.clear_guide()` | The mod's own guide line; see "Guides". |
 | `eqoa.map.open()` | Opens the full map, as the player's map key does. Returns `true`. `not_in_world` outside the world, `unavailable` while the player has Map turned off, `busy` if the request cannot be queued. Needs no capability. |
 | `eqoa.map.set_waypoint(point)`, `eqoa.map.clear_waypoint()` | Move or clear the player's own waypoint; see "The player's waypoint". |
@@ -1000,6 +1014,23 @@ Reading the map needs no capability.
 `eqoa.map.set_guide({world_id:int, x?, z?, entity_id?, dots?, label?})` sets this mod's guide: a dashed line with optional dots (`dots = {{x, z}, ...}`), drawn on the full map, the minimap and minimap views. It is separate from the waypoint and needs no capability. Give a point (`x`, `z`) or an `entity_id`; an entity guide follows the live entity (`not_found` if the client does not see it in that world). A mod has one guide; setting another replaces it. `eqoa.map.clear_guide()` removes it. Both return `true`. A guide is cleared when the mod is disabled.
 
 `guide.lost` fires when a guide ends by itself: `{owner:uint, world_id:int, entity_id:uint?, label:string?, reason:"entity_left"|"world_left"}` (`owner` is a number identifying the mod's running instance). An entity guide is lost when its entity goes; every guide is lost when the world is left.
+
+#### The terrain layer (round A13)
+
+`eqoa.map.terrain({size:number?})` returns a held picture of the player's world, the same one the game's own map shows when it is zoomed out to the whole world, so a mod-drawn map (a `map` session, above) needs no terrain drawing of its own. `size` is the longest side in pixels (1024 when omitted, 64..2048, `out_of_range` otherwise); the picture has the world's shape and is never larger than the game's own overview. A mod may hold two (`quota` for a third). `not_in_world` outside the world. It needs no capability. The picture is the game's overview of the zones its map has built: the game builds them behind play for a few seconds after a world is entered, so unbuilt ground is dark and fills in (`progress`). The terrain does not include tiles, markers, the waypoint or guides: a mod draws those itself from `eqoa.map.markers`, `eqoa.map.get` and `eqoa.map.terrain`'s transform.
+
+| Member | Meaning |
+|---|---|
+| `t.texture` | A `TextureInfo` (`uv` is `{0, 0, 1, 1}`: the whole picture), or nil until the game's map has a world to show. |
+| `t.error`, `t.get_texture()` | As for a minimap view: the `Error` that keeps the picture from being made (`quota` when the mod's texture budget is used up; ask for `"large_data"`), or the `TextureInfo`, nil, or `nil, Error`. |
+| `t.world_id`, `t.width`, `t.height` | The world the picture shows and its size in pixels; nil until the game's map has a world to show. |
+| `t.bounds` | `{x_min, z_min, x_max, z_max}`: the world rectangle the picture covers, in game units. |
+| `t.progress` | `{done, total}`: zones the game's map has drawn, of zones to draw. |
+| `t.project(x, z)` | `px, py, inside`: a world position in the picture's pixels (x grows right, z grows down; the picture's top left is `x_min, z_min`), and whether it lies on the world. `not_ready` before the game's map has a world to show. |
+| `t.unproject(px, py)` | `x, z`: the world position under a pixel. |
+| `t.close()` | Releases the picture now. It is also released when the mod is disabled or its Lua collects it; after a close `project` and `unproject` are `stale_handle`. |
+
+The picture follows the player's own world even while the game's map is browsing another (Places). It is drawn again only when the world changes or the game's map has built more ground.
 
 #### Minimap views
 
