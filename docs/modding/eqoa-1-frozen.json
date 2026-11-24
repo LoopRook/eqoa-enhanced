@@ -366,7 +366,6 @@
   "eqoa.auction.State.results",
   "eqoa.auction.State.revision",
   "eqoa.auction.State.sellable",
-  "eqoa.auction.State.timed_out",
   "eqoa.auction.State.tunar",
   "eqoa.auction.get",
   "eqoa.bank",
