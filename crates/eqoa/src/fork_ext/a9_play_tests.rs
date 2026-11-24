@@ -318,7 +318,7 @@ fn a9_trade_request_is_held_hidden_answered_like_the_window_and_times_out() {
     let host = host_all();
     lua_ok(&host, "assert(eqoa.windows.takeover('trade_ask', {scope='all'}) == true)");
     step(&mut p, &host);
-    deliver(&mut p, 0x0057, trade_request(78, 78));
+    deliver(&mut p, 0x0057, trade_request(77, 77));
     clear_recorded(&mut p);
     ask(&mut p, &host, "return eqoa.actions.trade_answer(false)");
     assert_eq!(recorded(&p), native_no, "No is the window's No");
@@ -328,7 +328,7 @@ fn a9_trade_request_is_held_hidden_answered_like_the_window_and_times_out() {
     let host = host_all();
     lua_ok(&host, "assert(eqoa.windows.takeover('trade_ask', {scope='all'}) == true)");
     step(&mut p, &host);
-    deliver(&mut p, 0x0057, trade_request(79, 79));
+    deliver(&mut p, 0x0057, trade_request(77, 77));
     step(&mut p, &host);
     clear_recorded(&mut p);
     a9_play::age_for_test(Duration::from_secs(44));
