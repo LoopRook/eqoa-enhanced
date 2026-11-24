@@ -462,9 +462,15 @@ impl Storage {
         self.save_encoded(key, &data)
     }
     pub(crate) fn save_encoded(&self, key: &str, value: &Json) -> Result<(), String> {
+        self.prepare_encoded(key, value)?.commit()
+    }
+    /// Everything `save_encoded` does except the disk write: the quota check and the encoding, so the same
+    /// refusals come back at once. The caller commits the result itself or hands it to the background writer.
+    pub(crate) fn prepare_encoded(&self, key: &str, value: &Json) -> Result<PreparedWrite, String> {
         let path = self.profile_path(key)?;
         super::sandbox::check_settings_quota(&self.files_dir(key)?, &path, value)?;
-        write_json(&path, value)
+        let bytes = encode_json(value)?;
+        Ok(PreparedWrite { path, bytes })
     }
 
     pub fn load_profile(&self, key: &str, lua: &Lua) -> Result<Option<Value>, String> {
@@ -729,12 +735,30 @@ fn read_json(path: &Path) -> Result<Option<Json>, String> {
         .map_err(|e| format!("invalid addon JSON: {e}"))
 }
 
-fn write_json(path: &Path, value: &Json) -> Result<(), String> {
+fn encode_json(value: &Json) -> Result<Vec<u8>, String> {
     let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
     if bytes.len() > MAX_JSON_BYTES {
         return Err("addon JSON exceeds 1 MiB".into());
     }
+    Ok(bytes)
+}
+
+fn write_json(path: &Path, value: &Json) -> Result<(), String> {
+    let bytes = encode_json(value)?;
     atomic_replace(path, &bytes).map_err(|e| e.to_string())
+}
+
+/// A mod settings file that passed validation and is encoded, waiting for its disk write.
+pub(crate) struct PreparedWrite {
+    pub(crate) path: PathBuf,
+    bytes: Vec<u8>,
+}
+
+impl PreparedWrite {
+    /// The atomic replace (temporary file, write, `sync_all`, rename). This is the slow part.
+    pub(crate) fn commit(self) -> Result<(), String> {
+        atomic_replace(&self.path, &self.bytes).map_err(|e| e.to_string())
+    }
 }
 
 pub(crate) fn atomic_replace(target: &Path, bytes: &[u8]) -> std::io::Result<()> {

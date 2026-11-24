@@ -126,6 +126,8 @@ pub(crate) struct Manager {
     named: Option<named::NamedSession>,
     root: PathBuf,
     storage: Storage,
+    /// Where mod settings reach the disk: off the frame thread (see `write_queue.rs`).
+    writes: std::sync::Arc<super::write_queue::WriteQueue>,
     disclosures: BTreeMap<String, Disclosure>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -156,6 +158,7 @@ impl Manager {
             named: None,
             root,
             storage: Storage::new(storage_root),
+            writes: std::sync::Arc::new(super::write_queue::WriteQueue::new()),
             disclosures: BTreeMap::new(),
             device: device.clone(),
             queue: queue.clone(),
@@ -253,6 +256,7 @@ impl Manager {
             return;
         }
         self.frame_number = self.frame_number.saturating_add(1);
+        self.report_write_failures();
         let _prologue = super::addon_perf::section("mgr.prologue");
         if !snapshot.in_game && self.snapshot.in_game {
             super::window_takeover::release_all();
@@ -482,6 +486,22 @@ impl Manager {
         }
     }
 
+    /// Waits for the settings writes still in the background, then reports any that failed. Called where a
+    /// write must not be lost or reordered: mod disable, logout, profile switch, quit, and before a
+    /// synchronous write or read of the same files.
+    fn flush_writes(&mut self) {
+        self.writes.flush();
+        self.report_write_failures();
+    }
+
+    /// Shows a background write that failed as a diagnostic for its mod (or for the profile file).
+    pub(super) fn report_write_failures(&mut self) {
+        for failure in self.writes.take_failures() {
+            let message = format!("Settings were not saved to disk: {}", failure.message);
+            self.diagnostic(failure.owner.as_deref(), "storage", message);
+        }
+    }
+
     fn diagnostic(&mut self, id: Option<&str>, phase: &'static str, message: String) {
         let details = serde_json::from_str::<serde_json::Value>(&message)
             .ok()
@@ -667,6 +687,8 @@ impl Manager {
                         })
                         .map_err(|e| e.to_string())
                 } else {
+                    // The synchronous write must land after any earlier background write of this file.
+                    self.flush_writes();
                     self.storage.save_profile(&entry.key, value)
                 };
                 if let Err(e) = result {
@@ -735,6 +757,9 @@ impl Manager {
         if active && save {
             self.save(entry, rendering);
         }
+        // A settings write the mod made before it was disabled must be on the disk before anything reads it
+        // again (the mod enabled once more, a profile switch).
+        self.flush_writes();
         if let Some(i) = entry.instance.as_mut()
             && i.active
         {
@@ -787,21 +812,17 @@ impl Manager {
         let (value, writer): (Option<serde_json::Value>, super::native_settings::Writer) =
             if let Some(s) = &self.named {
                 let value = s.data.addons.get(&key).cloned();
-                let mut document = s.data.clone();
-                let active = s.active.clone();
-                let store = s.store.clone();
-                let writable = s.writable;
-                (
-                    value,
-                    Rc::new(move |value| {
-                        if !writable {
-                            return Err("active profile is read-only".into());
-                        }
-                        let mut document = document.clone();
-                        document.addons.insert(key.clone(), value.clone());
-                        store.write(&active, &document)
-                    }),
-                )
+                // Refuses now as before; the disk write follows on the background writer.
+                let writer = super::native_settings::queued_profile_writer(
+                    s.store.clone(),
+                    self.writes.clone(),
+                    s.data.clone(),
+                    s.active.clone(),
+                    s.writable,
+                    key,
+                    entry.metadata.id.clone(),
+                );
+                (value, writer)
             } else {
                 let value = self
                     .storage
@@ -809,8 +830,13 @@ impl Manager {
                     .ok()
                     .flatten()
                     .and_then(|v| super::profile::encode(v).ok());
-                let store = self.storage.clone();
-                (value, Rc::new(move |value| store.save_encoded(&key, value)))
+                let writer = super::native_settings::queued_writer(
+                    self.storage.clone(),
+                    self.writes.clone(),
+                    key,
+                    entry.metadata.id.clone(),
+                );
+                (value, writer)
             };
         super::native_settings::configure(&i.host, value, writer);
     }
@@ -1105,6 +1131,7 @@ impl Manager {
             self.retire(entry);
         }
         self.entries = entries;
+        self.flush_writes();
         if collect {
             self.after_render();
         }
@@ -1134,6 +1161,7 @@ impl Manager {
 #[cfg(test)]
 mod tests {
     include!("manager_profiles_tests.rs");
+    include!("settings_write_manager_tests.rs");
     include!("manager_scope_recovery_tests.rs");
     include!("map_mod_manager_tests.rs");
     include!("round_minimap_manager_tests.rs");

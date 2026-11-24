@@ -286,20 +286,53 @@ impl Store {
     }
     pub fn write(&self, name: &str, doc: &Document) -> Result<(), String> {
         let path = self.path(name)?;
-        // Also protect against a file corrupted externally after this process loaded it.
-        if read_json(&path)?.is_some() {
+        self.guard_existing(name, &path)?;
+        let bytes = self.prepare(&path, doc)?;
+        replace_profile_file(&path, &bytes)
+    }
+    /// `write` without waiting for the disk: the checks that need no disk write (the document, the quota)
+    /// and the encoding run now and refuse as `write` does; the existing-file check and the atomic replace
+    /// run on `queue`'s worker. A failure there comes back through the queue's failures.
+    pub fn write_in_background(
+        &self,
+        queue: &super::write_queue::WriteQueue,
+        owner: Option<String>,
+        name: &str,
+        doc: &Document,
+    ) -> Result<(), String> {
+        let path = self.path(name)?;
+        let bytes = self.prepare(&path, doc)?;
+        let store = self.clone();
+        let name = name.to_owned();
+        let target = path.clone();
+        queue.submit(
+            path,
+            owner,
+            Box::new(move || {
+                store.guard_existing(&name, &target)?;
+                replace_profile_file(&target, &bytes)
+            }),
+        );
+        Ok(())
+    }
+    /// Also protect against a file corrupted externally after this process loaded it.
+    fn guard_existing(&self, name: &str, path: &Path) -> Result<(), String> {
+        if read_json(path)?.is_some() {
             self.read(name)?;
         }
+        Ok(())
+    }
+    fn prepare(&self, path: &Path, doc: &Document) -> Result<Vec<u8>, String> {
         Document::parse(doc.json())?;
         let addons = self.root()?.parent().ok_or("missing addon storage root")?;
         for (key, value) in &doc.addons {
             super::sandbox::check_settings_quota(
                 &addons.join(format!("{key}-files")),
-                &path,
+                path,
                 value,
             )?;
         }
-        write_json(&path, &doc.json())
+        encode_json(&doc.json())
     }
     pub fn names(&self) -> Result<Vec<String>, String> {
         let root = self.root()?;
@@ -705,13 +738,19 @@ fn read_json(path: &Path) -> Result<Option<Json>, String> {
         })
         .transpose()
 }
-fn write_json(path: &Path, value: &Json) -> Result<(), String> {
+fn encode_json(value: &Json) -> Result<Vec<u8>, String> {
     let bytes = serde_json::to_vec_pretty(value).map_err(|_| "Cannot encode mod profile")?;
     if bytes.len() > MAX_BYTES {
         return Err("Mod profile exceeds 16 MiB".into());
     }
-    super::storage::atomic_replace(path, &bytes)
+    Ok(bytes)
+}
+fn replace_profile_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    super::storage::atomic_replace(path, bytes)
         .map_err(|_| "Cannot save mod profile atomically".into())
+}
+fn write_json(path: &Path, value: &Json) -> Result<(), String> {
+    replace_profile_file(path, &encode_json(value)?)
 }
 
 #[cfg(test)]

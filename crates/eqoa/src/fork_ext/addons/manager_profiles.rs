@@ -267,6 +267,9 @@ impl Manager {
             return Ok(());
         } // Preview is not published before a choice.
         self.capture_profile(s, context)?;
+        // A save for a logout, a switch or a copy waits for the disk, after any background write of the
+        // same file (a mod's settings) so the older bytes cannot land on top of these.
+        self.flush_writes();
         s.store.write(&s.active, &s.data)?;
         s.dirty = false;
         Ok(())
@@ -438,6 +441,8 @@ impl Manager {
         match identity {
             Err(e) => self.diagnostic(None, "profiles", e),
             Ok(identity) if identity != s.character => {
+                // The switch reads and writes profile files: the background writes go first.
+                self.flush_writes();
                 if let Some(character) = &identity {
                     let now = Instant::now();
                     let retry = s.retry.as_ref().filter(|(c, _)| c == character);
@@ -498,6 +503,9 @@ impl Manager {
                 }
             }
             Ok(_) => s.retry = None,
+        }
+        if !s.actions.is_empty() {
+            self.flush_writes();
         }
         while let Some(action) = s.actions.pop_front() {
             let result = match action {
@@ -596,6 +604,7 @@ impl Manager {
         self.named = Some(s);
     }
     pub fn flush_profile(&mut self, context: &mut Context, force: bool) {
+        self.report_write_failures();
         let Some(mut s) = self.named.take() else {
             return;
         };
@@ -613,8 +622,14 @@ impl Manager {
                 context.save_ini_settings(&mut ini);
                 s.data.layout = ini;
             }
-            let result = if s.writable {
+            let result = if s.writable && force {
+                // Quit: nothing runs after this, so wait for the disk (after the earlier background writes).
+                self.writes.flush();
                 s.store.write(&s.active, &s.data)
+            } else if s.writable {
+                // Every frame that a mod saved or a window moved: no disk write on the frame thread.
+                s.store
+                    .write_in_background(&self.writes, None, &s.active, &s.data)
             } else {
                 Err("Unreadable original settings were preserved; use Save as a new name to recover".into())
             };

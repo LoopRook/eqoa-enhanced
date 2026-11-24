@@ -168,6 +168,9 @@ mod round7h_tests;
 mod sandbox;
 mod spike;
 pub(crate) mod storage;
+pub(crate) mod write_queue;
+#[cfg(test)]
+mod settings_write_tests;
 mod textures;
 pub(crate) mod weapon_sets;
 #[cfg(test)]
