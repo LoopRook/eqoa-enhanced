@@ -250,16 +250,16 @@ fn a9_trade_mod_coin_box_holds_enter_by_its_exact_name_and_renews_text_capture_e
     // after every frame
     // control: the box is not being typed in
     frames(&host, &bridge, &mut ctx, 5);
-    assert!(super::native_input::text_capture_stamp().is_none(), "control: no capture while the box is idle");
+    assert!(super::input::native::text_capture_stamp().is_none(), "control: no capture while the box is idle");
     assert!(host.lua.load("return require('tradeui').state.enter == nil").eval::<bool>().unwrap(), "control: Enter is not held while idle");
     // typing: capture asked for in each of 6 frames, Enter held under its exact name
     host.execute("require('tradeui').force_typing = true").unwrap();
     frames(&host, &bridge, &mut ctx, 1);
-    let mut last = super::native_input::text_capture_stamp().expect("capture asked for");
+    let mut last = super::input::native::text_capture_stamp().expect("capture asked for");
     for i in 0..5 {
         std::thread::sleep(Duration::from_millis(3));
         frames(&host, &bridge, &mut ctx, 1);
-        let now = super::native_input::text_capture_stamp().expect("still held");
+        let now = super::input::native::text_capture_stamp().expect("still held");
         assert!(now > last, "frame {i}: the capture was asked for again on this frame");
         last = now;
     }
@@ -308,7 +308,8 @@ fn a9_bag_viewer_repair_lists_costs_asks_once_for_all_and_repairs_one_at_a_time(
     frames(&host, &bridge, &mut ctx, 3);
     assert!(window_drawn("Repair##eqoa_bag_viewer_repair"), "the panel is up while a smith is open");
     assert_window_fits("Repair##eqoa_bag_viewer_repair", "repair panel at the default size");
-    let logs = host.drain_logs().unwrap();
+    // the Bag Viewer's own start-up note (auto-loot) is not the panel's: any other line would be
+    let logs: Vec<String> = host.drain_logs().unwrap().into_iter().filter(|l| !l.contains("auto-loot")).collect();
     assert!(logs.is_empty(), "{logs:?}");
     assert!(bridge.drain_diagnostics().is_empty());
     // one click repairs one item
