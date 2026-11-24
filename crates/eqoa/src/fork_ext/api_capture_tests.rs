@@ -92,7 +92,8 @@ fn round7c_play_records_match_declared_fields() {
             fields('Vec3', p.velocity)
             fields('mastery.Mastery', p.mastery)
             -- disposition*: only a creature the server sent a con colour for
-            fields('entities.Entity', eqoa.entities.list()[1], 'disposition disposition_name')
+            -- head_mark/merc_tag (A12): only a creature with a quest mark, or a mercenary with a named hirer
+            fields('entities.Entity', eqoa.entities.list()[1], 'disposition disposition_name head_mark merc_tag')
         "#,
         )
         .unwrap();

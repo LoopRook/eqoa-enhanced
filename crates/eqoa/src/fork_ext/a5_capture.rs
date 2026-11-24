@@ -205,7 +205,11 @@ pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
         | Act::GuildKick { .. }
         | Act::FriendAccept { .. }
         | Act::GuildAccept { .. }
-        | Act::TradeAccept { .. } => Err("not a character step".into()),
+        | Act::TradeAccept { .. }
+        | Act::MailDelete { .. }
+        | Act::MailSend { .. }
+        | Act::AuctionBid { .. }
+        | Act::AuctionSell { .. } => Err("not a character step".into()),
     }
 }
 

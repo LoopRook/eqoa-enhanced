@@ -967,6 +967,8 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
                 // round A9: their own lines (`native_a9::trading_label`, `asks_first_label`)
                 "blacksmith_repair" => "repair items (spends your coin)",
                 k if super::native_a9::NAMES.contains(&k) => continue,
+                // round A10: their own line (`native_a10::mail_label`) or asked first (`asks_first_label`)
+                k if super::native_a10::is_a10_action(k) => continue,
                 // round A5: the same for spending training points and the two Class Mastery steps
                 "train_stats" | "mastery_buy" | "mastery_refund" => continue,
                 "request_factions" => "ask for faction standings",
@@ -998,6 +1000,9 @@ fn replacement_labels(replaces: &[String], can_takeover: bool) -> [Option<String
                 "hud.quest_tracker" => "Quest Tracker",
                 "hud.dps_meter" => "DPS Meter",
                 "hud.breath" => "Breath gauge",
+                "hud.name_plates" => "Name plates",
+                "hud.damage_numbers" => "Damage numbers",
+                "hud.target_rings" => "Target rings",
                 "hud.spell_bars" => "Spell Bars",
                 "hud.utility_bars" => "Utility Bars",
                 "hud.all_pieces" => "All HUD pieces",
@@ -1058,6 +1063,7 @@ pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec
     lines.extend(asks_first_label(caps));
     lines.extend(super::native_a8::crafting_label(caps));
     lines.extend(super::native_a9::trading_label(caps));
+    lines.extend(super::native_a10::mail_label(caps));
     lines
 }
 
@@ -1076,6 +1082,11 @@ pub(crate) fn asks_first_label(caps: &[String]) -> Option<String> {
         ("train_stats", "spend training points"),
         ("mastery_buy", "buy a Class Mastery skill"),
         ("mastery_refund", "refund a Class Mastery skill"),
+        ("mail_delete", "delete a mail"),
+        ("mail_send", "send mail that carries tunar or an item"),
+        ("auction_bid", "bid at the auction"),
+        ("auction_buyout", "buy out an auction lot"),
+        ("auction_sell", "put an item up at the auction"),
     ] {
         if super::native::capability_grants(caps, &format!("eqoa.actions.{name}")) {
             steps.push(words);

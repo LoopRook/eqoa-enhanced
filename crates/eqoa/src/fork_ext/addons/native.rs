@@ -993,6 +993,14 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             "trade_answer trade_add trade_remove trade_money trade_accept trade_unaccept trade_cancel duel_answer blacksmith_repair blacksmith_close",
             8,
         ),
+        // round A10: mail and the auction
+        ("mail", "get", 8),
+        ("auction", "get", 8),
+        (
+            "actions",
+            "mail_refresh mail_read mail_delete mail_take mail_send auction_search auction_page auction_my_lots auction_my_bids auction_bidders auction_bid auction_buyout auction_sell",
+            8,
+        ),
         // round A7: community (friends, ignore, guild, who, group search)
         ("social", "friends ignored friend_request", 8),
         ("guild", "get invite", 8),
@@ -1007,6 +1015,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ("factions", "list", 8),
         ("combat", "record", 8),
         ("actions", "train_stats request_factions request_combat_record", 8),
+        // round A12: world overlays
+        ("camera", "project project_entity", 8),
     ] {
         let module_path = format!("eqoa.{module}");
         let backing = match modules.get::<Value>(module)? {
@@ -1152,6 +1162,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_a6::install(host)?;
     super::native_a8::install(host)?;
     super::native_a9::install(host)?;
+    super::native_a12::install(host)?;
+    super::native_a10::install(host)?;
     super::native_a7::install(host)?;
     super::native_a5::install(host)?;
     super::frame_actions::install(host)?;
@@ -1329,6 +1341,14 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.duel.State", "invite") => Some("eqoa.duel.Invite"),
         ("eqoa.blacksmith.State", "items") => Some("eqoa.blacksmith.Item"),
         ("eqoa.craft.Detail", "tools") => Some("eqoa.craft.Tool"),
+        ("eqoa.mail.State", "entries") => Some("eqoa.mail.Entry"),
+        ("eqoa.mail.State", "message") => Some("eqoa.mail.Message"),
+        ("eqoa.mail.State", "pack") => Some("eqoa.mail.PackItem"),
+        ("eqoa.auction.State", "results") => Some("eqoa.auction.Lot"),
+        ("eqoa.auction.State", "lots") => Some("eqoa.auction.Own"),
+        ("eqoa.auction.State", "bids") => Some("eqoa.auction.Bid"),
+        ("eqoa.auction.State", "bidders") => Some("eqoa.auction.Bidder"),
+        ("eqoa.auction.State", "sellable") => Some("eqoa.auction.Sellable"),
         ("eqoa.guild.Guild", "members") => Some("eqoa.guild.GuildMember"),
         ("eqoa.who.WhoState", "entries") => Some("eqoa.who.WhoEntry"),
         ("eqoa.lfg.LfgState", "entries") => Some("eqoa.lfg.LfgEntry"),
@@ -1391,7 +1411,7 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.entities.Entity",
-            "ref id name level position actor_position hp_fraction power kind world_id entity_type is_creature corpse search_flags npc_flags class_code target_id status_flags poisoned diseased disposition disposition_name",
+            "ref id name level position actor_position hp_fraction power kind world_id entity_type is_creature corpse search_flags npc_flags class_code target_id status_flags poisoned diseased disposition disposition_name head_mark merc_tag",
         ),
         (
             "eqoa.group.Group",
@@ -1485,6 +1505,8 @@ fn install_fields(lua: &Lua) {
                 Some(6)
             } else if (path, field) == ("eqoa.hotbar.HotbarSlot", "item") {
                 Some(5)
+            } else if matches!((path, field), ("eqoa.entities.Entity", "head_mark" | "merc_tag")) {
+                Some(8)
             } else if (path, field) == ("eqoa.abilities.Ability", "learned") {
                 Some(8)
             } else if matches!(

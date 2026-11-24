@@ -648,6 +648,10 @@ pub(crate) fn native_leaves(element: &str) -> Option<Vec<&'static str>> {
         "quest_tracker" => vec!["quest_tracker"],
         "dps_meter" => vec!["dps_meter"],
         "breath" => vec!["breath"],
+        // round A12: what the game draws in the world, for a mod that draws its own
+        "name_plates" => vec!["name_plates"],
+        "damage_numbers" => vec!["damage_numbers"],
+        "target_rings" => vec!["target_rings"],
         "all" => ALL_UI_ELEMENTS.to_vec(),
         "all_pieces" => {
             let mut all = ALL_UI_ELEMENTS.to_vec();
@@ -857,6 +861,9 @@ pub struct PublishedVisibility {
     pub quest_tracker: bool,
     pub dps_meter: bool,
     pub breath: bool,
+    pub name_plates: bool,
+    pub damage_numbers: bool,
+    pub target_rings: bool,
 }
 
 #[allow(dead_code)]
@@ -889,6 +896,9 @@ impl PublishedVisibility {
             || self.quest_tracker
             || self.dps_meter
             || self.breath
+            || self.name_plates
+            || self.damage_numbers
+            || self.target_rings
     }
 }
 
@@ -913,6 +923,9 @@ const REPORT_ELEMENTS: &[&str] = &[
     "breath",
     "spell_bars",
     "utility_bars",
+    "name_plates",
+    "damage_numbers",
+    "target_rings",
 ];
 
 thread_local! {
@@ -938,6 +951,9 @@ thread_local! {
         quest_tracker: false,
         dps_meter: false,
         breath: false,
+        name_plates: false,
+        damage_numbers: false,
+        target_rings: false,
     }) };
 }
 
@@ -981,6 +997,9 @@ pub(crate) fn publish_claims(claims: &HudClaimsRegistry) {
         quest_tracker: claims.is_hidden("quest_tracker"),
         dps_meter: claims.is_hidden("dps_meter"),
         breath: claims.is_hidden("breath"),
+        name_plates: claims.is_hidden("name_plates"),
+        damage_numbers: claims.is_hidden("damage_numbers"),
+        target_rings: claims.is_hidden("target_rings"),
     });
 }
 
