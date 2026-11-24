@@ -1346,7 +1346,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_trade"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1649,7 +1650,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_trade"
             ]
         );
 
@@ -1705,7 +1707,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_trade"
             ]
         );
 
@@ -1735,7 +1738,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_trade"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1831,7 +1835,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_trade"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );
