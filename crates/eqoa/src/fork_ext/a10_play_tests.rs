@@ -1385,6 +1385,52 @@ mod mods {
         assert!(sent().is_empty(), "{}", r.why());
     }
 
+    #[test]
+    fn mods_zoning_and_a_new_world_end_the_windows_and_nothing_stale_is_left_to_reopen_with() {
+        for (id, w, combo, key, kinds) in [
+            ("eqoa_mail", 360.0, "shift+m", "m", vec!["mail_inbox", "mail_compose"]),
+            ("eqoa_auction", 380.0, "shift+a", "a", vec!["auction_search"]),
+        ] {
+            for how in ["zoning", "state.reset", "world.entered"] {
+                let mut r = rig_with(id, w, 336.0, combo, key, |_| {});
+                assert!(ws::any_open_of(&kinds), "{id}: open; {}", r.why());
+                // a box is being typed in, so the Enter claim is held
+                if id == "eqoa_auction" {
+                    r.tap(100.0, 46.0);
+                } else {
+                    r.tap(110.0, 28.0);
+                    r.tap(30.0, 58.0);
+                }
+                // control: nothing has happened yet, it is still open
+                assert!(ws::any_open_of(&kinds));
+                match how {
+                    "zoning" => {
+                        ws::set_env(ws::Env { away: true, ..ws::Env::default() });
+                        r.frames(2);
+                        ws::set_env(ws::Env::default());
+                    }
+                    other => {
+                        CORE.with(|c| c.borrow_mut().emit(other, json!({})));
+                        native_events::dispatch(&r.host).unwrap();
+                        r.frames(2);
+                    }
+                }
+                assert!(!ws::any_open_of(&kinds), "{id} after {how}: the window and its session are gone");
+                // the mod works again at once: the key opens it, a box takes typing, the Enter claim is taken fresh
+                CORE.with(|c| {
+                    c.borrow_mut().emit("input.key", json!({"key": key, "combo": combo, "down": true, "repeat": false, "synthetic": false, "text": ""}))
+                });
+                native_events::dispatch(&r.host).unwrap();
+                r.settle();
+                assert!(ws::any_open_of(&kinds), "{id} after {how}: reopens; {}", r.why());
+                r.tap(100.0, 46.0);
+                r.type_text("ab");
+                let logs = r.host.drain_logs().unwrap();
+                assert!(logs.is_empty(), "{id} after {how}: no diagnostics: {logs:?}");
+            }
+        }
+    }
+
     // ---- the Bag Viewer's listing module, with the real client behind it ----
 
     fn load_listing(host: &Host) {

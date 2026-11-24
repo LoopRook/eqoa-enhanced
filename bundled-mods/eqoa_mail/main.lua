@@ -233,6 +233,9 @@ eqoa.events.on("mod.command", function(e)
 end)
 eqoa.events.on("disabling", function() close() end)
 eqoa.events.on("world.leaving", function() close() end)
+-- the client lets go of every session and claim when the world is left or a new one starts: nothing is kept from before
+eqoa.events.on("state.reset", function() close() end)
+eqoa.events.on("world.entered", function() close() end)
 
 function draw()
     local f = eqoa.hud.frame()
