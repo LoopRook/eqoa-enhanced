@@ -27,6 +27,7 @@ local state = {
     frame = 0,
     tell = {},          -- kind -> last claim outcome told in the log
     claimed = {},       -- key name -> input claim token
+    warned = {},        -- key name -> a refused claim was already told in the log
     page = 0, page_ref = nil,
     hits = {}, keys = {}, result = nil, retry = {},
     offers_on = true,
@@ -183,15 +184,24 @@ eqoa.events.on("disabling", function()
     eqoa.windows.release()
 end)
 
--- Keys held for the window while it is up (and let go the moment it is not).
+-- Keys held for the window while it is up (and let go the moment it is not). `eqoa.input.claim` knows a key only by its
+-- app name ("Enter", "Escape", a digit): any other spelling is refused, and a refused claim leaves the key to the game.
+local CLAIM_NAMES = { escape = "Escape", enter = "Enter" }
 local function set_claims(want)
     for key, token in pairs(state.claimed) do
         if not want[key] then eqoa.input.release(token); state.claimed[key] = nil end
     end
     for key in pairs(want) do
         if not state.claimed[key] then
-            local token = eqoa.input.claim(key == "escape" and "Escape" or key, true)
-            if token then state.claimed[key] = token end
+            local token = eqoa.input.claim(CLAIM_NAMES[key] or key, true)
+            if token then
+                state.claimed[key] = token
+            else
+                if not state.warned[key] then
+                    state.warned[key] = true
+                    note("warn", "could not hold the " .. key .. " key")
+                end
+            end
         end
     end
 end
@@ -261,6 +271,9 @@ local function draw_dialog(s, f, k, dw, dh)
     local y = 22 + #lines * LINE + 8
     local keys = { escape = function() pass(s.ref) end }
     if response then
+        -- Enter is this window's while a dialog is up, so it never reaches the game (it would open the chat line);
+        -- on answers it does nothing: the number keys and clicks answer
+        keys["enter"] = function() end
         for i = first + 1, last do
             local n = i - first
             local option = i

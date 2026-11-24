@@ -9,6 +9,8 @@ appear in the mod's window instead of the game's dialog window.
 - **The NPC's words** are wrapped to fit the window. Answers are buttons: click one or press its number, **1** to
   **6**. With more than six answers, **7** (More) and **8** (Back) turn the page. A plain message (no answers)
   has a **Done** button (click it, or press Enter or 1).
+- **Enter** is the window's while a dialog is up: on a plain message it presses Done, on a dialog with answers it does
+  nothing (the number keys and clicks answer). It never reaches the game, so it cannot open the chat line over the dialog.
 - **Escape or the x** gives the dialog back to the game: its own dialog window opens with the same words and
   answers, and you can answer it there. Nothing is dropped and nothing is answered for you.
 - A dialog that cannot be shown here always ends up in the game's window: if you turn the mod off, switch on

@@ -313,3 +313,45 @@ fn a2_dialog_window_pages_a_long_list_and_shows_an_offer() {
     dialog_sessions::hold(Item::Offer { summons: true, name: "Mage".into(), text: wide("Mage summons you.") }, None);
     assert!(r.frames(3) > 0, "the offer box is drawn");
 }
+
+/// Owner test 2026-11-23: Enter in a dialog advanced it and also opened the game's chat line, after which chat would not
+/// take typing. The mod asked for the Enter key under a name the host does not know ("enter"), so the claim was refused
+/// and the key went on to the game. Enter is the window's while a dialog is up, on both kinds of dialog, and the game has
+/// it again the moment the dialog is gone (nothing stays claimed).
+#[test]
+fn a2_dialog_window_keeps_enter_from_the_game_while_up_and_gives_it_back_after() {
+    const ENTER: u8 = 0x0D;
+    let suppressed = || super::input::is_key_suppressed(ENTER);
+    let mut r = rig("eqoa_dialogs");
+    r.frames(3);
+    assert!(!suppressed(), "no dialog: Enter is the game's (control)");
+    // a plain message: Enter is Done, and the game does not see the key
+    dialog_sessions::hold(Item::Text { text: wide("Hail, traveller."), talked_to: None }, None);
+    assert!(dialog_sessions::start_next(true, None).is_some());
+    r.frames(3);
+    assert!(suppressed(), "a text dialog: the game does not get Enter; {:?}", r.host.drain_logs());
+    press(&r.host, "enter");
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "Enter presses Done");
+    // Escape gives it back to the game's window; the claims end with the window
+    action_broker::reset_all_for_test();
+    press(&r.host, "escape");
+    assert_eq!(dialog_sessions::take_passes().len(), 1);
+    ws::reset_for_test();
+    r.frames(3);
+    assert!(!suppressed(), "the dialog is gone: Enter opens the chat line again");
+    drop(r);
+    // a dialog with answers: Enter answers nothing and still never reaches the game
+    let mut r = rig("eqoa_dialogs");
+    r.frames(2);
+    r.dialog(21, "What do you seek?", &["Rumors", "Work"]);
+    r.frames(3);
+    assert!(suppressed(), "a response dialog: the game does not get Enter");
+    press(&r.host, "enter");
+    assert!(action_broker::queued_kinds_for_test().is_empty(), "Enter answers nothing there");
+    press(&r.host, "1");
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "the number key still answers");
+    // turning the mod off leaves nothing claimed
+    native_events::clear(&r.host);
+    assert!(!suppressed(), "disabled: Enter is the game's");
+    assert!(r.host.drain_logs().unwrap().iter().all(|l| !l.contains("could not hold")));
+}
