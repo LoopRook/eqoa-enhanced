@@ -287,8 +287,8 @@ fn nameplates_kinds_options_and_long_names() {
 }
 
 #[test]
-fn nameplates_draws_quest_marks_and_merc_tags_and_a_bigger_plate_with_the_size_option() {
-    let plain = entity(7001, "Rat", "npc", [0.0, 0.0, -10.0]);
+fn nameplates_draws_quest_marks_and_merc_tags_stacked_above_the_name() {
+    let plain = entity(7001, "Gnoll Pup", "npc", [0.0, 0.0, -10.0]);
     let mut marked = plain.clone();
     marked["head_mark"] = json!("!");
     marked["merc_tag"] = json!("<Lonewulf's Mercenary>");
@@ -303,13 +303,33 @@ fn nameplates_draws_quest_marks_and_merc_tags_and_a_bigger_plate_with_the_size_o
     let (lo_m, hi_m) = bounds(&frame(&host, &bridge, &mut context));
     assert!(lo_m[1] < lo_p[1] - 10.0, "the mark and the tag stack above the name");
     assert!((hi_m[1] - hi_plain[1]).abs() < 1.0, "and the bar stays at the point");
-    // size 200 percent: the plain plate is wider than at 100 (text grows only where the client has a font service;
-    // the bar and the spacing grow either way)
-    world(vec![plain.clone()]);
-    let (lo1, hi1) = bounds(&frame(&host, &bridge, &mut context));
-    set_setting(&host, "size", "200");
-    let (lo2, hi2) = bounds(&frame(&host, &bridge, &mut context));
-    assert!(hi2[0] - lo2[0] > (hi1[0] - lo1[0]) * 1.05, "size 200 percent makes the plate bigger: {} vs {}", hi2[0] - lo2[0], hi1[0] - lo1[0]);
+}
+
+/// Text really grows with Size: the same plate at 100 and 200 percent, with the font service installed as the
+/// client has it (the mod must not depend on it).
+#[test]
+fn nameplates_size_option_really_scales_the_text() {
+    use super::fonts::{FontBank, current_context_epoch};
+    let mut context = context();
+    let addon = addon();
+    let host = Host::for_addon(&addon).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    let fonts = Rc::new(RefCell::new(FontBank::new(0, current_context_epoch())));
+    FontBank::install_for_addon(&fonts, &host.lua, &addon).unwrap();
+    host.run_addon(&addon).unwrap();
+    world(vec![entity(7001, "Gnoll Pup", "npc", [0.0, 0.0, -10.0])]);
+    let mut run = |size: u32| {
+        set_setting(&host, "size", &size.to_string());
+        fonts.borrow_mut().flush_pending(&mut context);
+        let v = frame(&host, &bridge, &mut context);
+        bounds(&v)
+    };
+    let (lo1, hi1) = run(100);
+    let (lo2, hi2) = run(200);
+    let ratio = (hi2[0] - lo2[0]) / (hi1[0] - lo1[0]);
+    assert!(ratio > 1.6, "text and plate roughly double with Size 200: {ratio}");
+    assert!((hi2[1] - lo2[1]) > (hi1[1] - lo1[1]) * 1.5, "and so does its height");
+    assert!(host.drain_logs().unwrap().is_empty());
 }
 
 #[test]
@@ -391,4 +411,181 @@ fn nameplates_cost_per_frame_with_fifty_entities() {
     );
     assert!(with_mod.saturating_sub(baseline) < std::time::Duration::from_millis(60), "{with_mod:?} vs {baseline:?}");
     assert!(host.drain_logs().unwrap().is_empty());
+}
+
+// ---- fix round ----------------------------------------------------------------------------------------------------
+
+fn hit(attacker: u32, defender: u32, amount: u32) {
+    super::native_core::emit(
+        "combat.hit",
+        json!({"attacker_id": attacker, "defender_id": defender, "amount": amount, "kind": "damage", "color": null,
+            "outgoing": attacker == 256, "incoming": defender == 256, "from_pet": false, "to_pet": false}),
+    );
+}
+
+/// The numbers alone: plates off, one creature in front to hit.
+fn numbers_only() -> (Host, Bridge, Context) {
+    world(vec![entity(7001, "Gnoll Pup", "npc", [0.0, 0.0, -10.0])]);
+    let context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon()).unwrap();
+    set_setting(&host, "creatures", "false");
+    (host, bridge, context)
+}
+
+fn vertex_colors(context: &mut Context, host: &Host, bridge: &Bridge) -> Vec<u32> {
+    context.frame();
+    bridge.invoke(|| { native_events::dispatch(host)?; native_events::render(host) }).unwrap();
+    let draw = context.render_legacy();
+    let mut out = Vec::new();
+    for list in draw.draw_data().draw_lists() {
+        out.extend(list.vtx_buffer().iter().map(|v| v.col));
+    }
+    out
+}
+
+fn rgb(c: u32) -> [u32; 3] {
+    [c & 0xff, (c >> 8) & 0xff, (c >> 16) & 0xff]
+}
+
+fn height_of(v: &[[f32; 2]]) -> f32 {
+    let (lo, hi) = bounds(v);
+    hi[1] - lo[1]
+}
+
+#[test]
+fn nameplates_a_hit_on_you_is_red_yours_is_white_and_a_big_hit_is_bigger() {
+    // one ImGui context at a time: each part has its own scope
+    {
+        let (host, bridge, mut context) = numbers_only();
+        assert!(frame(&host, &bridge, &mut context).is_empty(), "control: no hit, nothing drawn");
+        // yours: white glyphs
+        hit(256, 7001, 12);
+        let cols = vertex_colors(&mut context, &host, &bridge);
+        assert!(cols.iter().any(|c| rgb(*c) == [255, 255, 255]), "a white number");
+        assert!(!cols.iter().any(|c| { let [r, g, b] = rgb(*c); r > 200 && g < 120 && b < 120 }), "and nothing red");
+    }
+    {
+        // theirs on you (incoming): red, and not white
+        let (host, bridge, mut context) = numbers_only();
+        // the camera behind you, as the game's third-person view has it (at the eye itself you are not in view)
+        let fov_y = 2.0 * (0.5f32 * SIZE.1 as f32 / (SIZE.0 as f32 / 2.0)).atan();
+        native_a12::set_view(
+            glam::camera::rh::proj::directx::perspective(fov_y, SIZE.0 as f32 / SIZE.1 as f32, 0.3, 6000.0)
+                * glam::camera::rh::view::look_to_mat4(Vec3::new(0.0, 2.0, 6.0), Vec3::NEG_Z, Vec3::Y),
+            SIZE,
+        );
+        hit(7001, 256, 30);
+        let cols = vertex_colors(&mut context, &host, &bridge);
+        assert!(cols.iter().any(|c| { let [r, g, b] = rgb(*c); r > 240 && g > 50 && g < 90 && b > 50 && b < 90 }), "a red number");
+        assert!(!cols.iter().any(|c| rgb(*c) == [255, 255, 255]), "no white one");
+    }
+    // a hit well above your usual is bigger: its glyphs stand taller than a usual hit's
+    let usual_h = {
+        let (host, bridge, mut context) = numbers_only();
+        for _ in 0..6 {
+            hit(256, 7001, 10);
+        }
+        height_of(&frame(&host, &bridge, &mut context))
+    };
+    let big_h = {
+        let (host, bridge, mut context) = numbers_only();
+        for _ in 0..5 {
+            hit(256, 7001, 10);
+        }
+        hit(256, 7001, 100);
+        height_of(&frame(&host, &bridge, &mut context))
+    };
+    assert!(big_h > usual_h, "the bigger hit's number stands taller ({big_h} vs {usual_h})");
+}
+
+#[test]
+fn nameplates_a_number_near_the_eye_plane_or_behind_you_is_not_drawn_and_never_fails_the_mod() {
+    {
+        let (host, bridge, mut context) = numbers_only();
+        hit(256, 7001, 12);
+        // the creature's plate point is just in front of the eye and a long way to the side: finite pixels far away
+        native_a12::set_plates(vec![(7001, [1.0e5, 0.0, -0.35])]);
+        let v = frame(&host, &bridge, &mut context);
+        assert!(v.iter().all(|p| p[0].abs() < 1.0e5 && p[1].abs() < 1.0e5), "nothing far off the screen reaches the draw call");
+        assert!(host.drain_logs().unwrap().is_empty(), "no diagnostic: the mod is not failed");
+    }
+    // behind the camera: the number is not left frozen on the screen
+    let (host, bridge, mut context) = numbers_only();
+    hit(256, 7001, 12);
+    assert!(!frame(&host, &bridge, &mut context).is_empty(), "control: drawn while in view");
+    native_a12::set_plates(vec![]);
+    let fov_y = 2.0 * (0.5f32 * SIZE.1 as f32 / (SIZE.0 as f32 / 2.0)).atan();
+    let turned = glam::camera::rh::proj::directx::perspective(fov_y, SIZE.0 as f32 / SIZE.1 as f32, 0.3, 6000.0)
+        * glam::camera::rh::view::look_to_mat4(Vec3::ZERO, Vec3::Z, Vec3::Y);
+    native_a12::set_view(turned, SIZE);
+    assert!(frame(&host, &bridge, &mut context).is_empty(), "turned away from where it was hit, the number is not drawn");
+    assert!(host.drain_logs().unwrap().is_empty());
+}
+
+#[test]
+fn nameplates_the_hides_are_taken_again_after_the_client_drops_them_in_a_zone() {
+    // the client drops every claim on a zone; the mod lets go of its own on the events and takes them again
+    let run = |deliver_events: bool| -> (bool, bool, bool) {
+        world(vec![entity(7001, "Gnoll Pup", "npc", [1.0, 0.0, -10.0])]);
+        let mut context = context();
+        let host = Host::for_addon(&addon()).unwrap();
+        let bridge = Bridge::install(&host).unwrap();
+        let hud = attach(&host);
+        host.run_addon(&addon()).unwrap();
+        frame(&host, &bridge, &mut context);
+        publish_claims(&hud.claims.borrow());
+        assert_eq!(flags(), (true, true, false), "held in the world");
+        // the zone: the world goes, the client drops the claims
+        CORE.with(|c| c.borrow_mut().view.in_world = false);
+        hud.lease.update(HealthSnapshot::new(true, 100, 100), true);
+        publish_claims(&hud.claims.borrow());
+        assert_eq!(flags(), (false, false, false), "dropped by the client: the game's own would show");
+        if deliver_events {
+            super::native_core::emit("world.leaving", json!({}));
+            super::native_core::emit("state.reset", json!({"in_world": false, "initial": false}));
+            native_events::dispatch(&host).unwrap();
+        }
+        // the new world
+        CORE.with(|c| {
+            let mut c = c.borrow_mut();
+            c.view.in_world = true;
+            c.generation += 1;
+        });
+        hud.lease.update(HealthSnapshot::new(true, 100, 100), true);
+        if deliver_events {
+            super::native_core::emit("world.entered", json!({}));
+            super::native_core::emit("state.reset", json!({"in_world": true, "initial": false}));
+        }
+        frame(&host, &bridge, &mut context);
+        publish_claims(&hud.claims.borrow());
+        flags()
+    };
+    assert_eq!(run(true), (true, true, false), "taken again after the zone");
+    // negative control: a mod that kept its old tokens (the events not delivered) leaves the game's plates showing
+    assert_eq!(run(false), (false, false, false), "without the events the stale tokens are never replaced");
+}
+
+#[test]
+fn nameplates_crowded_keeps_the_nearest_and_always_the_target() {
+    let crowd = |n: u32| -> Vec<Json> {
+        (0..n)
+            .map(|i| entity(9000 + i, &format!("Crowd {i}"), "npc", [((i % 14) as f32 - 6.5) * 1.5, 0.0, -6.0 - (i / 14) as f32 * 2.0]))
+            .collect()
+    };
+    // the target is the farthest of 70
+    world(crowd(70));
+    CORE.with(|c| c.borrow_mut().view.player["target_id"] = json!(9069));
+    let mut context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon()).unwrap();
+    let cols = vertex_colors(&mut context, &host, &bridge);
+    assert!(cols.iter().any(|c| rgb(*c) == [255, 230, 89]), "the target's yellow frame is drawn although it is the farthest of 70");
+    let v70 = frame(&host, &bridge, &mut context).len();
+    world(crowd(60));
+    CORE.with(|c| c.borrow_mut().view.player["target_id"] = json!(9059));
+    let v60 = frame(&host, &bridge, &mut context).len();
+    assert!(v70 <= v60 + 400, "70 in range draw about what 60 do ({v70} vs {v60}): the cap holds");
 }
