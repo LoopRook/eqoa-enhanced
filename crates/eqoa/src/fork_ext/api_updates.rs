@@ -358,19 +358,9 @@ pub(crate) fn key(play: &Play, walker: Option<&crate::walker::Walker>) -> FrameK
     for (i, m) in play.hud_menus.menus.iter().enumerate() {
         v[12 + i] = m.sel as u64;
     }
-    if let Some(w) = walker {
-        let p = w.cam.walk.phys.position;
-        let speed = w.cam.walk.phys.velocity;
-        v[18..25].copy_from_slice(&[
-            p.x.0.to_bits() as u64,
-            p.y.0.to_bits() as u64,
-            p.z.0.to_bits() as u64,
-            speed.x.0.to_bits() as u64,
-            speed.y.0.to_bits() as u64,
-            speed.z.0.to_bits() as u64,
-            w.cam.walk.phys.angles.x.0.to_bits() as u64,
-        ]);
-    }
+    // The player's position, velocity and heading are not in the key: they are patched into the view on every
+    // drawn frame (`patch_live_position`), so a step-gated rebuild never waits on them (v[18..25] stay 0).
+    let _ = walker;
     v[26] = play.typing.is_some() as u64;
     v[27] = play.map.open as u64;
     v[28] = crate::fork_ext::addons::input::is_text_capture_active() as u64;
@@ -424,6 +414,73 @@ pub(crate) fn cached(key: FrameKey) -> Option<crate::fork_ext::addons::host::Sna
 pub(crate) fn cache(key: FrameKey, snapshot: crate::fork_ext::addons::host::Snapshot) {
     SNAPSHOT.with(|s| *s.borrow_mut() = Some((key, revision(), snapshot)));
 }
+thread_local! {
+    static STEP: Cell<bool> = const { Cell::new(true) };
+    #[cfg(test)]
+    static BUILDS: Cell<u64> = const { Cell::new(0) };
+}
+/// Whether the game stepped since the last rebuild: the game's own 30 Hz step, as `native_core::iteration` is told
+/// by the frame hook (the same step that dispatches the mods' actions and advances `Client.tick`). The mods' state
+/// is rebuilt on these; the player's position and the camera are patched on every drawn frame, and a state event
+/// between steps rebuilds at once (see `refresh`).
+fn step_due() -> bool {
+    native_core::take_game_step()
+}
+/// Set by `refresh`: this call rebuilt the state (a step, or a forced rebuild). `forge_snapshot` rebuilds the
+/// snapshot on it and otherwise reuses the last one with the live fields patched in.
+pub(crate) fn stepped() -> bool {
+    STEP.with(Cell::get)
+}
+/// The last snapshot built, whatever its key (the frames between two steps reuse it).
+pub(crate) fn latest() -> Option<crate::fork_ext::addons::host::Snapshot> {
+    SNAPSHOT.with(|s| s.borrow().as_ref().map(|(_, _, snapshot)| *snapshot))
+}
+#[cfg(test)]
+thread_local! {static NO_UPGRADE: Cell<bool> = const { Cell::new(false) };}
+/// Test seam: the gate as it was before the fix (a state event between steps did not rebuild).
+#[cfg(test)]
+pub(crate) fn set_no_upgrade_for_test(on: bool) {
+    NO_UPGRADE.with(|n| n.set(on));
+}
+fn no_upgrade() -> bool {
+    #[cfg(test)]
+    return NO_UPGRADE.with(Cell::get);
+    #[cfg(not(test))]
+    false
+}
+#[cfg(test)]
+pub(crate) fn builds_for_test() -> u64 {
+    BUILDS.with(Cell::get)
+}
+pub(crate) fn note_build() {
+    #[cfg(test)]
+    BUILDS.with(|b| b.set(b.get() + 1));
+}
+/// The live fields (position, velocity, heading, speed, location), taken from the walker into the view on every
+/// drawn frame. Same events as before: `patch_player` coalesces motion by tick.
+fn patch_live_position(play: &Play, walker: Option<&crate::walker::Walker>) {
+    let Some(w) = walker else { return };
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.view.player.is_null() {
+            return;
+        }
+        let p = w.cam.walk.phys.position;
+        let v = w.cam.walk.phys.velocity;
+        let xz = ee::add(ee::mul(v.x.0, v.x.0), ee::mul(v.z.0, v.z.0));
+        let mut after = c.view.player.clone();
+        after["position"] = vec3([p.x.0, p.y.0, p.z.0]);
+        after["velocity"] = vec3([v.x.0, v.y.0, v.z.0]);
+        after["heading"] = json!(w.cam.walk.phys.angles.x.0.rem_euclid(std::f32::consts::TAU));
+        after["speed"] = json!(ee::sqrt(ee::add(xz, ee::mul(v.y.0, v.y.0))));
+        after["horizontal_speed"] = json!(ee::sqrt(xz));
+        after["location"] = play.native_location(walker);
+        if after != c.view.player {
+            patch_player(&mut c, after);
+            dirty();
+        }
+    });
+}
 pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     let _timed = crate::fork_ext::addons::addon_perf::section("api.refresh");
     thread_local! {static EPOCH:Cell<u64>=const{Cell::new(u64::MAX)};}
@@ -435,7 +492,13 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     let manual = native_core::fixture_requested();
     #[cfg(not(test))]
     let manual = false;
-    if first || manual || CORE.with(|c| c.borrow().view.in_world != play.in_world_now()) {
+    // a rebuild is forced at once for a first call, a changed world state and a fresh capture; otherwise the
+    // game's 30 Hz step decides
+    let forced = first || manual || CORE.with(|c| c.borrow().view.in_world != play.in_world_now());
+    let step = step_due() || forced || SNAPSHOT.with(|s| s.borrow().is_none());
+    let seq_at_start = native_core::event_seq();
+    STEP.with(|s| s.set(step || !play.in_world_now()));
+    if forced {
         native_core::flush_deferred();
         let view = play.native_view(walker);
         CORE.with(|c| c.borrow_mut().publish(view));
@@ -460,12 +523,29 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         native_core::flush_deferred();
         return;
     }
+    let mut step = step;
     native_core::flush_deferred();
-    super::items::refresh(play);
-    super::r6a::refresh(play, walker);
-    super::a3::refresh(play, walker);
-    super::a5::refresh(play);
-    native_core::flush_deferred();
+    if step {
+        super::items::refresh(play);
+        super::r6a::refresh(play, walker);
+        super::a3::refresh(play, walker);
+        super::a5::refresh(play);
+        native_core::flush_deferred();
+    } else {
+        // Between steps only the camera and the packets' deltas run. If either produced an event about the
+        // game's state (a target, a window, a quest, an item), the state those events describe is rebuilt now, so a
+        // handler never reads a snapshot older than the event it was told about.
+        super::r6a::refresh(play, walker);
+        native_core::flush_deferred();
+        if native_core::state_event_since(seq_at_start) && !no_upgrade() {
+            step = true;
+            STEP.with(|s| s.set(true));
+            super::items::refresh(play);
+            super::a3::refresh(play, walker);
+            super::a5::refresh(play);
+            native_core::flush_deferred();
+        }
+    }
     CORE.with(|c| {
         let mut c = c.borrow_mut();
         c.flush_player_motion();
@@ -483,8 +563,9 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
             c.view.dots = dots;
         }
     });
+    patch_live_position(play, walker);
     let timed_key = crate::fork_ext::addons::addon_perf::section("api.refresh.key");
-    let now = key(play, walker);
+    let now = if step { key(play, walker) } else { KEY.with(|k| k.get()).unwrap_or_else(|| key(play, walker)) };
     drop(timed_key);
     let previous = KEY.with(|k| k.replace(Some(now)));
     if previous != Some(now) {
@@ -525,7 +606,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     CORE.with(|c| {
         let mut c = c.borrow_mut();
         let world = play.world_id() as i32;
-        if changed || c.view.map["zone"] != c.view.player["location"] {
+        if step && (changed || c.view.map["zone"] != c.view.player["location"]) {
             let mut after =
                 play.map
                     .api_state(world, &c.view.player["location"], play.words.as_ref());
