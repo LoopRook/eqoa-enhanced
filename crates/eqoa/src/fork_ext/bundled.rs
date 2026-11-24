@@ -45,6 +45,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_social",
     "eqoa_start_menu",
     "eqoa_chat",
+    "eqoa_nameplates",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -732,6 +733,21 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         package: "eqoa_social",
         data: include_bytes!("../../../../bundled-mods/eqoa_social/README.md"),
     },
+    BundledFile {
+        path: "eqoa_nameplates/mod.json",
+        package: "eqoa_nameplates",
+        data: include_bytes!("../../../../bundled-mods/eqoa_nameplates/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_nameplates/main.lua",
+        package: "eqoa_nameplates",
+        data: include_bytes!("../../../../bundled-mods/eqoa_nameplates/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_nameplates/README.md",
+        package: "eqoa_nameplates",
+        data: include_bytes!("../../../../bundled-mods/eqoa_nameplates/README.md"),
+    },
 ];
 
 pub fn bundled_registry_path(config_dir: &Path) -> PathBuf {
@@ -1320,7 +1336,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_nameplates"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1623,7 +1640,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_nameplates"
             ]
         );
 
@@ -1679,7 +1697,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_nameplates"
             ]
         );
 
@@ -1709,7 +1728,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_nameplates"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1805,7 +1825,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_nameplates"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );
