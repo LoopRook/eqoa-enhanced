@@ -67,6 +67,7 @@ fn fresh() {
     window_takeover::reset_all_for_test();
     window_takeover::forget_switch_for_test();
     input::reset_input_state();
+    input::focus(true);
     pointer_api::position([0.0, 0.0], true, (1024, 768));
     CORE.with(|c| {
         let mut c = c.borrow_mut();
@@ -141,7 +142,7 @@ impl Rig {
     fn hit(&self, label: &str) -> (f64, f64) {
         let x = self.lua_f64(&format!("(function() for _, h in ipairs(world_map.hits) do if h.label == \"{label}\" then return h.x + h.w / 2 end end return -1 end)()"));
         let y = self.lua_f64(&format!("(function() for _, h in ipairs(world_map.hits) do if h.label == \"{label}\" then return h.y + h.h / 2 end end return -1 end)()"));
-        assert!(x >= 0.0, "no control labelled {label:?}: {:?}", self.lua_str("#world_map.hits"));
+        assert!(x >= 0.0, "no control labelled {label:?}: {} hits, menu {}, note {}, last press {}, view {}, logs {:?}", self.lua_str("#world_map.hits"), self.lua_str("world_map.menu"), self.lua_str("world_map.note"), self.lua_str("world_map.last_press"), self.lua_str("world_map.view"), self.host.drain_logs());
         (x, y)
     }
     fn press(&mut self, at: (f64, f64), button: &str) {
@@ -400,4 +401,141 @@ fn a13_world_map_moves_resizes_and_keeps_its_place() {
     again.open();
     assert!((again.lua_f64("world_map.rect.w") - w1).abs() <= 2.0 && (again.lua_f64("world_map.rect.x") - x1).abs() <= 2.0, "came back");
     assert!((w1 - w0).abs() > 20.0);
+}
+
+#[test]
+fn a13_world_map_takes_the_map_key_back_after_a_zoning_and_after_the_switch() {
+    fresh();
+    let mut rig = rig([1024.0, 768.0], None);
+    assert!(window_takeover::is_taken(TakeoverKind::Map));
+    // the client lets go of every claim at a zoning, a teleport and a respawn
+    window_takeover::release_all();
+    assert!(!window_takeover::is_taken(TakeoverKind::Map), "released");
+    CORE.with(|c| c.borrow_mut().emit("world.entered", json!({"world_id": 0, "initial": false})));
+    native_events::dispatch(&rig.host).unwrap();
+    assert!(window_takeover::is_taken(TakeoverKind::Map), "world.entered asks again");
+    window_takeover::release_all();
+    CORE.with(|c| c.borrow_mut().emit("state.reset", json!({})));
+    native_events::dispatch(&rig.host).unwrap();
+    assert!(window_takeover::is_taken(TakeoverKind::Map), "state.reset asks again");
+    // the player's switch releases it; once it is off again the slow retry takes the key back
+    window_takeover::set_use_game_windows(true);
+    assert!(!window_takeover::is_taken(TakeoverKind::Map));
+    window_takeover::set_use_game_windows(false);
+    // the retry waits three seconds between tries: not yet, then its turn
+    rig.host.execute("world_map.claim_at = 1e9").unwrap();
+    rig.frames(2);
+    assert!(!window_takeover::is_taken(TakeoverKind::Map), "control: not before its turn");
+    rig.host.execute("world_map.claim_at = 0").unwrap();
+    rig.frames(1);
+    assert!(window_takeover::is_taken(TakeoverKind::Map), "the mod took the key back by itself");
+}
+
+fn route(rig: &mut Rig, key: &str, down: bool) {
+    input::route_mod_key(&winit::keyboard::Key::Character(key.into()), down, false, false, true, false);
+    native_events::dispatch(&rig.host).unwrap();
+}
+
+#[test]
+fn a13_world_map_typing_ends_with_a_click_back_in_the_game_and_gives_the_keyboard_back_at_once() {
+    fresh();
+    let mut rig = rig([1024.0, 768.0], None);
+    rig.open();
+    assert!(!input::is_text_capture_active(), "control: not typing");
+    // search: typing holds the keyboard, W goes into the box
+    let at = rig.hit("search");
+    rig.press(at, "left");
+    rig.frames(2);
+    assert!(input::is_text_capture_active(), "typing in the search box holds the keyboard");
+    route(&mut rig, "w", true);
+    route(&mut rig, "w", false);
+    assert_eq!(rig.lua_str("world_map.search"), "w", "W went into the box");
+    // a click back in the game ends it, and W is the game's (and the map's pan key) again
+    rig.press((2.0, 2.0), "left");
+    rig.frames(1);
+    assert!(!input::is_text_capture_active(), "a click outside released the keyboard at once");
+    assert_eq!(rig.lua_str("world_map.focus"), "nil");
+    route(&mut rig, "w", true);
+    assert_eq!(rig.lua_str("world_map.search"), "w", "W no longer goes into the box");
+    assert_eq!(rig.lua_str("world_map.held.w"), "true", "it pans the map");
+    route(&mut rig, "w", false);
+    // Enter on a result, Esc, a saved note and closing the map all release the keyboard at once
+    let at = rig.hit("search");
+    rig.press(at, "left");
+    rig.frames(1);
+    assert!(input::is_text_capture_active());
+    rig.key("Escape", "", true);
+    rig.frames(1);
+    assert!(!input::is_text_capture_active(), "Esc released it");
+    let mid = rig.middle();
+    rig.press(mid, "right");
+    let at = rig.hit("Drop a pin here...");
+    rig.press(at, "left");
+    assert!(input::is_text_capture_active(), "the note box holds the keyboard");
+    rig.key("Enter", "", true);
+    rig.frames(1);
+    assert!(!input::is_text_capture_active(), "saving the note released it");
+    // (a right-click on the pin just saved would remove it: the next one is made elsewhere)
+    let mid = (mid.0 + 120.0, mid.1 + 60.0);
+    rig.press(mid, "right");
+    let at = rig.hit("Drop a pin here...");
+    rig.press(at, "left");
+    assert!(input::is_text_capture_active());
+    // a click in the game while the note is open cancels it
+    rig.press((2.0, 2.0), "left");
+    rig.frames(1);
+    assert!(!input::is_text_capture_active() && rig.lua_str("world_map.note") == "nil", "a click in the game closed the note box");
+    // closing the map while typing
+    let at = rig.hit("search");
+    rig.press(at, "left");
+    rig.frames(1);
+    assert!(input::is_text_capture_active());
+    let id = ws::get(rig.vm, "map").unwrap().id;
+    ws::close(rig.vm, &id, "key").unwrap();
+    native_core::flush_deferred();
+    rig.frames(2);
+    assert!(!input::is_text_capture_active(), "closing the map released the keyboard");
+}
+
+#[test]
+fn a13_world_map_holds_the_shifted_pan_keys_and_ignores_keys_another_mod_is_typing() {
+    fresh();
+    let mut rig = rig([1024.0, 768.0], None);
+    rig.open();
+    for key in [b'W', b'A', b'S', b'D'] {
+        assert!(input::is_key_claimed(key), "Shift or Caps Lock W/A/S/D is the map's too: {key:#x}");
+    }
+    // another mod types in its own box: its Escape and letters are not this map's
+    let other = Host::with_test_capabilities(&["eqoa.input.capture_text"]).unwrap();
+    other.execute("eqoa.input.capture_text(true)").unwrap();
+    rig.key("w", "w", true);
+    rig.key("Escape", "", true);
+    assert!(ws::get(rig.vm, "map").is_some(), "Esc closed the other mod's box, not the map");
+    assert_eq!(rig.lua_str("world_map.held.w"), "nil", "W was typed there, it did not pan");
+    other.execute("eqoa.input.capture_text(false)").unwrap();
+    rig.key("Escape", "", true);
+    assert!(ws::get(rig.vm, "map").is_none(), "control: with nobody typing, Esc closes the map");
+}
+
+#[test]
+fn a13_world_map_waypoint_removal_takes_over_a_pin_it_does_not_own_and_clears_its_own() {
+    fresh();
+    let mut rig = rig([1024.0, 768.0], None);
+    // the player's own waypoint (no owner), on the player
+    CORE.with(|c| {
+        c.borrow_mut().view.map["waypoint"] = json!({"world_id": 0, "x": 25300.0, "z": 15200.0, "label": null, "owner": null});
+    });
+    rig.open();
+    rig.frames(2);
+    let (px, py) = (rig.middle().0, rig.middle().1);
+    rig.press((px, py), "right");
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["set_waypoint"], "not its own: set again first (to take it over), cleared once that is answered");
+    action_broker::reset_all_for_test();
+    // a waypoint this mod owns is cleared at once
+    CORE.with(|c| {
+        c.borrow_mut().view.map["waypoint"] = json!({"world_id": 0, "x": 25300.0, "z": 15200.0, "label": "World Map", "owner": "eqoa_world_map"});
+    });
+    rig.frames(2);
+    rig.press((px, py), "right");
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["clear_waypoint"]);
 }
