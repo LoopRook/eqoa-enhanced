@@ -478,6 +478,8 @@ fn mod_profiles_failed_save_keeps_previous_bundle_on_later_autosave() {
     gpu.render();
     manager.after_render();
     manager.flush_profile(&mut gpu.context, false);
+    // the profile file is written in the background: wait for it before reading it
+    manager.writes.flush();
     assert!(
         Store::new(Some(config.0.clone()))
             .read("Default")
@@ -1735,6 +1737,8 @@ fn mod_profiles_update_enables_bundled_defaults_missing_from_an_older_store() {
     );
     // The result is recorded, so later starts do not depend on the default.
     manager.flush_profile(&mut gpu.context, false);
+    // the profile file is written in the background: wait for it before reading it
+    manager.writes.flush();
     let saved = store.read("Default").unwrap();
     assert_eq!(saved.enabled.get(&key("eqoa_hud_numbers")), Some(&true));
     assert_eq!(saved.enabled.get(&key("eqoa_stats_box")), Some(&false));

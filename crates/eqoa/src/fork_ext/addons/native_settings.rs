@@ -6,7 +6,7 @@ use super::{
 };
 use mlua::{Function, Lua, Result, Value};
 use serde_json::Value as Json;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 pub(crate) type Writer = Rc<dyn Fn(&Json) -> std::result::Result<(), String>>;
 #[derive(Default)]
 pub(crate) struct Slot {
@@ -21,6 +21,43 @@ pub(crate) fn slot(lua: &Lua) -> Shared {
     lua.app_data_ref::<Shared>()
         .expect("settings slot installed")
         .clone()
+}
+/// The writer for a mod when the manager has no named profiles: the quota check and the encoding run now
+/// (the same refusals as ever), the disk write goes to the background `queue`.
+pub(crate) fn queued_writer(
+    storage: super::storage::Storage,
+    queue: Arc<super::write_queue::WriteQueue>,
+    key: String,
+    owner: String,
+) -> Writer {
+    Rc::new(move |value| {
+        let prepared = storage.prepare_encoded(&key, value)?;
+        queue.submit(
+            prepared.path.clone(),
+            Some(owner.clone()),
+            Box::new(move || prepared.commit()),
+        );
+        Ok(())
+    })
+}
+/// The writer for a mod under named profiles: the profile's checks run now, its file is written in the background.
+pub(crate) fn queued_profile_writer(
+    store: super::named_profiles::Store,
+    queue: Arc<super::write_queue::WriteQueue>,
+    document: super::named_profiles::Document,
+    active: String,
+    writable: bool,
+    key: String,
+    owner: String,
+) -> Writer {
+    Rc::new(move |value| {
+        if !writable {
+            return Err("active profile is read-only".into());
+        }
+        let mut document = document.clone();
+        document.addons.insert(key.clone(), value.clone());
+        store.write_in_background(&queue, Some(owner.clone()), &active, &document)
+    })
 }
 pub(crate) fn configure(host: &Host, value: Option<Json>, writer: Writer) {
     let s = slot(&host.lua);
