@@ -228,6 +228,7 @@ pub(super) fn prepare_addons(
         .or(g.offscreen.as_ref())?
         .create_view(&Default::default());
     let snapshot = play.map_or_else(Default::default, |p| p.forge_snapshot(walker));
+    crate::fork_ext::addons::native_a12::set_plates(play.map(|p| p.fork_plate_points()).unwrap_or_default());
     let mut encoder = g.device.create_command_encoder(&Default::default());
     g.forge_runtime.draw(
         &g.window,

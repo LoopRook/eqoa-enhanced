@@ -157,6 +157,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.camera.compass` | supported | 6 |  |
 | `eqoa.camera.get` | supported | 6 |  |
 | `eqoa.camera.project` | supported | 8 |  |
+| `eqoa.camera.project_entity` | supported | 8 |  |
 
 ## eqoa.capabilities
 

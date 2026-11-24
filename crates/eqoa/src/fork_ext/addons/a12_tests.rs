@@ -289,3 +289,56 @@ fn a12_the_guard_lines_sit_in_the_games_own_draws() {
     let damage = section("let under = self.damage.place(", "ui.quads.splice(0..0, under)");
     assert!(damage.contains("fork_hud::damage_hidden()"));
 }
+
+// ---- the game's own plate point -----------------------------------------------------------------------------------
+
+#[test]
+fn a12_plate_points_are_the_ones_play_plates_would_draw() {
+    use super::native_a12::{PlateSource, plate_points_of};
+    let ok = PlateSource { id: 7, has_creature: true, name_empty: false, shown: true, name_at: Some([1.0, 2.0, 3.0]) };
+    let with = |f: fn(&mut PlateSource)| {
+        let mut s = PlateSource { id: ok.id, has_creature: ok.has_creature, name_empty: ok.name_empty, shown: ok.shown, name_at: ok.name_at };
+        f(&mut s);
+        s
+    };
+    assert_eq!(plate_points_of([ok]), vec![(7, [1.0, 2.0, 3.0])], "the point is Puppet::name_at, unchanged");
+    // negative controls: each reason `Play::plates` skips a creature skips it here
+    assert!(plate_points_of([with(|s| s.has_creature = false)]).is_empty());
+    assert!(plate_points_of([with(|s| s.name_empty = true)]).is_empty());
+    assert!(plate_points_of([with(|s| s.shown = false)]).is_empty());
+    assert!(plate_points_of([with(|s| s.name_at = None)]).is_empty());
+    // and the tests are the ones `Play::plates` makes (a change there must come here)
+    let src = include_str!("../../play.rs").replace("\r\n", "\n");
+    assert!(src.contains("let (Some(c), Some(at)) = (&e.creature, p.name_at) else { continue };"));
+    assert!(src.contains("if c.name.is_empty() || !p.shown {"));
+    assert!(src.contains("out.push(Plate { at, color: self.name_color(c)"));
+}
+
+#[test]
+fn a12_project_entity_projects_the_point_the_game_puts_its_plate_at() {
+    let h = in_world_host();
+    native_a12::set_plates(vec![]);
+    native_a12::set_view(view_proj(Vec3::ZERO, Vec3::NEG_Z), SIZE);
+    // control: no plate point for it
+    h.execute("local r,e = eqoa.camera.project_entity(7); assert(r==nil and e.code=='not_found', tostring(e and e.code))").unwrap();
+    native_a12::set_plates(vec![(7, [0.0, 0.0, -10.0])]);
+    h.execute(
+        r#"
+        local a = assert(eqoa.camera.project_entity(7))
+        local b = assert(eqoa.camera.project({x=0,y=0,z=-10}))
+        assert(a.x==b.x and a.y==b.y and a.depth==b.depth and a.on_screen and not a.behind)
+        local c = assert(eqoa.camera.project_entity({id=7}, 1))
+        local d = assert(eqoa.camera.project({x=0,y=1,z=-10}))
+        assert(c.y==d.y and c.y < a.y)
+        for _, bad in ipairs({ "x", -1, 1.5, {} }) do
+          local r,e = eqoa.camera.project_entity(bad); assert(r==nil and e.code=='invalid_argument', tostring(e and e.code))
+        end
+        local r,e = eqoa.camera.project_entity(7, "up"); assert(r==nil and e.code=='invalid_argument')
+        local r,e = eqoa.camera.project_entity(8); assert(r==nil and e.code=='not_found')
+        "#,
+    )
+    .unwrap();
+    // the next frame has no plate for it (out of range or gone): not found again
+    native_a12::set_plates(vec![]);
+    h.execute("local r,e = eqoa.camera.project_entity(7); assert(r==nil and e.code=='not_found')").unwrap();
+}

@@ -3006,7 +3006,8 @@
         "eqoa.camera.Projection",
         "eqoa.camera.compass",
         "eqoa.camera.get",
-        "eqoa.camera.project"
+        "eqoa.camera.project",
+        "eqoa.camera.project_entity"
       ],
       "path": "eqoa.camera",
       "reason": null,
@@ -3141,6 +3142,14 @@
     {
       "children": [],
       "path": "eqoa.camera.project",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.project_entity",
       "reason": null,
       "revision": 1,
       "round": 8,

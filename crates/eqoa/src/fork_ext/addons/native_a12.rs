@@ -23,6 +23,22 @@ thread_local! {
     /// The frame's view-projection (in the game's world units) and the size in pixels of the surface the mods
     /// draw on, as of the frame being drawn.
     static VIEW: Cell<Option<(Mat4, (u32, u32))>> = const { Cell::new(None) };
+    /// Where the game puts each creature's name plate this frame (`Puppet::name_at`), by entity id.
+    static PLATES: std::cell::RefCell<std::collections::HashMap<u32, [f32; 3]>> = std::cell::RefCell::new(Default::default());
+}
+
+/// The viewer's hook: this frame's plate points (`Play::fork_plate_points`).
+pub(crate) fn set_plates(points: Vec<(u32, [f32; 3])>) {
+    PLATES.with(|p| {
+        let mut p = p.borrow_mut();
+        p.clear();
+        p.extend(points);
+    });
+}
+
+/// The point the game puts `id`'s plate at this frame, if it draws one.
+pub(crate) fn plate_point(id: u32) -> Option<[f32; 3]> {
+    PLATES.with(|p| p.borrow().get(&id).copied())
 }
 
 /// The viewer's hook: this frame's view-projection and the pixel size of the surface the mods draw on.
@@ -105,5 +121,61 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             lua.pack_multi((record(lua, "eqoa.camera.Projection", &record_value)?, Value::Nil))
         })?,
     )?;
+    bind(
+        lua,
+        "camera",
+        "project_entity",
+        lua.create_function(|lua, (target, lift): (Value, Option<Value>)| {
+            const SYMBOL: &str = "eqoa.camera.project_entity";
+            let id = match &target {
+                Value::Table(t) => t.get::<Value>("id").ok().as_ref().and_then(number),
+                other => number(other),
+            }
+            .filter(|n| n.fract() == 0.0 && (0.0..=u32::MAX as f64).contains(n));
+            let lift = match lift {
+                None | Some(Value::Nil) => Some(0.0),
+                Some(v) => number(&v),
+            };
+            let (Some(id), Some(lift)) = (id, lift) else {
+                return error(lua, SYMBOL, "invalid_argument", "give an entity or its id, and optionally a height in game units to lift the point");
+            };
+            if !CORE.with(|c| c.borrow().view.in_world) {
+                return error(lua, SYMBOL, "not_in_world", "enter a loaded world first");
+            }
+            let Some((view_proj, size)) = VIEW.get() else {
+                return error(lua, SYMBOL, "unavailable", "waiting for the first frame of the world");
+            };
+            let Some(at) = plate_point(id as u32) else {
+                return error(lua, SYMBOL, "not_found", "the game draws no name plate for that entity now");
+            };
+            let world = [at[0] as f64, at[1] as f64 + lift, at[2] as f64];
+            let (px, depth, on_screen, behind) = project(view_proj, size, world);
+            let value = json!({"x": px.map(|a| a[0]), "y": px.map(|a| a[1]), "depth": depth, "on_screen": on_screen, "behind": behind});
+            lua.pack_multi((record(lua, "eqoa.camera.Projection", &value)?, Value::Nil))
+        })?,
+    )?;
     Ok(())
+}
+
+/// What one creature's puppet says about its plate, for `plate_points`.
+#[derive(Clone, Copy)]
+pub(crate) struct PlateSource {
+    pub id: u32,
+    pub has_creature: bool,
+    pub name_empty: bool,
+    pub shown: bool,
+    pub name_at: Option<[f32; 3]>,
+}
+
+/// The creatures `Play::plates` would give a plate this frame, with the point it puts the plate at (`Puppet::name_at`:
+/// 0.6 above the name node, or over a prop's top): the same tests as `plates`, minus the loading screen and the
+/// hide switch (a mod that hides the plates still needs the points). Round A12, for `eqoa.camera.project_entity`.
+pub(crate) fn plate_points_of(sources: impl IntoIterator<Item = PlateSource>) -> Vec<(u32, [f32; 3])> {
+    sources
+        .into_iter()
+        .filter_map(|s| {
+            let at = s.name_at?;
+            (s.has_creature && !s.name_empty && s.shown).then_some((s.id, at))
+        })
+        .collect()
 }

@@ -327,6 +327,7 @@
   "eqoa.camera.compass",
   "eqoa.camera.get",
   "eqoa.camera.project",
+  "eqoa.camera.project_entity",
   "eqoa.capabilities",
   "eqoa.capabilities.Capability",
   "eqoa.capabilities.Capability.children",

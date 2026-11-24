@@ -998,7 +998,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ("combat", "record", 8),
         ("actions", "train_stats request_factions request_combat_record", 8),
         // round A12: world overlays
-        ("camera", "project", 8),
+        ("camera", "project project_entity", 8),
     ] {
         let module_path = format!("eqoa.{module}");
         let backing = match modules.get::<Value>(module)? {

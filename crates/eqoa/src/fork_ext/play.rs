@@ -5830,3 +5830,21 @@ impl Play {
     }
 }
 
+impl Play {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn fork_plate_points(&self) -> Vec<(u32, [f32; 3])> {
+        if self.loading.up() {
+            return Vec::new();
+        }
+        crate::fork_ext::addons::native_a12::plate_points_of(self.entities.slots.iter().enumerate().filter_map(|(slot, e)| {
+            let (e, p) = (e.as_ref()?, self.puppets.get(slot)?.as_ref()?);
+            Some(crate::fork_ext::addons::native_a12::PlateSource {
+                id: e.id,
+                has_creature: e.creature.is_some(),
+                name_empty: e.creature.as_ref().is_none_or(|c| c.name.is_empty()),
+                shown: p.shown,
+                name_at: p.name_at,
+            })
+        }))
+    }
+}
