@@ -255,8 +255,8 @@ fn a9_trade_request_is_held_hidden_answered_like_the_window_and_times_out() {
         let (v, mut r) = (vui(), NullRaster);
         p.run_npcw(&v, &mut r);
         clear_recorded(&mut p);
-        // the box starts on No: Right, then Enter
-        p.npcw_key(18, true);
+        // the box starts on No (Yes is the left button): Left, then Enter
+        p.npcw_key(17, true);
         p.run_npcw(&v, &mut r);
         p.npcw_key(13, true);
         p.run_npcw(&v, &mut r);
