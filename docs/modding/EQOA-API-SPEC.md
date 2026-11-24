@@ -525,7 +525,7 @@ A settings value is nil, a boolean, a finite number, a string, or a table of the
 | Function | Returns |
 |---|---|
 | `eqoa.files.read(path:string)` | The file's bytes as a string. `not_found`, `permission_denied`, or `quota` for a file over 1 MiB. |
-| `eqoa.files.write(path:string, bytes:string)` | `true`. The file is replaced whole or not at all. At most 1 MiB a file and 16 MiB for the mod in total, settings included (§9; `quota`). |
+| `eqoa.files.write(path:string, bytes:string)` | `true`. The file is replaced whole or not at all. At most 1 MiB a file and 16 MiB for the mod in total, settings included (§9; `quota`). The new file is in place when the call returns, so `read`, `exists`, `list` and `open` see it at once; the disk's own sync of it finishes in the background a moment later (a power cut in that moment can lose the write). Disabling the mod, logging out, switching profile and quitting wait for it; a sync that fails is a diagnostic for the mod in Mods & Addons (and the log). The same holds for `remove` and for `open("w")` / `flush` / `close`. |
 | `eqoa.files.remove(path:string)` | `true` if something was removed, `false` if there was nothing. |
 | `eqoa.files.list(dir:string="", glob:string="*")` | `FileEntry[] = {path:string, kind:"file"\|"directory", size:uint?}` for the entries directly in `dir`, sorted by name; `glob` filters names with `*` and `?`. `quota` rather than a partial list when there are more than 1,024 (design intent, §9). |
 

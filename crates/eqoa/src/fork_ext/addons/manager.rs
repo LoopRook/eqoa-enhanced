@@ -491,6 +491,7 @@ impl Manager {
     /// synchronous write or read of the same files.
     fn flush_writes(&mut self) {
         self.writes.flush();
+        super::deferred_sync::flush();
         self.report_write_failures();
     }
 
@@ -498,6 +499,11 @@ impl Manager {
     pub(super) fn report_write_failures(&mut self) {
         for failure in self.writes.take_failures() {
             let message = format!("Settings were not saved to disk: {}", failure.message);
+            self.diagnostic(failure.owner.as_deref(), "storage", message);
+        }
+        for failure in super::deferred_sync::take_failures() {
+            let message = format!("A file was written but not confirmed on disk: {}", failure.message);
+            crate::say(&format!("addon-files: {message}"));
             self.diagnostic(failure.owner.as_deref(), "storage", message);
         }
     }

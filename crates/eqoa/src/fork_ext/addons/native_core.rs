@@ -935,6 +935,15 @@ fn generation_loss(c: &mut Core, count: u64) {
 }
 pub(crate) fn flush_deferred() {
     super::window_sessions::flush_outbox();
+    // An empty flush (no queued capture, nothing lost, no guide to check) changes nothing: skip the timer, the
+    // CORE borrow and `guides::update`. Runs once per VM per frame, so this is the common case.
+    if DEFERRED.with(|d| {
+        let d = d.borrow();
+        !d.flushing && d.queue.is_empty() && d.lost == 0
+    }) && super::guides::none_set()
+    {
+        return;
+    }
     let _timed = super::addon_perf::section("deferred.flush");
     let batch = DEFERRED.with(|d| {
         let mut d = d.borrow_mut();

@@ -39,6 +39,8 @@ pub(crate) struct Bus {
     diagnostics: super::native::DiagnosticSink,
     next: u64,
     subscriptions: Vec<Subscription>,
+    /// Names with a live non-timer subscription; `None` = rebuild on next use (set by every change to `subscriptions`).
+    listen: RefCell<Option<std::collections::HashSet<String>>>,
     buttons: std::collections::BTreeMap<String,Function>,
     pub(super) active: bool,
     pub once_mode: bool,
@@ -56,6 +58,22 @@ pub(crate) struct Bus {
     first_lost: Option<u64>,
     last_lost: u64,
     boundary: u64,
+}
+impl Bus {
+    /// Does any live non-timer subscription of this VM listen for `name`? O(1) after a rebuild.
+    fn listens(&self, name: &str) -> bool {
+        let mut cache = self.listen.borrow_mut();
+        cache
+            .get_or_insert_with(|| self.subscriptions.iter().filter(|s| s.deadline.is_none()).map(|s| s.name.clone()).collect())
+            .contains(name)
+    }
+    #[cfg(test)]
+    pub(crate) fn listens_for_test(&self, name: &str) -> bool {
+        self.listens(name)
+    }
+    fn subs_changed(&self) {
+        *self.listen.borrow_mut() = None;
+    }
 }
 type Shared = Rc<RefCell<Bus>>;
 pub(crate) fn bus(lua: &mlua::Lua) -> Shared {
@@ -265,6 +283,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
         diagnostics: super::native::diagnostic_sink(lua),
         next: 0,
         subscriptions: Vec::new(),
+        listen: RefCell::new(None),
         buttons: Default::default(),
         active: true,
         once_mode,
@@ -326,6 +345,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
                     return error(lua, "eqoa.events.on", "quota", "128 subscription limit");
                 }
                 let t = token(lua, "event");
+                bus(lua).borrow().subs_changed();
                 bus(lua).borrow_mut().subscriptions.push(Subscription {
                     token: t.clone(),
                     name,
@@ -355,6 +375,7 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
             let mut b = shared.borrow_mut();
             let old = b.subscriptions.len();
             b.subscriptions.retain(|s| s.token != t);
+            b.subs_changed();
             lua.pack_multi((old != b.subscriptions.len(), Value::Nil))
         })?,
     )?;
@@ -644,6 +665,10 @@ fn deliver_data(
         }
         b.delivered += 1;
     }
+    if only.is_none() && e.name != "option.activated" && !shared.borrow().listens(&e.name) {
+        // nothing here listens for it (the index says so without scanning): it counted against the budget and that is all
+        return Ok(());
+    }
     let candidates = shared
         .borrow()
         .subscriptions
@@ -713,6 +738,7 @@ fn deliver_data(
             let callback = s.callback.clone();
             if s.once {
                 b.subscriptions.remove(i);
+                b.subs_changed();
             }
             callback
         };
@@ -754,7 +780,11 @@ fn deliver_data(
                 "failed",
                 &err.to_string(),
             );
-            shared.borrow_mut().subscriptions.retain(|s| s.token != t);
+            {
+                let mut b = shared.borrow_mut();
+                b.subscriptions.retain(|s| s.token != t);
+                b.subs_changed();
+            }
             // round A1 fix: a mod whose window code or key handling just failed has no working window; the
             // controller and its held sessions are the game's again at once, not at some later disable
             // round A2 fix: and its claims go with them (as a disable does), so the next NPC dialog or offer shows in
@@ -866,6 +896,7 @@ pub(crate) fn clear(host: &Host) {
     let b = bus(&host.lua);
     let mut b = b.borrow_mut();
     b.subscriptions.clear();
+    b.subs_changed();
     b.buttons.clear();
     b.pending.clear();
     b.commands.clear();
@@ -1055,7 +1086,7 @@ pub(crate) fn interested(name: &str) -> bool {
             .filter_map(std::rc::Weak::upgrade)
             .any(|b| {
                 let b = b.borrow();
-                b.active && b.subscriptions.iter().any(|s| s.name == name)
+                b.active && if name == "timer" { b.subscriptions.iter().any(|s| s.name == name) } else { b.listens(name) }
             })
     })
 }

@@ -188,7 +188,7 @@ fn persist_toggle(addon_id: &str, id: &str, value: bool) -> Result<(), String> {
     let bytes = serde_json::to_vec(&new_json).map_err(|e| e.to_string())?;
 
     if let Some(root) = STORAGE_ROOT.with(|r| r.borrow().clone()) {
-        super::storage::Storage::new(Some(root)).save_encoded(&v2_key, &new_json)?;
+        super::storage::Storage::new(Some(root)).save_encoded_deferred_sync(&v2_key, &new_json)?;
     }
     #[cfg(test)]
     {
@@ -202,7 +202,7 @@ fn persist_toggle(addon_id: &str, id: &str, value: bool) -> Result<(), String> {
                 .map(PathBuf::from)
                 .or_else(crate::settings::config_dir)
                 .ok_or_else(|| "configuration directory is unavailable".to_string())?;
-            super::storage::Storage::new(Some(dir)).save_encoded(&v2_key, &new_json)?;
+            super::storage::Storage::new(Some(dir)).save_encoded_deferred_sync(&v2_key, &new_json)?;
         }
     }
     Ok(())

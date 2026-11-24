@@ -51,7 +51,7 @@ impl FileState {
                     super::sandbox::check_quota(root, target, self.bytes.len())?;
                 }
             }
-            super::storage::atomic_replace(target, &self.bytes).map_err(|e| e.to_string())?;
+            super::deferred_sync::atomic_replace_deferred(target, &self.bytes, None).map_err(|e| e.to_string())?;
             #[cfg(test)]
             {
                 self.registry.borrow_mut().replacements += 1;
@@ -428,7 +428,7 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
                     let target = target.ok_or("addon data directory unavailable")?;
                     let _guard = super::sandbox::lock_parents(&target, true)?;
                     overlay_room(data_open.as_ref().unwrap(), &target, deleted.as_deref())?;
-                    super::storage::atomic_replace(&target, &[]).map_err(|e| e.to_string())?;
+                    super::deferred_sync::atomic_replace_deferred(&target, &[], None).map_err(|e| e.to_string())?;
                     if let Some(deleted) = deleted {
                         if deleted.exists() {
                             fs::remove_file(deleted).map_err(|e| e.to_string())?;
