@@ -138,6 +138,12 @@ const EVENTS: &[&str] = &[
     "who.result",
     "lfg.result",
     "lfg.changed",
+    "trade.request",
+    "trade.changed",
+    "trade.accepted",
+    "trade.closed",
+    "duel.changed",
+    "blacksmith.changed",
 ];
 fn install_event_fields(lua: &mlua::Lua) {
     for (name, fields) in [
@@ -213,6 +219,12 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("who.result", "entries count received"),
         ("lfg.result", "entries count"),
         ("lfg.changed", "before after changed"),
+        ("trade.request", "kind id name"),
+        ("trade.changed", "before after changed"),
+        ("trade.accepted", "kind side"),
+        ("trade.closed", "kind reason"),
+        ("duel.changed", "before after changed"),
+        ("blacksmith.changed", "before after changed"),
     ] {
         let payload = format!("eqoa.events.{name}.data");
         for field in fields.split_whitespace() {
@@ -249,7 +261,8 @@ fn event_round(name: &str) -> u8 {
         | "camera.changed" | "windows.changed" | "mastery.changed" => 6,
         "buffs.changed" | "cast.started" | "cast.ended" | "quests.goals_changed" | "windows.session"
         | "windows.key" | "confirm.closed" | "friends.changed" | "ignored.changed" | "guild.changed"
-        | "who.result" | "lfg.result" | "lfg.changed" => 8,
+        | "who.result" | "lfg.result" | "lfg.changed" | "trade.request" | "trade.changed" | "trade.accepted"
+        | "trade.closed" | "duel.changed" | "blacksmith.changed" => 8,
         _ => 2,
     }
 }

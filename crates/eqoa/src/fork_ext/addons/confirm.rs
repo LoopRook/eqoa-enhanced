@@ -43,6 +43,9 @@ pub(crate) enum Act {
     GuildKick { member_id: i32, name: String },
     FriendAccept { request_id: u32, name: String },
     GuildAccept { inviter_id: u32, inviter: String, guild: String },
+    /// Round A9: accepting a trade (`duel` false) or a duel's wager (`duel` true). `digest` stands for both sides'
+    /// offers as the question showed them: the Yes is carried out only if they are still exactly those.
+    TradeAccept { duel: bool, digest: u64 },
     /// Round A2: accepting a summons or a resurrection the game offered (`dialog_sessions`); `session` is the offer's.
     AcceptOffer { session: String, summons: bool },
     /// Round A5: spend training points, by stat in the game's order (`native_a5::STAT_NAMES`).
@@ -61,6 +64,8 @@ impl Act {
             Self::GuildKick { .. } => "guild_kick",
             Self::FriendAccept { .. } => "friend_accept",
             Self::GuildAccept { .. } => "guild_accept",
+            Self::TradeAccept { duel: false, .. } => "trade_accept",
+            Self::TradeAccept { duel: true, .. } => "duel_accept",
             Self::AcceptOffer { summons: true, .. } => "summon_offer",
             Self::AcceptOffer { summons: false, .. } => "revive_offer",
             Self::TrainStats { .. } => "train_stats",
@@ -431,6 +436,19 @@ pub(crate) fn guild_kick_text(name: &str) -> String {
 
 pub(crate) fn friend_accept_text(name: &str) -> String {
     format!("Accept friend request from \"{name}\"?")
+}
+
+/// The question for accepting a trade or a duel's wager: what each side gives, as the window shows it now.
+pub(crate) fn trade_accept_text(duel: bool, partner: &str, gives: &[String], gets: &[String]) -> String {
+    let list = |lines: &[String]| {
+        if lines.is_empty() { "nothing".to_string() } else { lines.join(", ") }
+    };
+    let what = if duel { "the duel's wager" } else { "the trade" };
+    format!(
+        "Accept {what} with \"{partner}\"? You give: {}. You get: {}. It cannot be undone once both accept.",
+        list(gives),
+        list(gets)
+    )
 }
 
 pub(crate) fn guild_accept_text(inviter: &str, guild: &str) -> String {

@@ -10,6 +10,7 @@ use super::Play;
 use crate::duel::{Ctx, Do, Part};
 use crate::duelwnd::{DuelWnd, WndOut};
 use crate::walker::Walker;
+#[path = "fork_ext/a9_pass_duel.rs"] pub(in crate::play) mod fork_a9;
 
 /// The duel part and its window.
 #[derive(Default)]

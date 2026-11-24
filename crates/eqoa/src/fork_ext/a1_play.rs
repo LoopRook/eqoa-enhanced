@@ -186,6 +186,8 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
         Act::GuildKick { .. } | Act::FriendAccept { .. } | Act::GuildAccept { .. } => {
             super::a7_play::carry_out(play, &p.act)
         }
+        // round A9: a trade or a duel's wager accepted, after re-checking what the question showed
+        Act::TradeAccept { .. } => super::a9_play::carry_out(play, &p.act),
         // round A5: the character window's steps are carried out where they are judged (`a5_capture`)
         Act::TrainStats { .. } | Act::Mastery { .. } => super::api_capture::a5::carry_out(play, &p.act),
     }
@@ -232,6 +234,14 @@ pub(crate) fn tick(play: &mut Play) {
     for (vm, kind) in window_sessions::take_passes() {
         if matches!(kind, TakeoverKind::FriendRequest | TakeoverKind::GuildInvite) {
             if play.mode != 0 || !super::a7_play::pass_request(play, vm, kind) {
+                window_sessions::cancel_pass(vm, kind);
+                continue;
+            }
+            window_sessions::finish_pass(vm, kind);
+            continue;
+        }
+        if TakeoverKind::A9.contains(&kind) {
+            if play.mode != 0 || !super::a9_play::pass(play, vm, kind) {
                 window_sessions::cancel_pass(vm, kind);
                 continue;
             }

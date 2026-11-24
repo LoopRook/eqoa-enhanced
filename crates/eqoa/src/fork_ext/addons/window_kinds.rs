@@ -118,7 +118,7 @@ pub(super) fn is_strip(kind: &str) -> bool {
 
 /// Server-pushed social prompts (friend request, guild invitation) require scope `"all"`.
 pub(super) fn is_request(kind: &str) -> bool {
-    matches!(kind, "friend_request" | "guild_invite")
+    matches!(kind, "friend_request" | "guild_invite" | "trade_ask" | "trade" | "duel_invite" | "duel" | "blacksmith")
 
 }
 
