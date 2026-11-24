@@ -10,7 +10,7 @@ This is the reference for the native Lua mod API of EQOA Enhanced, **as built**:
 
 ## 1. Conventions
 
-**Reads are snapshots, changes are events, writes are queued actions.** A getter returns a read-only copy of the client's state at this frame. To notice a change, subscribe to its event (§3) instead of comparing getters every frame. To make the game do something, call an action (§8); it is carried out at the next game step and its outcome comes back as an event.
+**Reads are snapshots, changes are events, writes are queued actions.** A getter returns a read-only copy of the client's state as of this frame. **Freshness (owner-accepted, additive):** the client rebuilds the state mods read on the game's 30 Hz step, not on every drawn frame, so a value other than the ones below can be up to one game step (33 ms) older than the frame that reads it; at 60 or 165 frames a second several frames in a row see the same value. The player's own position, velocity, heading and speed (`eqoa.player.get()`, the minimap and camera-driven reads) are refreshed on every drawn frame, so anything that follows the player moves smoothly. Events are unchanged: they are delivered in order with `tick` and `frame` as before. To notice a change, subscribe to its event (§3) instead of comparing getters every frame. To make the game do something, call an action (§8); it is carried out at the next game step and its outcome comes back as an event.
 
 **Names.** The API is the global `eqoa`; `require("eqoa")` returns the same table and `require("eqoa.player")` a module of it. Functions are called with a dot and named in snake_case: `eqoa.player.get()`. Modules and records are read-only: assigning to one raises an error.
 

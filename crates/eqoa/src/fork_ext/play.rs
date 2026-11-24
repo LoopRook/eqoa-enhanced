@@ -3740,10 +3740,25 @@ impl Play {
         }
         api_capture::updates::refresh(self, walker);
         let timed_build = crate::fork_ext::addons::addon_perf::section("snapshot.build");
+        // Between two of the game's 30 Hz steps the last snapshot is reused with the live parts patched in
+        // (input, and the player's position, velocity, heading and the camera-driven fields from the view).
+        if !api_capture::updates::stepped()
+            && let Some(mut snapshot) = api_capture::updates::latest()
+        {
+            drop(timed_build);
+            snapshot.input = crate::fork_ext::addons::input::live_snapshot();
+            crate::fork_ext::addons::native_core::CORE.with(|c| {
+                crate::fork_ext::addons::native_projection::apply(&mut snapshot, &c.borrow().view)
+            });
+            return snapshot;
+        }
         let key = api_capture::updates::key(self, walker);
         if let Some(mut snapshot) = api_capture::updates::cached(key) {
             drop(timed_build);
             snapshot.input = crate::fork_ext::addons::input::live_snapshot();
+            crate::fork_ext::addons::native_core::CORE.with(|c| {
+                crate::fork_ext::addons::native_projection::apply(&mut snapshot, &c.borrow().view)
+            });
             return snapshot;
         }
         let connected = self.session.self_id.is_some() && self.disconnected.is_none() && !self.quit;
@@ -4392,6 +4407,7 @@ impl Play {
             crate::fork_ext::addons::native_projection::apply(&mut snapshot, &c.borrow().view)
         });
         api_capture::updates::cache(key, snapshot);
+        api_capture::updates::note_build();
         snapshot
     }
 }
