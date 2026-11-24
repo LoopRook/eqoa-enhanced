@@ -98,7 +98,7 @@ def start_menu_checks(run_dir, log):
                     diff is not None and diff > 4.0))
         gone = ss.region_diff(base, run_dir / f"{slug}-back.png", START_BOX)
         out.append((f"{name}: Escape took the menu or window away (centre back to the world, change {gone if gone is None else round(gone, 1)})",
-                    gone is not None and gone < 5.0))
+                    gone is not None and gone < 12.0))   # world noise is under ~6, a window left up is ~47
         out.append((f"{name}: after Escape the Bag Viewer still opens", ss.window_up(run_dir / f"{slug}-then-bags.png", BAG_BOX)))
     return out
 
