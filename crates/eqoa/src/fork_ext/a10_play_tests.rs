@@ -49,6 +49,9 @@ fn item(id: i64, name: &str, key: u32, quantity: i64) -> net::dump::NetItem {
     // one item, not a stack: retail's auction takes no stack (`auction::can_sell`)
     it.item.max_stack = 1;
     it.item.value = 50;
+    // no art to fetch: the headless host has no icon textures (the Bags window asks for one only when an item has an icon)
+    it.item.icon = 0;
+    it.item.icon2 = 0;
     it
 }
 
