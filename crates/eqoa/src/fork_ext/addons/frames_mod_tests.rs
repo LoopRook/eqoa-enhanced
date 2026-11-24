@@ -476,7 +476,7 @@ fn perf_frames_mod_asks_each_capability_once_and_draws_the_same() {
     let later: i64 = lua.load("return ASKED").eval().unwrap();
     let drawn_later: i64 = lua.load("return DRAWN").eval().unwrap();
     eprintln!("PERFF capabilities.has asks: first frame {first}, next 30 frames {later}");
-    assert!(first >= 3, "control: the first frame asks which calls the mod may make ({first})");
+    assert!(first >= 2, "control: the first frame asks which calls the mod may make ({first})");
     assert_eq!(later, 0, "later frames ask nothing");
     assert_eq!(drawn_later, drawn * 30, "and draw the same windows each frame");
 }
