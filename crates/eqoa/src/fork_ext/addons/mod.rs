@@ -174,6 +174,11 @@ mod sandbox;
 mod spike;
 pub(crate) mod storage;
 pub(crate) mod write_queue;
+pub(crate) mod deferred_sync;
+#[cfg(test)]
+mod perf_core_events_tests;
+#[cfg(test)]
+mod deferred_sync_tests;
 #[cfg(test)]
 mod settings_write_tests;
 mod textures;

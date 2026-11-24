@@ -358,6 +358,8 @@ impl Manager {
             entry.not_before = self.frame_number + 1;
         }
         self.entries = entries;
+        // what OnEject wrote is on the disk before the new profile's mods start
+        self.flush_writes();
         self.commands.clear();
         self.after_render();
         Self::apply_profile_layout(context, &data.layout);

@@ -55,6 +55,10 @@ pub(crate) fn release_vm(vm: u64) {
         g.borrow_mut().remove(&vm);
     });
 }
+/// No guide is set: `update` has nothing to check or lose.
+pub(crate) fn none_set() -> bool {
+    GUIDES.with(|g| g.borrow().is_empty())
+}
 pub(crate) fn update(c: &mut Core) {
     let _timed = super::addon_perf::section("guide.update");
     GUIDES.with(|g|{let mut g=g.borrow_mut();let lost=g.iter().filter_map(|(vm,v)|(!c.view.in_world||v.entity.is_some_and(|id|entity_point(c,id,v.world).is_none())).then_some(*vm)).collect::<Vec<_>>();for vm in lost{let v=g.remove(&vm).unwrap();c.emit("guide.lost",json!({"owner":vm,"world_id":v.world,"entity_id":v.entity,"label":v.label,"reason":if c.view.in_world {"entity_left"}else{"world_left"}}));}});

@@ -10,7 +10,7 @@ This is the reference for the native Lua mod API of EQOA Enhanced, **as built**:
 
 ## 1. Conventions
 
-**Reads are snapshots, changes are events, writes are queued actions.** A getter returns a read-only copy of the client's state at this frame. To notice a change, subscribe to its event (§3) instead of comparing getters every frame. To make the game do something, call an action (§8); it is carried out at the next game step and its outcome comes back as an event.
+**Reads are snapshots, changes are events, writes are queued actions.** A getter returns a read-only copy of the client's state as of this frame. **Freshness (owner-accepted, additive):** the client rebuilds the state mods read on the game's 30 Hz step, not on every drawn frame, so a value other than the ones below can be up to one game step (33 ms) older than the frame that reads it; at 60 or 165 frames a second several frames in a row see the same value. The player's own position, velocity, heading and speed (`eqoa.player.get()`, the minimap and camera-driven reads) are refreshed on every drawn frame, so anything that follows the player moves smoothly. Events are unchanged: they are delivered in order with `tick` and `frame` as before. To notice a change, subscribe to its event (§3) instead of comparing getters every frame. To make the game do something, call an action (§8); it is carried out at the next game step and its outcome comes back as an event.
 
 **Names.** The API is the global `eqoa`; `require("eqoa")` returns the same table and `require("eqoa.player")` a module of it. Functions are called with a dot and named in snake_case: `eqoa.player.get()`. Modules and records are read-only: assigning to one raises an error.
 
@@ -525,7 +525,7 @@ A settings value is nil, a boolean, a finite number, a string, or a table of the
 | Function | Returns |
 |---|---|
 | `eqoa.files.read(path:string)` | The file's bytes as a string. `not_found`, `permission_denied`, or `quota` for a file over 1 MiB. |
-| `eqoa.files.write(path:string, bytes:string)` | `true`. The file is replaced whole or not at all. At most 1 MiB a file and 16 MiB for the mod in total, settings included (§9; `quota`). |
+| `eqoa.files.write(path:string, bytes:string)` | `true`. The file is replaced whole or not at all if the game crashes. At most 1 MiB a file and 16 MiB for the mod in total, settings included (§9; `quota`). The new file is in place when the call returns, so `read`, `exists`, `list` and `open` see it at once; the disk's own sync of it finishes in the background a moment later (a power cut or operating-system crash in the moment just after a write can lose that write or leave that file empty; the old contents are not brought back). Disabling or reloading the mod (including what its `DisableScript` writes and the files it left open), logging out, switching profile and quitting wait for it; a sync that fails is a diagnostic for the mod in Mods & Addons (and the log). The same holds for `remove` and for `open("w")` / `flush` / `close`. |
 | `eqoa.files.remove(path:string)` | `true` if something was removed, `false` if there was nothing. |
 | `eqoa.files.list(dir:string="", glob:string="*")` | `FileEntry[] = {path:string, kind:"file"\|"directory", size:uint?}` for the entries directly in `dir`, sorted by name; `glob` filters names with `*` and `?`. `quota` rather than a partial list when there are more than 1,024 (design intent, §9). |
 
