@@ -21,6 +21,9 @@ mod a1_play;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "a6_play.rs"]
 mod a6_play;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "a13_play.rs"]
+mod a13_play;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "a7_play.rs"]
@@ -840,6 +843,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         a7_play::hide_taken_requests(_play);
         a1_play::tick(_play);
         a6_play::tick(_play);
+        a13_play::tick(_play);
         a7_play::tick(_play);
         a2_play::tick(_play);
         a8_play::tick(_play, _game_step);
@@ -1022,7 +1026,9 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
             drain_released_waypoints(_play);
             if ready {
                 if reqs.map && crate::settings::map() && _play.addon_input_available() {
-                    _play.map.show();
+                    if !a13_play::open_for_mod(_play) {
+                        _play.map.show();
+                    }
                 }
                 if reqs.assist && matches!(_play.mode, 0 | 38) {
                     _play.assist_target();
@@ -2314,7 +2320,9 @@ fn dispatch_broker_action(
                             reason: "map is disabled in settings".into(),
                         };
                     }
-                    play.map.show();
+                    if !a13_play::open_for_mod(play) {
+                        play.map.show();
+                    }
                 }
                 "abilities" | "spellbook" => play.start_actions(vec![(0x0801_0000, 0)]),
                 "quests" => play.start_actions(vec![(0x0B0A_0000, 0)]),

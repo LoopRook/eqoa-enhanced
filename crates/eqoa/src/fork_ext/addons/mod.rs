@@ -105,6 +105,7 @@ pub(crate) fn big_stack(body: fn()) {
     }
 }
 pub(crate) mod map_views;
+pub(crate) mod map_terrain;
 pub(crate) mod map_waypoint;
 pub(crate) mod named_profiles;
 pub(crate) mod native;
@@ -120,6 +121,8 @@ pub(crate) mod native_a1;
 pub(crate) mod native_a6;
 #[cfg(test)]
 mod a6_tests;
+#[cfg(test)]
+mod a13_tests;
 pub(crate) mod native_a8;
 #[cfg(test)]
 mod a8_tests;

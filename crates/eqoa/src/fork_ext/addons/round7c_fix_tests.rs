@@ -89,7 +89,7 @@ fn round7c_takeover_answers_unsupported_for_a_game_window_it_cannot_take_yet() {
     let host = Host::with_test_capabilities(&["eqoa.windows.takeover"]).unwrap();
     host.execute(
         r#"
-        for _, kind in ipairs({'inventory', 'spellbook', 'quest_log', 'trade', 'map'}) do
+        for _, kind in ipairs({'inventory', 'spellbook', 'quest_log', 'trade'}) do
             local ok, err = eqoa.windows.takeover(kind, {scope='all'})
             assert(ok == nil and err.code == 'unsupported', kind .. ': ' .. tostring(err and err.code))
             assert(err.message:find('window-replacement', 1, true), err.message)
