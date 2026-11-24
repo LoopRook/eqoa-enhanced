@@ -277,7 +277,7 @@ screenshot checks (without it those checks FAIL with that reason, never pass sil
 | Scene | What it proves |
 |---|---|
 | 1 | Hail Commander Nothard (the `Q` key on the target) with the Dialog Window mod on: the dialog is the mod's, Enter presses Done and the server's next dialog follows, the reply is answered, no chat line is left open, then Enter opens chat and typed text reaches the server (`Lsgm shouts: hello there`). |
-| 2 | Start Menu mod: opens every top-level entry of this server's menu (TEST, Community, Character, Inventory, Ability, Auction, Pet, Quest, Support, Options; Quit is left out), one screenshot each (something opened), Escape back, then `B` still opens the Bag Viewer (the player can go on). |
+| 2 | Start Menu mod: opens every top-level entry of this server's menu (TEST, Community, Character, Inventory, Ability, Auction, Pet, Quest, Support, Options; Quit is left out), one screenshot each (something opened), Escape back (the centre of the screen is the plain world again), then `B` still opens the Bag Viewer (the player can go on). |
 | 3 | Chat mod: Enter, type, send (`Lsgm: hello chat`); `/g ` then type (the server answers `You are not in a group.`); Shift+T then type is a tell (`You told Lsgm`, `Lsgm tells you`). |
 | 4 | Bag Viewer opened over Character: a click on a spot both windows cover opens the item menu of the front window only; Character is still on its Summary tab afterwards. |
 | 5a | Bag Viewer: Ctrl+click three items, right-click, Sell (3) with the Yes, at the merchant 1.5 units from the start spot: `Sold 3 of 3`, the hidden merchant session opens and closes, the database keeps 1 of the 4 items. |
@@ -291,12 +291,13 @@ how much a region changed). A scene the server cannot support reports SKIP with 
 scene that cannot be tested prints as `SKIP part:` (5a and 5b: worn items are not tested, because the seed character's
 four heirloom items cannot be worn).
 
-**Negative controls.** `--control` re-runs each scene with the behaviour taken away and expects FAIL (`CONTROL OK`):
-1 and 2 and 3 run with the mod's own `main.lua` edited (Dialog Window without its Enter claim, Start Menu without its
-Enter claim, Chat with the T key opening a Say line) through a copy in the run's scratch mods folder (the client keeps a
-player-edited file); 4 runs with the Bag Viewer's pointer claim switched off; 5a and 5b leave out the Yes; 6 presses
-inside the window instead of on its grip. The stall assertion itself is checked in `test_scene_suite.py` against a log
-that contains a `stall:` line.
+**Negative controls.** `--control` re-runs each scene (all but 7) with the behaviour taken away and expects FAIL
+(`CONTROL OK`; `CONTROL BROKEN` means the scene still passed and its assertions are too weak). 1: the Dialog Window mod
+without its Enter claim. 2: the Start Menu whose top-level Escape no longer closes it. 3: the Chat mod whose T key opens a
+Say line instead of a Tell line. 4: the Bag Viewer's pointer claim switched off. 5a and 5b: the Yes left out (No answered).
+6: the drag pressed inside the window instead of on its grip. The edited-mod controls run a copy of the mod's `main.lua`
+in the run's own scratch mods folder (the client keeps a player-edited file); nothing in `bundled-mods/` changes. The
+stall assertion itself is checked in `test_scene_suite.py` against a log that contains a `stall:` line.
 
 **What it cannot tell you.** How anything feels (a frame that is slow only on the owner's PC, mouse feel, a hitch the
 offscreen path does not have), anything that needs a live server's data (the real shard's menus, merchants, quests,

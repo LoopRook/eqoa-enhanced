@@ -336,7 +336,7 @@ mod tests {
         let mut replay = Replay::parse(Some("shift down@10;shift up@20;shift sideways@30;ctrl down@40"), None);
         assert_eq!(replay.next(10), Some(Input::Mouse(Mouse::Shift(true))));
         assert_eq!(replay.next(20), Some(Input::Mouse(Mouse::Shift(false))));
-        assert_eq!(replay.next(30), Some(Input::Mouse(Mouse::Ctrl(true))), "the bad step is dropped, not queued");
+        assert_eq!(replay.next(40), Some(Input::Mouse(Mouse::Ctrl(true))), "the bad step is dropped, not queued");
         assert_eq!(replay.next(i64::MAX), None);
     }
 

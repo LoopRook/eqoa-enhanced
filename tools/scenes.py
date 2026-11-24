@@ -18,9 +18,10 @@ MERCHANT = "Heirloom Outfitter"     # a merchant 1.5 units from the start spot
 SLOTS = [(440 + 57 * i, 135) for i in range(8)]   # the Bags grid's first row, in screenshot pixels
 
 # (label, Escape presses to get back to play). This server's menu: a TEST sub-menu first, an Auction sub-menu between
-# Ability and Pet. A sub-menu takes two (up one menu, then close); an entry that opens a window takes one.
-START_ENTRIES = [("TEST", 2), ("Community", 2), ("Character", 2), ("Inventory", 1), ("Ability", 1), ("Auction", 2),
-                 ("Pet", 2), ("Quest", 1), ("Support", 2), ("Options", 2)]
+# Ability and Pet. A sub-menu takes two Escapes (up one menu, then close); so does an entry that opens the game's own
+# page (Ability, Quest; Options needs three: its page, then the menu twice); an entry that opens a mod window (Inventory) takes one.
+START_ENTRIES = [("TEST", 2), ("Community", 2), ("Character", 2), ("Inventory", 1), ("Ability", 2), ("Auction", 2),
+                 ("Pet", 2), ("Quest", 2), ("Support", 2), ("Options", 3)]
 
 
 def addon_line(mod, text):
@@ -67,6 +68,7 @@ def start_menu_scene():
         shots.append(f"{enter + 1000}={slug}.png")
         steps += [f"esc@{enter + 1500 + 400 * k}" for k in range(escapes)]
         again = enter + 1500 + 400 * escapes + 600
+        shots.append(f"{again - 300}={slug}-back.png")             # after Escape the menu / window must be gone
         steps.append(f"b@{again}")                                 # the player can go on: Bag Viewer opens
         shots.append(f"{again + 700}={slug}-then-bags.png")
         steps.append(f"b@{again + 1200}")
@@ -80,7 +82,9 @@ def start_menu_scene():
         shots=",".join(shots),
         absent=[("the Start Menu failing to take its key", r"addon eqoa_start_menu: \[warn\]")],
         extra=start_menu_checks,
-        control_patch={"eqoa_start_menu": [('state.enter = eqoa.input.claim("Enter", true)', "state.enter = nil")]},
+        # Escape at the top level no longer closes the menu: the player is stuck in it
+        control_patch={"eqoa_start_menu": [("    else" + chr(10) + "        close()" + chr(10) + "    end" + chr(10) + "end" + chr(10) + chr(10) + "local function step",
+                                            "    else" + chr(10) + "    end" + chr(10) + "end" + chr(10) + chr(10) + "local function step")]},
     )
 
 
@@ -92,6 +96,9 @@ def start_menu_checks(run_dir, log):
         diff = ss.region_diff(base, run_dir / f"{slug}.png", START_BOX)
         out.append((f"{name}: something opened (centre of the screen changed, mean {diff if diff is None else round(diff, 1)})",
                     diff is not None and diff > 4.0))
+        gone = ss.region_diff(base, run_dir / f"{slug}-back.png", START_BOX)
+        out.append((f"{name}: Escape took the menu or window away (centre back to the world, change {gone if gone is None else round(gone, 1)})",
+                    gone is not None and gone < 5.0))
         out.append((f"{name}: after Escape the Bag Viewer still opens", ss.window_up(run_dir / f"{slug}-then-bags.png", BAG_BOX)))
     return out
 
@@ -214,6 +221,17 @@ def drag_script(grip):
     return ";".join(steps), t
 
 
+def chat_moved(run_dir):
+    """The Chat mod keeps its window's place in the profile (x defaults to 4, y to the bottom): moved means it differs."""
+    import json
+    try:
+        profile = json.loads((run_dir / "config" / "addons" / "profiles" / "Default.json").read_text(encoding="utf-8"))
+        saved = dict(profile["addons"][ss.addon_key("eqoa_chat")]["table"])
+    except (OSError, KeyError, TypeError, ValueError):
+        return False
+    return saved.get("x", 4) != 4 or "y" in saved
+
+
 def drag_scene():
     script, t = drag_script(CHAT_GRIP)
     return ss.Scene(
@@ -225,7 +243,8 @@ def drag_scene():
         shots=f"9000=1-before.png,{t + 500}=2-after.png",
         absent=[("a stall line (a frame of a second or more)", r"^stall: ")],
         extra=lambda run_dir, log: [
-            ("the window really moved (its old place changed)", (ss.region_diff(run_dir / "1-before.png", run_dir / "2-after.png", CHAT_BOX) or 0) > 6.0),
+            ("the window really moved (its saved place is no longer the default)", chat_moved(run_dir)),
+            ("and its old place on the screen changed", (ss.region_diff(run_dir / "1-before.png", run_dir / "2-after.png", CHAT_BOX) or 0) > 6.0),
             ("the six drags reached the game as pointer input", len(__import__("re").findall(r"^script: mouse click Left at", log, __import__("re").M)) >= 1),
         ],
     )
