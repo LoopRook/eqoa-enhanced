@@ -3,7 +3,7 @@
 //! on a real host and a real ImGui context, the game's state is what `native_a9` is given, and what a mod asks for is
 //! read from the action broker's queue. Each test says what its control is.
 use super::{
-    a1_mod_tests::{addon, context, fixture, frames, manifest, root},
+    a1_mod_tests::{addon as plain_addon, context, fixture, frames, manifest, root},
     action_broker,
     bridge::Bridge,
     host::Host,
@@ -17,6 +17,18 @@ use std::time::{Duration, Instant};
 
 const TRADE: &str = "eqoa_trade";
 const BV: &str = "eqoa_bag_viewer";
+
+/// The package as the client discovers it: its manifest's `provides` and `replaces` too (a claim needs `replaces`).
+fn addon(id: &str) -> super::discovery::DiscoveredAddon {
+    let mut a = plain_addon(id);
+    let m = manifest(id);
+    let list = |k: &str| -> Vec<String> {
+        m[k].as_array().map(|v| v.iter().filter_map(|s| s.as_str().map(str::to_owned)).collect()).unwrap_or_default()
+    };
+    a.extensions.provides = list("provides");
+    a.extensions.replaces = list("replaces");
+    a
+}
 
 fn used_names(src: &str, prefix: &str) -> Vec<String> {
     let mut found = Vec::new();
@@ -162,7 +174,8 @@ fn a9_trade_mod_holds_the_windows_only_while_on_and_a_request_is_answered_with_o
     assert_eq!(queued(), vec!["trade_answer"]);
     host.execute("require('tradeui').answer_trade(false)").unwrap();
     assert_eq!(queued(), vec!["trade_answer", "trade_answer"]);
-    assert!(host.drain_logs().unwrap().is_empty());
+    let logs = host.drain_logs().unwrap();
+    assert!(logs.is_empty(), "{logs:?}");
     assert!(bridge.drain_diagnostics().is_empty());
 
     // a duel invitation uses the same prompt
@@ -195,7 +208,8 @@ fn a9_trade_mod_draws_the_answering_players_open_trade_and_never_accepts_by_itse
     assert!(frames(&host, &bridge, &mut ctx, 3) > 0);
     assert!(window_drawn("Trade with Bobbington the Lon..##eqoa_trade_window"), "the answerer's trade window is drawn");
     assert_window_fits("Trade with Bobbington the Lon..##eqoa_trade_window", "open trade at the default size");
-    assert!(host.drain_logs().unwrap().is_empty());
+    let logs = host.drain_logs().unwrap();
+    assert!(logs.is_empty(), "{logs:?}");
     assert!(bridge.drain_diagnostics().is_empty(), "no ImGui recovery diagnostics");
     assert!(queued().is_empty(), "control: a drawn trade sends and accepts nothing");
 
@@ -232,29 +246,23 @@ fn a9_trade_mod_coin_box_holds_enter_by_its_exact_name_and_renews_text_capture_e
     let (host, bridge, mut ctx, vm) = start(TRADE);
     native_a9::publish(View::Trade, Some(open_state(false)), None);
     hold(vm, TakeoverKind::Trade);
-    // count the capture calls the mod makes (the client lets capture lapse after about a second)
-    host.execute(
-        r#"
-        capture_calls, capture_on = 0, 0
-        local real = eqoa.input.capture_text
-        eqoa.input.capture_text = function(on)
-            capture_calls = capture_calls + 1
-            if on then capture_on = capture_on + 1 end
-            return real(on)
-        end
-        "#,
-    )
-    .unwrap();
+    // the client lets the capture lapse after about a second unless it is asked for again: its last-asked time is read
+    // after every frame
     // control: the box is not being typed in
     frames(&host, &bridge, &mut ctx, 5);
-    let none: i64 = host.lua.load("return capture_on").eval().unwrap();
-    assert_eq!(none, 0, "control: no capture while the box is idle");
+    assert!(super::native_input::text_capture_stamp().is_none(), "control: no capture while the box is idle");
     assert!(host.lua.load("return require('tradeui').state.enter == nil").eval::<bool>().unwrap(), "control: Enter is not held while idle");
     // typing: capture asked for in each of 6 frames, Enter held under its exact name
     host.execute("require('tradeui').force_typing = true").unwrap();
-    frames(&host, &bridge, &mut ctx, 6);
-    let on: i64 = host.lua.load("return capture_on").eval().unwrap();
-    assert_eq!(on, 6, "the capture is renewed on every frame the box is wanted");
+    frames(&host, &bridge, &mut ctx, 1);
+    let mut last = super::native_input::text_capture_stamp().expect("capture asked for");
+    for i in 0..5 {
+        std::thread::sleep(Duration::from_millis(3));
+        frames(&host, &bridge, &mut ctx, 1);
+        let now = super::native_input::text_capture_stamp().expect("still held");
+        assert!(now > last, "frame {i}: the capture was asked for again on this frame");
+        last = now;
+    }
     assert!(host.lua.load("return require('tradeui').state.enter ~= nil").eval::<bool>().unwrap(), "Enter claimed (a refused name leaves nil)");
     assert!(host.drain_logs().unwrap().is_empty(), "no 'unknown app key name' diagnostic");
     // leaving the box lets both go
@@ -300,7 +308,8 @@ fn a9_bag_viewer_repair_lists_costs_asks_once_for_all_and_repairs_one_at_a_time(
     frames(&host, &bridge, &mut ctx, 3);
     assert!(window_drawn("Repair##eqoa_bag_viewer_repair"), "the panel is up while a smith is open");
     assert_window_fits("Repair##eqoa_bag_viewer_repair", "repair panel at the default size");
-    assert!(host.drain_logs().unwrap().is_empty());
+    let logs = host.drain_logs().unwrap();
+    assert!(logs.is_empty(), "{logs:?}");
     assert!(bridge.drain_diagnostics().is_empty());
     // one click repairs one item
     host.execute("local R = require('repair'); R.repair_one(R.damaged(eqoa.blacksmith.get())[1])").unwrap();
@@ -349,11 +358,13 @@ fn a9_bag_viewer_repair_lists_costs_asks_once_for_all_and_repairs_one_at_a_time(
 #[test]
 fn a9_bag_viewer_repair_automatically_is_off_by_default_and_repairs_all_when_the_smith_opens() {
     // control: the option is off, a smith opens, nothing is sent
-    let (host, bridge, mut ctx, _vm) = start(BV);
-    assert!(host.lua.load("return require('repair').auto == false").eval::<bool>().unwrap(), "off by default");
-    native_a9::publish(View::Smith, Some(smith_state(&[(1, 50), (2, 70)], false, 500)), None);
-    frames(&host, &bridge, &mut ctx, 4);
-    assert!(queued().is_empty(), "with the option off the panel waits for a click");
+    {
+        let (host, bridge, mut ctx, _vm) = start(BV);
+        assert!(host.lua.load("return require('repair').auto == false").eval::<bool>().unwrap(), "off by default");
+        native_a9::publish(View::Smith, Some(smith_state(&[(1, 50), (2, 70)], false, 500)), None);
+        frames(&host, &bridge, &mut ctx, 4);
+        assert!(queued().is_empty(), "with the option off the panel waits for a click");
+    }
 
     // the option on: it repairs as the smith opens, with no question, one at a time, and says the total once
     let (host, bridge, mut ctx, _vm) = start(BV);
