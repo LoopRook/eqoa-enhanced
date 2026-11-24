@@ -23,6 +23,7 @@ use crate::fork_ext::addons::{
     action_broker::DispatchOutcome,
     confirm::Act,
     native_a11::{self, A11Action, Read},
+    dialog_sessions::{self, Item},
     native_items::is_handle_fresh,
     window_takeover::{self, TakeoverKind},
 };
@@ -44,6 +45,15 @@ struct Local {
     /// A mercenary window (its mode) the server asked to open while a hidden session held the game: it opens when the
     /// session ends, as the dye picker's open waits.
     merc_wait: Option<i32>,
+    /// The waiting window was passed to the game: it opens natively, whoever holds the kind.
+    merc_bypass: bool,
+    /// The dye picker a mod holds (its Open as the server sent it).
+    dye: Option<net::dyepick::Open>,
+    /// What the game looked like when the packet now being handled arrived.
+    pre_mode: i32,
+    pre_dye_event: bool,
+    pre_dye_close: Option<u32>,
+    was_dead: bool,
 }
 
 thread_local! {
@@ -53,6 +63,11 @@ thread_local! {
 /// A hidden session of a mod (a corpse, merchant or bank) holds the game in a window of its own while the game's mode
 /// reads 0. Asked by the hooks in `mercplay.rs`, `dyeplay.rs` and `fishplay.rs`; true means "act as the game does with
 /// a window up". `what` names the window for the log.
+/// A mod holds a session of this server window now.
+fn up(kind: TakeoverKind) -> bool {
+    dialog_sessions::windows().iter().any(|a| a.item.kind() == kind)
+}
+
 fn hidden_held() -> bool {
     TakeoverKind::ALL.iter().any(|k| window_takeover::is_hidden_active(*k))
 }
@@ -116,7 +131,7 @@ fn merc_state(play: &Play) -> Option<Json> {
     }
     let inventory = play.merc.window.as_ref().map(|w| {
         json!({
-            "open": play.mode == crate::play::mercplay::ITEMS_MODE,
+            "open": play.mode == crate::play::mercplay::ITEMS_MODE || up(TakeoverKind::MercItems),
             "slot": w.slot,
             "name": w.name,
             "class": w.class,
@@ -141,7 +156,7 @@ fn merc_state(play: &Play) -> Option<Json> {
     });
     let spells = play.merc.spells.as_ref().map(|s| {
         json!({
-            "open": play.mode == crate::play::mercplay::SPELLS_MODE,
+            "open": play.mode == crate::play::mercplay::SPELLS_MODE || up(TakeoverKind::MercSpells),
             "slot": s.slot,
             "name": s.name,
             "class": s.class,
@@ -166,7 +181,8 @@ fn merc_state(play: &Play) -> Option<Json> {
 }
 
 fn dye_state(play: &Play) -> Option<Json> {
-    let o = play.dyepick.open.as_ref().filter(|_| play.dyepick.picker.open && play.mode == crate::play::dyeplay::MODE)?;
+    let held = LOCAL.with(|l| l.borrow().dye.clone());
+    let o = &held.or_else(|| play.dyepick.open.clone().filter(|_| play.dyepick.picker.open && play.mode == crate::play::dyeplay::MODE))?;
     Some(json!({
         "revision": 0,
         "token": o.token,
@@ -202,13 +218,13 @@ fn state_name(state: i32) -> &'static str {
 
 fn fishing_state(play: &Play) -> Option<Json> {
     let state = play.fish.part.state;
-    if state == crate::fishing::state::OFF && play.mode != 36 {
+    if state == crate::fishing::state::OFF && play.mode != 36 && !up(TakeoverKind::Fishing) {
         return None;
     }
     let w = &play.fish.wnd;
     Some(json!({
         "revision": 0,
-        "open": play.mode == 36,
+        "open": play.mode == 36 || up(TakeoverKind::Fishing),
         "state": state_name(state),
         "casting": w.casting,
         // the meter the game's own window shows, 0..120; a mod that draws its own meter reads this one and the player
@@ -219,7 +235,7 @@ fn fishing_state(play: &Play) -> Option<Json> {
         "perfect_to": 63,
         "fair_from": 41,
         "fair_to": 78,
-        "list": w.list_visible,
+        "list": w.list_visible || (up(TakeoverKind::Fishing) && state == crate::fishing::state::CAUGHT),
         "catch": play.fish.part.catch.items.iter().enumerate().map(|(i, it)| json!({
             "slot": i + 1,
             "name": it.item.name,
@@ -234,6 +250,9 @@ fn fishing_state(play: &Play) -> Option<Json> {
 /// `eqoa.fishing.get`.
 pub(crate) fn tick(play: &mut Play, game_step: bool) {
     resume_merc(play);
+    if game_step {
+        tick_windows(play);
+    }
     // the one-request guard holds only until the server's answer has changed the state or the catch, or the session ended
     let now = (play.fish.part.state, play.fish.part.catch.items.len());
     LOCAL.with(|l| {
@@ -267,10 +286,22 @@ fn resume_merc(play: &mut Play) {
         LOCAL.with(|l| l.borrow_mut().merc_wait = None);
         return;
     }
+    let kind = if mode == items { TakeoverKind::MercItems } else { TakeoverKind::MercSpells };
+    let bypass = LOCAL.with(|l| l.borrow().merc_bypass);
+    if window_takeover::is_taken(kind) && !bypass {
+        // a mod holds the window: it is the mod's session, not the game's window (a hidden session does not matter)
+        LOCAL.with(|l| l.borrow_mut().merc_wait = None);
+        hold_window(play, kind);
+        return;
+    }
     if hidden_held() || play.mode != 0 {
         return;
     }
-    LOCAL.with(|l| l.borrow_mut().merc_wait = None);
+    LOCAL.with(|l| {
+        let mut l = l.borrow_mut();
+        l.merc_wait = None;
+        l.merc_bypass = false;
+    });
     play.merc.keys.clear();
     if mode == items {
         play.merc.items_open = true;
@@ -279,6 +310,245 @@ fn resume_merc(play: &mut Play) {
     }
     play.mode = mode;
     window_takeover::log("takeover: the mercenary window that waited for a hidden session opens now".into());
+}
+
+
+// ---- the windows a mod holds (takeover kinds `mercenary_items`, `mercenary_spells`, `dye_picker`, `fishing`) ----------
+
+/// The session's `data`: the same record the window's read returns.
+fn window_data(play: &Play, kind: TakeoverKind) -> Json {
+    let mut v = match kind {
+        TakeoverKind::MercItems | TakeoverKind::MercSpells => merc_state(play).unwrap_or(Json::Null),
+        TakeoverKind::DyePicker => dye_state(play).unwrap_or(Json::Null),
+        _ => fishing_state(play).unwrap_or(Json::Null),
+    };
+    if let Some(o) = v.as_object_mut() {
+        o.remove("revision");
+        if kind == TakeoverKind::MercItems {
+            o.remove("spells");
+        } else if kind == TakeoverKind::MercSpells {
+            o.remove("inventory");
+        }
+    }
+    v
+}
+
+fn hold_window(play: &mut Play, kind: TakeoverKind) {
+    let pos = play.self_at.map(|(p, _)| p);
+    let data = window_data(play, kind);
+    dialog_sessions::hold(Item::Window { kind, data }, pos);
+    window_takeover::log(format!("takeover: {} HIDDEN for the mod (a window the server opened; scope all)", kind.name()));
+}
+
+/// Before the game handles a packet: what it looks like, and whether the packet is the dye picker's.
+pub(crate) fn pre_event(play: &Play, event: &net::session::Event) {
+    let mut dye_open = false;
+    let mut dye_close = None;
+    if let net::session::Event::Opcode { op, data } = event
+        && *op == net::dyepick::OP_DYE_PICKER
+    {
+        match net::dyepick::read(data) {
+            Some(net::dyepick::Message::Open(_)) => dye_open = true,
+            Some(net::dyepick::Message::Close(t)) => dye_close = Some(t),
+            None => {}
+        }
+    }
+    LOCAL.with(|l| {
+        let mut l = l.borrow_mut();
+        l.pre_mode = play.mode;
+        l.pre_dye_event = dye_open;
+        l.pre_dye_close = dye_close;
+    });
+}
+
+/// After the game handled the packet: what it opened is taken for the mod that holds its kind (the game's mode is put
+/// back, as A2 does for a dialog), and a close from the server ends the mod's session.
+pub(crate) fn post_event(play: &mut Play) {
+    let (pre, dye_open, dye_close) = LOCAL.with(|l| {
+        let mut l = l.borrow_mut();
+        (l.pre_mode, std::mem::take(&mut l.pre_dye_event), l.pre_dye_close.take())
+    });
+    if play.is_dead() || !window_takeover::has_activity() {
+        return;
+    }
+    let (items, spells) = (crate::play::mercplay::ITEMS_MODE, crate::play::mercplay::SPELLS_MODE);
+    for (mode, kind) in [(items, TakeoverKind::MercItems), (spells, TakeoverKind::MercSpells)] {
+        if !window_takeover::is_taken(kind) {
+            continue;
+        }
+        let opened = play.mode == mode && pre != mode;
+        let waiting = LOCAL.with(|l| l.borrow().merc_wait) == Some(mode);
+        if opened || waiting {
+            if opened {
+                play.mode = pre;
+                play.merc.items_open = false;
+                play.merc.book_open = false;
+                play.merc.keys.clear();
+            }
+            LOCAL.with(|l| l.borrow_mut().merc_wait = None);
+            hold_window(play, kind);
+        }
+    }
+    if dye_open && window_takeover::is_taken(TakeoverKind::DyePicker) {
+        if let Some(o) = play.dyepick.pending.take() {
+            LOCAL.with(|l| l.borrow_mut().dye = Some(o));
+            hold_window(play, TakeoverKind::DyePicker);
+        }
+    }
+    if let Some(t) = dye_close
+        && LOCAL.with(|l| l.borrow().dye.as_ref().is_some_and(|o| o.token == t))
+    {
+        LOCAL.with(|l| l.borrow_mut().dye = None);
+        end_window(TakeoverKind::DyePicker, "server");
+    }
+    // a fishing session the game just opened (mode 36)
+    if window_takeover::is_taken(TakeoverKind::Fishing) && play.mode == 36 && pre != 36 {
+        play.mode = pre;
+        play.fish.wnd.blur();
+        hold_window(play, TakeoverKind::Fishing);
+    }
+}
+
+fn end_window(kind: TakeoverKind, reason: &str) {
+    if let Some(a) = dialog_sessions::windows().into_iter().find(|a| a.item.kind() == kind) {
+        dialog_sessions::finish(&a.id, reason);
+    }
+}
+
+/// The game's window for a session that ended with no answer (passed, released, disabled, idle): as the game would
+/// have shown it.
+pub(crate) fn give_window(play: &mut Play, kind: TakeoverKind) {
+    match kind {
+        TakeoverKind::MercItems | TakeoverKind::MercSpells => {
+            let mode = if kind == TakeoverKind::MercItems { crate::play::mercplay::ITEMS_MODE } else { crate::play::mercplay::SPELLS_MODE };
+            LOCAL.with(|l| {
+                let mut l = l.borrow_mut();
+                l.merc_wait = Some(mode);
+                l.merc_bypass = true;
+            });
+        }
+        TakeoverKind::DyePicker => {
+            if let Some(o) = LOCAL.with(|l| l.borrow_mut().dye.take()) {
+                play.dyepick.pending = Some(o);
+            }
+        }
+        _ => {
+            if play.fish.part.state != crate::fishing::state::OFF {
+                if play.mode == 0 && !hidden_held() {
+                    play.mode = 36;
+                    let mut cues = Vec::new();
+                    play.fish.wnd.focus(&mut cues);
+                    play.cues.extend(cues.into_iter().map(crate::sound::Cue::Ui));
+                } else {
+                    play.session.send(&crate::fishing::sub_msg(2));
+                }
+            }
+        }
+    }
+}
+
+/// The mod closes its window with `close_window(ref)`: what the game's own close does, so the server's state ends as
+/// it ends there.
+pub(crate) fn close_window(play: &mut Play, kind: TakeoverKind) {
+    match kind {
+        TakeoverKind::MercItems => {
+            let slot = play.merc.window.as_ref().map_or(0, |w| w.slot);
+            play.session.send(&net::mercwin::ask(slot, net::mercwin::ASK_CLOSE, 0, 0));
+        }
+        TakeoverKind::MercSpells => {}
+        TakeoverKind::DyePicker => {
+            if let Some(o) = LOCAL.with(|l| l.borrow_mut().dye.take()) {
+                play.session.send(&net::dyepick::cancelled(o.token));
+            }
+        }
+        _ => {
+            let st = play.fish.part.state;
+            if st != crate::fishing::state::OFF {
+                play.session.send(&crate::fishing::sub_msg(if st == crate::fishing::state::CAUGHT { 4 } else { 2 }));
+            }
+        }
+    }
+}
+
+/// Each step for the held windows: what ended on the server's side ends the session; a death ends them as the game's
+/// own windows end; changed data is told to the mod.
+fn tick_windows(play: &mut Play) {
+    let wins = dialog_sessions::windows();
+    if wins.is_empty() {
+        LOCAL.with(|l| l.borrow_mut().was_dead = play.is_dead());
+        return;
+    }
+    let dead = play.is_dead();
+    if dead && !LOCAL.with(|l| std::mem::replace(&mut l.borrow_mut().was_dead, true)) {
+        for a in &wins {
+            close_window(play, a.item.kind());
+            dialog_sessions::finish(&a.id, "death");
+        }
+        LOCAL.with(|l| l.borrow_mut().dye = None);
+        return;
+    }
+    LOCAL.with(|l| l.borrow_mut().was_dead = dead);
+    for a in wins {
+        let kind = a.item.kind();
+        let gone = match kind {
+            TakeoverKind::MercItems => play.merc.window.is_none(),
+            TakeoverKind::MercSpells => play.merc.spells.is_none(),
+            TakeoverKind::DyePicker => LOCAL.with(|l| l.borrow().dye.is_none()),
+            _ => play.fish.part.state == crate::fishing::state::OFF,
+        };
+        if gone {
+            if kind == TakeoverKind::DyePicker {
+                LOCAL.with(|l| l.borrow_mut().dye = None);
+            }
+            dialog_sessions::finish(&a.id, "server");
+            continue;
+        }
+        let data = window_data(play, kind);
+        if data != a.item.data() {
+            dialog_sessions::refresh_window(&a.id, data);
+        }
+    }
+}
+
+/// A fishing window a mod holds has no drawing to run its meter: the window's own cast logic (the `draw` block, in
+/// what it asks of the game) runs here each frame instead, on the same clock, so the power is only ever what the
+/// game's meter shows when the throw happens. The left stick is the mod's, not the window's: it reads 0.
+pub(crate) fn hidden_fishing_frame(play: &mut Play, walker: &crate::walker::Walker) {
+    let c = &walker.cam.walk.committed;
+    hidden_fishing_step(play, (c.smooth_location(), c.angles));
+}
+
+/// The cast logic of a held fishing window, at the walk's committed place and heading.
+pub(crate) fn hidden_fishing_step(play: &mut Play, place: (vi::vect::Vect3<vi::fpu::Ee>, vi::vect::Vect3<vi::fpu::Ee>)) {
+    if play.mode == 36 || !up(TakeoverKind::Fishing) || !play.fish.wnd.casting {
+        return;
+    }
+    let now = play.session.timer();
+    if play.fish.wnd.tick(now, vi::fpu::F::<vi::fpu::Ee>::new(0.0)) {
+        // `Splash`: PlayAction(65), and FindWater from the walk's committed place and heading
+        if play.session.self_id.is_some() {
+            play.session.send_op_byte(0x0047, 65);
+        }
+        play.emote = Some(65);
+        let actor = play.self_actor.map_or(-1, |a| a.actor as i32);
+        play.fish.water = Some((actor, place.0, place.1));
+    }
+    if !play.fish.wnd.casting {
+        let say = |play: &mut Play, id: i32| {
+            let text = play.words.as_ref().map_or_else(|| format!("(word {id})"), |w| w.get(id, 0).to_string());
+            let now = play.session.timer();
+            play.fish.wnd.set_text(&crate::ui::wide(&text), now);
+        };
+        if play.fish.wnd.hit {
+            let (w, m) = play.fish.part.cast(&play.dump.inventory, play.fish.wnd.quality);
+            say(play, w);
+            if let Some(m) = m {
+                play.session.send(&m);
+            }
+        } else {
+            say(play, 1421);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -416,6 +686,12 @@ fn dispatch_merc(play: &mut Play, action: &A11Action) -> DispatchOutcome {
 
 /// The picker the mod's token names, up now: the token is echoed exactly as the server sent it.
 fn picker_open(play: &Play, token: u32) -> Result<net::dyepick::Open, DispatchOutcome> {
+    if let Some(o) = LOCAL.with(|l| l.borrow().dye.clone()) {
+        if o.token != token {
+            return Err(refuse("stale_handle", "that is not the token of the picker now up (eqoa.dye.get().token)"));
+        }
+        return Ok(o);
+    }
     let Some(o) = play.dyepick.open.clone().filter(|_| play.dyepick.picker.open && play.mode == crate::play::dyeplay::MODE) else {
         return Err(refuse("not_ready", "no dye picker is up"));
     };
@@ -423,6 +699,25 @@ fn picker_open(play: &Play, token: u32) -> Result<net::dyepick::Open, DispatchOu
         return Err(refuse("stale_handle", "that is not the token of the picker now up (eqoa.dye.get().token)"));
     }
     Ok(o)
+}
+
+/// The picker answered: through the game's own path when its window is up; for a picker a mod holds, the same
+/// bytes (`dyepick_done`'s sends), and the session ends answered.
+fn answer_dye(play: &mut Play, up: PickerUp, token: u32) {
+    let held = LOCAL.with(|l| l.borrow_mut().dye.take());
+    match held {
+        None => play.dyepick_done(up),
+        Some(o) => {
+            let m = match up {
+                PickerUp::Pick(c) => net::dyepick::picked(o.token, c),
+                PickerUp::NoDye => net::dyepick::no_dye(o.token),
+                PickerUp::Cancel => net::dyepick::cancelled(o.token),
+            };
+            let _ = token;
+            play.session.send(&m);
+            end_window(TakeoverKind::DyePicker, "answered");
+        }
+    }
 }
 
 fn dispatch_dye(play: &mut Play, action: &A11Action) -> DispatchOutcome {
@@ -451,7 +746,7 @@ fn dispatch_dye(play: &mut Play, action: &A11Action) -> DispatchOutcome {
             if let Err(e) = picker_open(play, *token) {
                 return e;
             }
-            play.dyepick_done(PickerUp::Cancel);
+            answer_dye(play, PickerUp::Cancel, *token);
             sent()
         }
         _ => refuse("unsupported", "not a dye request"),
@@ -460,7 +755,8 @@ fn dispatch_dye(play: &mut Play, action: &A11Action) -> DispatchOutcome {
 
 fn dispatch_fishing(play: &mut Play, action: &A11Action) -> DispatchOutcome {
     use crate::fishing::{state, sub_msg};
-    if play.mode != 36 {
+    let held = up(TakeoverKind::Fishing);
+    if play.mode != 36 && !held {
         return refuse("not_ready", "no fishing window is up");
     }
     let st = play.fish.part.state;
@@ -477,20 +773,31 @@ fn dispatch_fishing(play: &mut Play, action: &A11Action) -> DispatchOutcome {
             if st != state::WAITING {
                 return refuse("not_ready", "the line is not ready to cast");
             }
-            play.fishing_key(134, true);
-            play.fishing_key(134, false);
+            if held {
+                // the held window has no keys: the game's own start of the cast, on its clock
+                let now = play.session.timer();
+                play.fish.wnd.cast(now);
+                play.cues.push(crate::sound::Cue::Ui(11));
+            } else {
+                play.fishing_key(134, true);
+                play.fishing_key(134, false);
+            }
             pressed()
         }
         A11Action::FishRelease => {
             if !play.fish.wnd.casting || play.fish.wnd.ready || st != state::WAITING {
                 return refuse("not_ready", "no cast is under way");
             }
-            play.fishing_key(134, true);
-            play.fishing_key(134, false);
+            if held {
+                play.fish.wnd.release = true;
+            } else {
+                play.fishing_key(134, true);
+                play.fishing_key(134, false);
+            }
             pressed()
         }
         A11Action::FishReel | A11Action::FishPull | A11Action::FishKeep { .. } => {
-            if st != state::CAUGHT || !play.fish.wnd.list_visible {
+            if st != state::CAUGHT || !(play.fish.wnd.list_visible || held) {
                 return refuse("not_ready", "nothing is on the line to reel, keep or pull");
             }
             if guard_waits {
@@ -548,10 +855,14 @@ pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
             if let Err(DispatchOutcome::Refused { reason, .. }) = picker_open(play, *token) {
                 return Err(reason);
             }
-            play.dyepick_done(match rgba {
-                Some(c) => PickerUp::Pick(*c),
-                None => PickerUp::NoDye,
-            });
+            answer_dye(
+                play,
+                match rgba {
+                    Some(c) => PickerUp::Pick(*c),
+                    None => PickerUp::NoDye,
+                },
+                *token,
+            );
             Ok(())
         }
         _ => Err("not an A11 step".into()),

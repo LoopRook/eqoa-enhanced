@@ -56,13 +56,23 @@ pub(crate) enum TakeoverKind {
     ChatEntry = 13,
     /// Round A13: the full world map the map key opens. Client-side, no server session: a mod holds it whole (`all`).
     Map = 14,
+    /// Round A11: the server's mercenary inventory and spell windows (modes 61, 62), the dye picker (63) and the
+    /// fishing window (36), held whole (`all`) as server-opened sessions (`dialog_sessions`, `a11_play`).
+    MercItems = 15,
+    MercSpells = 16,
+    DyePicker = 17,
+    Fishing = 18,
 }
 
 impl TakeoverKind {
     /// The three server-window kinds (loot, merchant, bank) that carry hidden server sessions and batch hooks.
     pub(crate) const ALL: [Self; 3] = [Self::Loot, Self::Merchant, Self::Bank];
     /// Every takeover kind, including server-pushed raid strips (`raid_ready`, `raid_roll`).
-    pub(crate) const ALL_KINDS: [Self; 15] = [
+    pub(crate) const ALL_KINDS: [Self; 19] = [
+        Self::MercItems,
+        Self::MercSpells,
+        Self::DyePicker,
+        Self::Fishing,
         Self::Loot,
         Self::Merchant,
         Self::Bank,
@@ -80,7 +90,11 @@ impl TakeoverKind {
         Self::GuildInvite,
     ];
     /// The NPC dialogs and offers of round A2: scope `all` only, held as `dialog_sessions`.
-    pub(crate) const DIALOGS: [Self; 5] = [
+    pub(crate) const DIALOGS: [Self; 9] = [
+        Self::MercItems,
+        Self::MercSpells,
+        Self::DyePicker,
+        Self::Fishing,
         Self::TextDialog,
         Self::ResponseDialog,
         Self::GroupInvite,
@@ -105,6 +119,10 @@ impl TakeoverKind {
             Self::SummonOffer => "summon_offer",
             Self::FriendRequest => "friend_request",
             Self::GuildInvite => "guild_invite",
+            Self::MercItems => "mercenary_items",
+            Self::MercSpells => "mercenary_spells",
+            Self::DyePicker => "dye_picker",
+            Self::Fishing => "fishing",
         }
     }
 
@@ -125,6 +143,10 @@ impl TakeoverKind {
             "summon_offer" => Ok(Self::SummonOffer),
             "friend_request" => Ok(Self::FriendRequest),
             "guild_invite" => Ok(Self::GuildInvite),
+            "mercenary_items" => Ok(Self::MercItems),
+            "mercenary_spells" => Ok(Self::MercSpells),
+            "dye_picker" => Ok(Self::DyePicker),
+            "fishing" => Ok(Self::Fishing),
             _ if super::window_kinds::is_window(s) => Err((
                 "unsupported",
                 format!(
@@ -259,7 +281,7 @@ struct TakeoverState {
     /// The merchant's list still owed for the mod's last sale or buy when its hidden session ended (the
     /// sale's answer can follow the action's end): held hidden for `LIST_GRACE`, then closed again quietly.
     grace_merchant: Option<ListGrace>,
-    holders: [Option<Holder>; 15],
+    holders: [Option<Holder>; 19],
     pending_opens: [Option<PendingOpen>; 3],
     /// Why a kind's hidden session is to end (set by release, the mod finishing, the holder going).
     pending_close: [Option<&'static str>; 3],

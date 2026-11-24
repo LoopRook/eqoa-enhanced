@@ -125,7 +125,12 @@ pub(super) fn is_request(kind: &str) -> bool {
 /// Round A2: NPC dialogs and offers need scope `"all"`: the wire names no speaker, so a dialog cannot be proven to
 /// answer the mod's own `talk` (and an offer is never the mod's own action).
 pub(super) fn is_dialog(kind: &str) -> bool {
-    matches!(kind, "text_dialog" | "response_dialog" | "group_invite" | "revive_offer" | "summon_offer")
+    // round A11: the server's mercenary, dye and fishing windows are held the same way (scope `all`)
+    matches!(
+        kind,
+        "text_dialog" | "response_dialog" | "group_invite" | "revive_offer" | "summon_offer"
+            | "mercenary_items" | "mercenary_spells" | "dye_picker" | "fishing"
+    )
 }
 
 #[cfg(test)]

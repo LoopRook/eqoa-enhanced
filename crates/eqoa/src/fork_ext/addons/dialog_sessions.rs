@@ -44,6 +44,9 @@ pub(crate) enum Item {
     Invite { id: u32, name: String, text: String },
     /// A summons (`summons`) or a resurrection offered by `name` (`Play::summon_prompt`).
     Offer { summons: bool, name: String, text: Vec<u16> },
+    /// Round A11: a window the server opened (a mercenary's inventory or spells, the dye picker, a fishing session): its
+    /// kind and the session's `data` (`a11_play`).
+    Window { kind: TakeoverKind, data: Value },
 }
 
 fn plain(text: &[u16]) -> String {
@@ -59,6 +62,7 @@ impl Item {
             Self::Invite { .. } => TakeoverKind::GroupInvite,
             Self::Offer { summons: true, .. } => TakeoverKind::SummonOffer,
             Self::Offer { summons: false, .. } => TakeoverKind::ReviveOffer,
+            Self::Window { kind, .. } => *kind,
         }
     }
 
@@ -77,6 +81,7 @@ impl Item {
             }),
             Self::Invite { name, text, .. } => json!({"name": name, "text": text}),
             Self::Offer { name, text, .. } => json!({"from": name, "text": plain(text)}),
+            Self::Window { data, .. } => data.clone(),
         }
     }
 
@@ -86,6 +91,7 @@ impl Item {
             Self::Text { .. } => 1,
             Self::Box { options, .. } => options.len(),
             Self::Invite { .. } | Self::Offer { .. } => 2,
+            Self::Window { .. } => 0,
         }
     }
 }
@@ -106,6 +112,8 @@ struct State {
     slot: Option<Active>,
     /// The summons or resurrection offer showing (the game's message box).
     offer: Option<Active>,
+    /// Round A11: the server windows held, at most one of each kind.
+    wins: Vec<Active>,
     texts: VecDeque<Item>,
     boxed: Option<Item>,
     invites: VecDeque<Item>,
@@ -117,6 +125,7 @@ impl State {
     fn is_busy(&self) -> bool {
         self.slot.is_some()
             || self.offer.is_some()
+            || !self.wins.is_empty()
             || !self.texts.is_empty()
             || self.boxed.is_some()
             || !self.invites.is_empty()
@@ -195,6 +204,22 @@ pub(crate) fn hold(item: Item, pos: Option<[f32; 3]>) -> Intake {
                 }
             });
         }
+        Item::Window { .. } => {
+            // a window the server opens again while the mod holds the first: the same session, new data
+            let existing = with(|s| s.wins.iter().find(|a| a.item.kind() == kind).map(|a| a.id.clone()));
+            if let Some(id) = existing {
+                with(|s| {
+                    if let Some(a) = s.wins.iter_mut().find(|a| a.id == id) {
+                        a.item = item.clone();
+                        a.touched = Instant::now();
+                    }
+                });
+                window_sessions::set_data(&id, item.data());
+            } else {
+                let session = window_sessions::start_dialog_session(vm, &addon, kind, item.data());
+                with(|s| s.wins.push(Active { id: session.id, vm, item, pos, touched: Instant::now() }));
+            }
+        }
         Item::Offer { .. } => {
             // the game's own prompt replaces the one before it
             let old = with(|s| s.offer.take());
@@ -248,6 +273,7 @@ pub(crate) fn find(id: &str) -> Option<Active> {
         s.slot
             .iter()
             .chain(s.offer.iter())
+            .chain(s.wins.iter())
             .find(|a| a.id == id)
             .cloned()
     })
@@ -259,7 +285,7 @@ pub(crate) fn touch(id: &str) {
         return;
     }
     with(|s| {
-        for a in s.slot.iter_mut().chain(s.offer.iter_mut()) {
+        for a in s.slot.iter_mut().chain(s.offer.iter_mut()).chain(s.wins.iter_mut()) {
             if a.id == id {
                 a.touched = Instant::now();
             }
@@ -273,7 +299,7 @@ pub(crate) fn touch_vm(vm: u64) {
         return;
     }
     with(|s| {
-        for a in s.slot.iter_mut().chain(s.offer.iter_mut()) {
+        for a in s.slot.iter_mut().chain(s.offer.iter_mut()).chain(s.wins.iter_mut()) {
             if a.vm == vm {
                 a.touched = Instant::now();
             }
@@ -308,6 +334,8 @@ pub(crate) fn take_passes() -> Vec<Active> {
                 out.extend(s.slot.take());
             } else if s.offer.as_ref().is_some_and(|a| a.id == id) {
                 out.extend(s.offer.take());
+            } else if let Some(i) = s.wins.iter().position(|a| a.id == id) {
+                out.push(s.wins.remove(i));
             }
         }
         out
@@ -321,6 +349,9 @@ pub(crate) fn finish(id: &str, reason: &str) {
             s.slot.take().is_some()
         } else if s.offer.as_ref().is_some_and(|a| a.id == id) {
             s.offer.take().is_some()
+        } else if let Some(i) = s.wins.iter().position(|a| a.id == id) {
+            s.wins.remove(i);
+            true
         } else {
             false
         }
@@ -338,6 +369,8 @@ pub(crate) fn session_ended(session: &window_sessions::Session, reason: &str) {
             s.slot.take()
         } else if s.offer.as_ref().is_some_and(|a| a.id == session.id) {
             s.offer.take()
+        } else if let Some(i) = s.wins.iter().position(|a| a.id == session.id) {
+            Some(s.wins.remove(i))
         } else {
             None
         }
@@ -357,6 +390,13 @@ pub(crate) fn vm_gone(vm: u64) {
     with(|s| {
         for a in [s.slot.take_if(|a| a.vm == vm), s.offer.take_if(|a| a.vm == vm)].into_iter().flatten() {
             s.give_back.push(a.item);
+        }
+        for a in std::mem::take(&mut s.wins) {
+            if a.vm == vm {
+                s.give_back.push(a.item);
+            } else {
+                s.wins.push(a);
+            }
         }
     });
 }
@@ -425,6 +465,22 @@ pub(crate) fn reconcile() {
                 s.give_back.push(a.item);
             }
         }
+        for a in std::mem::take(&mut s.wins) {
+            let reason = if window_takeover::holder_vm(a.item.kind()) != Some(a.vm) {
+                Some("ended")
+            } else if a.touched.elapsed() >= IDLE {
+                Some("idle")
+            } else {
+                None
+            };
+            match reason {
+                Some(reason) => {
+                    ended.push((a.id.clone(), reason));
+                    s.give_back.push(a.item);
+                }
+                None => s.wins.push(a),
+            }
+        }
         // waiting ones whose kind nobody holds any more
         let mut keep = VecDeque::new();
         for i in std::mem::take(&mut s.texts) {
@@ -476,6 +532,26 @@ pub(crate) fn walkers() -> Vec<Active> {
     })
 }
 
+/// New data for a held server window: told to its mod as a change.
+pub(crate) fn refresh_window(id: &str, data: Value) {
+    with(|s| {
+        if let Some(a) = s.wins.iter_mut().find(|a| a.id == id)
+            && let Item::Window { data: old, .. } = &mut a.item
+        {
+            *old = data.clone();
+        }
+    });
+    window_sessions::set_data(id, data);
+}
+
+/// The held server windows (a11 reads and ends them).
+pub(crate) fn windows() -> Vec<Active> {
+    if !is_busy() {
+        return Vec::new();
+    }
+    with(|s| s.wins.clone())
+}
+
 /// The invitation `id` was withdrawn by the server while parked or showing.
 pub(crate) fn invite_gone(id: u32) {
     if !is_busy() {
@@ -523,7 +599,7 @@ pub(crate) fn waiting_for_test() -> (usize, bool, usize) {
 #[cfg(test)]
 pub(crate) fn age_for_test(by: Duration) {
     with(|s| {
-        for a in s.slot.iter_mut().chain(s.offer.iter_mut()) {
+        for a in s.slot.iter_mut().chain(s.offer.iter_mut()).chain(s.wins.iter_mut()) {
             a.touched -= by;
         }
     });

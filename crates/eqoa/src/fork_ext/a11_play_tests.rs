@@ -501,3 +501,198 @@ fn a11_capabilities_are_checked_and_the_games_windows_are_unchanged() {
     assert!(!blocked("mercenary window"));
     drop(p);
 }
+
+// ---- takeover kinds: the server's windows held by a mod ----------------------------------------------------------------
+
+fn hold(host: &Host, kind: TakeoverKind) -> u64 {
+    let vm = native_events::bus(&host.lua).borrow().vm;
+    assert!(window_takeover::takeover(vm, "mod", kind, TakeoverScope::All).is_ok());
+    vm
+}
+
+/// The packet bytes the game handles, as the event the client's hooks see.
+fn dye_packet(bytes: Vec<u8>) -> net::session::Event {
+    net::session::Event::Opcode { op: net::dyepick::OP_DYE_PICKER, data: bytes }
+}
+
+fn session_ok(host: &Host, kind: &str) -> bool {
+    host.lua.load(format!("return eqoa.windows.session('{kind}') ~= nil")).eval().unwrap()
+}
+
+/// A mercenary window the server opens while a mod holds `mercenary_items` is the mod's session, not the game's
+/// window; its data follows the window's state; the server's gone flag ends it. Negative control: with no claim the
+/// same packet puts the game in mode 61 (the first assertion of the control).
+#[test]
+fn a11_a_held_mercenary_inventory_is_a_session_and_follows_the_servers_state() {
+    let (mut p, host) = rig();
+    // the control: no claim, the game's window opens
+    open_merc(&mut p);
+    post_event(&mut p);
+    assert_eq!(p.mode, crate::play::mercplay::ITEMS_MODE, "control: unclaimed, the game's own window");
+    p.mode = 0;
+    p.merc.items_open = false;
+    hold(&host, TakeoverKind::MercItems);
+    host.execute("ev = {}; eqoa.events.on('windows.session', function(e) ev[#ev + 1] = e.data.phase .. ':' .. tostring(e.data.kind) .. ':' .. tostring(e.data.reason) end)").unwrap();
+    p.merc_win_opcode(net::mercwin::OP_MERC_WINDOW_STATE, &window_body(OPEN, 1, "Kel", &merc_items()));
+    post_event(&mut p);
+    assert_eq!(p.mode, 0, "held: the game's window is not up");
+    step(&mut p, &host);
+    host.execute("local s = assert(eqoa.windows.session('mercenary_items')); assert(s.origin == 'server' and s.data.inventory.name == 'Kel' and #s.data.inventory.records == 3 and s.data.inventory.open == true)").unwrap();
+    // the server changes a record: the session's data follows (told as changed)
+    let two = vec![item(7, WORN, "Mithril Breastplate", 5, 5), item(9, CARRIED, "Buckler", 13, -1)];
+    p.merc_win_opcode(net::mercwin::OP_MERC_WINDOW_STATE, &window_body(0, 1, "Kel", &two));
+    step(&mut p, &host);
+    host.execute("assert(#eqoa.windows.session('mercenary_items').data.inventory.records == 2); assert(ev[#ev]:find('changed:mercenary_items'), ev[#ev])").unwrap();
+    // the hire is gone
+    p.merc_win_opcode(net::mercwin::OP_MERC_WINDOW_STATE, &window_body(net::mercwin::GONE, 1, "Kel", &[]));
+    step(&mut p, &host);
+    host.execute("assert(eqoa.windows.session('mercenary_items') == nil and ev[#ev] == 'closed:mercenary_items:server', ev[#ev])").unwrap();
+}
+
+/// Closing a held inventory window sends what the game's own close sends (0x7E73 7, the window's test pins the same
+/// bytes); `pass` and a released claim give the window back to the game (nothing is lost); asking for the window while
+/// a hidden session is up still gives the mod its session. Negative control: without the give, the passed window never
+/// opens (mode stays 0).
+#[test]
+fn a11_closing_passing_and_releasing_a_held_mercenary_window() {
+    let (mut p, host) = rig();
+    let vm = hold(&host, TakeoverKind::MercItems);
+    hide_a_session(&mut p);
+    open_merc(&mut p);
+    post_event(&mut p);
+    step(&mut p, &host);
+    assert!(session_ok(&host, "mercenary_items"), "the mod's session even over a hidden session");
+    window_takeover::set_hidden_inactive(TakeoverKind::Bank);
+    sent(&mut p);
+    let (ok, _) = ask(&mut p, &host, "return eqoa.actions.close_window(eqoa.windows.session('mercenary_items').ref)");
+    assert!(ok);
+    assert_eq!(sent_op(&mut p, 0x73, 0x7E), vec![vec![0x73, 0x7E, 1, 7]], "the game's own close of the window");
+    assert!(!session_ok(&host, "mercenary_items"));
+    // a second opening, passed to the game
+    p.merc_win_opcode(net::mercwin::OP_MERC_WINDOW_STATE, &window_body(OPEN, 1, "Kel", &merc_items()));
+    post_event(&mut p);
+    step(&mut p, &host);
+    assert_eq!(p.mode, 0);
+    host.execute("assert(eqoa.windows.pass(eqoa.windows.session('mercenary_items').ref))").unwrap();
+    step(&mut p, &host);
+    assert_eq!(p.mode, crate::play::mercplay::ITEMS_MODE, "passed: the game's own window opens");
+    assert!(!session_ok(&host, "mercenary_items"));
+    // a third, then the claim is released: the game's window, not a lost window
+    p.mode = 0;
+    p.merc_win_opcode(net::mercwin::OP_MERC_WINDOW_STATE, &window_body(OPEN, 1, "Kel", &merc_items()));
+    post_event(&mut p);
+    step(&mut p, &host);
+    assert_eq!((p.mode, session_ok(&host, "mercenary_items")), (0, true));
+    assert!(window_takeover::release(vm, TakeoverKind::MercItems));
+    step(&mut p, &host);
+    assert_eq!(p.mode, crate::play::mercplay::ITEMS_MODE, "released: the window comes back as the game's");
+}
+
+/// The dye picker a mod holds: a session with the token, the game's picker not up; Cancel sends the picker's own
+/// bytes; the colour asks first and goes out with the picker's token; the server's close ends the session; `pass`
+/// opens the game's picker. Negative control: without the claim the picker opens natively (mode 63).
+#[test]
+fn a11_a_held_dye_picker_is_a_session_with_the_pickers_own_answers() {
+    let (mut p, host) = rig();
+    // control: no claim
+    open_dye(&mut p, 0x0000_0001, true);
+    assert_eq!(p.mode, crate::play::dyeplay::MODE, "control: the game's picker");
+    p.dyepick_done(PickerUp::Cancel);
+    sent(&mut p);
+    hold(&host, TakeoverKind::DyePicker);
+    let up = |p: &mut Play, token: u32| {
+        let bytes = dye_open(token, false);
+        pre_event(p, &dye_packet(bytes.clone()));
+        p.dyepick_opcode(&bytes);
+        post_event(p);
+        let (v, mut r) = (vui(), NullRaster);
+        p.run_dyepick(&v, &mut r);
+    };
+    up(&mut p, 0xAABB_CCDD);
+    assert_eq!((p.mode, p.dyepick.picker.open), (0, false), "held: not the game's window");
+    step(&mut p, &host);
+    host.execute("local s = eqoa.windows.session('dye_picker'); assert(s.data.token == 0xAABBCCDD and s.data.open == true); assert(eqoa.dye.get().token == 0xAABBCCDD)").unwrap();
+    let (ok, code) = ask(&mut p, &host, "return eqoa.actions.dye_pick(0x1, 0x336699FF)");
+    assert!(!ok && code == "stale_handle", "{code}");
+    // a colour asks first, then the picker's own OK bytes
+    ask(&mut p, &host, "return eqoa.actions.dye_pick(0xAABBCCDD, 0x33669900)");
+    assert!(sent(&mut p).is_empty(), "asking sends nothing");
+    key(NamedKey::ArrowRight);
+    key(NamedKey::Enter);
+    step(&mut p, &host);
+    assert_eq!(sent_op(&mut p, 0x96, 0x7E), vec![net::dyepick::picked(0xAABB_CCDD, 0x3366_99FF)]);
+    assert!(!session_ok(&host, "dye_picker"));
+    // Cancel at once
+    up(&mut p, 0x0000_0102);
+    let (ok, _) = ask(&mut p, &host, "return eqoa.actions.dye_cancel(0x102)");
+    assert!(ok);
+    assert_eq!(sent_op(&mut p, 0x96, 0x7E), vec![net::dyepick::cancelled(0x102)]);
+    // the server closes it
+    up(&mut p, 0x0000_0103);
+    let close = vec![net::dyepick::CLOSE, 3, 1, 0, 0];
+    pre_event(&p, &dye_packet(close.clone()));
+    p.dyepick_opcode(&close);
+    post_event(&mut p);
+    step(&mut p, &host);
+    assert!(!session_ok(&host, "dye_picker"), "the server's close ended the session");
+    // pass: the game's picker opens
+    up(&mut p, 0x0000_0104);
+    host.execute("assert(eqoa.windows.pass(eqoa.windows.session('dye_picker').ref))").unwrap();
+    step(&mut p, &host);
+    let (v, mut r) = (vui(), NullRaster);
+    p.run_dyepick(&v, &mut r);
+    assert_eq!((p.mode, p.dyepick.open.as_ref().map(|o| o.token)), (crate::play::dyeplay::MODE, Some(0x104)));
+}
+
+/// A fishing session a mod holds: the session instead of the game's window, a cast the game's meter runs (a mod picks
+/// no power), the cast request the window itself would send, and a close that is the window's Escape. Negative control:
+/// with no claim the window opens (mode 36).
+#[test]
+fn a11_a_held_fishing_window_keeps_the_meter_and_sends_the_games_cast() {
+    let (mut p, host) = rig();
+    assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
+    post_event(&mut p);
+    assert_eq!(p.mode, 36, "control: the game's window");
+    p.mode = 0;
+    p.fish.wnd.blur();
+    p.fish.part.state = state::OFF;
+    hold(&host, TakeoverKind::Fishing);
+    assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
+    post_event(&mut p);
+    assert_eq!(p.mode, 0);
+    step(&mut p, &host);
+    host.execute("assert(eqoa.windows.session('fishing').data.state == 'waiting')").unwrap();
+    // pole and bait, as the game's cast checks them
+    let mut pole = net::dump::NetItem { quantity: 1, equip_slot: 14, quick_slot: -1, cur_hp: 5, inv_index: 1, ..Default::default() };
+    pole.item.wear_slot = 20;
+    let mut bait = net::dump::NetItem { quantity: 3, equip_slot: 15, quick_slot: -1, inv_index: 2, ..Default::default() };
+    bait.item.wear_slot = 21;
+    p.dump.inventory.items = vec![pole, bait];
+    sent(&mut p);
+    assert!(matches!(dispatch(&mut p, &A11Action::FishCast), DispatchOutcome::Completed { .. }));
+    assert!(p.fish.wnd.casting, "the game's own meter started, on the window's clock, with no window drawn");
+    // the throw: the meter's power then is the game's (a release 1.6 s in), the splash asked for the walk's place
+    let t = p.session.timer();
+    p.fish.wnd.cast(t - 1600);
+    assert!(matches!(dispatch(&mut p, &A11Action::FishRelease), DispatchOutcome::Completed { .. }));
+    let zero = (vi::vect::Vect3::default(), vi::vect::Vect3::default());
+    hidden_fishing_step(&mut p, zero);
+    assert!(p.fish.water.is_some(), "the splash asks for water, as the window's does");
+    assert_eq!(sent_op(&mut p, 0x47, 0x00), vec![vec![0x47, 0x00, 65]], "PlayAction(65)");
+    // the water was found and the splash is over: the window's cast request, with the quality the meter gave
+    p.fish.wnd.splash_time -= 3000;
+    p.fish.wnd.hit = true;
+    hidden_fishing_step(&mut p, zero);
+    assert_eq!(sent_op(&mut p, 0x01, 0x0F), vec![crate::fishing::cast_msg(p.fish.wnd.quality)]);
+    assert_eq!(p.fish.wnd.quality, crate::fishing::quality(p.fish.wnd.power), "the quality is the meter's, nothing else");
+    // a close is the window's Escape
+    p.fish.part.state = state::WAITING;
+    sent(&mut p);
+    let (ok, _) = ask(&mut p, &host, "return eqoa.actions.close_window(eqoa.windows.session('fishing').ref)");
+    assert!(ok);
+    assert_eq!(sent_op(&mut p, 0x01, 0x0F), vec![crate::fishing::sub_msg(2)]);
+    // the server stops the session
+    p.fishing_opcode(crate::fishing::OP_IN, &[2]);
+    step(&mut p, &host);
+    assert!(!session_ok(&host, "fishing"));
+}

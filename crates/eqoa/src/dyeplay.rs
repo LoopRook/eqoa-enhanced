@@ -35,7 +35,7 @@ pub struct DyePlay {
     /// the open the picker is up for (its token, target, slots)
     pub open: Option<Open>,
     /// an open waiting for the game to be where it may come up
-    pending: Option<Open>,
+    pub(crate) pending: Option<Open>,
     keys: Vec<(i32, bool)>,
     /// the left stick (lx, ly) as the pad last read it
     stick: [f32; 2],

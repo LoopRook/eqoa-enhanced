@@ -22,7 +22,7 @@ pub struct Fishing {
     ly: f32,
     /// `Splash`'s `FindWater`, for the next frame, which has the scene: the
     /// player's actor, the walk's committed place and its angles then
-    water: Option<(i32, Vect3<Ee>, Vect3<Ee>)>,
+    pub(crate) water: Option<(i32, Vect3<Ee>, Vect3<Ee>)>,
     /// `LoadTargetEffect`'s splash, made the first time it is wanted (None
     /// with no texture for it)
     splash: Option<SplashFx>,
@@ -257,6 +257,7 @@ impl Play {
     /// `Splash`'s `FindWater` owed; the emitter's births while the window
     /// plays it; its particles drawn with the spell effects'.
     pub(super) fn fishing_frame(&mut self, walker: &mut Walker, lib: &Library, game_ms: i64) {
+        super::fork_hooks::fishing_hidden_frame(self, walker);
         if let Some((actor, pos, hpr)) = self.fish.water.take() {
             let at = crate::fishing::find_water(&mut walker.scene, actor, pos, hpr);
             if !self.fish.splash_tried {

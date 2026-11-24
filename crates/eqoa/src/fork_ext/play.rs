@@ -145,6 +145,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
     }
     // round A2: what a dialog or offer this packet brings looks like before the game handles it
     a2_play::pre_event(play, event);
+    a11_play::pre_event(play, event);
     let api = api_capture::begin_game_event(play, event);
     let a7 = a7_play::begin_event(play, event);
     if let net::session::Event::MasterLoot(m) = event {
@@ -293,6 +294,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn divert_event(play: &mut Play) {
     a2_play::post_event(play);
+    a11_play::post_event(play);
 }
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn divert_event(_: &mut Play) {}
@@ -1116,6 +1118,16 @@ pub(crate) fn merc_open_waits(_play: &mut Play, mode: i32) -> bool {
 pub(crate) fn merc_open_waits(_: &mut Play, _: i32) -> bool {
     false
 }
+
+/// Round A11: a fishing window a mod holds has no drawing; its cast logic runs here, once a frame (the one upstream
+/// line in `fishing_frame`).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn fishing_hidden_frame(play: &mut Play, walker: &crate::walker::Walker) {
+    a11_play::hidden_fishing_frame(play, walker);
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn fishing_hidden_frame(_: &mut Play, _: &crate::walker::Walker) {}
 
 /// Round A11: a fishing session starting while a hidden session holds the game is cancelled as under any window, and
 /// the player is told why in one chat line.

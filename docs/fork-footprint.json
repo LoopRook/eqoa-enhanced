@@ -323,14 +323,14 @@
       "reason": "Round A11 (2026-11-24): the server's merc, dye and fishing windows must not open over a hidden session of a mod (the game's mode reads 0 there): one condition added to the line that decides whether the window may open, calling fork_hooks::server_window_blocked, which says what the game does with a window up (merc: not opened; dye: waits; fishing: cancelled). Backlog item of 2026-11-18, owner-approved plan row A11. Fix round: the merc windows wait for the hidden session instead of being dropped (two hook conditions) and three MercPlay fields (items_open, book_open, keys) became pub(crate) so the fork can open the waiting window."
     },
     "crates/eqoa/src/fishplay.rs": {
-      "added": 1,
-      "deleted": 1,
-      "reason": "Round A11 (2026-11-24): the server's merc, dye and fishing windows must not open over a hidden session of a mod (the game's mode reads 0 there): one condition added to the line that decides whether the window may open, calling fork_hooks::server_window_blocked, which says what the game does with a window up (merc: not opened; dye: waits; fishing: cancelled). Backlog item of 2026-11-18, owner-approved plan row A11."
+      "added": 3,
+      "deleted": 2,
+      "reason": "Round A11 (2026-11-24): the server's merc, dye and fishing windows must not open over a hidden session of a mod (the game's mode reads 0 there): one condition added to the line that decides whether the window may open, calling fork_hooks::server_window_blocked, which says what the game does with a window up (merc: not opened; dye: waits; fishing: cancelled). Backlog item of 2026-11-18, owner-approved plan row A11. A11 kinds (2026-11-24): one call at the top of fishing_frame (fork_hooks::fishing_hidden_frame) runs the cast meter of a fishing window a mod holds, which has no drawing to run it; `water` made pub(crate) for the splash's FindWater request."
     },
     "crates/eqoa/src/dyeplay.rs": {
-      "added": 2,
-      "deleted": 2,
-      "reason": "Round A11 (2026-11-24): the server's merc, dye and fishing windows must not open over a hidden session of a mod (the game's mode reads 0 there): one condition added to the line that decides whether the window may open, calling fork_hooks::server_window_blocked, which says what the game does with a window up (merc: not opened; dye: waits; fishing: cancelled). Backlog item of 2026-11-18, owner-approved plan row A11. Plus dyepick_done made pub(crate) so the mod's answer closes the picker through the game's own path."
+      "added": 3,
+      "deleted": 3,
+      "reason": "Round A11 (2026-11-24): the server's merc, dye and fishing windows must not open over a hidden session of a mod (the game's mode reads 0 there): one condition added to the line that decides whether the window may open, calling fork_hooks::server_window_blocked, which says what the game does with a window up (merc: not opened; dye: waits; fishing: cancelled). Backlog item of 2026-11-18, owner-approved plan row A11. Plus dyepick_done made pub(crate) so the mod's answer closes the picker through the game's own path. A11 kinds (2026-11-24): `pending` made pub(crate) so a mod that holds the dye picker takes the server's open into its session and hands it back to the game's picker on pass."
     }
   },
   "immutable": [
@@ -673,6 +673,12 @@
       "path": "crates/eqoa/src/fishplay.rs",
       "name": "A11 fishing session gate",
       "pattern": "fork_hooks::fishing_start_blocked\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/fishplay.rs",
+      "name": "A11 fishing hidden frame",
+      "pattern": "fork_hooks::fishing_hidden_frame\\(",
       "count": 1
     }
   ]
