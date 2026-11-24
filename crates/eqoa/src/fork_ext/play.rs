@@ -1105,6 +1105,30 @@ pub(crate) fn server_window_blocked(_: &'static str) -> bool {
     false
 }
 
+/// Round A11: the server asked to open a mercenary window (`mode` 61 inventory, 62 spells) while a hidden session holds
+/// the game: true means "do not open it now"; it opens when the hidden session ends (`a11_play::tick`).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn merc_open_waits(_play: &mut Play, mode: i32) -> bool {
+    a11_play::merc_waits(mode)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn merc_open_waits(_: &mut Play, _: i32) -> bool {
+    false
+}
+
+/// Round A11: a fishing session starting while a hidden session holds the game is cancelled as under any window, and
+/// the player is told why in one chat line.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn fishing_start_blocked(play: &mut Play) -> bool {
+    a11_play::fishing_blocked(play)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn fishing_start_blocked(_: &mut Play) -> bool {
+    false
+}
+
 /// Round A8: the server's crafting reply (0x1102), offered to a mod's crafting window before the game's own
 /// reading, which takes it only while the game's recipe book or experiment is up (`a8_play::reply`). True when a
 /// mod's window took it.

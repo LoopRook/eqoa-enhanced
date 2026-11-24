@@ -398,8 +398,8 @@ pub(crate) fn a11_label(caps: &[String]) -> Option<String> {
     if any(&["dye_pick", "dye_no_dye"]) {
         steps.push("answer the dye picker (a colour asks you first)");
     }
-    if any(&["fishing_cast", "fishing_release", "fishing_reel", "fishing_keep", "fishing_pull"]) {
-        steps.push("cast, reel and keep a catch while fishing");
+    if any(&["fishing_cast", "fishing_release", "fishing_reel", "fishing_keep", "fishing_pull", "fishing_cancel"]) {
+        steps.push("cast, reel, keep or let go of a catch while fishing");
     }
     (!steps.is_empty()).then(|| format!("Mercenary, dye and fishing windows: can {}", steps.join(", ")))
 }

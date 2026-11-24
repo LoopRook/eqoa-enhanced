@@ -154,15 +154,31 @@ fn a11_a_mercenary_window_does_not_open_over_a_hidden_session() {
     assert!(p.merc.window.is_some(), "the state is kept: a later Items > Inventory shows it");
     let log = window_takeover::take_log_for_test().join("\n");
     assert!(log.contains("mercenary window") && log.contains("hidden session"), "{log}");
-    // the same open after the session: opens (the control: no mod, the game as before)
+    // the session ends: the open that waited is made, not lost (a tick, with no new packet)
     window_takeover::set_hidden_inactive(TakeoverKind::Bank);
+    tick(&mut p, true);
+    assert_eq!(p.mode, crate::play::mercplay::ITEMS_MODE, "the waiting inventory window opens when the hidden session ends");
+    let (v, mut r) = (vui(), NullRaster);
+    p.run_merc_windows(&v, &mut r);
+    // the control: a window the server opens with no hidden session opens at once, as before
+    p.mode = 0;
     p.merc_win_opcode(net::mercwin::OP_MERC_WINDOW_STATE, &window_body(OPEN, 1, "Kel", &merc_items()));
-    assert_eq!(p.mode, crate::play::mercplay::ITEMS_MODE, "with no hidden session the window opens as before");
-    // the spells window is the same
+    assert_eq!(p.mode, crate::play::mercplay::ITEMS_MODE);
+    // the spells window waits the same way, and a hire gone while it waits opens nothing
     p.mode = 0;
     hide_a_session(&mut p);
     p.merc_win_opcode(net::mercwin::OP_MERC_SPELLS_STATE, &spells_body(OPEN, &[(950, 5, -1)], [0; SLOTS]));
     assert_eq!(p.mode, 0, "the spell window does not open over it either");
+    window_takeover::set_hidden_inactive(TakeoverKind::Bank);
+    tick(&mut p, true);
+    assert_eq!(p.mode, crate::play::mercplay::SPELLS_MODE);
+    p.mode = 0;
+    hide_a_session(&mut p);
+    p.merc_win_opcode(net::mercwin::OP_MERC_WINDOW_STATE, &window_body(OPEN, 1, "Kel", &merc_items()));
+    p.merc_win_opcode(net::mercwin::OP_MERC_WINDOW_STATE, &window_body(net::mercwin::GONE, 1, "Kel", &[]));
+    window_takeover::set_hidden_inactive(TakeoverKind::Bank);
+    tick(&mut p, true);
+    assert_eq!(p.mode, 0, "the hire is gone: nothing opens");
 }
 
 /// The dye picker waits where the game keeps it waiting (a window up) and opens when the hidden session ends.
@@ -195,6 +211,7 @@ fn a11_a_fishing_session_over_a_hidden_session_is_cancelled_as_under_any_window(
     assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
     assert_eq!(p.mode, 0);
     assert_eq!(sent_op(&mut p, 0x01, 0x0F), vec![crate::fishing::sub_msg(2)], "the game's own cancel, 0x0F01 2");
+    assert!(p.chat.iter().any(|(t, _)| t.starts_with("Fishing stopped: a mod window was busy")), "the player is told why");
     window_takeover::set_hidden_inactive(TakeoverKind::Bank);
     assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
     assert_eq!(p.mode, 36, "no hidden session: the window opens as before");
@@ -374,15 +391,48 @@ fn a11_fishing_requests_are_the_windows_own_bytes_and_not_repeated() {
     assert!(matches!(dispatch(&mut p, &A11Action::FishKeep { slot: 0 }), DispatchOutcome::Completed { .. }));
     assert_eq!(sent(&mut p), vec![crate::fishing::keep_msg(10, 3)]);
     assert_eq!(p.fish.part.state, state::KEEPING);
-    // Escape: 4 with a catch on the line, 2 otherwise
-    LOCAL.with(|l| l.borrow_mut().fish_sent = None);
-    p.fish.part.state = state::CAUGHT;
-    assert!(matches!(dispatch(&mut p, &A11Action::FishCancel), DispatchOutcome::Completed { .. }));
-    assert_eq!(sent(&mut p), vec![crate::fishing::sub_msg(4)]);
-    LOCAL.with(|l| l.borrow_mut().fish_sent = None);
+    // the server answers the keep: the catch is gone and the line waits again; the guard lets go with no help from here
+    p.fish.part.catch.items.clear();
     p.fish.part.state = state::WAITING;
+    tick(&mut p, false);
+    // Escape at a waiting line is 2
     assert!(matches!(dispatch(&mut p, &A11Action::FishCancel), DispatchOutcome::Completed { .. }));
     assert_eq!(sent(&mut p), vec![crate::fishing::sub_msg(2)]);
+    assert!(matches!(dispatch(&mut p, &A11Action::FishCancel), DispatchOutcome::Refused { code: "busy", .. }), "not twice before an answer");
+    // the server stops the session; a new one starts at the very same (waiting, no catch): cancel works again.
+    // Negative control: the old guard never let go and refused here for the whole second session.
+    p.fish.part.state = state::OFF;
+    tick(&mut p, false);
+    p.fish.part.state = state::WAITING;
+    tick(&mut p, false);
+    assert!(matches!(dispatch(&mut p, &A11Action::FishCancel), DispatchOutcome::Completed { .. }), "second session");
+    assert_eq!(sent(&mut p), vec![crate::fishing::sub_msg(2)]);
+    p.fish.part.state = state::OFF;
+    tick(&mut p, false);
+    p.fish.part.state = state::WAITING;
+    tick(&mut p, false);
+    // two catches of the same size, each reeled: the second is not refused
+    for round in 0..2 {
+        let mut fish = net::dump::NetItem { quantity: 1, equip_slot: -1, quick_slot: -1, inv_index: 20 + round, ..Default::default() };
+        fish.item.name = "Perch".into();
+        p.fish.part.catch.items.push(fish);
+        p.fish.part.state = state::CAUGHT;
+        p.fish.wnd.list_visible = true;
+        tick(&mut p, false);
+        assert!(matches!(dispatch(&mut p, &A11Action::FishReel), DispatchOutcome::Completed { .. }), "catch {round}");
+        assert_eq!(sent(&mut p), vec![crate::fishing::sub_msg(3)]);
+        p.fish.part.catch.items.clear();
+        p.fish.part.state = state::WAITING;
+        tick(&mut p, false);
+    }
+    // Escape with a catch on the line is 4
+    let mut last = net::dump::NetItem { quantity: 1, equip_slot: -1, quick_slot: -1, inv_index: 30, ..Default::default() };
+    last.item.name = "Perch".into();
+    p.fish.part.catch.items.push(last);
+    p.fish.part.state = state::CAUGHT;
+    tick(&mut p, false);
+    assert!(matches!(dispatch(&mut p, &A11Action::FishCancel), DispatchOutcome::Completed { .. }));
+    assert_eq!(sent(&mut p), vec![crate::fishing::sub_msg(4)]);
 }
 
 /// The cast is the game's window's own: the call presses its key, the meter and its clock are the window's, and a mod

@@ -43,9 +43,9 @@ pub struct MercPlay {
     /// the spell window: the player's spell book over the merc's
     book: crate::spellbook::SpellBook,
     /// the windows to open with the next HUD frame, which has the raster
-    items_open: bool,
-    book_open: bool,
-    keys: Vec<(i32, bool)>,
+    pub(crate) items_open: bool,
+    pub(crate) book_open: bool,
+    pub(crate) keys: Vec<(i32, bool)>,
     /// an ask on its way (its answer 0x7E75 lets the window ask again)
     pub waiting: bool,
 }
@@ -140,7 +140,7 @@ impl Play {
     /// Whether a window may open over what is up: play, or the merc's box the
     /// player answered (its menu's Inventory, Spells) and the NPC's words.
     fn merc_win_may_open(&self) -> bool {
-        matches!(self.mode, 0 | 7 | 9 | ITEMS_MODE | SPELLS_MODE) && !super::fork_hooks::server_window_blocked("mercenary window")
+        matches!(self.mode, 0 | 7 | 9 | ITEMS_MODE | SPELLS_MODE)
     }
 
     /// The windows' opcodes (0x7E74, 0x7E75, 0x7E77); true when handled.
@@ -157,7 +157,7 @@ impl Play {
                         }
                         return true;
                     }
-                    if w.flags & OPEN != 0 && self.merc_win_may_open() {
+                    if w.flags & OPEN != 0 && self.merc_win_may_open() && !super::fork_hooks::merc_open_waits(self, ITEMS_MODE) {
                         self.merc.items_open = true;
                         self.merc.keys.clear();
                         self.mode = ITEMS_MODE;
@@ -176,7 +176,7 @@ impl Play {
                         }
                         return true;
                     }
-                    if s.flags & OPEN != 0 && self.merc_win_may_open() {
+                    if s.flags & OPEN != 0 && self.merc_win_may_open() && !super::fork_hooks::merc_open_waits(self, SPELLS_MODE) {
                         self.merc.book_open = true;
                         self.merc.keys.clear();
                         self.mode = SPELLS_MODE;

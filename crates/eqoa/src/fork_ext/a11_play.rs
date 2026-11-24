@@ -26,7 +26,7 @@ use crate::fork_ext::addons::{
     native_items::is_handle_fresh,
     window_takeover::{self, TakeoverKind},
 };
-use net::mercwin::{CARRIED, HEIRLOOM, SLOTS, STOCK, WORN};
+use net::mercwin::{CARRIED, HEIRLOOM, OPEN, SLOTS, STOCK, WORN};
 use serde_json::{Value as Json, json};
 use std::cell::RefCell;
 
@@ -41,6 +41,9 @@ struct Local {
     /// What the fishing session looked like when its last reel, keep or pull went out: `(state, catch count)`. Another
     /// of the three waits until the server has changed one of them (nothing is replayed).
     fish_sent: Option<(i32, usize)>,
+    /// A mercenary window (its mode) the server asked to open while a hidden session held the game: it opens when the
+    /// session ends, as the dye picker's open waits.
+    merc_wait: Option<i32>,
 }
 
 thread_local! {
@@ -50,8 +53,31 @@ thread_local! {
 /// A hidden session of a mod (a corpse, merchant or bank) holds the game in a window of its own while the game's mode
 /// reads 0. Asked by the hooks in `mercplay.rs`, `dyeplay.rs` and `fishplay.rs`; true means "act as the game does with
 /// a window up". `what` names the window for the log.
+fn hidden_held() -> bool {
+    TakeoverKind::ALL.iter().any(|k| window_takeover::is_hidden_active(*k))
+}
+
+/// The server opens a mercenary window (`mode`) while a hidden session holds the game: it waits.
+pub(crate) fn merc_waits(mode: i32) -> bool {
+    let wait = blocked("mercenary window");
+    if wait {
+        LOCAL.with(|l| l.borrow_mut().merc_wait = Some(mode));
+    }
+    wait
+}
+
+/// A fishing session starts while a hidden session holds the game: the game's cancel goes out (the caller), and the
+/// player is told why, in one line.
+pub(crate) fn fishing_blocked(play: &mut Play) -> bool {
+    let wait = blocked("fishing session");
+    if wait {
+        play.add_chat("Fishing stopped: a mod window was busy, cast again".into(), [1.0, 0.25, 0.25, 1.0]);
+    }
+    wait
+}
+
 pub(crate) fn blocked(what: &'static str) -> bool {
-    let held = TakeoverKind::ALL.iter().any(|k| window_takeover::is_hidden_active(*k));
+    let held = hidden_held();
     LOCAL.with(|l| {
         let mut l = l.borrow_mut();
         if held {
@@ -203,9 +229,21 @@ fn fishing_state(play: &Play) -> Option<Json> {
     }))
 }
 
-/// Each step: what the three windows hold, for `eqoa.merc.get`, `eqoa.dye.get` and `eqoa.fishing.get`.
-pub(crate) fn tick(play: &Play, game_step: bool) {
-    if !game_step {
+/// Each step: a mercenary window that waited opens once no hidden session holds the game; the fishing guard lets go
+/// when the server has answered; and what the three windows hold, for `eqoa.merc.get`, `eqoa.dye.get` and
+/// `eqoa.fishing.get`.
+pub(crate) fn tick(play: &mut Play, game_step: bool) {
+    resume_merc(play);
+    // the one-request guard holds only until the server's answer has changed the state or the catch, or the session ended
+    let now = (play.fish.part.state, play.fish.part.catch.items.len());
+    LOCAL.with(|l| {
+        let mut l = l.borrow_mut();
+        if l.fish_sent.is_some_and(|sent| sent != now || now.0 == crate::fishing::state::OFF) {
+            l.fish_sent = None;
+        }
+    });
+    // nothing is read while no mod listens
+    if !game_step || !crate::fork_ext::addons::native_core::capture_requested() {
         return;
     }
     for (which, state) in [(Read::Merc, merc_state(play)), (Read::Dye, dye_state(play)), (Read::Fishing, fishing_state(play))] {
@@ -214,6 +252,33 @@ pub(crate) fn tick(play: &Play, game_step: bool) {
             None => native_a11::clear(which),
         }
     }
+}
+
+fn resume_merc(play: &mut Play) {
+    let Some(mode) = LOCAL.with(|l| l.borrow().merc_wait) else { return };
+    let (items, spells) = (crate::play::mercplay::ITEMS_MODE, crate::play::mercplay::SPELLS_MODE);
+    let wants = match mode {
+        m if m == items => play.merc.window.as_ref().is_some_and(|w| w.flags & OPEN != 0),
+        m if m == spells => play.merc.spells.as_ref().is_some_and(|s| s.flags & OPEN != 0),
+        _ => false,
+    };
+    if !wants {
+        // the hire went (a state with the gone flag): nothing to open
+        LOCAL.with(|l| l.borrow_mut().merc_wait = None);
+        return;
+    }
+    if hidden_held() || play.mode != 0 {
+        return;
+    }
+    LOCAL.with(|l| l.borrow_mut().merc_wait = None);
+    play.merc.keys.clear();
+    if mode == items {
+        play.merc.items_open = true;
+    } else {
+        play.merc.book_open = true;
+    }
+    play.mode = mode;
+    window_takeover::log("takeover: the mercenary window that waited for a hidden session opens now".into());
 }
 
 #[cfg(test)]
@@ -261,9 +326,6 @@ fn sent() -> DispatchOutcome {
 
 fn dispatch_merc(play: &mut Play, action: &A11Action) -> DispatchOutcome {
     use crate::mercwnd::{Ask, ask_bytes};
-    if !play.session.merc_windows {
-        return refuse("unsupported", "this server does not offer the mercenary windows");
-    }
     match action {
         A11Action::MercDismiss => {
             // the game's Start menu entry sends at once; the player is asked here first (a hire is spent)
@@ -272,6 +334,7 @@ fn dispatch_merc(play: &mut Play, action: &A11Action) -> DispatchOutcome {
             }
             super::a1_play::ask(Act::DismissMerc, "Send your mercenary away? It leaves your service.".into(), "")
         }
+        _ if !play.session.merc_windows => refuse("unsupported", "this server does not offer the mercenary windows"),
         A11Action::MercSpellSet { slot, spell } => {
             let Some(s) = play.merc.spells.as_ref() else {
                 return refuse("not_ready", "the server has not sent the mercenary's spells (its menu: Spells)");
