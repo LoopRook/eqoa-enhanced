@@ -15,13 +15,13 @@ spell book, ...) return to this one.
 - **Entries that an EQOA mod does the job of open that mod's window** when the mod is on: Character > Summary, Class
   Mastery, Factions and Combat Record open **EQOA Character**; Quest opens **EQOA Quest Journal**; the skill books under
   Tradeskills > Recipe Book open **EQOA Crafting**; Who, Buddy List > View List, Ignore > View List, Guild > Guild List
-  and Group > Group Search open **EQOA Social** on that page; Inventory opens **Bag Viewer**. With the mod off, the
+  and Group > Group Search open **EQOA Social** on that page; Inventory opens **Bag Viewer**; Ability opens **EQOA Spellbook**. With the mod off, the
   game's own window opens, as before. A sub-menu is always yours to browse (Tradeskills, Guild, Buddy List and the rest
   open as sub-menus). The menu knows an entry by the game's own command, not by its word, so the chat mode called Guild
   stays a chat mode. The menu asks the mod with `eqoa.mods.send` (the command `open`, which each of those mods accepts);
   it can ask for nothing but "open your window".
-- **Ability** is the game's own page (the EQOA Spellbook is a window of its own on Shift+K). Escape, or its Close,
-  brings you back to this menu. Every other entry runs the game's own command.
+- **Ability** opens **EQOA Spellbook** when that mod is on; with it off it is the game's own Ability page, and Escape (or its
+  Close) there brings you back to this menu.
 - **Enter** is this menu's while it is up: the game's chat line does not open with it.
 - **Inventory** with Bag Viewer off, and **Support** (Request Help, Help Status, Send Report), open the game's own Start
   menu: the item page has no copy here, and the game keeps its help and report forms to its own menu, so you press

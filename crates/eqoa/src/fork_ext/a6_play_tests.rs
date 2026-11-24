@@ -747,16 +747,19 @@ fn start_mod(a: &crate::fork_ext::addons::discovery::DiscoveredAddon) -> Running
 }
 
 /// A Play with the disc's start menu tables, the Start Menu mod, the Chat mod (which holds the chat line, as it does
-/// for the owner) and the Spellbook mod (a hotkey window) running.
+/// for the owner) and a hotkey window's mod running: the Spellbook (Shift+K) when `with_book`, else the Quest Journal
+/// (Shift+J), so the game's own Ability page is what the Ability entry opens.
 struct Rig {
     p: Play,
     menu: Running,
     chat: Running,
-    book: Running,
+    hot: Running,
+    /// the hotkey's key, its combo, its code and the kind of window it opens
+    hotkey: (&'static str, &'static str, u8, &'static str),
 }
 
 impl Rig {
-    fn new(img: &crate::client_image::ClientImage, words: &vi::strtab::StringTable, edit: Edit) -> Rig {
+    fn new(img: &crate::client_image::ClientImage, words: &vi::strtab::StringTable, edit: Edit, with_book: bool) -> Rig {
         let mut p = ready();
         crate::fork_ext::bindpage::reset_in_memory();
         window_takeover::forget_switch_for_test();
@@ -765,17 +768,18 @@ impl Rig {
         p.session.expansion = 2;
         let menu = start_mod(&bundled_edited("eqoa_start_menu", edit));
         let chat = start_mod(&bundled_edited("eqoa_chat", None));
-        let book = start_mod(&bundled_edited("eqoa_spellbook", None));
+        let (id, hotkey) = if with_book { ("eqoa_spellbook", ("k", "shift+k", b'K', "spellbook")) } else { ("eqoa_quest_journal", ("j", "shift+j", b'J', "quest_log")) };
+        let hot = start_mod(&bundled_edited(id, None));
         assert!(window_takeover::is_taken(TakeoverKind::StartMenu), "the Start Menu mod holds the Start key");
         assert!(window_takeover::is_taken(TakeoverKind::ChatEntry), "the Chat mod holds the chat line");
-        Rig { p, menu, chat, book }
+        Rig { p, menu, chat, hot, hotkey }
     }
 
     /// One game step, and what each mod is told after it.
     fn step(&mut self) {
         super::super::begin_iteration(&mut self.p, true);
         native_core::flush_deferred();
-        for m in [&self.menu, &self.chat, &self.book] {
+        for m in [&self.menu, &self.chat, &self.hot] {
             native_events::dispatch(&m.host).unwrap();
         }
     }
@@ -791,7 +795,7 @@ impl Rig {
             native_core::CORE.with(|c| {
                 c.borrow_mut().emit("input.key", json!({"key": name, "combo": combo, "down": true, "repeat": false, "synthetic": false, "text": ""}))
             });
-            for m in [&self.menu, &self.chat, &self.book] {
+            for m in [&self.menu, &self.chat, &self.hot] {
                 native_events::dispatch(&m.host).unwrap();
             }
         }
@@ -869,6 +873,11 @@ fn leaves(entries: &Value, at: &mut Vec<usize>, out: &mut Vec<(Vec<usize>, Strin
 /// After an entry ran and its window closed: nothing of the menu or the chat holds a key or the keyboard, Escape opens
 /// the Start menu again and closes it, and another window opens on its hotkey.
 fn the_player_is_free(r: &mut Rig, what: &str) {
+    // a window a route opened is closed first (its hotkey would close it)
+    if let Some(open) = ws::get(r.hot.vm, r.hotkey.3) {
+        ws::close(r.hot.vm, &open.id, "test").unwrap();
+        r.step();
+    }
     assert!(r.menu_session().is_none(), "{what}: the menu is closed");
     assert!(r.chat_line().is_none(), "{what}: no chat line of the Chat mod is open");
     assert!(!crate::fork_ext::addons::input::is_key_claimed(0x1b), "{what}: Escape is the game's again");
@@ -879,21 +888,22 @@ fn the_player_is_free(r: &mut Rig, what: &str) {
     r.escape();
     assert!(r.menu_session().is_none(), "{what}: Escape closes the menu");
     r.step();
-    assert!(r.key("k", "shift+k", b'K'));
-    assert!(ws::get(r.book.vm, "spellbook").is_some(), "{what}: Shift+K opens the Spellbook window (mode {})", r.p.mode);
-    let id = ws::get(r.book.vm, "spellbook").unwrap().id;
-    ws::close(r.book.vm, &id, "test").unwrap();
+    let (key, combo, code, kind) = r.hotkey;
+    assert!(r.key(key, combo, code));
+    assert!(ws::get(r.hot.vm, kind).is_some(), "{what}: {combo} opens the {kind} window (mode {})", r.p.mode);
+    let id = ws::get(r.hot.vm, kind).unwrap().id;
+    ws::close(r.hot.vm, &id, "test").unwrap();
     r.step();
 }
 
 /// Owner test 2026-11-24 through the real key path: Escape for the menu, down to Ability, Enter. The negative control
 /// runs the same keys on the old Lua (no claim on Enter).
-fn ability_walk(edit: Edit) -> Option<Rig> {
+fn ability_walk(edit: Edit, with_book: bool) -> Option<Rig> {
     let Some((img, words)) = disc_menu() else {
         eprintln!("SKIP a6 ability walk: no disc");
         return None;
     };
-    let mut r = Rig::new(&img, &words, edit);
+    let mut r = Rig::new(&img, &words, edit, with_book);
     r.escape();
     r.step();
     assert!(r.menu_session().is_some(), "Escape opened the mod's Start menu");
@@ -905,7 +915,7 @@ fn ability_walk(edit: Edit) -> Option<Rig> {
 
 #[test]
 fn a6_ability_opens_the_games_page_and_the_player_gets_every_key_back() {
-    let Some(mut r) = ability_walk(None) else { return };
+    let Some(mut r) = ability_walk(None, false) else { return };
     assert_eq!(r.p.mode, 5, "the game's Ability page (the spell book) is up");
     assert!(r.chat_line().is_none(), "the Enter that chose Ability did not also open the chat line");
     // Escape in the page goes back to the Start menu, which is the mod's
@@ -919,12 +929,25 @@ fn a6_ability_opens_the_games_page_and_the_player_gets_every_key_back() {
     the_player_is_free(&mut r, "after Ability");
 }
 
+/// With EQOA Spellbook on, Ability opens its window and the game's page stays shut; the Enter that chose it opens no
+/// chat line; everything works after. (The negative control is the old Lua, which had no Ability route, in the run
+/// recorded in the report; and the test above, with the Spellbook off, is the game's page.)
+#[test]
+fn a6_ability_opens_the_spellbook_mod_when_it_is_on() {
+    let Some(mut r) = ability_walk(None, true) else { return };
+    assert_eq!(r.p.mode, 0, "the game's Ability page did not open");
+    assert!(r.menu_session().is_none(), "the menu closed");
+    assert!(ws::get(r.hot.vm, "spellbook").is_some(), "EQOA Spellbook opened");
+    assert!(r.chat_line().is_none(), "no chat line");
+    the_player_is_free(&mut r, "after Ability into the Spellbook");
+}
+
 /// The negative control: the Start Menu Lua without the claim on Enter. The same keys leave the Chat mod holding a chat
 /// line (its text box takes every key) under the game's page.
 #[test]
 fn a6_ability_without_the_enter_claim_leaves_a_chat_line_open_the_old_bug() {
     let strip = |s: String| s.replace("    state.enter = eqoa.input.claim(\"Enter\", true)\n", "");
-    let Some(r) = ability_walk(Some(&strip)) else { return };
+    let Some(r) = ability_walk(Some(&strip), false) else { return };
     assert!(r.chat_line().is_some(), "the old Lua: Enter also opened the chat line and the Chat mod holds it");
     assert_eq!(r.p.mode, 5, "under the game's Ability page");
 }
@@ -951,7 +974,7 @@ fn a6_every_entry_of_the_discs_menu_leaves_the_player_able_to_go_on() {
     let mut walked = Vec::new();
     for (path, label, command) in all {
         let what = format!("{label} ({command}) at {path:?}");
-        let mut r = Rig::new(&img, &words, None);
+        let mut r = Rig::new(&img, &words, None, true);
         r.escape();
         r.step();
         assert!(r.menu_session().is_some(), "{what}: the menu opens");
@@ -969,6 +992,10 @@ fn a6_every_entry_of_the_discs_menu_leaves_the_player_able_to_go_on() {
         }
         assert!(r.chat_line().is_none(), "{what}: the Enter did not also open the chat line");
         assert!(r.menu_session().is_none(), "{what}: the menu ended when the entry ran");
+        // with EQOA Spellbook on, Ability is its window and not the game's page
+        if command.starts_with("0x8010000:") {
+            assert!(ws::get(r.hot.vm, "spellbook").is_some() && r.p.mode == 0, "{what}: EQOA Spellbook opened, not the game's page (mode {})", r.p.mode);
+        }
         // Support (the game's report routes) is the player's to press in the game's own menu: the hand-off opens it
         if command.starts_with("0xb0b1") {
             assert_eq!(r.p.mode, 13, "{what}: the game's own Start menu opened for the Support forms");
@@ -993,4 +1020,55 @@ fn a6_every_entry_of_the_discs_menu_leaves_the_player_able_to_go_on() {
         ws::reset_for_test();
     }
     eprintln!("walked {} entries: {walked:?}", walked.len());
+}
+
+impl Rig {
+    /// A pad button pressed and let go, as the viewer hands the report to the fork (`apply_pad`): the button must be
+    /// taken out of what the game sees. Returns the report the game would have seen at the press.
+    fn pad(&mut self, bit: u16) -> crate::input::Report {
+        let mut press = crate::input::Report { buttons: bit, sticks: [0.5; 4], ..Default::default() };
+        ws::apply_pad(&mut press);
+        self.step();
+        let mut release = crate::input::Report::default();
+        ws::apply_pad(&mut release);
+        self.step();
+        press
+    }
+}
+
+/// Owner test 2026-11-24 (pad): a controller player's Start opens the mod's menu and its d-pad and cross are the menu's;
+/// the character does not walk on the sticks while it is up. The game opens the menu in mode 13 and the mod's session is
+/// made a step later in mode 0; the pad focus the mod asks for on opening was refused because the client's idea of "plain
+/// play" was still the one from before.
+#[test]
+fn a6_the_pad_drives_the_mods_menu_and_keeps_the_character_still() {
+    use crate::input::bit;
+    let Some((img, words)) = disc_menu() else {
+        eprintln!("SKIP a6 pad: no disc");
+        return;
+    };
+    let mut r = Rig::new(&img, &words, None, false);
+    // the pad's Start is the game's key 144, as the keyboard's Escape is the game's `open_start_menu`
+    r.p.open_start_menu(true);
+    r.step();
+    let id = r.menu_session().expect("the mod's menu opened").id;
+    assert!(ws::is_focused(&id), "the mod holds the pad as its menu opens");
+    // down three rows (Ability), cross: the game's page
+    for _ in 0..3 {
+        let seen = r.pad(bit::DOWN);
+        assert_eq!(seen.buttons & bit::DOWN, 0, "the d-pad is the menu's, not the game's");
+        assert_eq!(seen.sticks, [0.0; 4], "the character does not walk on the sticks while the menu holds the pad");
+    }
+    r.pad(bit::CROSS);
+    r.step();
+    assert_eq!(r.p.mode, 5, "the pad's cross chose Ability: the game's page (mode {})", r.p.mode);
+    assert!(r.menu_session().is_none());
+    // triangle closes the menu at the top
+    r.p.mode = 0;
+    r.p.open_start_menu(true);
+    r.step();
+    assert!(r.menu_session().is_some());
+    r.pad(bit::TRIANGLE);
+    assert!(r.menu_session().is_none(), "the pad's triangle closed the menu");
+    assert!(ws::sessions_for_test().iter().all(|s| !ws::is_focused(&s.id)), "no focus is left behind");
 }

@@ -13,7 +13,7 @@ local W, PAD, ROW, ROWS = 220, 8, 15, 12
 -- mode). Only entries that run a command are routed, never a sub-menu, so every sub-menu stays open to browse. The
 -- game's labels on the disc's tables, for the record: Community (Who, Guild, Group, Buddy List, Chat Modes, Message,
 -- Mail, Trade, Ignore, Show Shouts, Hide Shouts), Character (Summary, Tradeskills, Class Mastery and Factions with
--- the expansion), Inventory, Ability, Pet, Quest, Support, Options, Quit. Ability is the game's own page: no mod.
+-- the expansion), Inventory, Ability, Pet, Quest, Support, Options, Quit.
 local ROUTES = {
     ["0x3020000"] = { mod = "eqoa_character" },                   -- Character > Summary
     ["0x2080000"] = { mod = "eqoa_character" },                   -- Character > Class Mastery
@@ -22,6 +22,7 @@ local ROUTES = {
     ["0xb0a0000"] = { mod = "eqoa_quest_journal" },               -- Quest
     ["0xa7010000"] = { mod = "eqoa_crafting" },                   -- Tradeskills > Recipe Book > a skill's book
     ["0x2000000"] = { mod = "eqoa_bag_viewer" },                  -- Inventory
+    ["0x8010000"] = { mod = "eqoa_spellbook" },                   -- Ability (the game's own page with the mod off)
     ["0xb030004"] = { mod = "eqoa_social", page = "who" },        -- Community > Who
     ["0xb050000"] = { mod = "eqoa_social", page = "friends" },    -- Community > Buddy List > View List
     ["0xb053000"] = { mod = "eqoa_social", page = "ignore" },     -- Community > Ignore > View List

@@ -44,7 +44,7 @@ fn open_menu(menu: &Mod, context: &mut Context, entry: &str, command: &str) {
 }
 
 // (the game's entry text on the disc's tables, its command, the mod that does its job, the session kind that mod opens)
-const ROUTES: [(&str, &str, &str, &str); 11] = [
+const ROUTES: [(&str, &str, &str, &str); 12] = [
     ("Summary", "0x3020000:0", "eqoa_character", "trainer"),
     ("Class Mastery", "0x2080000:0", "eqoa_character", "trainer"),
     ("Quest", "0xb0a0000:0", "eqoa_quest_journal", "quest_log"),
@@ -54,6 +54,7 @@ const ROUTES: [(&str, &str, &str, &str); 11] = [
     ("Who", "0xb030004:0", "eqoa_social", "buddy_list"),
     ("Group Search", "0x2090000:0", "eqoa_social", "buddy_list"),
     ("Inventory", "0x2000000:0", "eqoa_bag_viewer", "inventory"),
+    ("Ability", "0x8010000:0", "eqoa_spellbook", "spellbook"),
     ("Factions", "0xaa000001:0", "eqoa_character", "trainer"),
     ("Combat Record", "0x7e20001:0", "eqoa_character", "trainer"),
 ];
@@ -105,13 +106,12 @@ fn start_menu_social_entries_open_the_page_they_name_and_other_entries_stay_the_
     assert_eq!(action_broker::queued_kinds_for_test(), vec!["menu_command"], "an unmapped entry runs the game's command");
 }
 
-/// Owner test 2026-11-24, the disc's own labels: Ability is the game's page (the Spellbook mod is a window of its own on
-/// Shift+K), the chat mode called Guild and the Guild sub-menu are not the guild page, and a sub-menu is browsed, never
+/// Owner test 2026-11-24, the disc's own labels: the chat mode called Guild and the Guild sub-menu are not the guild page, and a sub-menu is browsed, never
 /// taken. The old Lua matched the label word alone, so each of these went to a mod, or never opened.
 #[test]
 fn start_menu_routes_by_the_games_command_not_by_a_word_that_other_entries_share() {
     let mut ctx = context();
-    for (entry, command) in [("Ability", "0x8010000:0"), ("Guild", "0xb030002:0"), ("Group", "0xb030000:0"), ("Say", "0xb010000:0"), ("Options", "0xb0d0002:0"), ("Experiment", "0xa7020000:0")] {
+    for (entry, command) in [("Guild", "0xb030002:0"), ("Group", "0xb030000:0"), ("Say", "0xb010000:0"), ("Options", "0xb0d0002:0"), ("Experiment", "0xa7020000:0")] {
         fixture();
         let menu = run("eqoa_start_menu");
         let _mods = ["eqoa_spellbook", "eqoa_social", "eqoa_crafting", "eqoa_character"].map(run);
