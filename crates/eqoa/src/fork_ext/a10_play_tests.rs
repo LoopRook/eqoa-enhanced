@@ -46,6 +46,8 @@ fn item(id: i64, name: &str, key: u32, quantity: i64) -> net::dump::NetItem {
     it.item.rent = 1;
     it.item.no_trade = 0;
     it.item.lore = 0;
+    // one item, not a stack: retail's auction takes no stack (`auction::can_sell`)
+    it.item.max_stack = 1;
     it
 }
 

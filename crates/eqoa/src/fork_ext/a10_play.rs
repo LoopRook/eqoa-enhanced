@@ -337,10 +337,10 @@ fn auction_on_close(play: &mut Play) {
     // `CloseAuctionSearch` without its start menu
     play.bank.auction.clear_results();
     play.bank.auction.clear_saved();
+    // a sale or bid still out stays waited for (`out`): it is the bank's, not this window's
     LOCAL.with(|l| {
         let mut l = l.borrow_mut();
         l.awaiting = None;
-        l.out = None;
         l.timed_out = false;
     });
     native_a10::clear_auction();
@@ -373,7 +373,11 @@ pub(crate) fn tick(play: &mut Play, game_step: bool) {
         let l = l.borrow();
         (l.mail_open, l.auction_open)
     });
-    if !mail && !auction && !was_mail && !was_auction {
+    let out_pending = LOCAL.with(|l| {
+        let l = l.borrow();
+        l.awaiting.is_some() || l.out.is_some()
+    });
+    if !mail && !auction && !was_mail && !was_auction && !out_pending {
         return;
     }
     if mail && !was_mail && !game_mail_up(play) {
@@ -393,19 +397,18 @@ pub(crate) fn tick(play: &mut Play, game_step: bool) {
         l.mail_open = mail;
         l.auction_open = auction;
     });
-    if auction {
-        // an answer ends the wait: a page (or the bidders) arrived, or the game's own request state came back to idle
-        if play.bank.auction.p7860 == 0 {
-            LOCAL.with(|l| l.borrow_mut().awaiting = None);
-        }
-        LOCAL.with(|l| {
-            let mut l = l.borrow_mut();
-            if l.out.is_some_and(|(s, _)| s != play.bank.state) {
-                l.out = None;
-            }
-        });
-        give_up_stale(play);
+    // an answer ends the wait: a page arrived, or the game's own request state moved on. A sale or a bid is waited
+    // for whether or not the auction window is still open (the bank's sell is a page of the bank window)
+    if play.bank.auction.p7860 == 0 {
+        LOCAL.with(|l| l.borrow_mut().awaiting = None);
     }
+    LOCAL.with(|l| {
+        let mut l = l.borrow_mut();
+        if l.out.is_some_and(|(s, _)| s != play.bank.state) {
+            l.out = None;
+        }
+    });
+    give_up_stale(play);
     if mail && !game_mail_up(play) && (game_step || native_a10::current_mail().is_none()) {
         native_a10::publish_mail(mail_snapshot(play));
     }
