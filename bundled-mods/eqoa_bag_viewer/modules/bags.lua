@@ -52,6 +52,10 @@ end
 -- look is kept SCAN_TTL seconds (distances only drift by a step in that time), so a crowded zone never makes it one
 -- look per frame; Auto-loot's poll (`auto_poll`) shares it.
 local SCAN_TTL, SCAN_MIN = 0.5, 0.25
+-- What the open window asks (is a merchant, a banker or a corpse near: a button's place and colour) may be this old
+-- before the zone is looked at again: they drift by steps, and a look is ~3.4 ms. Everything that acts on the answer
+-- (Auto-loot's poll, the fight check, the helpers) keeps SCAN_TTL.
+M.DRAW_TTL = 1.0
 -- A merchant or banker farther than this is not "nearby" at all: no Sell junk or bank row for one at the other end of a
 -- city (the "too far" line is for one within sight that the server may not answer yet).
 M.NPC_SHOWN_WITHIN = 40.0
@@ -84,11 +88,11 @@ function M.not_a_fight(e, ppos, pl)
     return nil
 end
 
-local function scan_zone()
+local function scan_zone(ttl)
     local now = os.clock()
     if scan_data and scan_at and now >= scan_at then
         local age = now - scan_at
-        if age < SCAN_TTL and not (scan_dirty and age >= SCAN_MIN) then return scan_data end
+        if age < (ttl or SCAN_TTL) and not (scan_dirty and age >= SCAN_MIN) then return scan_data end
     end
     local data = {corpses = {}, nearest = {}}
     M.scan_count = M.scan_count + 1
@@ -137,15 +141,15 @@ function M.scan_reset()
     scan_at, scan_data, scan_dirty = nil, nil, false
 end
 
-function M.nearby_corpse()
-    local data = scan_zone()
+function M.nearby_corpse(ttl)
+    local data = scan_zone(ttl)
     local c = data.nearest.corpse
     if not c then return nil end
     return c.e, c.d2
 end
 
-function M.nearby_npc(kind)
-    local data = scan_zone()
+function M.nearby_npc(kind, ttl)
+    local data = scan_zone(ttl)
     local c = data.nearest[kind == "merchant" and "merchant" or (kind == "bank" and "bank" or "any")]
     if not c then return nil end
     return c.e, c.d2
@@ -197,16 +201,16 @@ function M.within_reach(kind, dist)
 end
 
 -- The nearest `kind` NPC's distance (nil when none is in the zone). `fresh` asks the zone again first.
-function M.npc_distance(kind, fresh)
+function M.npc_distance(kind, fresh, ttl)
     if fresh then M.scan_reset() end
-    local npc, d2 = M.nearby_npc(kind)
+    local npc, d2 = M.nearby_npc(kind, ttl)
     if not npc then return nil end
     return math.sqrt(d2 or 0), npc
 end
 
 -- Why a button for `kind` is out of reach ("too far from the banker"), or nil when it is in reach or there is none.
-function M.too_far(kind)
-    local dist = M.npc_distance(kind)
+function M.too_far(kind, ttl)
+    local dist = M.npc_distance(kind, nil, ttl)
     if dist == nil or M.within_reach(kind, dist) then return nil end
     return TOO_FAR[kind]
 end
@@ -309,7 +313,7 @@ end
 function M.visible_tabs()
     local tabs = {}
     for _, t in ipairs(M.TABS) do tabs[#tabs + 1] = t end
-    if eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse() ~= nil then
+    if eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse(M.DRAW_TTL) ~= nil then
         local t = M.CORPSE_TAB
         tabs[#tabs + 1] = {key = t.key, label = t.label, idx = 7}
     end

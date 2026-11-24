@@ -204,9 +204,20 @@ eqoa.events.on("resource.failed", function(e)
         importing = nil; notify("Import: " .. (d.error and d.error.message or "failed"))
     elseif d.kind == "export" then notify("Export: " .. (d.error and d.error.message or "failed")) end
 end)
-for _, name in ipairs({"entity.added","entity.changed"}) do
-    eqoa.events.on(name, function(e) record(e.data.after, e.frame) end)
+-- An update that changed only fields the journal does not read (hit points, who it targets, an animation) cannot make a
+-- creature newly worth recording: the last look at it, an added or a scan, had everything the answer depends on. Only
+-- the fields `record` reads are worth the work.
+local READ = {id=true, name=true, level=true, is_creature=true, corpse=true, class_code=true, search_flags=true,
+    position=true, actor_position=true, world_id=true}
+local function reads_changed(list)
+    if type(list) ~= "table" or #list == 0 then return true end
+    for _, field in ipairs(list) do if READ[field] then return true end end
+    return false
 end
+eqoa.events.on("entity.added", function(e) record(e.data.after, e.frame) end)
+eqoa.events.on("entity.changed", function(e)
+    if reads_changed(e.data.changed) then record(e.data.after, e.frame) end
+end)
 for _, name in ipairs({"state.reset","events.dropped"}) do eqoa.events.on(name,function() scan = true end) end
 eqoa.events.on("render", function(e)
     now = e.time

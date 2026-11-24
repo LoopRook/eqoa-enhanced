@@ -43,9 +43,27 @@ local state = {
     -- the tabs the player edits (nil until the styles are known, or after Reset tabs), the next id, the open menu
     -- (a tab's, or the strip's), its rows' hit areas, a tab being renamed, and what the text was cut by
     custom = nil, next_tab = 1, menu = nil, menu_hits = {}, rename = nil, cuts = 0, menu_cuts = 0, capturing = false,
+    -- `rev` rises whenever what a tab shows can have changed (a new line, a style ticked, a tab made or removed): the
+    -- list a tab shows is worked out again only then (`visible_lines`)
+    rev = 0,
 }
 
 local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
+
+-- What the bridge is asked for is remembered while it cannot have changed: a text's width, how far a text is cut to
+-- fit, a colour's packed value. They hold for one scale of the window and one font (`measure_key`, checked each frame
+-- with a reference text), so a resize or a font change measures everything again. Bounded: it starts over past a limit.
+local MEASURE_MOST = 1500
+local measure_key, widths, width_n, fits, fit_n, packed = nil, {}, 0, {}, 0, nil
+local function width(s)
+    local w = widths[s]
+    if w == nil then
+        if width_n >= MEASURE_MOST then widths, width_n = {}, 0 end
+        w = ui.CalcTextSize(s)
+        widths[s], width_n = w, width_n + 1
+    end
+    return w
+end
 
 -- The chat styles a tab can show, in the order its menu lists them.
 local STYLE_ORDER = { "say", "group", "guild", "shouts", "tells", "combat", "loot", "rolls", "experience", "system" }
@@ -75,6 +93,7 @@ eqoa.settings.on_load(function(saved)
     if type(saved.w) == "number" then state.w = clamp(saved.w, MIN_W, MAX_W) end
     if type(saved.h) == "number" then state.h = clamp(saved.h, MIN_H, MAX_H) end
     if type(saved.next_tab) == "number" then state.next_tab = saved.next_tab end
+    state.rev = state.rev + 1
     if type(saved.tabs) == "table" then
         local list, has_all = {}, false
         for _, t in ipairs(saved.tabs) do
@@ -98,6 +117,7 @@ local function add_line(m)
     state.seq = state.seq + 1
     state.lines[#state.lines + 1] = { text = m.text, kind = m.kind or "system", links = m.links or {}, color = m.color, seq = state.seq }
     while #state.lines > MAX_LINES do table.remove(state.lines, 1) end
+    state.rev = state.rev + 1
 end
 
 -- What this mod has to say (a line it could not send, and why) comes as a System line, in red.
@@ -112,6 +132,7 @@ local function add_combat(text, color)
     state.seq = state.seq + 1
     state.combat[#state.combat + 1] = { text = text, kind = "combat", links = {}, color = color, seq = state.seq }
     while #state.combat > MAX_COMBAT do table.remove(state.combat, 1) end
+    state.rev = state.rev + 1
 end
 
 local function entity_name(id)
@@ -164,9 +185,13 @@ local function active_tab()
     return tabs()[1]
 end
 
+-- The list the open tab shows, kept while nothing it is made of has changed (`state.rev`) and the tab is the same one:
+-- the lines of a style's tab were filtered, and the combat log merged in, again every drawn frame.
+local shown = { id = nil, kinds = nil, rev = -1, list = nil }
 local function visible_lines(tab)
     -- All is every line of chat (the combat log is for the tabs that show Combat)
     if not tab.kinds then return state.lines end
+    if shown.list and shown.id == tab.id and shown.kinds == tab.kinds and shown.rev == state.rev then return shown.list end
     local out = {}
     for _, l in ipairs(state.lines) do
         if tab.kinds[l.kind] then out[#out + 1] = l end
@@ -186,6 +211,7 @@ local function visible_lines(tab)
         end
         out = merged
     end
+    shown.id, shown.kinds, shown.rev, shown.list = tab.id, tab.kinds, state.rev, out
     return out
 end
 
@@ -203,6 +229,7 @@ local function move_tab(t, delta)
     local j = i and i + delta
     if not i or j < 1 or j > #list then return end
     list[i], list[j] = list[j], list[i]
+    state.rev = state.rev + 1
     persist()
 end
 
@@ -212,6 +239,7 @@ local function delete_tab(t)
     local i = index_of(t)
     if not i then return end
     table.remove(list, i)
+    state.rev = state.rev + 1
     if state.tab == t.id then state.tab, state.scroll = "all", 0 end
     persist()
 end
@@ -229,11 +257,13 @@ local function new_tab()
     list[#list + 1] = { id = id, name = "New", kinds = {} }
     state.tab, state.scroll = id, 0
     state.custom = list
+    state.rev = state.rev + 1
     persist()
 end
 
 local function reset_tabs()
     state.custom = nil
+    state.rev = state.rev + 1
     state.tab, state.scroll = "all", 0
     persist()
 end
@@ -242,6 +272,7 @@ local function toggle_kind(t, kind)
     if t.all then return end
     t.kinds = t.kinds or {}
     t.kinds[kind] = (not t.kinds[kind]) or nil
+    state.rev = state.rev + 1
     persist()
 end
 
@@ -530,6 +561,12 @@ eqoa.events.on("render", function()
         + ImGuiWindowFlags.NoMove + ImGuiWindowFlags.NoResize + ImGuiWindowFlags.NoScrollbar
         + ImGuiWindowFlags.NoSavedSettings + ImGuiWindowFlags.NoInputs)
     ui.SetWindowFontScale(k * 10 / 13)
+    -- one reference measure a frame says whether the scale or the font moved since the remembered measures were made
+    local mkey = k .. "|" .. ui.CalcTextSize("Mgj WW")
+    if mkey ~= measure_key then
+        measure_key = mkey
+        widths, width_n, fits, fit_n, packed = {}, 0, {}, 0, nil
+    end
     -- follow a press that took the move strip or the corner to its release (ImGui's own mouse state)
     local d = state.drag
     if d then
@@ -553,20 +590,37 @@ eqoa.events.on("render", function()
         end
     end
     local dl = ui.GetWindowDrawList()
-    local c = {
-        text = ui.GetColorU32(.91, .91, .91, 1), muted = ui.GetColorU32(.55, .55, .55, 1),
-        surface = ui.GetColorU32(.05, .05, .05, .8), raised = ui.GetColorU32(.12, .12, .12, 1),
-        border = ui.GetColorU32(.25, .25, .25, 1), white = ui.GetColorU32(1, 1, 1, 1),
-        link = ui.GetColorU32(.45, .7, 1, 1), warn = ui.GetColorU32(1, .35, .35, 1),
-        on = ui.GetColorU32(.2, .2, .3, 1),
-    }
+    if not packed then
+        packed = {
+            text = ui.GetColorU32(.91, .91, .91, 1), muted = ui.GetColorU32(.55, .55, .55, 1),
+            surface = ui.GetColorU32(.05, .05, .05, .8), raised = ui.GetColorU32(.12, .12, .12, 1),
+            border = ui.GetColorU32(.25, .25, .25, 1), white = ui.GetColorU32(1, 1, 1, 1),
+            link = ui.GetColorU32(.45, .7, 1, 1), warn = ui.GetColorU32(1, .35, .35, 1),
+            on = ui.GetColorU32(.2, .2, .3, 1),
+        }
+    end
+    local c = packed
     local function fill(x, y, w, h, color) dl:AddRectFilled(at(x, y), at(x + w, y + h), color) end
     local function frame(x, y, w, h, color) dl:AddRect(at(x, y), at(x + w, y + h), color) end
     local function text(x, y, value, color, maxw)
         value = tostring(value)
-        while maxw and #value > 0 and ui.CalcTextSize(value) > maxw * k do
-            value = value:match("^(.*)[%z\1-\127\194-\244][\128-\191]*$") or ""
-            state.cuts = state.cuts + 1
+        if maxw then
+            -- cut to fit once for a text and a width; the cut is the same until the scale or font changes
+            local by_width = fits[maxw]
+            if not by_width then by_width = {}; fits[maxw] = by_width end
+            local kept = by_width[value]
+            if not kept then
+                if fit_n >= MEASURE_MOST then fits, fit_n = {}, 0; by_width = {}; fits[maxw] = by_width end
+                local cut, shown_text = 0, value
+                while #shown_text > 0 and width(shown_text) > maxw * k do
+                    shown_text = shown_text:match("^(.*)[%z\1-\127\194-\244][\128-\191]*$") or ""
+                    cut = cut + 1
+                end
+                kept = { text = shown_text, cut = cut }
+                by_width[value], fit_n = kept, fit_n + 1
+            end
+            state.cuts = state.cuts + kept.cut
+            value = kept.text
         end
         dl:AddText(at(x, y), color or c.text, value)
     end
@@ -586,7 +640,7 @@ eqoa.events.on("render", function()
         text(6, HEAD + 2, "Rename: " .. state.rename.text .. "_   (Enter, Esc)", c.white, W - 52)
     else
         for _, t in ipairs(tabs()) do
-            local tw = ui.CalcTextSize(t.label) / k + 8
+            local tw = width(t.label) / k + 8
             if tx + tw > limit then break end
             fill(tx, HEAD + 2, tw, 12, t.id == state.tab and c.on or c.raised)
             frame(tx, HEAD + 2, tw, 12, c.border)
@@ -631,15 +685,20 @@ eqoa.events.on("render", function()
             local y = HEAD + 18 + (row - 1) * LINE
             local body = l.text
             local color = l.kind == "notice" and c.warn or c.text
-            if l.color and l.color.r then color = ui.GetColorU32(l.color.r, l.color.g, l.color.b, 1) end
+            if l.color and l.color.r then
+                if l.packed_for ~= packed then
+                    l.packed, l.packed_for = ui.GetColorU32(l.color.r, l.color.g, l.color.b, 1), packed
+                end
+                color = l.packed
+            end
             text(PAD, y, body, color, W - 2 * PAD)
             for _, link in ipairs(l.links or {}) do
                 local from = byte_at(body, link.start)
                 local upto = byte_at(body, link.start + link.len)
                 local before = body:sub(1, from - 1)
                 local name = body:sub(from, upto - 1)
-                local lx = PAD + ui.CalcTextSize(before) / k
-                local lw = ui.CalcTextSize(name) / k
+                local lx = PAD + width(before) / k
+                local lw = width(name) / k
                 if lx + lw < W - PAD then
                     text(lx, y, name, c.link)
                     state.hits[#state.hits + 1] = hit(lx, y, lw, LINE, function() open_link(link) end)
@@ -659,7 +718,7 @@ eqoa.events.on("render", function()
                 local to = eqoa.chat.reply_to()
                 if to then label = "Reply " .. to:sub(1, 8) end
             end
-            local bw = ui.CalcTextSize(label) / k + 8
+            local bw = width(label) / k + 8
             fill(x, y, bw, 12, ch.id == state.channel and c.on or c.surface)
             frame(x, y, bw, 12, c.border)
             text(x + 4, y, label, ch.id == state.channel and c.white or c.muted)
