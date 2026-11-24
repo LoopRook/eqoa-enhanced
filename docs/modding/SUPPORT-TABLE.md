@@ -475,6 +475,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.map.open` | supported | 4 |  |
 | `eqoa.map.set_guide` | supported | 4 |  |
 | `eqoa.map.set_waypoint` | supported | 7 |  |
+| `eqoa.map.terrain` | supported | 8 |  |
 | `eqoa.map.view` | supported | 4 |  |
 | `eqoa.map.waypoint` | supported | 7 | capability to set or clear a personal waypoint |
 
