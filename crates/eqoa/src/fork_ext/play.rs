@@ -21,6 +21,9 @@ mod a1_play;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "a6_play.rs"]
 mod a6_play;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "a13_play.rs"]
+mod a13_play;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "a7_play.rs"]
@@ -840,6 +843,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         a7_play::hide_taken_requests(_play);
         a1_play::tick(_play);
         a6_play::tick(_play);
+        a13_play::tick(_play);
         a7_play::tick(_play);
         a2_play::tick(_play);
         a8_play::tick(_play, _game_step);
