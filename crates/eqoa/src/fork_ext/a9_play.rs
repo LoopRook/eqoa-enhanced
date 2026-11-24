@@ -67,8 +67,6 @@ struct InviteHold {
 #[derive(Clone, Debug)]
 struct SmithHold {
     hold: Hold,
-    /// The one repair out: the item's game slot, its condition then, the purse then, and when it was sent.
-    pending: Option<(u32, i64, i32, Instant)>,
 }
 
 /// The packet being handled, as it looked before the game handled it.
@@ -92,6 +90,9 @@ struct Local {
     invite: Option<InviteHold>,
     wager: Option<Hold>,
     smith: Option<SmithHold>,
+    /// The one repair out (held smith or the game's own): the item's game slot, its condition then, the purse then,
+    /// and when it was sent.
+    repair_out: Option<(u32, i64, i32, Instant)>,
     /// Invitations that came while a wager was held, waiting as the game's queue would (with when they came).
     parked: Vec<(Invite, Instant)>,
     /// The partner's accept at the moment a held trade was passed back: put on the game's window after it opens.
@@ -331,6 +332,7 @@ fn smith_state(play: &Play) -> Option<Json> {
             json!({
                 "slot": i + 1,
                 "id": it.item.id,
+                "inventory_key": it.inv_index,
                 "name": it.item.name,
                 "quantity": it.quantity.max(1),
                 "condition": condition,
@@ -342,7 +344,9 @@ fn smith_state(play: &Play) -> Option<Json> {
         .collect();
     Some(json!({
         "coin": purse(play),
-        "repair_pending": held.as_ref().is_some_and(|h| h.pending.is_some()),
+        "repair_pending": local(|l| l.repair_out.is_some()),
+        "held": held.is_some(),
+        "total": smith_items(play).iter().map(|it| i64::from(crate::blacksmith::repair_cost(it))).sum::<i64>(),
         "items": items,
     }))
 }
@@ -428,7 +432,7 @@ fn take_smith(play: &mut Play) {
     smith_pass::hide_smith(play);
     play.mode = 0;
     sync_session(TakeoverKind::Blacksmith, Some(&hold), "ended");
-    local(|l| l.smith = Some(SmithHold { hold, pending: None }));
+    local(|l| l.smith = Some(SmithHold { hold }));
 }
 
 /// A window of mode 16, 15, 43, 44 or 19 that appeared since the last look is taken for the mod that holds its kind
@@ -931,10 +935,8 @@ fn expire(play: &mut Play) {
     }
     // a repair the server never answered stops blocking the next one
     local(|l| {
-        if let Some(s) = l.smith.as_mut()
-            && s.pending.as_ref().is_some_and(|p| p.3.elapsed() >= Duration::from_secs(3))
-        {
-            s.pending = None;
+        if l.repair_out.as_ref().is_some_and(|p| p.3.elapsed() >= Duration::from_secs(3)) {
+            l.repair_out = None;
         }
     });
     smith_settle(play);
@@ -942,14 +944,10 @@ fn expire(play: &mut Play) {
 
 /// The repair out is answered once the item's condition or the purse is not what it was.
 fn smith_settle(play: &Play) {
-    let Some((key, hp, coin, _)) = local(|l| l.smith.as_ref().and_then(|s| s.pending)) else { return };
+    let Some((key, hp, coin, _)) = local(|l| l.repair_out) else { return };
     let item = play.dump.inventory.items.iter().find(|it| it.inv_index == key);
     if item.is_none_or(|it| it.cur_hp != hp) || purse(play) != coin {
-        local(|l| {
-            if let Some(s) = l.smith.as_mut() {
-                s.pending = None;
-            }
-        });
+        local(|l| l.repair_out = None);
     }
 }
 
@@ -1056,7 +1054,7 @@ fn dispatch_inner(play: &mut Play, action: &A9Action) -> DispatchOutcome {
     match action {
         A9Action::TradeAnswer { accept } => trade_answer(play, *accept),
         A9Action::DuelAnswer { accept } => duel_answer(play, *accept),
-        A9Action::BlacksmithRepair { slot, id } => repair(play, *slot, *id),
+        A9Action::BlacksmithRepair { slot, id, key } => repair(play, *slot, *id, *key),
         A9Action::BlacksmithClose => {
             let Some(h) = local(|l| l.smith.clone()).filter(|h| holds(TakeoverKind::Blacksmith) && Some(h.hold.vm) == caller()) else {
                 return refuse("not_ready", "hold the 'blacksmith' window first (eqoa.windows.takeover) and wait for the smith");
@@ -1368,17 +1366,32 @@ pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
     Ok(())
 }
 
-fn repair(play: &mut Play, slot: usize, id: i64) -> DispatchOutcome {
-    let Some(h) = local(|l| l.smith.clone()).filter(|h| Some(h.hold.vm) == caller() && holds(TakeoverKind::Blacksmith)) else {
-        return refuse("not_ready", "hold the 'blacksmith' window first (eqoa.windows.takeover) and wait for the smith");
-    };
-    if h.pending.is_some() {
+/// A repair is allowed at a smith the caller holds, or at the game's own smith window while it is open and nobody
+/// holds the kind: the window is the player's to see, and the game lets any press through. A smith another mod holds
+/// is that mod's alone. Acting without a click is the manifest's "can act on its own" (`runtime`).
+fn repair(play: &mut Play, slot: usize, id: i64, key: Option<u32>) -> DispatchOutcome {
+    let held = local(|l| l.smith.clone());
+    match &held {
+        Some(h) if Some(h.hold.vm) != caller() || !holds(TakeoverKind::Blacksmith) => {
+            return refuse("busy", "another mod holds the blacksmith window");
+        }
+        None if play.mode != 19 || window_takeover::is_taken(TakeoverKind::Blacksmith) => {
+            return refuse("not_ready", "no blacksmith is open: wait for the smith (or hold 'blacksmith' with eqoa.windows.takeover)");
+        }
+        _ => {}
+    }
+    if local(|l| l.repair_out.is_some()) {
         return refuse("busy", "the last repair has not been answered yet");
     }
-    let Some(it) = smith_items(play).get(slot).map(|it| (*it).clone()) else {
-        return refuse("stale_handle", "that row is not in the smith's list now");
+    let items = smith_items(play);
+    let found = match key {
+        Some(k) => items.iter().find(|it| it.inv_index == k).map(|it| (*it).clone()),
+        None => items.get(slot).map(|it| (*it).clone()),
     };
-    if it.item.id != id {
+    let Some(it) = found else {
+        return refuse("stale_handle", "that item is not in the smith's list now");
+    };
+    if key.is_none() && it.item.id != id {
         return refuse("stale_handle", "that row holds a different item now");
     }
     let cost = crate::blacksmith::repair_cost(&it);
@@ -1393,11 +1406,7 @@ fn repair(play: &mut Play, slot: usize, id: i64) -> DispatchOutcome {
     let mut w = net::stream::Writer::op(0x0062);
     w.u32(it.inv_index).u32(smith_pass::smith_id(play));
     play.session.send(&w.data);
-    local(|l| {
-        if let Some(s) = l.smith.as_mut() {
-            s.pending = Some((it.inv_index, it.cur_hp, coin, Instant::now()));
-        }
-    });
+    local(|l| l.repair_out = Some((it.inv_index, it.cur_hp, coin, Instant::now())));
     DispatchOutcome::Completed { detail: Some(json!({"sent": true, "confirmed": false, "cost": cost})) }
 }
 

@@ -772,7 +772,8 @@ fn a9_blacksmith_lists_repairs_like_the_window_and_refuses_what_the_game_does() 
         &host,
         r#"
         local s = assert(eqoa.blacksmith.get())
-        assert(s.coin == 1000 and #s.items == 2 and s.repair_pending == false)
+        assert(s.coin == 1000 and #s.items == 2 and s.repair_pending == false and s.total == 50 and s.held == true)
+        assert(s.items[1].inventory_key == 1 and s.items[2].inventory_key == 2)
         assert(s.items[1].id == 20 and s.items[1].cost == 50 and s.items[1].can_repair == true and s.items[1].condition == 0.5)
         assert(s.items[2].id == 21 and s.items[2].cost == 0 and s.items[2].can_repair == false)
         assert(eqoa.windows.session("blacksmith") ~= nil)
@@ -804,6 +805,18 @@ fn a9_blacksmith_lists_repairs_like_the_window_and_refuses_what_the_game_does() 
     p.dump.player.p34 = 950;
     step(&mut p, &host);
     lua_ok(&host, "assert(eqoa.blacksmith.get().repair_pending == false and eqoa.blacksmith.get().items[1].can_repair == false)");
+    // by the items API's own key
+    p.dump.inventory.items[0].cur_hp = 25;
+    step(&mut p, &host);
+    clear_recorded(&mut p);
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1})");
+    lua_ok(&host, "assert(results[1].ok == true and results[1].detail.cost == 50, tostring(results[1].code))");
+    assert_eq!(recorded(&p), native_repair, "by key it is the same repair");
+    p.dump.inventory.items[0].cur_hp = 50;
+    p.dump.player.p34 = 950;
+    step(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 99})");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'stale_handle')");
     // close: the window's close
     clear_recorded(&mut p);
     ask(&mut p, &host, "return eqoa.actions.blacksmith_close()");
@@ -820,6 +833,25 @@ fn a9_blacksmith_lists_repairs_like_the_window_and_refuses_what_the_game_does() 
     deliver(&mut p, 0x0063, vec![]);
     step(&mut p, &host);
     lua_ok(&host, "assert(eqoa.blacksmith.get() == nil and ev[#ev] == 'closed:blacksmith:closed', ev[#ev])");
+
+    // nobody holds the kind: the game's own smith window is open, and a mod may repair at it (once, by the same bytes)
+    let mut p = ready();
+    smith_bags(&mut p);
+    let host = host_all();
+    step(&mut p, &host);
+    lua_ok(&host, "assert(eqoa.blacksmith.get() == nil)");
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1})");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready', 'control: no smith open')");
+    deliver(&mut p, 0x0061, 4242u32.to_le_bytes().to_vec());
+    assert_eq!(p.mode, 19, "the game's own window");
+    step(&mut p, &host);
+    lua_ok(&host, "local s = assert(eqoa.blacksmith.get()); assert(s.held == false and s.total == 50 and s.items[1].cost == 50)");
+    clear_recorded(&mut p);
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1})");
+    assert_eq!(recorded(&p), native_repair, "the same bytes as the window's X");
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1})");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'busy')");
+    assert_eq!(recorded(&p).len(), 1, "never replayed");
 }
 
 // ---- reads and the labels ----
@@ -840,13 +872,10 @@ fn a9_the_reads_say_nothing_before_a_world_and_nothing_with_nothing_open() {
 fn a9_the_labels_name_what_the_manifest_declares() {
     let caps = |names: &[&str]| names.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
     let lines = native_a9::trading_label(&caps(&["eqoa.actions.trade_add", "eqoa.actions.trade_money", "eqoa.actions.blacksmith_repair"]));
-    assert_eq!(
-        lines,
-        vec![
-            "Trading: can offer items in a trade, offer coin in a trade".to_string(),
-            "Blacksmith: can repair items (it spends your coin)".to_string()
-        ]
-    );
+    assert_eq!(lines, vec!["Trading: can offer items in a trade, offer coin in a trade".to_string()]);
+    // repairing acts on its own (no click, no question): it is named where every such action is
+    let own = crate::fork_ext::addons::runtime::autonomous_action_label(&caps(&["eqoa.actions.blacksmith_repair"]));
+    assert_eq!(own.as_deref(), Some("Actions: can act on its own (repair items (spends your coin))"));
     assert!(native_a9::trading_label(&caps(&["eqoa.trade.get"])).is_empty(), "reading says nothing: the control");
     let asks = crate::fork_ext::addons::runtime::asks_first_label(&caps(&["eqoa.actions.trade_accept"]));
     assert_eq!(asks.as_deref(), Some("Asks you first: accept a trade or a duel wager"));

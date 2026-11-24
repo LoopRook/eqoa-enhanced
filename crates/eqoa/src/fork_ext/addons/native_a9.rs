@@ -69,7 +69,8 @@ pub(crate) enum A9Action {
     /// Yes or No to the invitation a held `duel_invite` shows.
     DuelAnswer { accept: bool },
     /// Repair one row of `eqoa.blacksmith.get().items`.
-    BlacksmithRepair { slot: usize, id: i64 },
+    /// By the row (`slot`, `id`) or, when `key` is set, by the item's `inventory_key` (the items API's own key).
+    BlacksmithRepair { slot: usize, id: i64, key: Option<u32> },
     BlacksmithClose,
 }
 
@@ -263,8 +264,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             "eqoa.duel.Invite",
             "id name race_id race_name class_id class_name level guild title",
         ),
-        ("eqoa.blacksmith.State", "revision coin items repair_pending"),
-        ("eqoa.blacksmith.Item", "slot id name quantity condition cost can_repair worn"),
+        ("eqoa.blacksmith.State", "revision coin items repair_pending total held"),
+        ("eqoa.blacksmith.Item", "slot id inventory_key name quantity condition cost can_repair worn"),
     ] {
         describe(lua, path, "supported", Some(ROUND), "");
         for field in fields.split_whitespace() {
@@ -362,7 +363,30 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             })
         })?,
     )?;
-    for (name, trade) in [("trade_remove", true), ("blacksmith_repair", false)] {
+    bind(
+        lua,
+        "actions",
+        "blacksmith_repair",
+        lua.create_function(|lua, pick: Value| {
+            enqueue_lua_with(lua, "eqoa.actions.blacksmith_repair", || {
+                let Value::Table(t) = &pick else {
+                    return Err((
+                        "invalid_argument",
+                        "pass a listed row {slot = .., id = ..} or an item's {inventory_key = ..}".into(),
+                    ));
+                };
+                if let Some(v) = t.get::<Value>("inventory_key").ok().filter(|v| !matches!(v, Value::Nil)) {
+                    return match int_arg(&v).and_then(|n| u32::try_from(n).ok()) {
+                        Some(key) => Ok(ActionKind::A9(A9Action::BlacksmithRepair { slot: 0, id: 0, key: Some(key) })),
+                        None => Err(("invalid_argument", "inventory_key must be an item's inventory_key".into())),
+                    };
+                }
+                let (slot, id) = pick_of(t)?;
+                Ok(ActionKind::A9(A9Action::BlacksmithRepair { slot, id, key: None }))
+            })
+        })?,
+    )?;
+    for (name, trade) in [("trade_remove", true)] {
         bind(
             lua,
             "actions",
@@ -374,11 +398,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                         return Err(("invalid_argument", "pass a listed row: {slot = .., id = ..}".into()));
                     };
                     let (slot, id) = pick_of(t)?;
-                    Ok(ActionKind::A9(if trade {
-                        A9Action::TradeRemove { slot, id }
-                    } else {
-                        A9Action::BlacksmithRepair { slot, id }
-                    }))
+                    let _ = trade;
+                    Ok(ActionKind::A9(A9Action::TradeRemove { slot, id }))
                 })
             })?,
         )?;
@@ -419,14 +440,9 @@ pub(crate) fn trading_label(caps: &[String]) -> Vec<String> {
     if !steps.is_empty() {
         lines.push(format!("Trading: can {}", steps.join(", ")));
     }
-    let mut smith: Vec<&str> = Vec::new();
-    for (name, words) in [("blacksmith_repair", "repair items (it spends your coin)"), ("blacksmith_close", "close the blacksmith")] {
-        if has(name) {
-            smith.push(words);
-        }
-    }
-    if !smith.is_empty() {
-        lines.push(format!("Blacksmith: can {}", smith.join(", ")));
+    // `blacksmith_repair` is named under "can act on its own" (`runtime::autonomous_action_label`)
+    if has("blacksmith_close") {
+        lines.push("Blacksmith: can close the blacksmith".to_string());
     }
     lines
 }

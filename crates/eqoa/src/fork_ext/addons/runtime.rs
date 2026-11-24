@@ -965,6 +965,7 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
                 // round A8: their own line (`native_a8::crafting_label`)
                 k if k.starts_with("craft_") => continue,
                 // round A9: their own lines (`native_a9::trading_label`, `asks_first_label`)
+                "blacksmith_repair" => "repair items (spends your coin)",
                 k if super::native_a9::NAMES.contains(&k) => continue,
                 // round A5: the same for spending training points and the two Class Mastery steps
                 "train_stats" | "mastery_buy" | "mastery_refund" => continue,
