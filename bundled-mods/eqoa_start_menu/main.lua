@@ -196,10 +196,28 @@ function finish()
     state.session, state.hits, state.rect, state.path = nil, {}, nil, {}
 end
 
-local ok, err = eqoa.windows.takeover("start_menu", { scope = "all" })
-if not ok then
-    eqoa.log.write("warn", "Start Menu could not take the Start key: " .. tostring(err and err.message))
+-- The client lets go of every claim when the world is left (zoning, a respawn, a teleport, a new login) and with the
+-- player's "Use the game's windows" switch, so the Start key is taken again on the new world, and now and then
+-- besides. Asking while holding it is no change, so this may be asked as often as it is wanted.
+local told
+local function claim()
+    local ok, err = eqoa.windows.takeover("start_menu", { scope = "all" })
+    local now = ok and "held" or (err and err.code or "refused")
+    if now ~= told then
+        told = now
+        if not ok then
+            eqoa.log.write("warn", "Start Menu could not take the Start key: " .. tostring(err and err.message))
+        end
+    end
 end
+claim()
+eqoa.events.on("world.entered", function() claim() end)
+eqoa.events.on("state.reset", function() claim() end)
+local RECLAIM_FRAMES, frames = 120, 0
+eqoa.events.on("render", function()
+    frames = frames + 1
+    if frames % RECLAIM_FRAMES == 0 then claim() end
+end)
 
 eqoa.events.on("windows.session", function(e)
     local d = e.data

@@ -509,11 +509,47 @@ listen("windows.session", function(e)
     end
 end)
 
-local ok, err = eqoa.windows.takeover("chat_entry", { scope = "all" })
-if not ok then
-    eqoa.log.write("warn", "Chat could not take the Enter key: " .. tostring(err and err.message))
+-- The client lets go of every claim when the world is left (zoning, a respawn, a teleport, a new login) and with the
+-- player's "Use the game's windows" switch: the chat line and the hiding of the game's chat are taken again on the new
+-- world, and now and then besides. Asking for a kind already held is no change. The hide is asked for again on each new
+-- world (`e.generation` is the world's number), after letting go of the old token, so the mod never holds two claims
+-- and an old world's token never outlives the mod.
+local told
+local in_world = false
+local hide_world, hide_told
+local function claim(world)
+    local ok, err = eqoa.windows.takeover("chat_entry", { scope = "all" })
+    local now = ok and "held" or (err and err.code or "refused")
+    if now ~= told then
+        told = now
+        if not ok then
+            eqoa.log.write("warn", "Chat could not take the Enter key: " .. tostring(err and err.message))
+        end
+    end
+    if not in_world then return end
+    if state.hide and world ~= nil and world ~= hide_world then
+        eqoa.hud.show(state.hide)
+        state.hide = nil
+    end
+    if not state.hide then
+        local token, herr = eqoa.hud.hide("chat")
+        state.hide, hide_world = token, world
+        local code = token and "held" or (herr and herr.code or "refused")
+        if code ~= hide_told then
+            hide_told = code
+            if not token then
+                eqoa.log.write("warn", "Chat could not hide the game's chat: " .. tostring(herr and herr.message))
+            end
+        end
+    end
 end
-state.hide = eqoa.hud.hide("chat")
+claim()
+eqoa.events.on("world.entered", function(e) in_world = true; claim(e.generation) end)
+eqoa.events.on("state.reset", function(e)
+    in_world = e.data and e.data.in_world == true
+    claim(e.generation)
+end)
+eqoa.events.on("world.leaving", function() in_world = false end)
 
 local function release()
     close_menu()
@@ -524,7 +560,10 @@ local function release()
     if state.hide then eqoa.hud.show(state.hide); state.hide = nil end
 end
 eqoa.events.on("disabling", release)
+local RECLAIM_FRAMES, frames = 120, 0
 eqoa.events.on("render", function()
+    frames = frames + 1
+    if frames % RECLAIM_FRAMES == 0 then claim() end
     local f = eqoa.hud.frame()
     local k = math.min(f.scale_x, f.scale_y)
     local dw, dh = ui.GetDisplaySize()
