@@ -159,13 +159,13 @@ fn move_to(x: f32, y: f32, context: &mut Context) {
 
 /// A left press at the pointer; `true` when the claim kept it from the game.
 fn press(x: f32, y: f32, context: &mut Context) -> bool {
+    press_button(x, y, MouseButton::Left, context)
+}
+
+fn press_button(x: f32, y: f32, button: MouseButton, context: &mut Context) -> bool {
     move_to(x, y, context);
     pointer_api::observe(
-        &WindowEvent::MouseInput {
-            device_id: DeviceId::dummy(),
-            state: ElementState::Pressed,
-            button: MouseButton::Left,
-        },
+        &WindowEvent::MouseInput { device_id: DeviceId::dummy(), state: ElementState::Pressed, button },
         SIZE,
     )
 }
@@ -424,4 +424,62 @@ fn a_drag_that_began_on_an_imgui_window_is_kept_when_it_passes_under_a_claimed_o
     assert_eq!(active, held, "the button is still held under the book");
     context.io_mut().add_mouse_button_event(dear_imgui_rs::input::MouseButton::Left, false);
     frames(&[&window, &book], &mut context, 2);
+}
+
+#[test]
+fn the_bag_viewers_item_menu_over_another_window_takes_left_and_right_clicks_alone() {
+    let mut context = setup();
+    let book = Mod::real("eqoa_spellbook");
+    let bag = Mod::real("eqoa_bag_viewer");
+    h::press(&book.host, "k", "shift+k");
+    frames(&[&book, &bag], &mut context, 3);
+    h::press(&bag.host, "b", "shift+b");
+    // an empty pack: the bag has no inventory to read in this fixture, so it is given one empty row to draw
+    bag.host
+        .lua
+        .load("local B = require('bags'); B.is_grid_stale = function() return false end; B.grid = {rows = 1, total_rows = 1, items = {}, money = 0, used = 0, capacity = 8}")
+        .exec()
+        .unwrap();
+    frames(&[&book, &bag], &mut context, 4);
+    assert!(ws::get(bag.vm, "inventory").is_some(), "the Bag Viewer opened");
+    assert!(z("eqoa_bag_viewer_layer") > z("eqoa_spellbook_layer"), "the Bag Viewer opened last is in front");
+    // the menu an item's click builds (its rows are the bag's own: one use, one greyed), drawn on the next frame
+    bag.host
+        .lua
+        .load("local B = require('bags'); B.menu = {title = 'Test item', rows = {{label = 'Use', text = 'Use', enabled = true}, {label = 'Destroy', enabled = false, reason = 'asks first'}}, fx = 8, fy = 46}")
+        .exec()
+        .unwrap();
+    frames(&[&book, &bag], &mut context, 2);
+    let (mx, my, mw, mh): (f32, f32, f32, f32) =
+        bag.host.lua.load("local r = require('bags').menu_rect; return r.x, r.y, r.w, r.h").eval().unwrap();
+    let (rb, rbook) = (rect(bag.vm), rect(book.vm));
+    let menu = [mx, my, mw, mh];
+    assert!(
+        inside(&rb, mx, my) && inside(&rb, mx + mw, my + mh),
+        "the menu is drawn inside the Bag Viewer's claimed window ({menu:?} in {rb:?}), so the claim covers it"
+    );
+    let row = (mx + mw * 0.5, my + 24.0);
+    assert!(inside(&rbook, row.0, row.1), "a menu row is over the Spellbook too");
+    deliver(&[&book, &bag]);
+    for button in [MouseButton::Left, MouseButton::Right] {
+        assert!(press_button(row.0, row.1, button, &mut context));
+        assert_eq!((bag.clicks(), book.clicks()), (1, 0), "{button:?}: only the menu's window hears the click");
+        deliver(&[&book, &bag]);
+        // the menu is still there for the next click (a right-click closes it: put it back)
+        bag.host
+            .lua
+            .load("local B = require('bags'); B.menu = B.menu or {title = 'Test item', rows = {{label = 'Use', text = 'Use', enabled = true}, {label = 'Destroy', enabled = false, reason = 'asks first'}}, fx = 8, fy = 46}")
+            .exec()
+            .unwrap();
+        frames(&[&book, &bag], &mut context, 2);
+    }
+    // the Spellbook shows no hover under the menu
+    move_to(row.0, row.1, &mut context);
+    assert!(!book.lua_bool("return eqoa.input.pointer().inside_window"));
+    // control: before the order, the Spellbook heard the menu's clicks too
+    pointer_api::set_legacy_for_test(true);
+    press_button(row.0, row.1, MouseButton::Right, &mut context);
+    assert_eq!((bag.clicks(), book.clicks()), (1, 1), "control: the click went through the menu to the Spellbook");
+    pointer_api::set_legacy_for_test(false);
+    deliver(&[&book, &bag]);
 }
