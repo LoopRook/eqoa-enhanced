@@ -1106,3 +1106,5 @@ fn a6_a_failing_handler_releases_its_windows_and_is_told_they_closed() {
     assert!(window_takeover::is_taken(TakeoverKind::StartMenu));
     assert!(ws::get(vm2, "start_menu").is_some());
 }
+
+include!("perf_mods_tests.rs");

@@ -52,6 +52,10 @@ end
 -- look is kept SCAN_TTL seconds (distances only drift by a step in that time), so a crowded zone never makes it one
 -- look per frame; Auto-loot's poll (`auto_poll`) shares it.
 local SCAN_TTL, SCAN_MIN = 0.5, 0.25
+-- What the open window asks (is a merchant, a banker or a corpse near: a button's place and colour) may be this old
+-- before the zone is looked at again: they drift by steps, and a look is ~3.4 ms. Everything that acts on the answer
+-- (Auto-loot's poll, the fight check, the helpers) keeps SCAN_TTL.
+M.DRAW_TTL = 1.0
 -- A merchant or banker farther than this is not "nearby" at all: no Sell junk or bank row for one at the other end of a
 -- city (the "too far" line is for one within sight that the server may not answer yet).
 M.NPC_SHOWN_WITHIN = 40.0
@@ -84,11 +88,11 @@ function M.not_a_fight(e, ppos, pl)
     return nil
 end
 
-local function scan_zone()
+local function scan_zone(ttl)
     local now = os.clock()
     if scan_data and scan_at and now >= scan_at then
         local age = now - scan_at
-        if age < SCAN_TTL and not (scan_dirty and age >= SCAN_MIN) then return scan_data end
+        if age < (ttl or SCAN_TTL) and not (scan_dirty and age >= SCAN_MIN) then return scan_data end
     end
     local data = {corpses = {}, nearest = {}}
     M.scan_count = M.scan_count + 1
@@ -137,15 +141,15 @@ function M.scan_reset()
     scan_at, scan_data, scan_dirty = nil, nil, false
 end
 
-function M.nearby_corpse()
-    local data = scan_zone()
+function M.nearby_corpse(ttl)
+    local data = scan_zone(ttl)
     local c = data.nearest.corpse
     if not c then return nil end
     return c.e, c.d2
 end
 
-function M.nearby_npc(kind)
-    local data = scan_zone()
+function M.nearby_npc(kind, ttl)
+    local data = scan_zone(ttl)
     local c = data.nearest[kind == "merchant" and "merchant" or (kind == "bank" and "bank" or "any")]
     if not c then return nil end
     return c.e, c.d2

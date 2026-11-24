@@ -11,7 +11,16 @@ local ui = eqoa.imgui
 -- ImGuiCond_FirstUseEver: the windows start side by side, and keep where the player drags them
 local FIRST_USE = 4
 
-local function has(path) return eqoa.capabilities.has(path) end
+-- What the mod may call does not change while it runs: each capability is asked once, not every drawn frame.
+local known_caps = {}
+local function has(path)
+    local yes = known_caps[path]
+    if yes == nil then
+        yes = eqoa.capabilities.has(path) and true or false
+        known_caps[path] = yes
+    end
+    return yes
+end
 
 -- "1:05", "12s" or "--" where the server keeps no end for an effect.
 local function clock(seconds)
