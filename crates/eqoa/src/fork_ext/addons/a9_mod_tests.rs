@@ -87,7 +87,7 @@ fn request_state() -> serde_json::Value {
 
 fn open_state(accepted_mine: bool) -> serde_json::Value {
     let bag = |slot: i64, id: i64, name: &str, qty: i64, worn: bool| {
-        json!({"slot": slot, "id": id, "name": name, "quantity": qty, "worn": worn, "no_trade": false, "can_offer": !worn})
+        json!({"slot": slot, "id": id, "name": name, "quantity": qty, "worn": worn, "no_trade": false, "can_offer": !worn, "text": format!("{name}\nDamage 12 / Delay 30\nLevel 20")})
     };
     json!({
         "kind": "trade", "phase": "open", "held": true,
@@ -214,9 +214,9 @@ fn a9_trade_mod_draws_the_answering_players_open_trade_and_never_accepts_by_itse
     assert!(queued().is_empty(), "control: a drawn trade sends and accepts nothing");
 
     // the right-click offer: a row that can be offered, one that is worn (the core refuses it too), and the whole stack
-    host.execute("local T = require('tradeui'); local t = eqoa.trade.get(); T.offer_row(t, t.bags[2], false)").unwrap();
+    host.execute("local T = require('tradeui'); local t = eqoa.trade.get(); T.offer_row(t.bags[2], false)").unwrap();
     assert_eq!(queued(), vec!["trade_add"]);
-    host.execute("local T = require('tradeui'); local t = eqoa.trade.get(); T.offer_row(t, t.bags[3], false)").unwrap();
+    host.execute("local T = require('tradeui'); local t = eqoa.trade.get(); T.offer_row(t.bags[3], false)").unwrap();
     assert_eq!(queued(), vec!["trade_add"], "a worn row is not offered");
     host.execute("local T = require('tradeui'); local t = eqoa.trade.get(); T.take_back(t.mine.items[1]); T.set_money('250')").unwrap();
     assert_eq!(queued(), vec!["trade_add", "trade_remove", "trade_money"]);
@@ -298,6 +298,14 @@ fn smith_state(costs: &[(i64, i64)], pending: bool, coin: i64) -> serde_json::Va
     json!({"coin": coin, "repair_pending": pending, "held": false, "total": total, "items": items})
 }
 
+fn result_line(host: &Host) -> String {
+    host.lua.load("return require('bags').result and require('bags').result.text or ''").eval().unwrap()
+}
+
+fn sent_ok(host: &Host) {
+    host.execute("local R = require('repair'); R.on_action_result({request_id = R.run.wait, ok = true, phase = 'completed'})").unwrap();
+}
+
 #[test]
 fn a9_bag_viewer_repair_lists_costs_asks_once_for_all_and_repairs_one_at_a_time() {
     let (host, bridge, mut ctx, _vm) = start(BV);
@@ -308,14 +316,19 @@ fn a9_bag_viewer_repair_lists_costs_asks_once_for_all_and_repairs_one_at_a_time(
     frames(&host, &bridge, &mut ctx, 3);
     assert!(window_drawn("Repair##eqoa_bag_viewer_repair"), "the panel is up while a smith is open");
     assert_window_fits("Repair##eqoa_bag_viewer_repair", "repair panel at the default size");
-    // the Bag Viewer's own start-up note (auto-loot) is not the panel's: any other line would be
+    // the smith's own diagnostics: only the Bag Viewer's start-up note (auto-loot) is allowed
     let logs: Vec<String> = host.drain_logs().unwrap().into_iter().filter(|l| !l.contains("auto-loot")).collect();
     assert!(logs.is_empty(), "{logs:?}");
     assert!(bridge.drain_diagnostics().is_empty());
-    // one click repairs one item
+    // one click repairs one item, and it is told as repaired only once the smith's list shows it so
     host.execute("local R = require('repair'); R.repair_one(R.damaged(eqoa.blacksmith.get())[1])").unwrap();
     assert_eq!(queued(), vec!["blacksmith_repair"]);
-    host.execute("local R = require('repair'); R.on_action_result({request_id = R.run.wait, ok = true, phase = 'completed'})").unwrap();
+    sent_ok(&host);
+    frames(&host, &bridge, &mut ctx, 2);
+    assert!(host.lua.load("return require('repair').run ~= nil").eval::<bool>().unwrap(), "sent is not repaired: the run waits for the list");
+    native_a9::publish(View::Smith, Some(smith_state(&[(1, 0), (2, 70), (3, 0)], false, 450)), None);
+    frames(&host, &bridge, &mut ctx, 2);
+    assert!(host.lua.load("return require('repair').status.text:find('Repaired 1 item for 50 coins') ~= nil").eval::<bool>().unwrap());
     action_broker::reset_all_for_test();
 
     // "Repair all": the question names the total and nothing is sent before the Yes (the control)
@@ -323,75 +336,115 @@ fn a9_bag_viewer_repair_lists_costs_asks_once_for_all_and_repairs_one_at_a_time(
     frames(&host, &bridge, &mut ctx, 3);
     assert_window_fits("Repair##eqoa_bag_viewer_repair", "repair question");
     assert!(queued().is_empty(), "the question sends nothing");
-    // No ends it, still nothing
     host.execute("local R = require('repair'); R.answer(eqoa.blacksmith.get(), false)").unwrap();
     frames(&host, &bridge, &mut ctx, 2);
     assert!(queued().is_empty(), "No repairs nothing");
-    // Yes: one repair goes, and no second until the server has answered the first
+    // Yes: one repair goes, and no second until the smith's own list shows the first done
+    native_a9::publish(View::Smith, Some(smith_state(&[(1, 50), (2, 70), (3, 0)], false, 500)), None);
     host.execute("local R = require('repair'); local s = eqoa.blacksmith.get(); R.begin_ask(s); R.answer(s, true)").unwrap();
     frames(&host, &bridge, &mut ctx, 4);
     assert_eq!(queued(), vec!["blacksmith_repair"], "one at a time");
-    // the answer comes: the server's read says pending, then the first item is whole
-    host.execute("local R = require('repair'); R.on_action_result({request_id = R.run.wait, ok = true, phase = 'completed'})").unwrap();
+    sent_ok(&host);
     native_a9::publish(View::Smith, Some(smith_state(&[(1, 0), (2, 70), (3, 0)], true, 450)), None);
     frames(&host, &bridge, &mut ctx, 3);
     assert_eq!(queued(), vec!["blacksmith_repair"], "no second repair while the smith's last one is pending");
     native_a9::publish(View::Smith, Some(smith_state(&[(1, 0), (2, 70), (3, 0)], false, 450)), None);
     frames(&host, &bridge, &mut ctx, 3);
     assert_eq!(queued(), vec!["blacksmith_repair", "blacksmith_repair"], "the next goes after the answer");
-    host.execute("local R = require('repair'); R.on_action_result({request_id = R.run.wait, ok = true, phase = 'completed'})").unwrap();
+    sent_ok(&host);
     native_a9::publish(View::Smith, Some(smith_state(&[(1, 0), (2, 0), (3, 0)], false, 380)), None);
     frames(&host, &bridge, &mut ctx, 3);
     assert_eq!(queued().len(), 2, "nothing is sent twice, and the run is over");
-    let line: String = host.lua.load("return require('bags').result and require('bags').result.text or ''").eval().unwrap();
-    assert!(line.starts_with("Repaired 2 items for 120 coins"), "the total is told: {line}");
+    assert!(result_line(&host).starts_with("Repaired 2 items for 120 coins"), "{}", result_line(&host));
+    // the smith closes: the result stays up a few seconds, then goes
+    native_a9::publish(View::Smith, None, None);
+    assert!(frames(&host, &bridge, &mut ctx, 2) > 0, "the last result stays up after the smith closes");
+    assert!(window_drawn("Repair##eqoa_bag_viewer_repair_done"));
+    host.execute("require('repair').last.finish = os.clock() - 1").unwrap();
+    assert_eq!(frames(&host, &bridge, &mut ctx, 2), 0, "and goes away");
+
+    // an item the smith never answers is not told as repaired: the run stops with the reason, after one send
+    action_broker::reset_all_for_test();
+    native_a9::publish(View::Smith, Some(smith_state(&[(1, 50), (2, 70)], false, 500)), None);
+    frames(&host, &bridge, &mut ctx, 2);
+    host.execute("local R = require('repair'); local s = eqoa.blacksmith.get(); R.begin_ask(s); R.answer(s, true)").unwrap();
+    frames(&host, &bridge, &mut ctx, 3);
+    sent_ok(&host);
+    native_a9::publish(View::Smith, Some(smith_state(&[(1, 50), (2, 70)], true, 500)), None);
+    frames(&host, &bridge, &mut ctx, 2);
+    native_a9::publish(View::Smith, Some(smith_state(&[(1, 50), (2, 70)], false, 500)), None);
+    frames(&host, &bridge, &mut ctx, 3);
+    assert_eq!(queued(), vec!["blacksmith_repair"], "nothing more is sent after an unanswered one");
+    let status: String = host.lua.load("return require('repair').status.text").eval().unwrap();
+    assert!(status.contains("no answer from the smith") && status.starts_with("Repaired 0 items for 0 coins"), "{status}");
+
     // a changed price makes the Yes ask again instead of repairing at a price the player did not see
     action_broker::reset_all_for_test();
     native_a9::publish(View::Smith, Some(smith_state(&[(1, 50)], false, 500)), None);
     frames(&host, &bridge, &mut ctx, 2);
-    host.execute("local R = require('repair'); R.begin_ask(eqoa.blacksmith.get())").unwrap();
+    host.execute("local R = require('repair'); R.status = nil; R.begin_ask(eqoa.blacksmith.get())").unwrap();
     native_a9::publish(View::Smith, Some(smith_state(&[(1, 90)], false, 500)), None);
     host.execute("local R = require('repair'); R.answer(eqoa.blacksmith.get(), true)").unwrap();
     frames(&host, &bridge, &mut ctx, 3);
     assert!(queued().is_empty(), "a Yes for a different total repairs nothing");
+
+    // what cannot be paid for is skipped, the rest repaired, and the line says how many were skipped
+    action_broker::reset_all_for_test();
+    native_a9::publish(View::Smith, Some(smith_state(&[(1, 50), (2, 70)], false, 60)), None);
+    frames(&host, &bridge, &mut ctx, 2);
+    host.execute("local R = require('repair'); local s = eqoa.blacksmith.get(); R.begin_ask(s); assert(R.ask.n == 1 and R.ask.total == 50 and R.ask.skipped == 1); R.answer(s, true)").unwrap();
+    frames(&host, &bridge, &mut ctx, 3);
+    assert_eq!(queued(), vec!["blacksmith_repair"], "only the item that can be paid for");
+    sent_ok(&host);
+    native_a9::publish(View::Smith, Some(smith_state(&[(1, 0), (2, 70)], false, 10)), None);
+    frames(&host, &bridge, &mut ctx, 3);
+    assert!(result_line(&host).contains("Repaired 1 item for 50 coins; 1 skipped (not enough coin)"), "{}", result_line(&host));
 }
 
 #[test]
-fn a9_bag_viewer_repair_automatically_is_off_by_default_and_repairs_all_when_the_smith_opens() {
+fn a9_bag_viewer_repair_automatically_is_off_by_default_per_character_and_repairs_all_when_the_smith_opens() {
     // control: the option is off, a smith opens, nothing is sent
     {
         let (host, bridge, mut ctx, _vm) = start(BV);
-        assert!(host.lua.load("return require('repair').auto == false").eval::<bool>().unwrap(), "off by default");
+        assert!(host.lua.load("return require('repair').auto_on() == false").eval::<bool>().unwrap(), "off by default");
         native_a9::publish(View::Smith, Some(smith_state(&[(1, 50), (2, 70)], false, 500)), None);
         frames(&host, &bridge, &mut ctx, 4);
         assert!(queued().is_empty(), "with the option off the panel waits for a click");
     }
 
-    // the option on: it repairs as the smith opens, with no question, one at a time, and says the total once
+    // ticked for this character: it repairs as the smith opens, with no question, one at a time, and says the total
     let (host, bridge, mut ctx, _vm) = start(BV);
-    host.execute("require('repair').auto = true").unwrap();
+    host.execute("require('repair').set_auto(true)").unwrap();
     native_a9::publish(View::Smith, Some(smith_state(&[(1, 50), (2, 70)], false, 500)), None);
     frames(&host, &bridge, &mut ctx, 4);
     assert_eq!(queued(), vec!["blacksmith_repair"], "the first repair goes at once, no question");
-    host.execute("local R = require('repair'); R.on_action_result({request_id = R.run.wait, ok = true, phase = 'completed'})").unwrap();
+    sent_ok(&host);
     native_a9::publish(View::Smith, Some(smith_state(&[(1, 0), (2, 70)], false, 450)), None);
     frames(&host, &bridge, &mut ctx, 3);
-    host.execute("local R = require('repair'); R.on_action_result({request_id = R.run.wait, ok = true, phase = 'completed'})").unwrap();
+    sent_ok(&host);
     native_a9::publish(View::Smith, Some(smith_state(&[(1, 0), (2, 0)], false, 380)), None);
     frames(&host, &bridge, &mut ctx, 3);
     assert_eq!(queued().len(), 2);
-    let line: String = host.lua.load("return require('bags').result and require('bags').result.text or ''").eval().unwrap();
-    assert!(line.starts_with("Repaired 2 items for 120 coins"), "{line}");
-    // it does not repair again for the same visit, and a refusal stops the run with the reason
+    assert!(result_line(&host).starts_with("Repaired 2 items for 120 coins"), "{}", result_line(&host));
+    // it does not repair again for the same visit
     frames(&host, &bridge, &mut ctx, 3);
     assert_eq!(queued().len(), 2);
+    // another character on the same account has its own switch: off
+    super::native_core::CORE.with(|c| c.borrow_mut().view.player = json!({"id": 257, "name": "Alt", "level": 20}));
     native_a9::publish(View::Smith, None, None);
     frames(&host, &bridge, &mut ctx, 2);
-    native_a9::publish(View::Smith, Some(smith_state(&[(1, 50)], false, 10)), None);
+    action_broker::reset_all_for_test();
+    native_a9::publish(View::Smith, Some(smith_state(&[(1, 50)], false, 500)), None);
+    frames(&host, &bridge, &mut ctx, 4);
+    assert!(queued().is_empty(), "the option is per character: this one has it off");
+    // and a refusal stops the run with the reason (back on the first character, too little coin)
+    super::native_core::CORE.with(|c| c.borrow_mut().view.player = json!({"id": 256, "name": "Me", "level": 20}));
+    native_a9::publish(View::Smith, None, None);
+    frames(&host, &bridge, &mut ctx, 2);
+    native_a9::publish(View::Smith, Some(smith_state(&[(1, 50)], false, 500)), None);
     frames(&host, &bridge, &mut ctx, 3);
     host.execute("local R = require('repair'); R.on_action_result({request_id = R.run.wait, ok = false, code = 'not_ready', reason = 'you carry 10', phase = 'completed'})").unwrap();
-    let line: String = host.lua.load("return require('bags').result.text").eval().unwrap();
-    assert!(line.contains("stopped: you carry 10"), "{line}");
+    assert!(result_line(&host).contains("stopped: you carry 10"), "{}", result_line(&host));
 }
 
 #[test]
@@ -419,4 +472,125 @@ fn a9_trade_mod_takes_its_windows_again_after_zoning() {
     super::native_core::CORE.with(|c| c.borrow_mut().emit("world.entered", json!({"world_id": 2, "initial": false})));
     frames(&host, &bridge, &mut ctx, 3);
     assert!(window_takeover::is_taken(TakeoverKind::TradeAsk), "and on world.entered");
+}
+
+// ---- real input on the Trade window (the fix round after the mods review) ----
+
+fn window_ptr(name_part: &str) -> Option<*mut sys::ImGuiWindow> {
+    unsafe {
+        let ctx = &*sys::igGetCurrentContext();
+        let windows = &ctx.Windows;
+        for i in 0..windows.Size {
+            let w = *windows.Data.add(i as usize);
+            if !w.is_null() && (*w).WasActive {
+                let name = std::ffi::CStr::from_ptr((*w).Name).to_string_lossy();
+                if name.contains(name_part) {
+                    return Some(w);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Moves the pointer over the item `label` of the window (or child) whose name contains `window`, by looking for the
+/// place where Dear ImGui says that item is hovered. The click that follows is the real path: the mouse is the
+/// window system's, and the button is the one the player sees.
+fn hover_item(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, window: &str, label: &str) -> (f32, f32) {
+    let w = window_ptr(window).unwrap_or_else(|| panic!("window {window:?} is not drawn"));
+    let (pos, size, seed) = unsafe { ((*w).Pos, (*w).Size, (*w).ID) };
+    let label_c = std::ffi::CString::new(label).unwrap();
+    let want = unsafe { sys::igImHashStr(label_c.as_ptr(), 0, seed) };
+    let mut y = pos.y + 2.0;
+    while y < pos.y + size.y {
+        let mut x = pos.x + 2.0;
+        while x < pos.x + size.x {
+            ctx.io_mut().add_mouse_pos_event([x, y]);
+            frames(host, bridge, ctx, 1);
+            let hovered = unsafe { (*sys::igGetCurrentContext()).HoveredId };
+            if hovered == want {
+                return (x, y);
+            }
+            x += 6.0;
+        }
+        y += 4.0;
+    }
+    panic!("no place in {window:?} hovers {label:?}");
+}
+
+fn click(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, button: dear_imgui_rs::MouseButton) {
+    ctx.io_mut().add_mouse_button_event(button, true);
+    frames(host, bridge, ctx, 1);
+    ctx.io_mut().add_mouse_button_event(button, false);
+    frames(host, bridge, ctx, 2);
+}
+
+const TRADE_WIN: &str = "eqoa_trade_window";
+
+#[test]
+fn a9_trade_mod_set_button_sends_what_was_typed_by_a_real_click() {
+    let (host, bridge, mut ctx, vm) = start(TRADE);
+    native_a9::publish(View::Trade, Some(open_state(false)), None);
+    hold(vm, TakeoverKind::Trade);
+    frames(&host, &bridge, &mut ctx, 3);
+    // the coin box: click it, type 500
+    hover_item(&host, &bridge, &mut ctx, TRADE_WIN, "##coins");
+    click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Left);
+    for c in "500".chars() {
+        ctx.io_mut().add_input_character(c);
+        frames(&host, &bridge, &mut ctx, 1);
+    }
+    assert_eq!(host.lua.load("return require('tradeui').state.money_text").eval::<String>().unwrap(), "500");
+    assert!(queued().is_empty(), "typing offers nothing");
+    // the click on Set: the box loses the keyboard on the press, the button fires on the release
+    hover_item(&host, &bridge, &mut ctx, TRADE_WIN, "Set##coins_set");
+    click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Left);
+    assert_eq!(queued(), vec!["trade_money"], "Set sends the offer");
+    assert_eq!(host.lua.load("return require('tradeui').state.last_money_sent").eval::<i64>().unwrap(), 500, "the typed amount, not the current offer (120)");
+    assert!(host.lua.load("return require('tradeui').state.money_text == nil").eval::<bool>().unwrap(), "and the box is empty again");
+}
+
+#[test]
+fn a9_trade_mod_offers_by_button_and_by_right_click_with_the_window_in_front() {
+    let (host, bridge, mut ctx, vm) = start(TRADE);
+    native_a9::publish(View::Trade, Some(open_state(false)), None);
+    hold(vm, TakeoverKind::Trade);
+    frames(&host, &bridge, &mut ctx, 3);
+    // the mod no longer depends on the pointer event another mod's claim can swallow
+    let src = std::fs::read_to_string(root(TRADE).join("modules/tradeui.lua")).unwrap();
+    assert!(!src.contains("pointer.pressed"), "the offer is the window's own input, not a pointer event");
+    // the row's Offer button (left-click), found inside the bags list
+    hover_item(&host, &bridge, &mut ctx, "##bags", "Offer##offer_2");
+    click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Left);
+    assert_eq!(queued(), vec!["trade_add"], "Offer sends one add");
+    // the right-click on the row itself
+    hover_item(&host, &bridge, &mut ctx, "##bags", "Rusty Sword x1##bag_2");
+    click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Right);
+    assert_eq!(queued(), vec!["trade_add", "trade_add"], "a right-click on a row offers it");
+    // control: a right-click on the window's empty space offers nothing
+    ctx.io_mut().add_mouse_pos_event([5.0, 5.0]);
+    frames(&host, &bridge, &mut ctx, 1);
+    click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Right);
+    assert_eq!(queued().len(), 2);
+    // a stack's All button offers the whole stack
+    hover_item(&host, &bridge, &mut ctx, "##bags", "All##all_1");
+    click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Left);
+    assert_eq!(queued().len(), 3);
+}
+
+#[test]
+fn a9_trade_mod_takes_its_windows_again_when_the_switch_was_turned_off_and_on() {
+    let (host, bridge, mut ctx, _vm) = start(TRADE);
+    let kinds = [TakeoverKind::TradeAsk, TakeoverKind::Trade, TakeoverKind::DuelInvite, TakeoverKind::Duel];
+    // the player's switch releases every claim, with no zone and no event the mod sees
+    window_takeover::release_all();
+    for k in kinds {
+        assert!(!window_takeover::is_taken(k));
+    }
+    frames(&host, &bridge, &mut ctx, 60);
+    assert!(!window_takeover::is_taken(TakeoverKind::Trade), "control: within the first 120 frames nothing is retried");
+    frames(&host, &bridge, &mut ctx, 70);
+    for k in kinds {
+        assert!(window_takeover::is_taken(k), "taken again within 120 frames: {k:?}");
+    }
 }

@@ -254,8 +254,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ),
         ("eqoa.trade.Partner", "id name"),
         ("eqoa.trade.Side", "items money accepted"),
-        ("eqoa.trade.Item", "slot id name quantity"),
-        ("eqoa.trade.Bag", "slot id name quantity worn no_trade can_offer"),
+        ("eqoa.trade.Item", "slot id name quantity text"),
+        ("eqoa.trade.Bag", "slot id name quantity worn no_trade can_offer text"),
         (
             "eqoa.duel.State",
             "revision enabled state invite queued opponent_id seconds_remaining duration",

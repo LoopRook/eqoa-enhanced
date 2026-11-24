@@ -5,19 +5,23 @@ local ui = eqoa.imgui
 local T = {}
 
 local PROMPT_W, WIN_W = 330, 430
-local ROWS = 12
 local KINDS = {"trade_ask", "trade", "duel_invite", "duel"}
+-- the claims end with the world and with the player's "Use the game's windows" switch: held again every so often
+local CLAIM_EVERY = 120
 
 T.state = {
     claimed = false,
-    status = nil, -- {text, ok}
-    notice = nil, -- {text, until}
-    money_text = nil, -- what is typed in the coin box (nil: not being edited)
+    frames = 0,
+    warned = {},
+    status = nil, -- {text, ok}: what the player is told in the window
+    prompt_status = nil, -- the same, for the request box
+    notice = nil, -- {text, finish}
+    money_text = nil, -- what is typed in the coin box (nil: nothing typed)
     typing = false,
     enter = nil, -- the claim on Enter, held only while the coin box has the keyboard
     capturing = false,
-    rclick = nil, -- a right-click not yet used by a bag row: {shift = bool}
     last_req = nil,
+    last_money_sent = nil, -- the amount the last coin offer carried (what a test reads)
 }
 local S = T.state
 
@@ -28,15 +32,18 @@ local function short(text, max)
 end
 
 local function say(text, ok) S.status = {text = tostring(text), ok = ok} end
+local function say_prompt(text, ok) S.prompt_status = {text = tostring(text), ok = ok} end
 
-local function coins(n) return string.format("%d coin%s", n or 0, n == 1 and "" or "s") end
+local function tunar(n) return string.format("%d tunar", n or 0) end
 
 -- ---------------------------------------------------------------- holding the windows
 
 local function claim()
     for _, kind in ipairs(KINDS) do
         local ok, err = eqoa.windows.takeover(kind, {scope = "all"})
-        if not ok and err and err.code ~= "unavailable" then
+        if not ok and err and err.code ~= "unavailable" and not S.warned[kind] then
+            -- once: a kind another mod holds is retried quietly every 120 frames
+            S.warned[kind] = true
             eqoa.log.write("warn", "Trade did not take over " .. kind .. ": " .. tostring(err.message))
         end
     end
@@ -70,23 +77,23 @@ local function set_typing(on)
     end
     S.typing = on
 end
-
 T.set_typing = set_typing
 
 -- ---------------------------------------------------------------- the actions
 
-local function run(label, fn)
+local function run(label, fn, prompt)
     local req, err = fn()
     if err then
         S.last_req = nil
-        say(err.message or err.code or "Refused", false)
+        local text = err.message or err.code or "Refused"
+        if prompt then say_prompt(text, false) else say(text, false) end
     elseif req then
         S.last_req = req
-        say(label, nil)
+        if prompt then say_prompt(label, nil) else say(label, nil) end
     end
 end
 
-function T.offer_row(t, row, whole)
+function T.offer_row(row, whole)
     if not row or not row.can_offer then return end
     local count = whole and row.quantity or 1
     run("Offering " .. short(row.name, 20), function()
@@ -100,23 +107,23 @@ function T.take_back(row)
     end)
 end
 
+-- The coins typed in the box (digits only), offered as the whole amount. Set and Enter both come here.
 function T.set_money(text)
-    local n = tonumber(((text or ""):gsub("[^%d]", "")))
+    local n = tonumber(((text or ""):gsub("[^%d]", ""):sub(1, 9)))
     if not n then n = 0 end
-    run("Offering " .. coins(n), function() return eqoa.actions.trade_money(n) end)
+    S.last_money_sent = n
+    run("Offering " .. tunar(n), function() return eqoa.actions.trade_money(n) end)
 end
 
--- ---------------------------------------------------------------- the request prompt (trade and duel)
-
 function T.answer_trade(yes)
-    run(yes and "Trade accepted" or "Trade declined", function() return eqoa.actions.trade_answer(yes) end)
+    run(yes and "Request accepted" or "Request declined", function() return eqoa.actions.trade_answer(yes) end, true)
 end
 
 function T.answer_duel(yes)
-    run(yes and "Duel accepted" or "Duel declined", function() return eqoa.actions.duel_answer(yes) end)
+    run(yes and "Request accepted" or "Request declined", function() return eqoa.actions.duel_answer(yes) end, true)
 end
 
--- Accept: the client asks "You give X, you get Y. Trade?" (starting on No); nothing changes hands before the Yes
+-- Accept: the client asks the question (starting on No); nothing changes hands before the Yes
 function T.accept()
     run("Waiting for your Yes", function() return eqoa.actions.trade_accept() end)
 end
@@ -129,12 +136,17 @@ function T.cancel()
     run("Cancelled", function() return eqoa.actions.trade_cancel() end)
 end
 
+-- ---------------------------------------------------------------- the request prompt (trade and duel)
+
 local function seconds(x) return math.max(0, math.ceil(x or 0)) end
 
 local function draw_prompt(t, d)
     local trade_req = t and t.phase == "request" and t.held and eqoa.windows.session("trade_ask")
     local invite = d and d.state == "invited" and d.invite and eqoa.windows.session("duel_invite") and d.invite
-    if not trade_req and not invite then return end
+    if not trade_req and not invite then
+        S.prompt_status = nil
+        return
+    end
     local dw = ui.GetDisplaySize()
     if dw <= 0 then return end
     ui.SetNextWindowPos((dw - PROMPT_W) * 0.5, 64, ImGuiCond.FirstUseEver)
@@ -161,6 +173,7 @@ local function draw_prompt(t, d)
             ui.SameLine()
             if ui.Button("Show in game##duel_pass") then eqoa.windows.pass(eqoa.windows.session("duel_invite").ref) end
         end
+        if S.prompt_status then ui.TextWrapped(S.prompt_status.text) end
     end
     ui.End()
 end
@@ -169,8 +182,13 @@ end
 
 local function item_line(it) return string.format("%s x%d", short(it.name, 24), it.quantity or 1) end
 
+-- the item as the game's own windows describe it (its lines and stat bonuses), else its name and quantity
 local function tip(it)
-    if ui.IsItemHovered() then ui.SetTooltip(string.format("%s\nQuantity: %d", it.name, it.quantity or 1)) end
+    if ui.IsItemHovered() then
+        local text = it.text
+        if type(text) ~= "string" or text == "" then text = string.format("%s\nQuantity: %d", it.name, it.quantity or 1) end
+        ui.SetTooltip(text)
+    end
 end
 
 local function draw_trade(t)
@@ -202,19 +220,20 @@ local function draw_trade(t)
             ui.SameLine()
             if ui.Button("Take back##mine_" .. it.slot) then T.take_back(it) end
         end
-        ui.Text("  Coins: " .. (t.mine.money or 0))
+        ui.Text("  Tunar: " .. (t.mine.money or 0))
         ui.SameLine()
         ui.SetNextItemWidth(110)
-        local shown = S.money_text or tostring(t.mine.money or 0)
-        local val, changed = ui.InputTextWithHint("##coins", "coins", shown, 0)
+        -- the text typed stays until Set, Enter or the end of the trade: a click on Set takes the box's focus a frame
+        -- before the button fires, so it must not be dropped when the box is left
+        local val, changed = ui.InputTextWithHint("##coins", tostring(t.mine.money or 0), S.money_text or "", 0)
         if changed then S.money_text = val:gsub("[^%d]", ""):sub(1, 9) end
         if ui.IsItemActive() then typing_now = true end
         ui.SameLine()
         if ui.Button("Set##coins_set") then
-            T.set_money(S.money_text or shown)
+            if S.money_text and S.money_text ~= "" then T.set_money(S.money_text) end
             S.money_text = nil
         end
-        ui.TextDisabled(string.format("  You carry %s", coins(t.carried)))
+        ui.TextDisabled(string.format("  You carry %s", tunar(t.carried)))
         ui.Separator()
         -- the other side
         ui.Text(short(t.partner.name, 20) .. " offers" .. (t.theirs.accepted and "  (accepted)" or ""))
@@ -223,10 +242,11 @@ local function draw_trade(t)
             ui.Text("  " .. item_line(it))
             tip(it)
         end
-        ui.Text("  Coins: " .. (t.theirs.money or 0))
+        ui.Text("  Tunar: " .. (t.theirs.money or 0))
         ui.Separator()
-        -- the bags: a right-click offers one (Shift+right-click the whole stack)
-        ui.Text("Your items (right-click to offer; Shift+right-click for all)")
+        -- the bags: Offer (left-click) offers one, All the whole stack; a right-click on a row offers one too. All of
+        -- these are this window's own, so the window in front takes the click wherever other mod windows overlap
+        ui.Text("Your items (right-click a row, or Offer)")
         if ui.BeginChild("##bags", 0, 110, ImGuiChildFlags.Border) then
             local shown_rows = 0
             for _, b in ipairs(t.bags or {}) do
@@ -234,9 +254,12 @@ local function draw_trade(t)
                     shown_rows = shown_rows + 1
                     ui.Selectable(item_line(b) .. "##bag_" .. b.slot, false)
                     tip(b)
-                    if S.rclick and ui.IsItemHovered() then
-                        T.offer_row(t, b, S.rclick.shift)
-                        S.rclick = nil
+                    if ui.IsItemHovered() and ui.IsMouseReleased(1) then T.offer_row(b, false) end
+                    ui.SameLine()
+                    if ui.Button("Offer##offer_" .. b.slot) then T.offer_row(b, false) end
+                    if (b.quantity or 1) > 1 then
+                        ui.SameLine()
+                        if ui.Button("All##all_" .. b.slot) then T.offer_row(b, true) end
                     end
                 end
             end
@@ -257,8 +280,6 @@ local function draw_trade(t)
         if S.status then ui.TextWrapped(S.status.text) end
     end
     ui.End()
-    -- the coin box was left: what was typed is not kept
-    if not typing_now and S.typing then S.money_text = nil end
     set_typing(typing_now)
 end
 
@@ -285,13 +306,13 @@ local function on_render()
         set_typing(false)
         return
     end
-    if not S.claimed then claim() end
+    S.frames = S.frames + 1
+    if not S.claimed or S.frames % CLAIM_EVERY == 0 then claim() end
     local t = eqoa.trade.get()
     local d = eqoa.duel.get()
     draw_prompt(t, d)
     draw_trade(t)
     draw_notice()
-    S.rclick = nil
 end
 
 -- ---------------------------------------------------------------- events
@@ -310,10 +331,6 @@ function T.start()
         set_typing(false)
         S.claimed = false
         S.money_text = nil
-    end)
-    eqoa.events.on("pointer.pressed", function(e)
-        local d = e.data
-        if d.button == "right" then S.rclick = {shift = d.shift == true} end
     end)
     -- Enter in the coin box sets the coins (it is claimed only while the box has the keyboard)
     eqoa.events.on("input.key", function(e)
@@ -334,7 +351,10 @@ function T.start()
     eqoa.events.on("action.result", function(e)
         local d = e.data
         if not d or S.last_req == nil or d.request_id ~= S.last_req then return end
-        if d.ok == false then say(d.reason or d.code or "Refused", false) end
+        if d.ok == false then
+            say(d.reason or d.code or "Refused", false)
+            say_prompt(d.reason or d.code or "Refused", false)
+        end
     end)
     eqoa.events.on("confirm.closed", function(e)
         local d = e.data

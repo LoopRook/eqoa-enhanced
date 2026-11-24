@@ -122,15 +122,19 @@ additions to `eqoa/1`).
 
 ## Repair at a blacksmith
 
-When a blacksmith's window is open, a small **Repair** panel appears beside it (the game's own window stays as it is). It lists each
-damaged item with its repair cost; click **Repair** on a row to repair that item. **Repair all (N coins)** asks once ("Repair 4 items
-for 120 coins?", Yes or No) and then repairs the items one at a time, waiting for the server's answer to each before the next; the
-result line (and a chat line) says what was repaired and what it cost, and stops at the first refusal (for example not enough
-coin). The panel is only there while a smith is open, and with the Bag Viewer off the game's blacksmith window is just the game's.
+When a blacksmith's window is open, a small **Repair** panel appears beside it (the game's own window stays as it is). It lists every
+damaged item with its repair cost (the list scrolls past eight); click **Repair** on a row to repair that item. **Repair all (N coins)**
+asks once ("Repair 4 items for 120 coins?", Yes or No) and then repairs the items one at a time. What it can pay for is repaired in the
+smith's order; an item that costs more than you carry is skipped, and the result says how many were skipped. The next item is sent
+only when the smith's own list shows the last one repaired, and what the result says was repaired is what the list showed repaired:
+if the smith does not answer (out of reach, for example) the run stops and says so. It also stops if an item's price rose after you
+said Yes. The result is shown in the panel (and kept up for ten seconds after you leave the smith) and in the Bags window's result
+line. The client cannot yet say a line in the chat window for a mod, so there is no chat line.
 
-The box **Repair automatically at a blacksmith** is off by default. When it is on, everything damaged is repaired as soon as the
-smith's window opens, with no question; one chat line gives the total spent. The choice is kept in `repair_options.txt` in the mod's
-folder. Mods & Addons shows the Bag Viewer as one that **can act on its own** because it can repair without a click when that box
-is on; the label comes from the mod's manifest, so it shows whether or not the box is ticked.
+The box **Repair automatically at a blacksmith** is off by default and is kept **per character**, like the other automatic choices
+(in `repair_options.txt` in the mod's folder). When it is on for the character you play, everything it can pay for is repaired as soon
+as the smith's window opens, with no question, and the result gives the total spent. Mods & Addons shows the Bag Viewer as one that
+**can act on its own** because it can repair without a click when that box is on; the label comes from the mod's manifest, so it
+shows whether or not the box is ticked. With the Bag Viewer off, the game's blacksmith window is just the game's.
 
 The mod uses `eqoa.blacksmith.get` and `eqoa.actions.blacksmith_repair` (round A9).

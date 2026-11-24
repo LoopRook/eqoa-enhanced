@@ -457,7 +457,12 @@ pub(crate) fn trade_accept_text(duel: bool, _partner: &str, gives: &[String], ge
     let list = |lines: &[String]| {
         if lines.is_empty() { "nothing".to_string() } else { lines.join(", ") }
     };
-    format!("You give {}, you get {}. {}", list(gives), list(gets), if duel { "Start the duel?" } else { "Trade?" })
+    if duel {
+        // nobody gives and gets in a duel: both stakes are held, and the winner takes both
+        format!("Both stakes are held; the winner takes both. You stake {}, they stake {}. Start the duel?", list(gives), list(gets))
+    } else {
+        format!("You give {}, you get {}. Trade?", list(gives), list(gets))
+    }
 }
 
 pub(crate) fn guild_accept_text(inviter: &str, guild: &str) -> String {

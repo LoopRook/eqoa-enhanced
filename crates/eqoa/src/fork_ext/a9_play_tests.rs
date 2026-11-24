@@ -1371,3 +1371,29 @@ fn a9_l_an_unanswered_repair_at_the_games_own_smith_does_not_block_the_item_for_
     lua_ok(&host, "assert(results[1].ok == true, tostring(results[1].code))");
     assert_eq!(recorded(&p).len(), 1);
 }
+
+#[test]
+fn a9_mods_review_the_item_text_the_game_shows_is_in_the_read_and_a_wager_question_says_what_happens() {
+    let _baseline = Baseline;
+    let mut p = ready();
+    bags(&mut p);
+    p.dump.inventory.items[0].item.desc = "A scale from a snake.".into();
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('trade', {scope='all'}) == true)");
+    step(&mut p, &host);
+    open_trade(&mut p, 77);
+    step(&mut p, &host);
+    lua_ok(
+        &host,
+        r#"
+        local t = assert(eqoa.trade.get())
+        assert(t.bags[1].text:find("Snake Scale", 1, true), t.bags[1].text)
+        assert(t.bags[1].text:find("A scale from a snake.", 1, true), "the item's own text is in it")
+        "#,
+    );
+    // the wager's question: nobody gives and gets, both stakes are held
+    let text = crate::fork_ext::addons::confirm::trade_accept_text(true, "Al", &["100 tunar".to_string()], &["50 tunar".to_string()]);
+    assert_eq!(text, "Both stakes are held; the winner takes both. You stake 100 tunar, they stake 50 tunar. Start the duel?");
+    let text = crate::fork_ext::addons::confirm::trade_accept_text(false, "Al", &["Rusty Sword".to_string()], &[]);
+    assert_eq!(text, "You give Rusty Sword, you get nothing. Trade?", "control: a trade keeps its own wording");
+}
