@@ -343,6 +343,7 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
 
 ## Window takeover and upstream's keyboard-owning windows (sync review 2026-11-18)
 
+- **Resolved for the three server windows, 2026-11-24 (round A11, `feat/eqoa-api-a11`):** a mercenary window, the dye picker and a fishing session the server opens while a hidden session holds the game now act as the game does with a window up (merc: not opened; dye: waits until the session ends; fishing: cancelled), through one hook line each (`fork_hooks::server_window_blocked`). Still open from the note below: `report_viewer.rs:61`'s "not plain play" rule, and NPC dialogs and invitations, which still open over a hidden session on purpose (they carry the server's words, such as a bank's refusal).
 - **Status:** For round 6.5 / window replacement. Upstream's mercenary windows and dye picker only open from modes 0, 7, 9
   (`mercplay.rs:142`, `dyeplay.rs:255`); a hidden takeover session leaves mode 0, so they can open while a mod holds a hidden
   bank/loot session (the mod's bank action then stalls until the picker closes; a loot request made in modes 61/63 is

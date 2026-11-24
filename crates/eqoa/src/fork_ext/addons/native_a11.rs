@@ -111,6 +111,12 @@ thread_local! {
 /// The client's reading of a window's state. A changed state gets the next revision; an unchanged one is left as it
 /// is (so a mod can tell by `revision` alone).
 pub(crate) fn publish(which: Read, mut state: Json) {
+    let open = match which {
+        Read::Merc => state["inventory"]["open"] == true || state["spells"]["open"] == true,
+        Read::Dye => true,
+        Read::Fishing => state["open"] == true,
+    };
+    let mut emitted = None;
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         if let Some(old) = s[which as usize].as_ref() {
@@ -127,17 +133,39 @@ pub(crate) fn publish(which: Read, mut state: Json) {
             r.get()
         });
         state["revision"] = json!(next);
+        emitted = Some(next);
         s[which as usize] = Some(state);
     });
+    if let Some(revision) = emitted {
+        emit(which, json!({"revision": revision, "open": open}));
+    }
+}
+
+/// The event of a window whose state changed (`merc.changed`, `dye.changed`, `fishing.changed`): `open` is whether the
+/// game's own window is up, so a mod hears a window open, change and close as one stream.
+fn emit(which: Read, data: Json) {
+    let name = match which {
+        Read::Merc => "merc.changed",
+        Read::Dye => "dye.changed",
+        Read::Fishing => "fishing.changed",
+    };
+    if super::native_events::interested(name) {
+        super::native_core::CORE.with(|c| c.borrow_mut().emit(name, data));
+    }
 }
 
 /// Nothing of that window is left to read.
 pub(crate) fn clear(which: Read) {
-    STATE.with(|s| s.borrow_mut()[which as usize] = None);
+    let was = STATE.with(|s| s.borrow_mut()[which as usize].take());
+    if let Some(old) = was {
+        emit(which, json!({"revision": old["revision"], "open": false}));
+    }
 }
 
 pub(crate) fn clear_all() {
-    STATE.with(|s| *s.borrow_mut() = [None, None, None]);
+    for which in [Read::Merc, Read::Dye, Read::Fishing] {
+        clear(which);
+    }
 }
 
 pub(crate) fn current(which: Read) -> Option<Json> {

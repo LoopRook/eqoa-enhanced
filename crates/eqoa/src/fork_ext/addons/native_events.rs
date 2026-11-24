@@ -138,6 +138,9 @@ const EVENTS: &[&str] = &[
     "who.result",
     "lfg.result",
     "lfg.changed",
+    "merc.changed",
+    "dye.changed",
+    "fishing.changed",
 ];
 fn install_event_fields(lua: &mlua::Lua) {
     for (name, fields) in [
@@ -213,6 +216,9 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("who.result", "entries count received"),
         ("lfg.result", "entries count"),
         ("lfg.changed", "before after changed"),
+        ("merc.changed", "revision open"),
+        ("dye.changed", "revision open"),
+        ("fishing.changed", "revision open"),
     ] {
         let payload = format!("eqoa.events.{name}.data");
         for field in fields.split_whitespace() {
@@ -249,7 +255,7 @@ fn event_round(name: &str) -> u8 {
         | "camera.changed" | "windows.changed" | "mastery.changed" => 6,
         "buffs.changed" | "cast.started" | "cast.ended" | "quests.goals_changed" | "windows.session"
         | "windows.key" | "confirm.closed" | "friends.changed" | "ignored.changed" | "guild.changed"
-        | "who.result" | "lfg.result" | "lfg.changed" => 8,
+        | "who.result" | "lfg.result" | "lfg.changed" | "merc.changed" | "dye.changed" | "fishing.changed" => 8,
         _ => 2,
     }
 }

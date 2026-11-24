@@ -102,6 +102,10 @@ fn rig() -> (Play, Host) {
         results, closed = {}, {}
         eqoa.events.on("action.result", function(e) results[#results + 1] = e.data end)
         eqoa.events.on("confirm.closed", function(e) closed[#closed + 1] = e.data end)
+        evs = {}
+        for _, n in ipairs({"merc.changed", "dye.changed", "fishing.changed"}) do
+            eqoa.events.on(n, function(e) evs[#evs + 1] = n .. ":" .. tostring(e.data.open) .. ":" .. tostring(e.data.revision ~= nil) end)
+        end
         eqoa.input.bind({ id = "go", label = "Go", default_key = "9" }, function() last_req, last_err = next_fn() end)
         "#,
     )
@@ -327,6 +331,8 @@ fn a11_the_dye_picker_cancel_and_the_reads() {
     assert_eq!(p.mode, 0);
     step(&mut p, &host);
     host.execute("assert(eqoa.dye.get() == nil)").unwrap();
+    // the open and the close are one stream: told when the picker came up and when it went
+    host.execute("assert(evs[1] == 'dye.changed:true:true' and evs[#evs] == 'dye.changed:false:true', table.concat(evs, ' '))").unwrap();
 }
 
 // ---- fishing ---------------------------------------------------------------------------------------------------------
@@ -424,6 +430,7 @@ fn a11_the_reads_say_what_the_windows_hold() {
     )
     .unwrap();
     // the revision only moves when a field does
+    host.execute("local seen = table.concat(evs, ' '); assert(seen:find('merc.changed:false:true') and seen:find('fishing.changed:true:true'), seen)").unwrap();
     host.execute("rev = eqoa.merc.get().revision").unwrap();
     step(&mut p, &host);
     host.execute("assert(eqoa.merc.get().revision == rev)").unwrap();
