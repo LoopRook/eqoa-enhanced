@@ -48,6 +48,7 @@ fn item(id: i64, name: &str, key: u32, quantity: i64) -> net::dump::NetItem {
     it.item.lore = 0;
     // one item, not a stack: retail's auction takes no stack (`auction::can_sell`)
     it.item.max_stack = 1;
+    it.item.value = 50;
     it
 }
 
@@ -375,12 +376,17 @@ fn lot_bytes(w: &mut Writer, id: i64, qty: i64, buyout: i64, ends: i64) {
 
 /// A results page (0x1206, sub-op 129): the lots (id, quantity, buyout), the server's minutes and the three columns.
 fn page_reply(page: i64, lots: &[(i64, i64, i64)]) -> Vec<u8> {
+    page_reply_cols(page, lots, [7, -1, 3])
+}
+
+/// The same with the page's three columns set (the leader, the high bid, the bids or the next bid's floor).
+fn page_reply_cols(page: i64, lots: &[(i64, i64, i64)], cols: [i64; 3]) -> Vec<u8> {
     let mut w = Writer::default();
     w.u8(129).signed(page).signed(30).signed(lots.len() as i64);
     for (id, qty, buyout) in lots {
         lot_bytes(&mut w, *id, *qty, *buyout, 500);
     }
-    for col in [7i64, -1, 3] {
+    for col in cols {
         w.signed(lots.len() as i64);
         for _ in lots {
             w.signed(col);
@@ -565,13 +571,12 @@ fn a10_a_bid_asks_first_checks_the_lot_again_and_sends_the_games_bid_once() {
     assert_eq!(p.bank.state, 4);
     step(&mut p, &host);
     assert_eq!(sent().len(), n + 1, "sent once");
-    // answered: free again
+    // answered: free again (the game's own reply ends the wait, nothing here does)
     p.bank_opcode(0x1206, &{
         let mut w = Writer::default();
         w.u8(132);
         w.data
     });
-    p.bank.state = 0;
     step(&mut p, &host);
     // buyout asks for the lot's own price; a lot with none is refused
     let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_buyout(502)");
@@ -595,22 +600,22 @@ fn a10_a_lot_of_my_own_or_one_that_has_ended_is_not_bid_on() {
     let (mut p, host) = auction_rig();
     lot_page(&mut p, &host, &[(501, 1, 400)]);
     p.dump.bank.lots.push(p.bank.auction.results[0].clone());
-    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 5})");
+    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 150})");
     assert!(!ok && code == "not_ready", "{code}");
     assert!(!confirm::is_open());
     p.dump.bank.lots.clear();
     // the server's clock runs past the lot's end
     p.bank.auction.minutes = 900;
-    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 5})");
+    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 150})");
     assert!(!ok && code == "not_ready", "{code}");
     assert!(!confirm::is_open());
     // the control: back in time, it asks
     p.bank.auction.minutes = 30;
-    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 5})");
+    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 150})");
     assert!(ok && confirm::is_open());
     // the disc's auction takes one item at a time
     confirm::reset_for_test();
-    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 5, count = 2})");
+    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 150, count = 2})");
     assert!(!ok && code == "invalid_argument", "{code}");
 }
 
@@ -674,12 +679,12 @@ fn a10_selling_is_a_page_of_the_bank_asks_first_and_names_the_banker() {
     // an item that cannot be sold (no trade) and a row of another item are refused with no question
     p.bank.state = 0;
     confirm::reset_for_test();
-    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 2, id = 700002, price = 1, buyout = 2, hours = 1})");
+    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 2, id = 700002, price = 100, buyout = 300, hours = 12})");
     assert!(!ok && code == "not_ready", "{code}");
-    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = 700002, price = 1, buyout = 2, hours = 1})");
+    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = 700002, price = 100, buyout = 300, hours = 12})");
     assert!(!ok && code == "stale_handle", "{code}");
     // the disc's auction puts one up at a time
-    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = 700001, count = 3, price = 1, buyout = 2, hours = 1})");
+    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = 700001, count = 3, price = 100, buyout = 300, hours = 12})");
     assert!(!ok && code == "invalid_argument", "{code}");
     assert!(!confirm::is_open());
 }
@@ -689,15 +694,15 @@ fn a10_selling_needs_the_mods_own_bank_and_the_bank_offering_the_auction_and_the
     // no bank held: refused, with the words that say what to do
     let (mut p, host) = rig();
     p.dump.bank.items = net::dump::ItemList { p04: 0, items: vec![item(700_001, "Gold Ring", 21, 1)] };
-    let (ok, code, reason) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = 700001, price = 1, buyout = 2, hours = 1})");
+    let (ok, code, reason) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = 700001, price = 100, buyout = 300, hours = 12})");
     assert!(!ok && code == "not_ready" && reason.contains("hold the bank"), "{code} {reason}");
     // the bank offers no auction: refused (the control: it works in the next block)
     let (mut p, host) = bank_rig();
     p.dump.bank.p78cc = false;
-    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = 700001, price = 1, buyout = 2, hours = 1})");
+    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = 700001, price = 100, buyout = 300, hours = 12})");
     assert!(!ok && code == "not_ready", "{code}");
     p.dump.bank.p78cc = true;
-    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = 700001, price = 1, buyout = 2, hours = 1})");
+    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = 700001, price = 100, buyout = 300, hours = 12})");
     assert!(ok);
     // the ring leaves the bank before the Yes
     let n = sent().len();
@@ -708,7 +713,7 @@ fn a10_selling_needs_the_mods_own_bank_and_the_bank_offering_the_auction_and_the
     // the game's own bank window up: busy
     confirm::reset_for_test();
     p.mode = 11;
-    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = 700001, price = 1, buyout = 2, hours = 1})");
+    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = 700001, price = 100, buyout = 300, hours = 12})");
     assert!(!ok && code == "busy", "{code}");
 }
 
@@ -734,16 +739,20 @@ fn a10_a_request_the_server_never_answers_is_given_up_on_and_never_replayed() {
     let n = sent().len();
     // before the time: still waiting
     step(&mut p, &host);
-    lua_ok(&host, r#"assert(eqoa.auction.get().pending == "search" and eqoa.auction.get().timed_out == false)"#);
+    lua_ok(&host, r#"assert(eqoa.auction.get().pending == "search" and eqoa.auction.get().uncertain == nil)"#);
     LOCAL.with(|l| l.borrow_mut().awaiting = Some(Instant::now() - GIVE_UP - Duration::from_secs(1)));
     step(&mut p, &host);
-    lua_ok(&host, r#"local a = eqoa.auction.get(); assert(a.pending == "none" and a.timed_out == true, a.pending)"#);
+    lua_ok(&host, r#"local a = eqoa.auction.get(); assert(a.pending == "none" and a.uncertain == "search", a.pending)"#);
     assert_eq!(p.bank.state, 0);
     assert_eq!(sent().len(), n, "never replayed");
-    // a new request goes (and clears the flag)
+    // a new request goes, and the page it brings is the fresh read that ends the doubt
     let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_search()");
     assert!(ok);
-    lua_ok(&host, "assert(eqoa.auction.get().timed_out == false)");
+    lua_ok(&host, r#"assert(eqoa.auction.get().uncertain == "search", "not before a page arrives")"#);
+    let page = p.bank.auction.page as i64;
+    p.bank_opcode(0x1206, &page_reply(page, &[(501, 1, 400)]));
+    step(&mut p, &host);
+    lua_ok(&host, "assert(eqoa.auction.get().uncertain == nil)");
 }
 
 #[test]
@@ -811,4 +820,257 @@ fn a10_dead_or_out_of_the_world_nothing_is_sent() {
     assert_eq!(sent().len(), n);
     super::dropped();
     assert!(native_a10::current_mail().is_none() && native_a10::current_auction().is_none());
+}
+
+// ---- the fix round (review of 2026-11-24) ----
+
+fn live_rig() -> (Play, Host) {
+    // the play fixture sets the feature word itself, so the live word is set after it is made
+    auction_rig()
+}
+
+#[test]
+fn a10_m1_a_bid_is_held_to_the_games_own_bid_form_limits_and_the_question_shows_the_buyout() {
+    let (mut p, host) = auction_rig();
+    // the disc's form: the lowest bid is the lot's minimum or one above the high bid
+    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_search()");
+    assert!(ok);
+    let page = p.bank.auction.page as i64;
+    p.bank_opcode(0x1206, &page_reply_cols(page, &[(501, 1, 400)], [7, 100, 3]));
+    step(&mut p, &host);
+    let n = sent().len();
+    for (price, why) in [(100, "not above the high bid"), (5, "below the minimum"), (401, "above the buyout"), (500000, "far above the buyout")] {
+        let (ok, code, _) = act(&mut p, &host, &format!("return eqoa.actions.auction_bid({{lot = 501, price = {price}}})"));
+        assert!(!ok && code == "out_of_range", "{why}: {code}");
+        assert!(!confirm::is_open(), "{why}: no question for a bid the game's form cannot make");
+    }
+    assert_eq!(sent().len(), n);
+    // the control: the lowest allowed bid, and the buyout itself, ask; and the question shows the buyout
+    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 101})");
+    assert!(ok && confirm::is_open());
+    assert!(confirm::current_for_test().unwrap().text.contains("buyout is 400"), "{}", confirm::current_for_test().unwrap().text);
+    confirm::reset_for_test();
+    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 400})");
+    assert!(ok, "a bid at the buyout is the form's top");
+}
+
+#[test]
+fn a10_m1_the_live_form_holds_the_count_at_the_existing_bids_and_the_buyout_price_to_the_whole_stack() {
+    let (mut p, host) = auction_rig();
+    crate::live::with_features(Some(0x1B), || {
+        lot_page(&mut p, &host, &[(501, 20, 400)]);
+        // the floor is the page's third column (3) and the lot's minimum (10)
+        let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 9})");
+        assert!(!ok && code == "out_of_range", "{code}");
+        // a bid already for 5: fewer is refused, the same count asks
+        p.dump.bank.bids.push(net::dump::Bid { character_id: 1, auction_id: 501, x08: 150, x0c: 5, x10: 750, x14: 0 });
+        let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 160, count = 3})");
+        assert!(!ok && code == "out_of_range", "{code}");
+        let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 160, count = 5})");
+        assert!(ok);
+        assert!(confirm::current_for_test().unwrap().text.contains("800 in all"), "{}", confirm::current_for_test().unwrap().text);
+        confirm::reset_for_test();
+        // at the buyout price only for the whole stack (the game's word 1858)
+        let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 400, count = 5})");
+        assert!(!ok && code == "out_of_range", "{code}");
+        let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 400, count = 20})");
+        assert!(ok);
+    });
+}
+
+#[test]
+fn a10_m1_a_lot_that_changed_before_the_yes_is_not_bid_on() {
+    let (mut p, host) = auction_rig();
+    lot_page(&mut p, &host, &[(501, 1, 400)]);
+    let n = sent().len();
+    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 150})");
+    assert!(ok);
+    // the buyout drops under the price the player was asked about (a page that changed the lot)
+    p.bank.auction.results[0].p2f8 = 100;
+    say_yes();
+    step(&mut p, &host);
+    assert_eq!(sent().len(), n, "negative control: the price is above the buyout now, nothing is bid");
+    // the minimum rises above it
+    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 90})");
+    assert!(ok);
+    p.bank.auction.results[0].p2f4 = 95;
+    say_yes();
+    step(&mut p, &host);
+    assert_eq!(sent().len(), n);
+}
+
+#[test]
+fn a10_m2_a_sale_is_held_to_the_games_own_sell_form_limits() {
+    let (mut p, host) = bank_rig();
+    let n = sent().len();
+    for (call, why) in [
+        ("{slot = 1, id = 700001, price = 49, buyout = 300, hours = 12}", "below the item's value (50)"),
+        ("{slot = 1, id = 700001, price = 0, buyout = 1, hours = 12}", "free"),
+        ("{slot = 1, id = 700001, price = 100, buyout = 99, hours = 12}", "buyout below the price"),
+        ("{slot = 1, id = 700001, price = 100, buyout = 1000000000, hours = 12}", "above 999999999"),
+        ("{slot = 1, id = 700001, price = 100, buyout = 300, hours = 11}", "under 12 hours"),
+        ("{slot = 1, id = 700001, price = 100, buyout = 300, hours = 73}", "over 72 hours"),
+        ("{slot = 1, id = 700001, price = 100, buyout = 300, hours = 10000}", "far over"),
+    ] {
+        let (ok, code, _) = act(&mut p, &host, &format!("return eqoa.actions.auction_sell({call})"));
+        assert!(!ok && code == "out_of_range", "{why}: {code}");
+        assert!(!confirm::is_open(), "{why}: no question for a sale the game's form cannot make");
+    }
+    assert_eq!(sent().len(), n);
+    // the controls: the form's edges ask
+    for call in [
+        "{slot = 1, id = 700001, price = 50, buyout = 50, hours = 12}",
+        "{slot = 1, id = 700001, price = 100, buyout = 999999999, hours = 72}",
+    ] {
+        confirm::reset_for_test();
+        let (ok, _, _) = act(&mut p, &host, &format!("return eqoa.actions.auction_sell({call})"));
+        assert!(ok && confirm::is_open(), "{call}");
+    }
+    // a sale whose limits stop holding before the Yes (the item's value changes) is not sent
+    p.dump.bank.items.items[0].item.value = 5000;
+    say_yes();
+    step(&mut p, &host);
+    assert_eq!(sent().len(), n);
+}
+
+#[test]
+fn a10_m3_the_mods_window_going_never_empties_the_games_own_auction_window() {
+    for how in ["close", "disable", "lua_error", "death"] {
+        let (mut p, host) = auction_rig();
+        lot_page(&mut p, &host, &[(501, 1, 400)]);
+        // the player opens the game's own Auction over it and its page is shown
+        p.mode = 39;
+        let page_before = p.bank.auction.page;
+        assert_eq!(p.bank.auction.results.len(), 1);
+        match how {
+            "close" => host.execute("assert(eqoa.windows.close_session(s_auction_search.ref))").unwrap(),
+            "disable" => ws::end_vm_told(native_events::bus(&host.lua).borrow().vm, "disabled"),
+            "lua_error" => ws::mods_stopped("lua_error"),
+            _ => ws::end_own("death"),
+        }
+        step(&mut p, &host);
+        assert_eq!(p.bank.auction.results.len(), 1, "{how}: the page the player is looking at stays");
+        assert_eq!(p.bank.auction.page, page_before, "{how}: the game's page counter is not bumped");
+        // the control: with the game's window not up, the same ending does clear the mod's own page
+        let (mut q, host2) = auction_rig();
+        lot_page(&mut q, &host2, &[(501, 1, 400)]);
+        ws::mods_stopped("lua_error");
+        step(&mut q, &host2);
+        assert!(q.bank.auction.results.is_empty(), "{how}: control");
+    }
+}
+
+#[test]
+fn a10_l1_a_bid_given_up_on_stays_unknown_until_a_fresh_read_and_is_not_repeated() {
+    let (mut p, host) = auction_rig();
+    lot_page(&mut p, &host, &[(501, 1, 400), (502, 1, 400)]);
+    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 150})");
+    assert!(ok);
+    say_yes();
+    step(&mut p, &host);
+    let n = sent().len();
+    LOCAL.with(|l| l.borrow_mut().out = Some((4, Instant::now() - GIVE_UP - Duration::from_secs(1))));
+    step(&mut p, &host);
+    lua_ok(&host, r#"assert(eqoa.auction.get().uncertain == "bid" and eqoa.auction.get().pending == "none")"#);
+    // the same lot is not bid on again (nothing asked), another is
+    let (ok, code, reason) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 150})");
+    assert!(!ok && code == "busy" && reason.contains("may have gone through"), "{code} {reason}");
+    assert!(!confirm::is_open());
+    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 502, price = 150})");
+    assert!(ok, "another lot is not in doubt");
+    confirm::reset_for_test();
+    assert_eq!(sent().len(), n, "nothing replayed");
+    // a fresh page: the doubt ends and the lot may be bid on
+    lot_page(&mut p, &host, &[(501, 1, 400)]);
+    lua_ok(&host, "assert(eqoa.auction.get().uncertain == nil)");
+    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 160})");
+    assert!(ok);
+}
+
+#[test]
+fn a10_l2_the_give_up_never_resets_the_game_windows_own_request_state() {
+    let (mut p, host) = auction_rig();
+    lot_page(&mut p, &host, &[(501, 1, 400)]);
+    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_bid({lot = 501, price = 150})");
+    assert!(ok);
+    say_yes();
+    step(&mut p, &host);
+    assert_eq!(p.bank.state, 4);
+    // the player's own window opens and has its own request out (state 5); the mod's request goes stale
+    p.mode = 39;
+    p.bank.state = 5;
+    LOCAL.with(|l| l.borrow_mut().out = Some((5, Instant::now() - GIVE_UP - Duration::from_secs(1))));
+    step(&mut p, &host);
+    assert_eq!(p.bank.state, 5, "the game's own window does not look idle early");
+    // the control: with no game window up the give-up resets, as before
+    p.mode = 0;
+    LOCAL.with(|l| l.borrow_mut().out = Some((5, Instant::now() - GIVE_UP - Duration::from_secs(1))));
+    step(&mut p, &host);
+    assert_eq!(p.bank.state, 0);
+}
+
+#[test]
+fn a10_l3_opening_the_mods_auction_window_does_not_forget_a_sale_waiting() {
+    let (mut p, host) = bank_rig();
+    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = 700001, price = 100, buyout = 300, hours = 12})");
+    assert!(ok);
+    say_yes();
+    step(&mut p, &host);
+    assert_eq!(p.bank.state, 3);
+    assert!(LOCAL.with(|l| l.borrow().out.is_some()));
+    open(&mut p, &host, "auction_search");
+    assert!(LOCAL.with(|l| l.borrow().out.is_some()), "the sale is still waited for, and still covered by the give-up");
+    assert_eq!(p.bank.state, 3);
+    // and it is given up on as before (a sale is the bank's)
+    LOCAL.with(|l| l.borrow_mut().out = Some((3, Instant::now() - GIVE_UP - Duration::from_secs(1))));
+    step(&mut p, &host);
+    lua_ok(&host, r#"assert(eqoa.auction.get().uncertain == "sell")"#);
+    // the same bank record is not put up again until a fresh read
+    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = 700001, price = 100, buyout = 300, hours = 12})");
+    assert!(!ok && code == "busy", "{code}");
+}
+
+#[test]
+fn a10_l4_a_mail_that_carries_something_goes_to_one_name_and_the_question_names_it_as_sent() {
+    let (mut p, host) = inbox_rig();
+    open(&mut p, &host, "mail_compose");
+    p.mail.grams.live = true;
+    p.mail.grams.attach.offer = Some(Offer { items: 1, postage: 0 });
+    let n = sent().len();
+    // two names: refused, nothing asked (control: plain mail to two names still goes, as the game's compose does)
+    let (ok, code, _) = act(&mut p, &host, r#"return eqoa.actions.mail_send({to = "Bob, Ann", subject = "S", body = "B", tunar = 10})"#);
+    assert!(!ok && code == "invalid_argument", "{code}");
+    assert!(!confirm::is_open());
+    let (ok, _, _) = act(&mut p, &host, r#"return eqoa.actions.mail_send({to = "Bob, Ann", subject = "S", body = "B"})"#);
+    assert!(ok);
+    assert_eq!(sent().len(), n + 1);
+    p.mail.grams.state = 0;
+    // the question names the name as it will be sent (the game keeps A-Z only and capitalises)
+    let (ok, _, _) = act(&mut p, &host, r#"return eqoa.actions.mail_send({to = "b0b", subject = "S", body = "B", tunar = 10})"#);
+    assert!(ok);
+    let t = confirm::current_for_test().unwrap().text;
+    assert!(t.contains("to Bb "), "{t}");
+    // a subject of two lines is refused where it is parsed
+    confirm::reset_for_test();
+    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.mail_send({to = 'Bob', subject = 'a\\nb', body = 'B', tunar = 10})");
+    assert!(!ok && code == "invalid_argument", "{code}");
+}
+
+#[test]
+fn a10_l5_one_take_at_a_time_and_l7_a_mail_id_is_the_whole_u32() {
+    let (mut p, host) = inbox_rig();
+    p.mail.grams.attach.carried = Some(crate::mailattach::Carried { id: 11, tunar: 40, items: vec![], returned: false });
+    let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.mail_take(11)");
+    assert!(ok);
+    let n = sent().len();
+    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.mail_take(11)");
+    assert!(!ok && code == "busy", "{code}");
+    assert_eq!(sent().len(), n, "negative control: the second Take is not sent");
+    // the server answers: the mail carries nothing now, and the question is over
+    p.mail.grams.attach.carried = Some(crate::mailattach::Carried { id: 11, tunar: 0, items: vec![], returned: false });
+    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.mail_take(11)");
+    assert!(!ok && code == "not_ready", "{code}");
+    // an id past i32 is taken as a mail id (it is not in the inbox: a stale handle, not a bad argument)
+    let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.mail_read(3000000000)");
+    assert!(!ok && code == "stale_handle", "{code}");
 }

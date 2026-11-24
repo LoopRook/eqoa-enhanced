@@ -200,9 +200,9 @@ fn field_text(t: &mlua::Table, key: &str, max_chars: usize) -> std::result::Resu
     }
 }
 
-fn id_arg(v: &Value, what: &str) -> std::result::Result<i64, Refusal> {
+fn id_arg(v: &Value, what: &str, max: i64) -> std::result::Result<i64, Refusal> {
     match int_arg(v) {
-        Some(n) if (0..=i64::from(i32::MAX)).contains(&n) => Ok(n),
+        Some(n) if (0..=max).contains(&n) => Ok(n),
         _ => Err(bad(&format!("{what} must be the id of an entry of the window's list"))),
     }
 }
@@ -224,6 +224,10 @@ fn parse_send(arg: &Value) -> std::result::Result<A10Action, Refusal> {
     };
     let to = field_text(t, "to", 512)?.unwrap_or_default();
     let subject = field_text(t, "subject", 32)?.unwrap_or_default();
+    if subject.contains('
+') {
+        return Err(bad("the subject is one line"));
+    }
     let body = field_text(t, "body", 512)?.unwrap_or_default();
     let tunar = field_int(t, "tunar", 0, i64::from(u32::MAX))?.unwrap_or(0) as u32;
     let item = match t.get::<Value>("item").unwrap_or(Value::Nil) {
@@ -288,7 +292,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ("eqoa.mail.PackItem", "slot id name quantity"),
         (
             "eqoa.auction.State",
-            "revision offered mode pending page results minutes lots bids bidders_lot bidders sellable tunar banked timed_out",
+            "revision offered mode pending page results minutes lots bids bidders_lot bidders sellable tunar banked uncertain",
         ),
         ("eqoa.auction.Lot", "lot name quantity seller min_bid buyout minutes_left high_bid leader bids next_bid mine"),
         ("eqoa.auction.Bidder", "name bid"),
@@ -378,8 +382,13 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             lua.create_function(move |lua, id: Value| {
                 let symbol = format!("eqoa.actions.{name}");
                 enqueue_lua_with(lua, &symbol, || {
-                    let what = if name.starts_with("mail") { "a mail id (an eqoa.mail.get() entry's id)" } else { "a lot (an eqoa.auction.get() lot's id)" };
-                    Ok(ActionKind::A10(make(id_arg(&id, what)?)))
+                    // a mail's id is a whole u32 (the game sends it as such); a lot's is an i32
+                    let (what, max) = if name.starts_with("mail") {
+                        ("a mail id (an eqoa.mail.get() entry's id)", i64::from(u32::MAX))
+                    } else {
+                        ("a lot (an eqoa.auction.get() lot's id)", i64::from(i32::MAX))
+                    };
+                    Ok(ActionKind::A10(make(id_arg(&id, what, max)?)))
                 })
             })?,
         )?;

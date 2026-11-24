@@ -469,6 +469,8 @@ pub(crate) fn mail_send_text(to: &str, subject: &str, tunar: u32, item: Option<(
     if let Some((name, count)) = item {
         parts.push(if count > 1 { format!("{count} x \"{name}\"") } else { format!("\"{name}\"") });
     }
+    let subject = subject.replace('
+', " ");
     let mut text = format!("Send {} to {to} in the mail \"{subject}\"?", parts.join(" and "));
     if postage > 0 {
         text.push_str(&format!(" The postage is {postage} tunar."));
@@ -477,19 +479,22 @@ pub(crate) fn mail_send_text(to: &str, subject: &str, tunar: u32, item: Option<(
 }
 
 /// The question for a bid or a buyout.
-pub(crate) fn auction_bid_text(name: &str, price: i32, count: i32, buyout: bool) -> String {
+pub(crate) fn auction_bid_text(name: &str, price: i32, count: i32, buyout: bool, lot_buyout: i64) -> String {
     let what = if count > 1 { format!("{count} x \"{name}\"") } else { format!("\"{name}\"") };
     if buyout {
         format!("Buy out {what} for {price} tunar each? The tunar leaves you at once.")
     } else {
-        format!("Bid {price} tunar each on {what}? The tunar is held until you are outbid or win.")
+        let total = if count > 1 { format!(" ({} in all)", i64::from(price) * i64::from(count)) } else { String::new() };
+        let buy = if lot_buyout > 0 { format!(" Its buyout is {lot_buyout} tunar each.") } else { String::new() };
+        format!("Bid {price} tunar each on {what}{total}? The tunar is held until you are outbid or win.{buy}")
     }
 }
 
 /// The question for putting an item up at the auction.
 pub(crate) fn auction_sell_text(name: &str, count: i32, price: i32, buyout: i32, minutes: i32) -> String {
     let what = if count > 1 { format!("{count} x \"{name}\"") } else { format!("\"{name}\"") };
-    format!("Put {what} up at the auction from {price} tunar, buyout {buyout} tunar, for {} hours? It leaves your bank.", minutes / 60)
+    let each = if count > 1 { " each" } else { "" };
+    format!("Put {what} up at the auction from {price} tunar{each}, buyout {buyout} tunar{each}, for {} hours? It leaves your bank.", minutes / 60)
 }
 
 /// The question for spending training points: how many, and on which stats.

@@ -10,7 +10,7 @@
 //!
 //! The actions are the game's own requests: `Grams`' and `Auction`'s builders, one request at a time as the game has
 //! it. Nothing is ever resent: an action that finds one still out is refused `busy`, and a request the server never
-//! answers is given up on after `GIVE_UP` (told to the mod as `timed_out`, never replayed). Every step that moves
+//! answers is given up on after `GIVE_UP` (told to the mod as `uncertain`, never replayed). Every step that moves
 //! money, items or mail that cannot be had back asks the player first (`confirm.rs`) and is carried out only on
 //! their Yes, after checking again that the mail, lot or item is still what the question named.
 use super::Play;
@@ -43,8 +43,23 @@ struct Local {
     awaiting: Option<Instant>,
     /// a sell, bid or bidders request is out: the game's `bank.state` it set, and when
     out: Option<(i32, Instant)>,
-    /// the last request was given up on after `GIVE_UP`
-    timed_out: bool,
+    /// the lot and the bank record a request out is about (a bid, a sale)
+    out_target: (Option<i64>, Option<u32>),
+    /// a request was given up on after `GIVE_UP`: it may or may not have happened
+    uncertain: Option<Uncertain>,
+    /// a Take of a mail's contents is out: which mail, and when
+    taking: Option<(u32, Instant)>,
+}
+
+/// A request the fork gave up on. It stays until a fresh page shows the lots again, and until then the same lot is
+/// not bid on again and the same bank record is not put up again.
+#[derive(Clone)]
+struct Uncertain {
+    kind: &'static str,
+    lot: Option<i64>,
+    key: Option<u32>,
+    /// the game's page counter when it was given up on: a later, answered page is a fresh read
+    page: i32,
 }
 
 thread_local! {
@@ -236,9 +251,9 @@ fn auction_snapshot(play: &Play) -> Json {
     let a = &play.bank.auction;
     let now = play.session.now() as i64;
     let live = live();
-    let (mode, awaiting, timed_out) = LOCAL.with(|l| {
+    let (mode, awaiting, uncertain) = LOCAL.with(|l| {
         let l = l.borrow();
-        (l.mode, l.awaiting.is_some(), l.timed_out)
+        (l.mode, l.awaiting.is_some(), l.uncertain.as_ref().map(|u| u.kind))
     });
     let pending = if awaiting { mode_request(mode) } else { state_name(play.bank.state) };
     let mine = |lot: i64| play.dump.bank.lots.iter().any(|l| l.lot_id == lot);
@@ -308,7 +323,7 @@ fn auction_snapshot(play: &Play) -> Json {
         "sellable": sellable,
         "tunar": play.dump.player.p34,
         "banked": play.dump.player.p38,
-        "timed_out": timed_out,
+        "uncertain": uncertain,
     })
 }
 
@@ -328,21 +343,19 @@ fn auction_on_open(play: &mut Play) {
         let mut l = l.borrow_mut();
         l.mode = "search";
         l.awaiting = None;
-        l.out = None;
-        l.timed_out = false;
+        // a sale or bid still out is the bank's, not this window's: opening does not forget it
     });
 }
 
 fn auction_on_close(play: &mut Play) {
-    // `CloseAuctionSearch` without its start menu
-    play.bank.auction.clear_results();
-    play.bank.auction.clear_saved();
+    // `CloseAuctionSearch` without its start menu. The game's own window, when it is up, owns the page: the mod's
+    // window going (closed, disabled, a Lua error, death) never empties what the player is looking at
+    if !game_auction_up(play) {
+        play.bank.auction.clear_results();
+        play.bank.auction.clear_saved();
+    }
     // a sale or bid still out stays waited for (`out`): it is the bank's, not this window's
-    LOCAL.with(|l| {
-        let mut l = l.borrow_mut();
-        l.awaiting = None;
-        l.timed_out = false;
-    });
+    LOCAL.with(|l| l.borrow_mut().awaiting = None);
     native_a10::clear_auction();
 }
 
@@ -353,13 +366,19 @@ fn give_up_stale(play: &mut Play) {
         (l.awaiting.is_some_and(|t| t.elapsed() >= GIVE_UP), l.out.is_some_and(|(_, t)| t.elapsed() >= GIVE_UP))
     });
     if page_stale || out_stale {
-        // the game's own reset for a request that will not be answered (`bank_reset`)
-        play.bank.state = 0;
+        // the game's own reset for a request that will not be answered (`bank_reset`), unless its own window is up:
+        // that window's request is not the mod's to forget
+        if !game_auction_up(play) {
+            play.bank.state = 0;
+        }
+        let page = play.bank.auction.page;
         LOCAL.with(|l| {
             let mut l = l.borrow_mut();
+            let kind = if out_stale { l.out.map_or("request", |(s, _)| state_name(s)) } else { mode_request(l.mode) };
+            let (lot, key) = if out_stale { l.out_target } else { (None, None) };
+            l.uncertain = Some(Uncertain { kind, lot, key, page });
             l.awaiting = None;
             l.out = None;
-            l.timed_out = true;
         });
     }
 }
@@ -397,6 +416,16 @@ pub(crate) fn tick(play: &mut Play, game_step: bool) {
         l.mail_open = mail;
         l.auction_open = auction;
     });
+    // a fresh page (a new counter, answered) is a fresh read of the lots: what was uncertain is known again
+    if play.bank.auction.p7860 == 0 {
+        let page = play.bank.auction.page;
+        LOCAL.with(|l| {
+            let mut l = l.borrow_mut();
+            if l.uncertain.as_ref().is_some_and(|u| u.page != page) {
+                l.uncertain = None;
+            }
+        });
+    }
     // an answer ends the wait: a page arrived, or the game's own request state moved on. A sale or a bid is waited
     // for whether or not the auction window is still open (the bank's sell is a page of the bank window)
     if play.bank.auction.p7860 == 0 {
@@ -498,6 +527,15 @@ fn mail_inbox_action(play: &mut Play, action: &A10Action) -> DispatchOutcome {
             if play.mail.grams.attach.carried_by(*id).is_none() {
                 return refuse("not_ready", "read the mail first: the server has not said it carries anything");
             }
+            // one Take at a time: until the server says what the mail carries now (or 15 s)
+            let taking = LOCAL.with(|l| l.borrow().taking);
+            if let Some((t, since)) = taking
+                && since.elapsed() < GIVE_UP
+                && play.mail.grams.attach.carried_by(t).is_some()
+            {
+                return refuse("busy", "the last Take has not been answered yet");
+            }
+            LOCAL.with(|l| l.borrow_mut().taking = Some((*id, Instant::now())));
             play.mail.grams.out.push(crate::mailattach::take(*id));
             flush_mail(play);
             sent()
@@ -567,6 +605,12 @@ fn mail_send(play: &mut Play, action: &A10Action) -> DispatchOutcome {
         return sent();
     }
     // a mail that carries something: only where the server offers it, and each limit the compose window keeps
+    if names.len() != 1 {
+        return refuse(
+            "invalid_argument",
+            "a mail that carries tunar or an item goes to one name (the client cannot tell whether the server gives it to each)",
+        );
+    }
     let offer = match play.mail.grams.attach.offer {
         Some(o) if play.mail.grams.live => o,
         _ => return refuse("unsupported", "this server's mail carries nothing"),
@@ -594,7 +638,7 @@ fn mail_send(play: &mut Play, action: &A10Action) -> DispatchOutcome {
         }
     };
     let text = confirm::mail_send_text(
-        &to.trim().to_string(),
+        &String::from_utf8_lossy(&names[0]),
         subject,
         *tunar,
         picked.as_ref().map(|(_, _, c, n)| (n.as_str(), *c)),
@@ -639,18 +683,17 @@ fn begin_page(play: &mut Play, mode: &'static str, req: Vec<u8>) -> DispatchOutc
         let mut l = l.borrow_mut();
         l.mode = mode;
         l.awaiting = Some(Instant::now());
-        l.timed_out = false;
     });
     sent()
 }
 
-fn begin_out(play: &mut Play, state: i32, req: Vec<u8>) -> DispatchOutcome {
+fn begin_out(play: &mut Play, state: i32, req: Vec<u8>, lot: Option<i64>, key: Option<u32>) -> DispatchOutcome {
     send(play, req);
     play.bank.state = state;
     LOCAL.with(|l| {
         let mut l = l.borrow_mut();
         l.out = Some((state, Instant::now()));
-        l.timed_out = false;
+        l.out_target = (lot, key);
     });
     sent()
 }
@@ -724,7 +767,7 @@ fn auction_action(play: &mut Play, action: &A10Action) -> DispatchOutcome {
             if lot_in_results(play, *lot).is_none() {
                 return refuse("stale_handle", "that lot is not in the page shown now");
             }
-            begin_out(play, 6, Auction::bidders(*lot as i32))
+            begin_out(play, 6, Auction::bidders(*lot as i32), Some(*lot), None)
         }
         A10Action::AuctionBid { lot, price, count } => ask_bid(play, *lot, *price, *count, false),
         A10Action::AuctionBuyout { lot } => {
@@ -743,10 +786,14 @@ fn auction_action(play: &mut Play, action: &A10Action) -> DispatchOutcome {
 
 /// The checks the game's own bid form makes before it asks (`auctionwnd.rs`, state 2 and 4): the lot is still
 /// running and is not the player's own.
-fn bid_blocked(play: &Play, lot: i64, count: i32) -> Option<DispatchOutcome> {
-    let Some(l) = lot_in_results(play, lot) else {
+fn bid_blocked(play: &Play, lot: i64, price: i32, count: i32, buyout: bool) -> Option<DispatchOutcome> {
+    let Some(at) = play.bank.auction.results.iter().position(|l| l.lot_id == lot) else {
         return Some(refuse("stale_handle", "that lot is not in the page shown now"));
     };
+    let l = &play.bank.auction.results[at];
+    if LOCAL.with(|x| x.borrow().uncertain.as_ref().is_some_and(|u| u.kind == "bid" && u.lot == Some(lot))) {
+        return Some(refuse("busy", "the last bid on this lot got no answer and may have gone through: read the page again (auction_search, auction_page or auction_my_bids) before bidding on it again"));
+    }
     let a = &play.bank.auction;
     let now = play.session.now() as i64;
     if minutes_left(a, l.p2fc, now).is_some_and(|m| m < 0) {
@@ -761,16 +808,59 @@ fn bid_blocked(play: &Play, lot: i64, count: i32) -> Option<DispatchOutcome> {
     if i64::from(count) > l.quantity.max(1) {
         return Some(refuse("out_of_range", format!("the lot holds {}, not {count}", l.quantity.max(1))));
     }
+    // the game's own bid form's limits (`auctionwnd.rs` `draw_bid`, `draw_bid_live`): a price from the floor to the
+    // buyout, a count not below the one already bid, and the buyout price only for the whole stack
+    let col = |k: usize| a.cols[k].get(at).copied().unwrap_or(0);
+    let live = crate::live::features().live();
+    if live && let Some((_, _, had)) = Auction::find_bid3(&play.dump.bank, lot) && i64::from(count) < had {
+        return Some(refuse("out_of_range", format!("you already bid for {had}: a bid cannot be for fewer")));
+    }
+    if !buyout {
+        let floor = if live { l.p2f4.max(col(2)) } else { l.p2f4.max(col(1) + 1) };
+        if i64::from(price) < floor {
+            return Some(refuse("out_of_range", format!("the lowest bid on this lot is {floor}")));
+        }
+        if l.p2f8 > 0 && i64::from(price) > l.p2f8 {
+            return Some(refuse("out_of_range", format!("a bid cannot be above the lot's buyout, {}: use auction_buyout", l.p2f8)));
+        }
+        if live && l.p2f8 > 0 && i64::from(price) == l.p2f8 && i64::from(count) != l.quantity {
+            return Some(refuse("out_of_range", format!("a bid at the buyout price is for the whole stack, {}", l.quantity)));
+        }
+    }
     None
 }
 
 fn ask_bid(play: &mut Play, lot: i64, price: i32, count: i32, buyout: bool) -> DispatchOutcome {
-    if let Some(e) = bid_blocked(play, lot, count) {
+    if let Some(e) = bid_blocked(play, lot, price, count, buyout) {
         return e;
     }
     let name = lot_in_results(play, lot).map(|l| l.item.name.clone()).unwrap_or_default();
-    let text = confirm::auction_bid_text(&name, price, count, buyout);
+    let lot_buyout = lot_in_results(play, lot).map_or(0, |l| l.p2f8);
+    let text = confirm::auction_bid_text(&name, price, count, buyout, lot_buyout);
     super::a1_play::ask(Act::AuctionBid { lot, price, count, buyout, name }, text, AUCTION_KIND)
+}
+
+/// The game's own sell form's limits (`auction.rs` `SellWnd::draw_sell`): a starting price from the item's value up
+/// to 999,999,999, a buyout from the price up to the same, and 12 to 72 hours (the GM channel's shorter times
+/// are not a mod's). Refused before any question.
+fn sell_blocked(it: &net::dump::NetItem, price: i32, buyout: i32, minutes: i32) -> Option<DispatchOutcome> {
+    const MAX: i32 = 999_999_999;
+    if i64::from(price) < it.item.value as i64 {
+        return Some(refuse("out_of_range", format!("the lowest starting price for this item is {}", it.item.value)));
+    }
+    if price > MAX || buyout > MAX {
+        return Some(refuse("out_of_range", "a price is at most 999999999"));
+    }
+    if buyout < price {
+        return Some(refuse("out_of_range", "the buyout cannot be below the starting price"));
+    }
+    if !(720..=4320).contains(&minutes) {
+        return Some(refuse("out_of_range", "an auction runs 12 to 72 hours"));
+    }
+    if LOCAL.with(|l| l.borrow().uncertain.as_ref().is_some_and(|u| u.kind == "sell" && u.key == Some(it.inv_index))) {
+        return Some(refuse("busy", "the last sale of this item got no answer and may have gone through: read your lots (auction_my_lots) before putting it up again"));
+    }
+    None
 }
 
 fn auction_sell(play: &mut Play, action: &A10Action) -> DispatchOutcome {
@@ -812,6 +902,9 @@ fn auction_sell(play: &mut Play, action: &A10Action) -> DispatchOutcome {
         return refuse("out_of_range", format!("the stack holds {}, not {count}", it.quantity.max(1)));
     }
     let minutes = hours.saturating_mul(60);
+    if let Some(e) = sell_blocked(it, *price, *buyout, minutes) {
+        return e;
+    }
     let text = confirm::auction_sell_text(&it.item.name, *count, *price, *buyout, minutes);
     let act = Act::AuctionSell {
         key: it.inv_index,
@@ -867,8 +960,8 @@ pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
                 }
             };
             let names = recipients(to);
-            if names.is_empty() {
-                return Err("the mail names nobody".into());
+            if names.len() != 1 {
+                return Err("a mail that carries something goes to one name".into());
             }
             let (s, b) = (crate::ui::wide(subject), crate::ui::wide(body));
             play.mail.grams.send_gram_attached(&names, &s, &b, *tunar, pick);
@@ -883,11 +976,11 @@ pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
                 return Err("the auction is not available".into());
             }
             request_free(play).map_err(|_| "a bank or auction request is still waiting".to_string())?;
-            if let Some(DispatchOutcome::Refused { reason, .. }) = bid_blocked(play, *lot, *count) {
+            if let Some(DispatchOutcome::Refused { reason, .. }) = bid_blocked(play, *lot, *price, *count, *buyout) {
                 return Err(reason);
             }
             let msg = if *buyout || live() { Auction::bid_n(*lot as i32, *price, *count) } else { Auction::bid(*lot as i32, *price) };
-            begin_out(play, 4, msg);
+            begin_out(play, 4, msg, Some(*lot), None);
             Ok(())
         }
         Act::AuctionSell { key, id, count, price, buyout, minutes, .. } => {
@@ -901,11 +994,13 @@ pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
             if play.bank.state != 0 {
                 return Err("a bank request is still waiting".into());
             }
-            let ok = play.dump.bank.items.items.iter().any(|it| it.inv_index == *key && it.item.id == *id && it.quantity.max(1) >= i64::from(*count) && crate::auction::can_sell(it));
-            if !ok {
+            let Some(it) = play.dump.bank.items.items.iter().find(|it| it.inv_index == *key && it.item.id == *id && it.quantity.max(1) >= i64::from(*count) && crate::auction::can_sell(it)) else {
                 return Err("the item is no longer in the bank as it was".into());
+            };
+            if let Some(DispatchOutcome::Refused { reason, .. }) = sell_blocked(it, *price, *buyout, *minutes) {
+                return Err(reason);
             }
-            begin_out(play, 3, Auction::sell(banker, *key, *count, *price, *buyout, *minutes));
+            begin_out(play, 3, Auction::sell(banker, *key, *count, *price, *buyout, *minutes), None, Some(*key));
             Ok(())
         }
         _ => Err("not a mail or auction confirmation".into()),

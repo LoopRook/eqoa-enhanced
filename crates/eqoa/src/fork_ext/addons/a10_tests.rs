@@ -72,6 +72,8 @@ fn a10_arguments_are_checked_before_anything_is_queued() {
         ("eqoa.actions.mail_read(1.5)", "invalid_argument"),
         ("eqoa.actions.mail_delete(nil)", "invalid_argument"),
         ("eqoa.actions.mail_take(2^40)", "invalid_argument"),
+        ("eqoa.actions.mail_read(4294967296)", "invalid_argument"),
+        ("eqoa.actions.mail_send({to = 'Bob', subject = 'a\\nb', body = 'b'})", "invalid_argument"),
         ("eqoa.actions.mail_refresh(1)", "invalid_argument"),
         ("eqoa.actions.mail_send('Bob')", "invalid_argument"),
         ("eqoa.actions.mail_send({to = 5})", "invalid_argument"),
@@ -104,7 +106,7 @@ fn a10_arguments_are_checked_before_anything_is_queued() {
     // the controls: well-formed calls queue, each under its own name
     h.execute(
         r#"
-        assert(eqoa.actions.mail_refresh()); assert(eqoa.actions.mail_read(12)); assert(eqoa.actions.mail_delete(12)); assert(eqoa.actions.mail_take(12))
+        assert(eqoa.actions.mail_refresh()); assert(eqoa.actions.mail_read(12)); assert(eqoa.actions.mail_read(4294967295)); assert(eqoa.actions.mail_delete(12)); assert(eqoa.actions.mail_take(12))
         assert(eqoa.actions.mail_send({to = 'Bob', subject = 's', body = 'b', tunar = 5, item = {slot = 1, id = 2, count = 3}}))
         assert(eqoa.actions.auction_search()); assert(eqoa.actions.auction_search({name = 'Iron', class = 3, wear = -1}))
         assert(eqoa.actions.auction_page(true)); assert(eqoa.actions.auction_my_lots()); assert(eqoa.actions.auction_my_bids())
@@ -117,7 +119,7 @@ fn a10_arguments_are_checked_before_anything_is_queued() {
     assert_eq!(
         action_broker::queued_kinds_for_test(),
         vec![
-            "mail_refresh", "mail_read", "mail_delete", "mail_take", "mail_send", "auction_search", "auction_search", "auction_page",
+            "mail_refresh", "mail_read", "mail_read", "mail_delete", "mail_take", "mail_send", "auction_search", "auction_search", "auction_page",
             "auction_my_lots", "auction_my_bids", "auction_bidders", "auction_bid", "auction_buyout", "auction_sell"
         ]
     );
@@ -185,12 +187,14 @@ fn a10_the_questions_name_what_is_at_stake() {
     let t = confirm::mail_send_text("Bob", "Gift", 100, Some(("Iron Ore", 2)), 15);
     assert!(t.contains("100 tunar and 2 x \"Iron Ore\"") && t.contains("Bob") && t.contains("postage is 15"), "{t}");
     assert!(!confirm::mail_send_text("Bob", "Gift", 100, None, 0).contains("postage"));
-    let t = confirm::auction_bid_text("Iron Ore", 150, 5, false);
-    assert!(t.starts_with("Bid 150 tunar each on 5 x \"Iron Ore\""), "{t}");
-    let t = confirm::auction_bid_text("Iron Ore", 400, 1, true);
+    let t = confirm::auction_bid_text("Iron Ore", 150, 5, false, 400);
+    assert!(t.starts_with("Bid 150 tunar each on 5 x \"Iron Ore\" (750 in all)") && t.ends_with("Its buyout is 400 tunar each."), "{t}");
+    assert!(!confirm::auction_bid_text("Iron Ore", 150, 1, false, 0).contains("buyout"));
+    let t = confirm::auction_bid_text("Iron Ore", 400, 1, true, 400);
     assert!(t.starts_with("Buy out \"Iron Ore\" for 400 tunar each"), "{t}");
     let t = confirm::auction_sell_text("Gold Ring", 1, 100, 300, 720);
     assert!(t.contains("\"Gold Ring\"") && t.contains("from 100 tunar") && t.contains("buyout 300") && t.contains("12 hours"), "{t}");
+    assert!(confirm::auction_sell_text("Arrow", 20, 5, 9, 720).contains("from 5 tunar each, buyout 9 tunar each"));
     // every one has its own kind name, so a mod hears which question closed
     for (act, kind) in [
         (confirm::Act::MailDelete { id: 1, subject: String::new() }, "mail_delete"),
