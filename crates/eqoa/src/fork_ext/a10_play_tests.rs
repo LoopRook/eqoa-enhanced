@@ -1592,8 +1592,13 @@ mod mods {
             };
             p.dump.bank.items.items[1].item.value = 80;
         });
-        r.host.execute("local B = require('bags'); B.select(6)").unwrap();
         r.settle();
+        r.host.execute("local B = require('bags'); B.select(6)").unwrap();
+        for _ in 0..6 {
+            r.settle();
+        }
+        let diag = state_of(&r, "local B = require('bags'); return 'open=' .. tostring(B.open) .. ' grid=' .. tostring(B.grid) .. ' tab=' .. tostring(B.tab) .. ' rect=' .. tostring(B.rect) .. ' inv=' .. tostring(eqoa.inventory.get())");
+        assert!(state_of(&r, "return tostring(require('bags').rect ~= nil)") == "true", "the Bags window is drawn: {diag}; {}", r.why());
         r
     }
 
