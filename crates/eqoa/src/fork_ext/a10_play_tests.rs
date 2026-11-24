@@ -1716,7 +1716,7 @@ mod mods {
         assert!(q.text.contains("Gold Ring") && q.text.contains("from 50 tunar"), "{}", q.text);
         // the Yes lands on a frame that is not a game step (the client carries it out on every drawn frame)
         say_yes();
-        super::super::begin_iteration(&mut r.p, false);
+        crate::play::fork_hooks::begin_iteration(&mut r.p, false);
         r.frames(1);
         assert_eq!(sent().len(), n + 1, "the first sale went");
         // the server answers, the second form comes with its own lowest price; nothing is silently listed
