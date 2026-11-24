@@ -303,6 +303,29 @@ fn a1_destroy_many_skips_a_stack_that_changed_and_stops_with_the_world() {
 }
 
 #[test]
+fn a1_destroy_many_never_takes_a_worn_stack_asked_for_or_put_on_during_the_run() {
+    let (mut p, host) = rig3();
+    let sent = p.session.sends_lost;
+    // asked for: refused for every mod, no question is put to the player (the rig's first item is the worn sword)
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.destroy_many({inv.items[2].ref, inv.items[1].ref})");
+    host.execute("assert(results[1].ok == false and results[1].code == 'not_ready' and results[1].reason:find('worn'), tostring(results[1] and results[1].reason))").unwrap();
+    assert!(!confirm::is_open(), "a list with a worn stack is not asked at all");
+    assert_eq!(p.session.sends_lost, sent);
+    // put on while the run goes: skipped at its turn and counted, never destroyed
+    ask(&mut p, &host, BOTH);
+    key(NamedKey::ArrowRight);
+    key(NamedKey::Enter);
+    step(&mut p, &host);
+    assert_eq!(p.session.sends_lost, sent + 1);
+    server_answers(&mut p, "Iron Ore");
+    let rat = p.dump.inventory.items.iter().position(|it| it.item.name == "Rat Pelt").unwrap();
+    p.dump.inventory.items[rat].equip_slot = 3;
+    step(&mut p, &host);
+    assert_eq!(p.session.sends_lost, sent + 1, "the stack that was put on is not destroyed");
+    host.execute("assert(closed[1].detail.sent_count == 1 and closed[1].detail.total == 2 and closed[1].detail.skipped[1] == 'Rat Pelt')").unwrap();
+}
+
+#[test]
 fn a1_destroy_many_refuses_what_cannot_be_asked() {
     let (mut p, host) = rig3();
     ask(&mut p, &host, "return eqoa.actions.destroy_many({})");

@@ -72,6 +72,10 @@ pub(crate) fn dispatch(play: &mut Play, action: &A1Action) -> DispatchOutcome {
                     Err(e) => return e,
                 };
                 let it = &play.dump.inventory.items[idx];
+                // a worn stack is never part of a group destroy, whoever asks (the player scans a list, they do not audit it)
+                if it.equip_slot != -1 {
+                    return refuse("not_ready", "worn items cannot be group-destroyed");
+                }
                 let count = it.quantity.max(1);
                 lines.push((it.item.name.clone(), count, it.equip_slot != -1, it.quick_slot >= 0, it.item.no_trade > 0));
                 acts.push((it.inv_index, it.item.name.clone(), count));
@@ -302,7 +306,8 @@ fn advance_run(play: &mut Play, run: &mut confirm::Run) -> bool {
         match found {
             Some(idx) => {
                 let it = &play.dump.inventory.items[idx];
-                if it.item.name == name && count <= it.quantity.max(1) {
+                // worn by its turn (the player put it on while the run went): skipped, never destroyed
+                if it.item.name == name && count <= it.quantity.max(1) && it.equip_slot == -1 {
                     play.item_outs(vec![crate::itemmenu::ItemOut::UseItemOn(idx as i32, count as i32)]);
                     run.sent += 1;
                     // the game waits for the server now: the next stack goes on a later step
