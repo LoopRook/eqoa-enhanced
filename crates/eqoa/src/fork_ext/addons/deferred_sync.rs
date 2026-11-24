@@ -13,6 +13,8 @@
 //! * **What is deferred is only the durability.** A crash of the game keeps the write (the operating
 //!   system has the bytes). A power cut or system crash within the short time before the background sync
 //!   finishes can lose the write or leave the file empty; the previous file is not restored.
+//! * No file handle is kept open between the write and the sync: the job reopens the path, so a later
+//!   write, rename or remove of the same path never meets a handle of ours (a path gone by then is fine).
 //! * Syncs wait per file and collapse to the last one; `flush` waits for all of them. The manager calls it
 //!   where a write must be on disk (mod disable, logout, profile switch, quit).
 //! * A sync that fails is a [`Failure`] the manager shows in Mods & Addons and the log.
@@ -45,22 +47,60 @@ pub(crate) fn atomic_replace_deferred(target: &Path, bytes: &[u8], owner: Option
             Err(e) => return Err(e),
         }
     };
-    let result = file.write_all(bytes).and_then(|_| file.flush()).and_then(|_| fs::rename(&temporary, target));
+    // No handle is kept open across the rename or a later remove: the background job reopens the path to sync it.
+    let written = file.write_all(bytes).and_then(|_| file.flush());
+    drop(file);
+    let result = written.and_then(|_| retry_once_after_syncs(|| fs::rename(&temporary, target)));
     if let Err(e) = result {
-        drop(file);
         let _ = fs::remove_file(&temporary);
         return Err(e);
     }
-    // The handle stays valid after the rename (std opens with delete sharing) and syncs the bytes now in place.
-    let shown = target.display().to_string();
+    let path = target.to_path_buf();
     SYNCS.with(|q| {
         q.submit(
-            target.to_path_buf(),
+            path.clone(),
             owner.map(str::to_owned),
-            Box::new(move || file.sync_all().map_err(|e| format!("{shown}: {e}"))),
+            Box::new(move || sync_path(&path)),
         )
     });
     Ok(())
+}
+
+/// A mod's `remove` of a file: the file goes at once; a sync waiting for that path finds nothing and is done.
+pub(crate) fn remove_file(path: &Path) -> std::io::Result<()> {
+    retry_once_after_syncs(|| fs::remove_file(path))
+}
+
+/// On a filesystem without POSIX delete/rename semantics (FAT, exFAT, some network shares) a path the background
+/// thread has open for its sync can refuse a rename or remove for that moment. Wait for the syncs and try once more.
+fn retry_once_after_syncs(op: impl Fn() -> std::io::Result<()>) -> std::io::Result<()> {
+    match op() {
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            flush();
+            op()
+        }
+        other => other,
+    }
+}
+
+/// The background half: sync what is at `path` now. A file that was removed meanwhile needs nothing.
+fn sync_path(path: &Path) -> Result<(), String> {
+    #[cfg(test)]
+    if FAIL_NEXT.swap(false, Ordering::SeqCst) {
+        return Err(format!("{}: injected failure", path.display()));
+    }
+    match fs::OpenOptions::new().write(true).open(path) {
+        Ok(file) => file.sync_all().map_err(|e| format!("{}: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+#[cfg(test)]
+static FAIL_NEXT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Test seam: the next sync fails (the failure is attributed to the write's owner).
+#[cfg(test)]
+pub(crate) fn fail_next_sync_for_test() {
+    FAIL_NEXT.store(true, Ordering::SeqCst);
 }
 
 /// Waits until every queued sync has been tried.

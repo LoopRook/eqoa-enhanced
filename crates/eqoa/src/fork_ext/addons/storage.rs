@@ -465,8 +465,8 @@ impl Storage {
         self.prepare_encoded(key, value)?.commit()
     }
     /// `save_encoded` with the sync on the background thread (same refusals, same file in place at return).
-    pub(crate) fn save_encoded_deferred_sync(&self, key: &str, value: &Json) -> Result<(), String> {
-        self.prepare_encoded(key, value)?.commit_deferred_sync(None)
+    pub(crate) fn save_encoded_deferred_sync(&self, key: &str, value: &Json, owner: Option<&str>) -> Result<(), String> {
+        self.prepare_encoded(key, value)?.commit_deferred_sync(owner)
     }
     /// Everything `save_encoded` does except the disk write: the quota check and the encoding, so the same
     /// refusals come back at once. The caller commits the result itself or hands it to the background writer.

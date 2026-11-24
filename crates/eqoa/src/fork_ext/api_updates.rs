@@ -415,32 +415,16 @@ pub(crate) fn cache(key: FrameKey, snapshot: crate::fork_ext::addons::host::Snap
     SNAPSHOT.with(|s| *s.borrow_mut() = Some((key, revision(), snapshot)));
 }
 thread_local! {
-    static STEPS: RefCell<crate::frames::Frames> = RefCell::new(crate::frames::Frames::default());
     static STEP: Cell<bool> = const { Cell::new(true) };
-    #[cfg(test)]
-    static TEST_CLOCK_MS: Cell<Option<f64>> = const { Cell::new(None) };
     #[cfg(test)]
     static BUILDS: Cell<u64> = const { Cell::new(0) };
 }
-fn clock_ms() -> Option<f64> {
-    #[cfg(test)]
-    {
-        // tests: with no clock set every call is a step (the old behaviour: a rebuild on every call)
-        return TEST_CLOCK_MS.with(Cell::get);
-    }
-    #[cfg(not(test))]
-    {
-        thread_local! {static START: std::time::Instant = std::time::Instant::now();}
-        Some(START.with(|s| s.elapsed().as_secs_f64() * 1000.0))
-    }
-}
-/// Whether this drawn frame is one of the game's 30 a second (`frames.rs`'s clock): the mods' snapshot and
-/// state are rebuilt on these; the player's position and the camera are patched on every drawn frame.
+/// Whether the game stepped since the last rebuild: the game's own 30 Hz step, as `native_core::iteration` is told
+/// by the frame hook (the same step that dispatches the mods' actions and advances `Client.tick`). The mods' state
+/// is rebuilt on these; the player's position and the camera are patched on every drawn frame, and a state event
+/// between steps rebuilds at once (see `refresh`).
 fn step_due() -> bool {
-    match clock_ms() {
-        Some(now) => STEPS.with(|s| s.borrow_mut().due(now)),
-        None => true,
-    }
+    native_core::take_game_step()
 }
 /// Set by `refresh`: this call rebuilt the state (a step, or a forced rebuild). `forge_snapshot` rebuilds the
 /// snapshot on it and otherwise reuses the last one with the live fields patched in.
@@ -452,13 +436,17 @@ pub(crate) fn latest() -> Option<crate::fork_ext::addons::host::Snapshot> {
     SNAPSHOT.with(|s| s.borrow().as_ref().map(|(_, _, snapshot)| *snapshot))
 }
 #[cfg(test)]
-pub(crate) fn set_test_clock(ms: Option<f64>) {
-    TEST_CLOCK_MS.with(|c| c.set(ms));
-    STEPS.with(|s| *s.borrow_mut() = crate::frames::Frames::default());
-}
+thread_local! {static NO_UPGRADE: Cell<bool> = const { Cell::new(false) };}
+/// Test seam: the gate as it was before the fix (a state event between steps did not rebuild).
 #[cfg(test)]
-pub(crate) fn set_test_clock_keep(ms: f64) {
-    TEST_CLOCK_MS.with(|c| c.set(Some(ms)));
+pub(crate) fn set_no_upgrade_for_test(on: bool) {
+    NO_UPGRADE.with(|n| n.set(on));
+}
+fn no_upgrade() -> bool {
+    #[cfg(test)]
+    return NO_UPGRADE.with(Cell::get);
+    #[cfg(not(test))]
+    false
 }
 #[cfg(test)]
 pub(crate) fn builds_for_test() -> u64 {
@@ -508,6 +496,7 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
     // game's 30 Hz step decides
     let forced = first || manual || CORE.with(|c| c.borrow().view.in_world != play.in_world_now());
     let step = step_due() || forced || SNAPSHOT.with(|s| s.borrow().is_none());
+    let seq_at_start = native_core::event_seq();
     STEP.with(|s| s.set(step || !play.in_world_now()));
     if forced {
         native_core::flush_deferred();
@@ -534,16 +523,29 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         native_core::flush_deferred();
         return;
     }
+    let mut step = step;
     native_core::flush_deferred();
     if step {
         super::items::refresh(play);
-    }
-    super::r6a::refresh(play, walker);
-    if step {
+        super::r6a::refresh(play, walker);
         super::a3::refresh(play, walker);
         super::a5::refresh(play);
+        native_core::flush_deferred();
+    } else {
+        // Between steps only the camera and the packets' deltas run. If either produced an event about the
+        // game's state (a target, a window, a quest, an item), the state those events describe is rebuilt now, so a
+        // handler never reads a snapshot older than the event it was told about.
+        super::r6a::refresh(play, walker);
+        native_core::flush_deferred();
+        if native_core::state_event_since(seq_at_start) && !no_upgrade() {
+            step = true;
+            STEP.with(|s| s.set(true));
+            super::items::refresh(play);
+            super::a3::refresh(play, walker);
+            super::a5::refresh(play);
+            native_core::flush_deferred();
+        }
     }
-    native_core::flush_deferred();
     CORE.with(|c| {
         let mut c = c.borrow_mut();
         c.flush_player_motion();

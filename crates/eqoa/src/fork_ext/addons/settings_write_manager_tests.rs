@@ -107,3 +107,86 @@ fn settings_manager_shutdown_waits_for_pending_writes() {
     assert!(!manager.writes.is_busy());
     assert_eq!(settings_file(&config.0, &addon), Some(encoded("return {v=5}")));
 }
+
+fn find_file(dir: &Path, name: &str) -> Option<Vec<u8>> {
+    for entry in fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_file(&path, name) {
+                return Some(found);
+            }
+        } else if path.file_name().is_some_and(|n| n == name) {
+            return fs::read(path).ok();
+        }
+    }
+    None
+}
+
+/// Disabling a mod waits for what its `DisableScript` writes and for the files it left open (closed by the
+/// manager after the first flush): both are on the disk when the disable returns, with the disk's sync slow.
+/// (Control, the old order: the flush ran before them, so the syncs were still pending when disable returned;
+/// run by hand by removing the flush at the end of `disable`.)
+#[test]
+fn disable_waits_for_the_disable_scripts_writes_and_the_files_it_left_open() {
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let scripts = Scratch::new();
+    let config = Scratch::new();
+    scripts.package(
+        "a",
+        true,
+        r#"
+        if not hooked then
+            hooked = true
+            UiForge.RegisterCallback(UiForge.CallbackType.DisableScript, function() assert(eqoa.files.write('d.txt', 'from disable')) end)
+        end
+        "#,
+    );
+    let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+    gpu.frame(&mut manager);
+    gpu.frame(&mut manager);
+    super::super::deferred_sync::set_delay_for_test(std::time::Duration::from_millis(700));
+    manager.queue(Command::Enable("a".into(), false));
+    gpu.frame(&mut manager);
+    assert!(
+        !super::super::deferred_sync::is_busy(),
+        "disable returned with a file's sync still pending"
+    );
+    assert_eq!(find_file(&config.0, "d.txt").as_deref(), Some(&b"from disable"[..]), "{:?}", manager.diagnostics());
+    super::super::deferred_sync::set_delay_for_test(std::time::Duration::ZERO);
+}
+
+/// A reload closes the files the mod left open (after the manager's first flush): their bytes are on the disk when
+/// the reload returns. (Control, the old order: the sync was still pending then.)
+#[test]
+fn reload_waits_for_the_files_the_mod_left_open() {
+    let Some(mut gpu) = Gpu::new() else {
+        return;
+    };
+    let scripts = Scratch::new();
+    let config = Scratch::new();
+    scripts.package(
+        "a",
+        true,
+        r#"
+        -- the first instance leaves a file open; the reloaded one finds it written and leaves it be
+        if not hooked then
+            hooked = true
+            if eqoa.files.read('data/h.txt') == nil then
+                h = assert(io.open('data/h.txt', 'w'))
+                h:write('left open')
+            end
+        end
+        "#,
+    );
+    let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+    gpu.frame(&mut manager);
+    gpu.frame(&mut manager);
+    super::super::deferred_sync::set_delay_for_test(std::time::Duration::from_millis(700));
+    manager.queue(Command::Reload("a".into()));
+    gpu.frame(&mut manager);
+    assert!(!super::super::deferred_sync::is_busy(), "reload returned with a file's sync still pending");
+    assert_eq!(find_file(&config.0, "h.txt").as_deref(), Some(&b"left open"[..]), "{:?}", manager.diagnostics());
+    super::super::deferred_sync::set_delay_for_test(std::time::Duration::ZERO);
+}

@@ -148,12 +148,82 @@ fn an_option_toggle_write_is_quick_and_the_file_is_in_place_for_the_next_read() 
     let key = Storage::key_for_addon_id("toggle_mod");
     let value = serde_json::json!({"table": [["opt", true]]});
     let start = Instant::now();
-    storage.save_encoded_deferred_sync(&key, &value).unwrap();
+    storage.save_encoded_deferred_sync(&key, &value, Some("toggle_mod")).unwrap();
     assert!(start.elapsed() < QUICK, "the toggle write waited: {:?}", start.elapsed());
     let on_disk: serde_json::Value = serde_json::from_slice(&fs::read(storage.profile_path(&key).unwrap()).unwrap()).unwrap();
     assert_eq!(on_disk, value, "in place at once");
     assert!(deferred_sync::is_busy());
-    assert!(storage.save_encoded_deferred_sync("../escape", &value).is_err(), "a bad key is refused at the call");
+    assert!(storage.save_encoded_deferred_sync("../escape", &value, Some("toggle_mod")).is_err(), "a bad key is refused at the call");
     deferred_sync::flush();
     assert!(!deferred_sync::is_busy());
+}
+
+/// write -> remove -> write of one path with a slow sync pending: each call is quick, nothing waits on or fails
+/// against a handle of ours (none is kept open), the removed path's sync finds nothing and is not a failure, and the
+/// last bytes are the ones on disk after the flush.
+#[test]
+fn write_remove_write_of_one_path_with_a_slow_sync_never_blocks_or_fails() {
+    let (_dir, host) = fixture();
+    deferred_sync::set_delay_for_test(DELAY);
+    let spent = timed(
+        &host,
+        r#"
+        assert(eqoa.files.write('p.txt', 'one'))
+        assert(eqoa.files.remove('p.txt') == true)
+        assert(eqoa.files.write('p.txt', 'two'))
+        assert(eqoa.files.remove('p.txt') == true)
+        assert(eqoa.files.write('p.txt', 'three'))
+        "#,
+    );
+    assert!(spent < QUICK, "a write/remove/write waited: {spent:?}");
+    host.execute("assert(eqoa.files.read('p.txt') == 'three')").unwrap();
+    deferred_sync::flush();
+    assert!(deferred_sync::take_failures().is_empty(), "the sync of a replaced or removed path is not a failure");
+    host.execute("assert(eqoa.files.read('p.txt') == 'three')").unwrap();
+    // a path removed with its sync still waiting: the sync finds nothing and is fine
+    host.execute("assert(eqoa.files.write('gone.txt', 'x')); assert(eqoa.files.remove('gone.txt') == true)").unwrap();
+    deferred_sync::flush();
+    assert!(deferred_sync::take_failures().is_empty());
+}
+
+/// A sync that fails is shown for the mod that wrote: `eqoa.files.write`, a file opened with `io.open(.., "w")` and
+/// closed or flushed, and an option toggle all name their owner. (Control: no failure, no entry.)
+#[test]
+fn a_failed_sync_is_attributed_to_the_mod_for_every_kind_of_write() {
+    let (dir, host) = fixture();
+    fs::create_dir_all(dir.0.join("scripts/pack/resources")).unwrap();
+    let resources = dir.0.join("scripts/pack/resources").canonicalize().unwrap();
+    let shown = resources.to_string_lossy().replace("\\\\?\\", "").replace(std::path::MAIN_SEPARATOR, "/");
+    host.lua.globals().set("resource", shown).unwrap();
+    deferred_sync::set_delay_for_test(Duration::from_millis(50));
+    host.execute("assert(eqoa.files.write('ok.txt', 'x'))").unwrap();
+    deferred_sync::flush();
+    assert!(deferred_sync::take_failures().is_empty(), "control: no failure, no entry");
+    for (what, lua) in [
+        ("files.write", "assert(eqoa.files.write('w.txt', 'x'))"),
+        ("io.open w + flush", "f = assert(io.open(resource..'/h.cfg','w')); f:write('x'); assert(f:flush())"),
+        ("io.open w + close", "g = assert(io.open(resource..'/c.cfg','w')); g:write('x'); assert(g:close())"),
+    ] {
+        deferred_sync::flush();
+        let _ = deferred_sync::take_failures();
+        deferred_sync::set_delay_for_test(Duration::from_millis(300));
+        host.execute(lua).unwrap();
+        // every write queues a sync; make the last queued one fail
+        deferred_sync::fail_next_sync_for_test();
+        deferred_sync::flush();
+        let failures = deferred_sync::take_failures();
+        assert!(!failures.is_empty(), "{what}: the injected failure is reported");
+        assert!(failures.iter().all(|f| f.owner.as_deref() == Some("pack")), "{what}: names the mod, got {failures:?}");
+    }
+    // the option toggle's file
+    let storage = Storage::new(Some(dir.0.join("toggle")));
+    deferred_sync::set_delay_for_test(Duration::from_millis(300));
+    storage
+        .save_encoded_deferred_sync(&Storage::key_for_addon_id("toggle_mod"), &serde_json::json!({"table": []}), Some("toggle_mod"))
+        .unwrap();
+    deferred_sync::fail_next_sync_for_test();
+    deferred_sync::flush();
+    let failures = deferred_sync::take_failures();
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert_eq!(failures[0].owner.as_deref(), Some("toggle_mod"));
 }

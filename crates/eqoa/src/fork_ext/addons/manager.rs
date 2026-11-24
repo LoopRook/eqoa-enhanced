@@ -800,6 +800,9 @@ impl Manager {
         if entry.status != Status::Failed {
             entry.status = Status::Disabled;
         }
+        // What DisableScript wrote and what closing the mod's open files wrote are waited for too (the flush above
+        // ran before them): disable, reload and a profile switch return with those files on the disk.
+        self.flush_writes();
         super::options::set_addon_enabled(&entry.metadata.id, false);
         crate::fork_ext::bindpage::set_addon_enabled(&entry.metadata.id, false);
         super::hud_layer::clear_addon(&entry.metadata.id);

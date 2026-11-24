@@ -141,7 +141,7 @@ impl Mounts {
             super::deferred_sync::atomic_replace_deferred(&deleted, &[], Some(&self.addon.id)).map_err(|e| e.to_string())?;
         }
         if target.exists() {
-            fs::remove_file(&target).map_err(|e| e.to_string())?;
+            super::deferred_sync::remove_file(&target).map_err(|e| e.to_string())?;
         }
         super::exchange::saved(self, &key);
         Ok(true)
