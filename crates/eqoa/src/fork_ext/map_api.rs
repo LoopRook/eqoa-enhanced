@@ -337,17 +337,52 @@ mod render_tests;
 
 impl Map {
     /// The player's own world's overview (not the world a Places browse shows), once the map's layer and the world
-    /// are there.
+    /// are there, with the detail tiles the map holds on the GPU (the player's world only).
     pub(crate) fn api_terrain(&self) -> Option<crate::fork_ext::addons::map_terrain::Source<'_>> {
+        use crate::fork_ext::addons::map_terrain::{Source, TileSrc};
         let w = self.home.as_ref().or(self.world.as_ref())?;
         let index = w.overview?;
-        let texture = self.layers.as_ref()?.map.texture_of(index)?;
+        let layer = &self.layers.as_ref()?.map;
+        let texture = layer.texture_of(index)?;
         let c = &w.builder.cells;
         let texels = c.overview_size();
         if texels.0 == 0 || texels.1 == 0 {
             return None;
         }
-        Some(crate::fork_ext::addons::map_terrain::Source { texture, extent: c.extent(), texels, world: w.index, texture_index: index, progress: w.builder.progress() })
+        let mut tiles = Vec::new();
+        if self.home.is_none() {
+            for (&zone, &(t, _)) in &w.tiles {
+                if let (Some(cell), Some(texture)) = (c.cell_of.get(zone).copied().flatten(), layer.texture_of(t)) {
+                    tiles.push(TileSrc { zone, rect: c.rect(cell), texture });
+                }
+            }
+        }
+        Some(Source { texture, extent: c.extent(), texels, world: w.index, texture_index: index, progress: w.builder.progress(), tiles, tile_scale: TILE_SCALE })
+    }
+
+    /// Keeps the detail tiles the mod's held views show (`(centre, scale, picture size)` each): asked of the game's
+    /// cache, marked as wanted for the minimap's keeping (`mini.wanted`, which `take_pictures` honours) and not let go
+    /// as least lately used. Called once a step, before the map's frame, from `a13_play::tick`.
+    pub(crate) fn api_terrain_keep(&mut self, views: &[([f32; 2], f32, (u32, u32))]) {
+        if self.home.is_some() {
+            return;
+        }
+        let Some(w) = self.world.as_mut() else { return };
+        for &(center, scale, size) in views {
+            let mut zones = wanted_tiles(&w.builder.cells, view::View { center, scale }, size);
+            zones.truncate(12);
+            for zi in zones {
+                match w.tiles.get_mut(&zi) {
+                    Some(t) => t.1 = self.frame,
+                    None => {
+                        w.builder.want_tile(zi);
+                    }
+                }
+                if !self.mini.wanted.contains(&zi) {
+                    self.mini.wanted.push(zi);
+                }
+            }
+        }
     }
 }
 

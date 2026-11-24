@@ -1026,7 +1026,9 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
             drain_released_waypoints(_play);
             if ready {
                 if reqs.map && crate::settings::map() && _play.addon_input_available() {
-                    _play.map.show();
+                    if !a13_play::open_for_mod(_play) {
+                        _play.map.show();
+                    }
                 }
                 if reqs.assist && matches!(_play.mode, 0 | 38) {
                     _play.assist_target();
@@ -2318,7 +2320,9 @@ fn dispatch_broker_action(
                             reason: "map is disabled in settings".into(),
                         };
                     }
-                    play.map.show();
+                    if !a13_play::open_for_mod(play) {
+                        play.map.show();
+                    }
                 }
                 "abilities" | "spellbook" => play.start_actions(vec![(0x0801_0000, 0)]),
                 "quests" => play.start_actions(vec![(0x0B0A_0000, 0)]),

@@ -48,6 +48,10 @@ pub(crate) fn diverts(held: bool, fresh: bool, may: bool, pass_once: bool) -> bo
 
 /// Each step's work for the map (`begin_iteration`).
 pub(crate) fn tick(play: &mut Play) {
+    // the detail tiles of the mod's held terrain views are asked for and kept, before the map's frame
+    if crate::fork_ext::addons::map_terrain::wanted() {
+        play.map.api_terrain_keep(&crate::fork_ext::addons::map_terrain::view_requests());
+    }
     let open_now = play.map.open;
     let fresh = open_now && !WAS_OPEN.with(|c| c.replace(open_now));
     if !open_now {
@@ -91,6 +95,20 @@ fn refresh_plain(play: &mut Play) {
     env.plain = !env.away && play.addon_input_available() && !play.map.open;
     env.passable = env.plain && play.mode == 0;
     window_sessions::set_env(env);
+}
+
+/// `eqoa.map.open()` and `open_window("map")` (a mod's own request, carried out in the step before the map's frame): while
+/// a mod holds the map the mod's map is opened or refreshed at once (never toggled, never the game's, and told as
+/// `opened_from = "mod"`). False where the game's map is the one to open (no holder, the game's map already up, the
+/// player's switch, Map off, dead or away).
+pub(crate) fn open_for_mod(play: &mut Play) -> bool {
+    let Some((vm, addon)) = holder() else { return false };
+    if play.map.open || !may_divert() || !crate::settings::map() {
+        return false;
+    }
+    window_sessions::open_client(vm, &addon, "map", "mod", json!({}));
+    refresh_plain(play);
+    true
 }
 
 /// A `pass` the mod asked for (`a1_play::tick`): the game's own map opens for this one opening and the mod's session

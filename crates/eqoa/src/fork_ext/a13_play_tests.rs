@@ -166,3 +166,42 @@ fn a13_diverts_only_when_held_fresh_allowed_and_not_passed() {
     assert!(!diverts(true, true, false, false), "the switch, death or away");
     assert!(!diverts(true, true, true, true), "a pass");
 }
+
+#[test]
+fn a13_a_mods_map_open_reaches_the_holder_in_the_same_step_and_never_toggles_it() {
+    let mut p = ready();
+    let h = host();
+    // control: nobody holds the kind, so the game's map is the one to open
+    assert!(!open_for_mod(&mut p), "no holder: the caller opens the game's map");
+    let vm = hold(&h);
+    // the holder's map opens at once: the game's map is never up, not even before the next step
+    assert!(open_for_mod(&mut p));
+    assert!(!p.map.open, "the game's map never opened");
+    let s = ws::get(vm, "map").expect("the holder has its session now");
+    assert_eq!((s.origin, s.opened_from.as_str()), ("player", "mod"), "told as the mod's own request, not as the player's key");
+    // asked again (a mod that wants it open): refreshed, not closed
+    assert!(open_for_mod(&mut p));
+    assert!(ws::get(vm, "map").is_some(), "the second request does not close the holder's map");
+    step(&mut p, &h);
+    assert!(!p.map.open && ws::get(vm, "map").is_some());
+    // a map the game already has up stays the game's (as for the key)
+    ws::reset_for_test();
+    p.map.show();
+    assert!(!open_for_mod(&mut p));
+}
+
+#[test]
+fn a13_disabling_the_holder_ends_its_map_through_the_real_disable_path() {
+    let mut p = ready();
+    let h = host();
+    let vm = hold(&h);
+    p.map.show();
+    step(&mut p, &h);
+    assert!(ws::get(vm, "map").is_some());
+    native_events::clear(&h);
+    step(&mut p, &h);
+    assert!(ws::get(vm, "map").is_none() && !window_takeover::is_taken(TakeoverKind::Map), "the disable released the claim and the session");
+    p.map.show();
+    step(&mut p, &h);
+    assert!(p.map.open, "and the game's map is the player's again");
+}
