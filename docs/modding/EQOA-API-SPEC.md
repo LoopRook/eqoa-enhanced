@@ -1004,8 +1004,8 @@ A mod can show its own inbox, mail compose form and auction. It opens a `"mail_i
 | `results` | The page shown, each an `eqoa.auction.Lot = {lot:int, name, quantity, seller, min_bid, buyout, minutes_left:int?, high_bid:int?, leader:int?, bids:int?, next_bid:int?, mine:bool}` (`high_bid` is nil with no bids; `leader` and `bids` are the disc auction's columns, `next_bid` the live one's; `minutes_left` is nil until a page has set the server's clock and below 0 for an ended lot). |
 | `minutes` | The server's clock in minutes, or nil. |
 | `lots`, `bids` | The character's own: `eqoa.auction.Own = {lot, name, quantity, buyout, minutes_left}` and `eqoa.auction.Bid = {lot, price, count, escrow}`. |
-| `bidders_lot`, `bidders` | The lot `auction_bidders` asked about and its bidders, each `{name, bid}`, highest first. |
-| `sellable` | The bank's items that can be put up (`{slot, id, name, quantity}`), only while a mod holds the bank. |
+| `bidders_lot`, `bidders` | The lot `auction_bidders` asked about and its bidders, each an `eqoa.auction.Bidder = {name:string, bid:int}`, highest first. |
+| `sellable` | The bank's items that can be put up, each an `eqoa.auction.Sellable = {slot:int, id:int, name:string, quantity:int}` (`slot` is 1-based and is what `auction_sell` takes, with `id`), only while a mod holds the bank. |
 | `tunar`, `banked` | Tunar carried and in the bank. |
 | `timed_out` | The last request was given up on (never resent); cleared by the next request. |
 
