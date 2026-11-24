@@ -38,6 +38,14 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.assign_ability` | supported | 6 |  |
 | `eqoa.actions.assist` | supported | 3 |  |
 | `eqoa.actions.attack` | supported | 6 |  |
+| `eqoa.actions.auction_bid` | supported | 8 |  |
+| `eqoa.actions.auction_bidders` | supported | 8 |  |
+| `eqoa.actions.auction_buyout` | supported | 8 |  |
+| `eqoa.actions.auction_my_bids` | supported | 8 |  |
+| `eqoa.actions.auction_my_lots` | supported | 8 |  |
+| `eqoa.actions.auction_page` | supported | 8 |  |
+| `eqoa.actions.auction_search` | supported | 8 |  |
+| `eqoa.actions.auction_sell` | supported | 8 |  |
 | `eqoa.actions.autorun` | supported | 6 |  |
 | `eqoa.actions.bank_money` | supported | 6 |  |
 | `eqoa.actions.bank_move` | supported | 6 |  |
@@ -93,6 +101,11 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.loot_all` | supported | 6 |  |
 | `eqoa.actions.loot_assign` | supported | 7 |  |
 | `eqoa.actions.loot_roll` | supported | 7 |  |
+| `eqoa.actions.mail_delete` | supported | 8 |  |
+| `eqoa.actions.mail_read` | supported | 8 |  |
+| `eqoa.actions.mail_refresh` | supported | 8 |  |
+| `eqoa.actions.mail_send` | supported | 8 |  |
+| `eqoa.actions.mail_take` | supported | 8 |  |
 | `eqoa.actions.mastery_browse` | supported | 6 |  |
 | `eqoa.actions.mastery_buy` | supported | 6 |  |
 | `eqoa.actions.mastery_refund` | supported | 6 |  |
@@ -134,6 +147,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 |---|---|---|---|
 | `eqoa.api` | supported | 2 |  |
 
+## eqoa.auction
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.auction` | supported | 8 |  |
+| `eqoa.auction.get` | supported | 8 |  |
+
 ## eqoa.bank
 
 | Path | Status | Since round | Reason |
@@ -156,6 +176,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.camera` | supported | 6 |  |
 | `eqoa.camera.compass` | supported | 6 |  |
 | `eqoa.camera.get` | supported | 6 |  |
+| `eqoa.camera.project` | supported | 8 |  |
+| `eqoa.camera.project_entity` | supported | 8 |  |
 
 ## eqoa.capabilities
 
@@ -460,6 +482,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 |---|---|---|---|
 | `eqoa.loot` | supported | 5 |  |
 | `eqoa.loot.get` | supported | 5 |  |
+
+## eqoa.mail
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.mail` | supported | 8 |  |
+| `eqoa.mail.get` | supported | 8 |  |
 
 ## eqoa.map
 
@@ -783,12 +812,66 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.BatchResult.state` | supported | 6 | BatchResult field |
 | `eqoa.actions.BatchResult.total` | supported | 6 | BatchResult field |
 | `eqoa.actions.RequestId` | supported | 6 | opaque action request handle |
+| `eqoa.auction.Bid` | supported | 8 |  |
+| `eqoa.auction.Bid.count` | supported | 8 |  |
+| `eqoa.auction.Bid.escrow` | supported | 8 |  |
+| `eqoa.auction.Bid.lot` | supported | 8 |  |
+| `eqoa.auction.Bid.price` | supported | 8 |  |
+| `eqoa.auction.Bidder` | supported | 8 |  |
+| `eqoa.auction.Bidder.bid` | supported | 8 |  |
+| `eqoa.auction.Bidder.name` | supported | 8 |  |
+| `eqoa.auction.Lot` | supported | 8 |  |
+| `eqoa.auction.Lot.bids` | supported | 8 |  |
+| `eqoa.auction.Lot.buyout` | supported | 8 |  |
+| `eqoa.auction.Lot.high_bid` | supported | 8 |  |
+| `eqoa.auction.Lot.leader` | supported | 8 |  |
+| `eqoa.auction.Lot.lot` | supported | 8 |  |
+| `eqoa.auction.Lot.min_bid` | supported | 8 |  |
+| `eqoa.auction.Lot.mine` | supported | 8 |  |
+| `eqoa.auction.Lot.minutes_left` | supported | 8 |  |
+| `eqoa.auction.Lot.name` | supported | 8 |  |
+| `eqoa.auction.Lot.next_bid` | supported | 8 |  |
+| `eqoa.auction.Lot.quantity` | supported | 8 |  |
+| `eqoa.auction.Lot.seller` | supported | 8 |  |
+| `eqoa.auction.Own` | supported | 8 |  |
+| `eqoa.auction.Own.buyout` | supported | 8 |  |
+| `eqoa.auction.Own.lot` | supported | 8 |  |
+| `eqoa.auction.Own.minutes_left` | supported | 8 |  |
+| `eqoa.auction.Own.name` | supported | 8 |  |
+| `eqoa.auction.Own.quantity` | supported | 8 |  |
+| `eqoa.auction.Sellable` | supported | 8 |  |
+| `eqoa.auction.Sellable.id` | supported | 8 |  |
+| `eqoa.auction.Sellable.name` | supported | 8 |  |
+| `eqoa.auction.Sellable.quantity` | supported | 8 |  |
+| `eqoa.auction.Sellable.slot` | supported | 8 |  |
+| `eqoa.auction.State` | supported | 8 |  |
+| `eqoa.auction.State.banked` | supported | 8 |  |
+| `eqoa.auction.State.bidders` | supported | 8 |  |
+| `eqoa.auction.State.bidders_lot` | supported | 8 |  |
+| `eqoa.auction.State.bids` | supported | 8 |  |
+| `eqoa.auction.State.lots` | supported | 8 |  |
+| `eqoa.auction.State.minutes` | supported | 8 |  |
+| `eqoa.auction.State.mode` | supported | 8 |  |
+| `eqoa.auction.State.offered` | supported | 8 |  |
+| `eqoa.auction.State.page` | supported | 8 |  |
+| `eqoa.auction.State.pending` | supported | 8 |  |
+| `eqoa.auction.State.results` | supported | 8 |  |
+| `eqoa.auction.State.revision` | supported | 8 |  |
+| `eqoa.auction.State.sellable` | supported | 8 |  |
+| `eqoa.auction.State.tunar` | supported | 8 |  |
+| `eqoa.auction.State.uncertain` | supported | 8 |  |
 | `eqoa.camera.Camera` | supported | 6 |  |
 | `eqoa.camera.Camera.distance` | supported | 6 |  |
 | `eqoa.camera.Camera.heading` | supported | 6 |  |
 | `eqoa.camera.Camera.mode` | supported | 6 |  |
 | `eqoa.camera.Camera.pitch` | supported | 6 |  |
 | `eqoa.camera.Camera.position` | supported | 6 |  |
+| `eqoa.camera.Projection` | supported | 8 |  |
+| `eqoa.camera.Projection.behind` | supported | 8 |  |
+| `eqoa.camera.Projection.depth` | supported | 8 |  |
+| `eqoa.camera.Projection.on_screen` | supported | 8 |  |
+| `eqoa.camera.Projection.x` | supported | 8 |  |
+| `eqoa.camera.Projection.y` | supported | 8 |  |
 | `eqoa.capabilities.Capability` | supported | 2 |  |
 | `eqoa.capabilities.Capability.children` | supported | 2 |  |
 | `eqoa.capabilities.Capability.path` | supported | 2 |  |
@@ -951,11 +1034,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.entities.Entity.disposition` | supported | 2 |  |
 | `eqoa.entities.Entity.disposition_name` | supported | 2 |  |
 | `eqoa.entities.Entity.entity_type` | supported | 2 |  |
+| `eqoa.entities.Entity.head_mark` | supported | 8 |  |
 | `eqoa.entities.Entity.hp_fraction` | supported | 2 |  |
 | `eqoa.entities.Entity.id` | supported | 2 |  |
 | `eqoa.entities.Entity.is_creature` | supported | 2 |  |
 | `eqoa.entities.Entity.kind` | supported | 2 |  |
 | `eqoa.entities.Entity.level` | supported | 2 |  |
+| `eqoa.entities.Entity.merc_tag` | supported | 8 |  |
 | `eqoa.entities.Entity.name` | supported | 2 |  |
 | `eqoa.entities.Entity.npc_flags` | supported | 6 |  |
 | `eqoa.entities.Entity.poisoned` | supported | 2 |  |
@@ -1485,6 +1570,45 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.lfg.LfgState.invites_open` | supported | 8 |  |
 | `eqoa.lfg.LfgState.members_invite` | supported | 8 |  |
 | `eqoa.lfg.LfgState.registered` | supported | 8 |  |
+| `eqoa.mail.Entry` | supported | 8 |  |
+| `eqoa.mail.Entry.carries` | supported | 8 |  |
+| `eqoa.mail.Entry.date` | supported | 8 |  |
+| `eqoa.mail.Entry.from` | supported | 8 |  |
+| `eqoa.mail.Entry.id` | supported | 8 |  |
+| `eqoa.mail.Entry.read` | supported | 8 |  |
+| `eqoa.mail.Entry.subject` | supported | 8 |  |
+| `eqoa.mail.Message` | supported | 8 |  |
+| `eqoa.mail.Message.date` | supported | 8 |  |
+| `eqoa.mail.Message.from` | supported | 8 |  |
+| `eqoa.mail.Message.id` | supported | 8 |  |
+| `eqoa.mail.Message.items` | supported | 8 |  |
+| `eqoa.mail.Message.returned` | supported | 8 |  |
+| `eqoa.mail.Message.subject` | supported | 8 |  |
+| `eqoa.mail.Message.text` | supported | 8 |  |
+| `eqoa.mail.Message.to` | supported | 8 |  |
+| `eqoa.mail.Message.tunar` | supported | 8 |  |
+| `eqoa.mail.PackItem` | supported | 8 |  |
+| `eqoa.mail.PackItem.id` | supported | 8 |  |
+| `eqoa.mail.PackItem.name` | supported | 8 |  |
+| `eqoa.mail.PackItem.quantity` | supported | 8 |  |
+| `eqoa.mail.PackItem.slot` | supported | 8 |  |
+| `eqoa.mail.State` | supported | 8 |  |
+| `eqoa.mail.State.carries_offer` | supported | 8 |  |
+| `eqoa.mail.State.count` | supported | 8 |  |
+| `eqoa.mail.State.delivered` | supported | 8 |  |
+| `eqoa.mail.State.entries` | supported | 8 |  |
+| `eqoa.mail.State.max_items` | supported | 8 |  |
+| `eqoa.mail.State.message` | supported | 8 |  |
+| `eqoa.mail.State.names` | supported | 8 |  |
+| `eqoa.mail.State.new` | supported | 8 |  |
+| `eqoa.mail.State.offered` | supported | 8 |  |
+| `eqoa.mail.State.pack` | supported | 8 |  |
+| `eqoa.mail.State.postage` | supported | 8 |  |
+| `eqoa.mail.State.refusal` | supported | 8 |  |
+| `eqoa.mail.State.revision` | supported | 8 |  |
+| `eqoa.mail.State.status` | supported | 8 |  |
+| `eqoa.mail.State.truncated` | supported | 8 |  |
+| `eqoa.mail.State.tunar` | supported | 8 |  |
 | `eqoa.map.Bounds` | supported | 4 |  |
 | `eqoa.map.Bounds.x_max` | supported | 4 |  |
 | `eqoa.map.Bounds.x_min` | supported | 4 |  |

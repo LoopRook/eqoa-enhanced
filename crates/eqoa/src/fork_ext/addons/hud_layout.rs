@@ -244,6 +244,9 @@ pub fn hud_element_visible(element: &str) -> bool {
         "quest_tracker" | "quests" => !v.quest_tracker,
         "dps_meter" | "meter" => !v.dps_meter,
         "breath" => !v.breath,
+        "name_plates" => !v.name_plates,
+        "damage_numbers" => !v.damage_numbers,
+        "target_rings" => !v.target_rings,
         "stats_box" | "plain_play" => state.right_hud_up,
         "mana_bars" => true,
         "all" => {

@@ -278,9 +278,9 @@
       "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`Loot::read_list`)."
     },
     "crates/eqoa/src/bankplay.rs": {
-      "added": 8,
-      "deleted": 0,
-      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`BankPlay::read_lists`). round 6 action hook call: `super::fork_hooks::bank_requests(self, &mut out);` immediately before the BankOut loop. round 6.5 window takeover hook calls (2 inserted one-liners, 0 deleted): `window_taken(self, 11)` on 0x124D and `bank_taken_tick(self, vui)` in run_bank. round A1 `pass` (2026-11-22, owner-approved design `docs/plans/eqoa-api/game-ui-today-and-modern-ui.md` section 3 keeps `pass` for corpse, merchant and bank): one inserted line, a child-module declaration `#[path = \"fork_ext/a1_pass_bank.rs\"] pub(in crate::play) mod fork_pass;` (0 deleted). It is needed because the flags that make the game open its window on the next step (`BankPlay::open`) are private to this module; handing a hidden session back to the game's own window means setting them, and no accessor or hook call can do that from outside. The child holds the setters only."
+      "added": 9,
+      "deleted": 1,
+      "reason": "round 6 read-only accessors, approved by the lead on the owner's delegation 2026-11-16 (`BankPlay::read_lists`). round 6 action hook call: `super::fork_hooks::bank_requests(self, &mut out);` immediately before the BankOut loop. round 6.5 window takeover hook calls (2 inserted one-liners, 0 deleted): `window_taken(self, 11)` on 0x124D and `bank_taken_tick(self, vui)` in run_bank. round A1 `pass` (2026-11-22, owner-approved design `docs/plans/eqoa-api/game-ui-today-and-modern-ui.md` section 3 keeps `pass` for corpse, merchant and bank): one inserted line, a child-module declaration `#[path = \"fork_ext/a1_pass_bank.rs\"] pub(in crate::play) mod fork_pass;` (0 deleted). It is needed because the flags that make the game open its window on the next step (`BankPlay::open`) are private to this module; handing a hidden session back to the game's own window means setting them, and no accessor or hook call can do that from outside. The child holds the setters only. Round A10 (mail and auction, 2026-11-24, API layer approved by the owner): ONE line changed (+1/-1), the auction replies' `IsAuctionMode` argument in Recv1206: `self.mode == 39` becomes `self.mode == 39 || super::fork_hooks::auction_reading()`. The game keeps a search page only while its own search window (mode 39) is up (`Auction::recv_results` clears it otherwise), and a mod's own auction window leaves the mode at 0, so without the line the mod's search would never receive a page; the guard is false unless a mod holds an `auction_search` session. The test `a10_without_the_one_line_the_hidden_search_misses_its_pages` shows the page dropped without it. Nothing else in this file is touched."
     },
     "crates/eqoa/src/bank.rs": {
       "added": 3,
@@ -596,6 +596,12 @@
     },
     {
       "path": "crates/eqoa/src/bankplay.rs",
+      "name": "A10 auction session reading",
+      "pattern": "fork_hooks::auction_reading\\(\\)",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/bankplay.rs",
       "name": "A1 pass bank",
       "pattern": "mod fork_pass;",
       "count": 1
@@ -634,6 +640,30 @@
       "path": "crates/eqoa/src/play.rs",
       "name": "HUD hidden meter wheel skip",
       "pattern": "fork_hud::meter_hidden\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/play.rs",
+      "name": "A12 name plates hidden",
+      "pattern": "fork_hud::plates_hidden\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/play.rs",
+      "name": "A12 damage numbers hidden",
+      "pattern": "fork_hud::damage_hidden\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/play.rs",
+      "name": "A12 target rings hidden",
+      "pattern": "fork_hud::rings_hidden\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/viewer.rs",
+      "name": "A12 frame view for camera.project",
+      "pattern": "fork_report::view\\(",
       "count": 1
     },
     {

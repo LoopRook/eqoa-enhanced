@@ -7079,6 +7079,8 @@ impl App {
                     None => self.camera.view(self.bounds, g.config.width as f32 / g.config.height as f32),
                 };
                 self.last_view = Some(view.view_proj);
+                #[cfg(not(target_arch = "wasm32"))]
+                fork_report::view(view.view_proj, (g.config.width, g.config.height));
                 // the minimap inside (`map::indoor`): the ceiling over the
                 // player, in the collision world
                 if let (Some(p), Some(w)) = (self.play.as_mut(), self.walker.as_mut()) {

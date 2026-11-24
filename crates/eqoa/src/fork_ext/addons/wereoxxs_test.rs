@@ -1063,6 +1063,9 @@ fn forge_wereoxxs_disabled_startup_profile_enable_toggle_disable_reenable_all_el
         breath: false,
         spell_bars: false,
         utility_bars: false,
+        name_plates: false,
+        damage_numbers: false,
+        target_rings: false,
     };
     assert_eq!(
         published_visibility(),
