@@ -51,9 +51,19 @@ pub(in crate::play) fn show_trade_ask(play: &mut Play) {
 /// The open trade's window opens (a pass of a held `trade`): as `Trade02` leaves it, the offers kept.
 #[cfg(not(target_arch = "wasm32"))]
 pub(in crate::play) fn show_trade(play: &mut Play) {
+    // `Trade02`: whatever was up is put away first (the start menu and its inventory stayed beside the trade, and an
+    // item picked looked doubled), then the window
+    play.set_mode_zero();
     play.mode = 15;
     play.chat_mode(1);
     play.npcw.trade_start = true;
+}
+
+/// Both accept marks cleared, as the window's `start` clears them: a held trade never runs `start`, so the last trade's
+/// marks would carry over (and lock the next trade).
+#[cfg(not(target_arch = "wasm32"))]
+pub(in crate::play) fn clear_marks(play: &mut Play) {
+    play.npcw.trade.clear_accepted();
 }
 
 /// The player's own accept, as the window's accept key marks it.

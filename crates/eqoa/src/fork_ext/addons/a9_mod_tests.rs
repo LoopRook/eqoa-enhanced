@@ -393,3 +393,30 @@ fn a9_bag_viewer_repair_automatically_is_off_by_default_and_repairs_all_when_the
     let line: String = host.lua.load("return require('bags').result.text").eval().unwrap();
     assert!(line.contains("stopped: you carry 10"), "{line}");
 }
+
+#[test]
+fn a9_trade_mod_takes_its_windows_again_after_zoning() {
+    let (host, bridge, mut ctx, _vm) = start(TRADE);
+    let kinds = [TakeoverKind::TradeAsk, TakeoverKind::Trade, TakeoverKind::DuelInvite, TakeoverKind::Duel];
+    for k in kinds {
+        assert!(window_takeover::is_taken(k));
+    }
+    // zoning: the client drops every claim (the mod keeps running)
+    window_takeover::release_all();
+    for k in kinds {
+        assert!(!window_takeover::is_taken(k), "dropped by the world change");
+    }
+    // control: frames alone do not take them back (the mod would stay without them for the rest of the session)
+    frames(&host, &bridge, &mut ctx, 3);
+    assert!(!window_takeover::is_taken(TakeoverKind::Trade), "control: nothing re-claims without the lifecycle event");
+    // the lifecycle: the state is reset (or the world is entered) and the mod takes them again
+    super::native_core::CORE.with(|c| c.borrow_mut().emit("state.reset", json!({"in_world": true, "initial": false})));
+    frames(&host, &bridge, &mut ctx, 3);
+    for k in kinds {
+        assert!(window_takeover::is_taken(k), "taken again after the reset: {k:?}");
+    }
+    window_takeover::release_all();
+    super::native_core::CORE.with(|c| c.borrow_mut().emit("world.entered", json!({"world_id": 2, "initial": false})));
+    frames(&host, &bridge, &mut ctx, 3);
+    assert!(window_takeover::is_taken(TakeoverKind::TradeAsk), "and on world.entered");
+}

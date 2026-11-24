@@ -1230,3 +1230,144 @@ fn a9_the_wagers_partner_accept_is_told_and_a_held_trade_handed_back_takes_the_a
     assert_eq!(p.mode, 15, "the game's own trade window opens");
     assert_eq!(sub_msgs(&p, 1), 0, "the trade itself is not cancelled");
 }
+
+// ---- the second review (N1 to N3, the cheap LOWs) ----
+
+#[test]
+fn a9_n1_a_second_trade_starts_with_nothing_accepted_whatever_the_last_one_left() {
+    let _baseline = Baseline;
+    let mut p = ready();
+    bags(&mut p);
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('trade', {scope='all'}) and eqoa.windows.takeover('trade_ask', {scope='all'}))");
+    step(&mut p, &host);
+    // the first trade: both accept, it completes
+    open_trade(&mut p, 77);
+    step(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.trade_accept()");
+    key(NamedKey::ArrowRight);
+    key(NamedKey::Enter);
+    step(&mut p, &host);
+    deliver(&mut p, 0x0056, trade_msg(6, 77, &[]));
+    deliver(&mut p, 0x0056, trade_msg(16, 77, &[]));
+    step(&mut p, &host);
+    assert_eq!(trade_pass::trade_marks(&p), (true, true), "control: the last trade left both marks on (the bug's precondition)");
+    // a second trade, as the asker: nothing is accepted, everything is allowed
+    open_trade(&mut p, 88);
+    step(&mut p, &host);
+    assert_eq!(trade_pass::trade_marks(&p), (false, false), "a new held trade starts clean");
+    lua_ok(&host, "local t = eqoa.trade.get(); assert(t.mine.accepted == false and t.theirs.accepted == false and t.can_accept == true)");
+    clear_recorded(&mut p);
+    ask(&mut p, &host, "return eqoa.actions.trade_add({slot = 1, id = 10})");
+    lua_ok(&host, "assert(results[1].ok == true, tostring(results[1].reason))");
+    // end it with both accepted again, then a third as the answerer
+    deliver(&mut p, 0x0056, trade_msg(6, 88, &[]));
+    deliver(&mut p, 0x0056, trade_msg(16, 88, &[]));
+    step(&mut p, &host);
+    deliver(&mut p, 0x0057, trade_request(99, 99));
+    step(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.trade_answer(true)");
+    step(&mut p, &host);
+    assert_eq!(trade_pass::trade_marks(&p), (false, false), "an answered trade starts clean too");
+    lua_ok(&host, "local t = eqoa.trade.get(); assert(t.mine.accepted == false and t.theirs.accepted == false)");
+    ask(&mut p, &host, "return eqoa.actions.trade_money(5)");
+    lua_ok(&host, "assert(results[1].ok == true, tostring(results[1].reason))");
+}
+
+#[test]
+fn a9_n2_a_yes_from_a_trade_ask_only_holder_puts_other_windows_away_as_the_games_yes_does() {
+    let _baseline = Baseline;
+    let mut p = ready();
+    bags(&mut p);
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('trade_ask', {scope='all'}))");
+    step(&mut p, &host);
+    deliver(&mut p, 0x0057, trade_request(77, 77));
+    step(&mut p, &host);
+    // the player opened the start menu during the request
+    p.mode = 13;
+    let before = p.race_frame_due.len();
+    ask(&mut p, &host, "return eqoa.actions.trade_answer(true)");
+    assert_eq!(p.mode, 15, "the game's trade window");
+    assert_eq!(p.race_frame_due.len(), before + 1, "the start menu was closed as SetMode(0) closes it (the doubled-item guard)");
+    // control: with nothing up, the same Yes closes nothing
+    let mut q = ready();
+    bags(&mut q);
+    let host_q = host_all();
+    lua_ok(&host_q, "assert(eqoa.windows.takeover('trade_ask', {scope='all'}))");
+    step(&mut q, &host_q);
+    deliver(&mut q, 0x0057, trade_request(77, 77));
+    step(&mut q, &host_q);
+    let before = q.race_frame_due.len();
+    ask(&mut q, &host_q, "return eqoa.actions.trade_answer(true)");
+    assert_eq!((q.mode, q.race_frame_due.len()), (15, before));
+}
+
+#[test]
+fn a9_n3_the_opponents_coin_change_is_not_the_echo_of_ours() {
+    let _baseline = Baseline;
+    let mut p = ready();
+    p.duel.part.features = crate::duel::FEATURE_DUELS;
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('duel', {scope='all'}) == true)");
+    step(&mut p, &host);
+    deliver(&mut p, crate::duel::OP_IN, duel_down(1, 5, &[]));
+    deliver(&mut p, crate::duel::OP_IN, duel_down(13, 5, &[]));
+    step(&mut p, &host);
+    ask(&mut p, &host, "eqoa.actions.trade_money(600); return eqoa.actions.trade_accept()");
+    lua_ok(&host, "assert(results[1].ok == true and results[2].code == 'busy')");
+    // the opponent's stake changes first (sub 12: our 0, theirs 700): not our echo, the accept stays refused
+    deliver(&mut p, crate::duel::OP_IN, duel_down(12, 5, &[0, 0, 0, 0, 0xBC, 0x02, 0, 0, 0, 0]));
+    ask(&mut p, &host, "return eqoa.actions.trade_accept()");
+    lua_ok(&host, "assert(results[1].code == 'busy', 'the opponent changing is not our echo: ' .. tostring(results[1].code))");
+    // our own stake comes back at the amount we sent: now the question may be asked
+    deliver(&mut p, crate::duel::OP_IN, duel_down(12, 5, &[0x58, 0x02, 0, 0, 0xBC, 0x02, 0, 0, 0, 0]));
+    ask(&mut p, &host, "return eqoa.actions.trade_accept()");
+    lua_ok(&host, "assert(results[1].ok == true and results[1].detail.asked == true, tostring(results[1].code))");
+}
+
+#[test]
+fn a9_l_a_withdrawn_invitation_does_not_come_back_from_behind_a_hidden_trade() {
+    let _baseline = Baseline;
+    let mut p = ready();
+    bags(&mut p);
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('trade', {scope='all'}) == true)");
+    step(&mut p, &host);
+    open_trade(&mut p, 77);
+    step(&mut p, &host);
+    deliver(&mut p, crate::duel::OP_IN, duel_invitation(9, "Late"));
+    lua_ok(&host, "assert(eqoa.duel.get().queued == 1)");
+    // control: another invitation's withdrawal leaves it
+    deliver(&mut p, crate::duel::OP_IN, duel_down(3, 4, &[]));
+    lua_ok(&host, "assert(eqoa.duel.get().queued == 1)");
+    // its own withdrawal takes it out
+    deliver(&mut p, crate::duel::OP_IN, duel_down(3, 9, &[]));
+    lua_ok(&host, "assert(eqoa.duel.get().queued == 0)");
+}
+
+#[test]
+fn a9_l_an_unanswered_repair_at_the_games_own_smith_does_not_block_the_item_for_good() {
+    let _baseline = Baseline;
+    let mut p = ready();
+    smith_bags(&mut p);
+    let host = host_all();
+    step(&mut p, &host);
+    deliver(&mut p, 0x0061, 4242u32.to_le_bytes().to_vec());
+    step(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1})");
+    lua_ok(&host, "assert(results[1].ok == true)");
+    a9_play::age_repair_for_test(Duration::from_secs(4));
+    step(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1})");
+    lua_ok(&host, "assert(results[1].code == 'busy', 'control: while that smith stays open the item waits')");
+    // the smith closes and another opens: nothing is waiting for the old answer any more
+    deliver(&mut p, 0x0063, vec![]);
+    step(&mut p, &host);
+    deliver(&mut p, 0x0061, 4242u32.to_le_bytes().to_vec());
+    step(&mut p, &host);
+    clear_recorded(&mut p);
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1})");
+    lua_ok(&host, "assert(results[1].ok == true, tostring(results[1].code))");
+    assert_eq!(recorded(&p).len(), 1);
+}
