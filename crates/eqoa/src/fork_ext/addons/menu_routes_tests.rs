@@ -31,10 +31,11 @@ fn run(id: &str) -> Mod {
     Mod { host, bridge, vm }
 }
 
-/// A Start menu whose first entry is `entry`, opened as the client does it; `entry` is what the game would label it.
-fn open_menu(menu: &Mod, context: &mut Context, entry: &str) {
+/// A Start menu whose first entry is `entry` running `command`, opened as the client does it; `entry` is what the game
+/// labels it on the disc's tables (the Lua routes by the command, so each row names the game's own).
+fn open_menu(menu: &Mod, context: &mut Context, entry: &str, command: &str) {
     let data = json!({"entries": [
-        {"text": entry, "enabled": true, "command": "0xb0a0000:0"},
+        {"text": entry, "enabled": true, "command": command},
         {"text": "Quit", "enabled": true, "command": "0xa010000:0"},
     ]});
     ws::open_client(menu.vm, "eqoa_start_menu", "start_menu", "key", data);
@@ -42,28 +43,30 @@ fn open_menu(menu: &Mod, context: &mut Context, entry: &str) {
     frames(&menu.host, &menu.bridge, context, 2);
 }
 
-// (the game's entry text, the mod that does its job, the session kind that mod opens)
-const ROUTES: [(&str, &str, &str); 9] = [
-    ("Summary", "eqoa_character", "trainer"),
-    ("Quest Journal", "eqoa_quest_journal", "quest_log"),
-    ("Tradeskills", "eqoa_crafting", "recipe_book"),
-    ("Spell Book", "eqoa_spellbook", "spellbook"),
-    ("Friends", "eqoa_social", "buddy_list"),
-    ("Guild", "eqoa_social", "guild"),
-    ("Who", "eqoa_social", "buddy_list"),
-    ("Group Search", "eqoa_social", "buddy_list"),
-    ("Bags", "eqoa_bag_viewer", "inventory"),
+// (the game's entry text on the disc's tables, its command, the mod that does its job, the session kind that mod opens)
+const ROUTES: [(&str, &str, &str, &str); 11] = [
+    ("Summary", "0x3020000:0", "eqoa_character", "trainer"),
+    ("Class Mastery", "0x2080000:0", "eqoa_character", "trainer"),
+    ("Quest", "0xb0a0000:0", "eqoa_quest_journal", "quest_log"),
+    ("Weapons", "0xa7010000:0", "eqoa_crafting", "recipe_book"),
+    ("View List", "0xb050000:0", "eqoa_social", "buddy_list"),
+    ("Guild List", "0xb051001:0", "eqoa_social", "guild"),
+    ("Who", "0xb030004:0", "eqoa_social", "buddy_list"),
+    ("Group Search", "0x2090000:0", "eqoa_social", "buddy_list"),
+    ("Inventory", "0x2000000:0", "eqoa_bag_viewer", "inventory"),
+    ("Factions", "0xaa000001:0", "eqoa_character", "trainer"),
+    ("Combat Record", "0x7e20001:0", "eqoa_character", "trainer"),
 ];
 
 #[test]
 fn start_menu_entries_open_the_eqoa_mod_when_it_is_on_and_the_games_window_when_it_is_off() {
     let mut ctx = context();
-    for (entry, id, kind) in ROUTES {
+    for (entry, command, id, kind) in ROUTES {
         // the mod is on: the entry asks it to open, and the game's own command is not run
         fixture();
         let menu = run("eqoa_start_menu");
         let target = run(id);
-        open_menu(&menu, &mut ctx, entry);
+        open_menu(&menu, &mut ctx, entry, command);
         press(&menu.host, "return", "return");
         assert!(action_broker::queued_kinds_for_test().is_empty(), "{entry}: the game's entry is not run; logs {:?}", menu.host.drain_logs());
         assert!(ws::get(menu.vm, "start_menu").is_none(), "{entry}: the menu closes");
@@ -74,7 +77,7 @@ fn start_menu_entries_open_the_eqoa_mod_when_it_is_on_and_the_games_window_when_
         // the control: the mod is off, the same entry runs the game's own command
         fixture();
         let menu = run("eqoa_start_menu");
-        open_menu(&menu, &mut ctx, entry);
+        open_menu(&menu, &mut ctx, entry, command);
         press(&menu.host, "return", "return");
         assert_eq!(action_broker::queued_kinds_for_test(), vec!["menu_command"], "{entry}: with {id} off the game's entry runs");
     }
@@ -86,7 +89,7 @@ fn start_menu_social_entries_open_the_page_they_name_and_other_entries_stay_the_
     fixture();
     let menu = run("eqoa_start_menu");
     let target = run("eqoa_social");
-    open_menu(&menu, &mut ctx, "Guild");
+    open_menu(&menu, &mut ctx, "Guild List", "0xb051001:0");
     press(&menu.host, "return", "return");
     frames(&target.host, &target.bridge, &mut ctx, 2);
     assert!(ws::get(target.vm, "guild").is_some(), "Guild opens the guild page");
@@ -97,7 +100,40 @@ fn start_menu_social_entries_open_the_page_they_name_and_other_entries_stay_the_
     fixture();
     let menu = run("eqoa_start_menu");
     let _social = run("eqoa_social");
-    open_menu(&menu, &mut ctx, "Options");
+    open_menu(&menu, &mut ctx, "Options", "0xb0d0002:0");
     press(&menu.host, "return", "return");
     assert_eq!(action_broker::queued_kinds_for_test(), vec!["menu_command"], "an unmapped entry runs the game's command");
+}
+
+/// Owner test 2026-11-24, the disc's own labels: Ability is the game's page (the Spellbook mod is a window of its own on
+/// Shift+K), the chat mode called Guild and the Guild sub-menu are not the guild page, and a sub-menu is browsed, never
+/// taken. The old Lua matched the label word alone, so each of these went to a mod, or never opened.
+#[test]
+fn start_menu_routes_by_the_games_command_not_by_a_word_that_other_entries_share() {
+    let mut ctx = context();
+    for (entry, command) in [("Ability", "0x8010000:0"), ("Guild", "0xb030002:0"), ("Group", "0xb030000:0"), ("Say", "0xb010000:0"), ("Options", "0xb0d0002:0"), ("Experiment", "0xa7020000:0")] {
+        fixture();
+        let menu = run("eqoa_start_menu");
+        let _mods = ["eqoa_spellbook", "eqoa_social", "eqoa_crafting", "eqoa_character"].map(run);
+        open_menu(&menu, &mut ctx, entry, command);
+        press(&menu.host, "return", "return");
+        assert_eq!(action_broker::queued_kinds_for_test(), vec!["menu_command"], "{entry}: the game's own entry runs");
+        assert!(ws::sessions_for_test().iter().all(|s| s.vm == menu.vm), "{entry}: no mod window opened");
+    }
+    // a sub-menu called Guild opens as a sub-menu: Enter goes into it
+    fixture();
+    let menu = run("eqoa_start_menu");
+    let social = run("eqoa_social");
+    ws::open_client(
+        menu.vm,
+        "eqoa_start_menu",
+        "start_menu",
+        "key",
+        json!({"entries": [{"text": "Guild", "enabled": true, "entries": [{"text": "Guild List", "enabled": true, "command": "0xb051001:0"}]}]}),
+    );
+    native_core::flush_deferred();
+    frames(&menu.host, &menu.bridge, &mut ctx, 2);
+    press(&menu.host, "return", "return");
+    assert!(ws::get(menu.vm, "start_menu").is_some(), "the sub-menu opened, the menu is still up");
+    assert!(ws::get(social.vm, "guild").is_none(), "and the guild page did not");
 }

@@ -12,13 +12,20 @@ spell book, ...) return to this one.
 - Click an entry, or move with the arrow keys (the controller's d-pad) and press Enter (the controller's cross). An
   entry with `>` opens a sub-menu; **Esc** (the controller's triangle) goes up one menu, and closes the menu at the top.
   The **x** closes it too, and so does pressing the Start key again.
-- **Entries that an EQOA mod does the job of open that mod's window** when the mod is on: Summary, Class Mastery,
-  Factions and Combat Record open **EQOA Character**; Quest Journal opens **EQOA Quest Journal**; Tradeskills and Recipe
-  Book open **EQOA Crafting**; Spell Book opens **EQOA Spellbook**; Friends, Ignore, Guild, Who and Group Search open
-  **EQOA Social** on that page; Bags and Inventory open **Bag Viewer**. With the mod off, the game's own window opens, as
-  before. The menu asks the mod with `eqoa.mods.send` (the command `open`, which each of those mods now accepts); it
-  can ask for nothing but "open your window".
-- **Items** opens the game's own Start menu so you can use its item page (the bag windows have no copy here).
+- **Entries that an EQOA mod does the job of open that mod's window** when the mod is on: Character > Summary, Class
+  Mastery, Factions and Combat Record open **EQOA Character**; Quest opens **EQOA Quest Journal**; the skill books under
+  Tradeskills > Recipe Book open **EQOA Crafting**; Who, Buddy List > View List, Ignore > View List, Guild > Guild List
+  and Group > Group Search open **EQOA Social** on that page; Inventory opens **Bag Viewer**. With the mod off, the
+  game's own window opens, as before. A sub-menu is always yours to browse (Tradeskills, Guild, Buddy List and the rest
+  open as sub-menus). The menu knows an entry by the game's own command, not by its word, so the chat mode called Guild
+  stays a chat mode. The menu asks the mod with `eqoa.mods.send` (the command `open`, which each of those mods accepts);
+  it can ask for nothing but "open your window".
+- **Ability** is the game's own page (the EQOA Spellbook is a window of its own on Shift+K). Escape, or its Close,
+  brings you back to this menu. Every other entry runs the game's own command.
+- **Enter** is this menu's while it is up: the game's chat line does not open with it.
+- **Inventory** with Bag Viewer off, and **Support** (Request Help, Help Status, Send Report), open the game's own Start
+  menu: the item page has no copy here, and the game keeps its help and report forms to its own menu, so you press
+  Support there yourself.
 - The menu closes when you run an entry, zoom, die, turn the mod off or switch on **Use the game's windows**. Your
   character can keep walking while it is up; the controller's sticks do not move the character while it holds the pad.
 - Turn the mod off and the Start key is the game's again at once.

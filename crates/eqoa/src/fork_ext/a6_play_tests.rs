@@ -681,3 +681,316 @@ fn a6_a_mods_chat_line_keeps_the_character_running() {
     assert!(!p.autorun, "no chat line, the capture stops the run");
     crate::fork_ext::addons::input::testing_text_capture(false);
 }
+
+// ---- The real Start Menu mod on a real Play with the disc's own menu tables (owner test 2026-11-24: choosing
+// Ability left the player stuck: the same Enter also opened the game's chat line, the Chat mod took it, and its
+// box held the keyboard under the game's Ability page). Keys go the way the viewer sends them.
+
+fn iso_path() -> std::path::PathBuf {
+    std::env::var_os("EQOA_ISO").map(Into::into).unwrap_or_else(|| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../run/eqoa.iso"))
+}
+
+/// The disc's CLIENT image and word table (None without the disc: the test says SKIP and counts as one).
+fn disc_menu() -> Option<(crate::client_image::ClientImage, vi::strtab::StringTable)> {
+    let iso = iso_path();
+    let image = crate::modules::load_now(crate::modules::Module::Client, &iso)?;
+    let img = crate::client_image::ClientImage::from_bytes((*image).clone())?;
+    let words = iso::Iso::open(&iso).ok().and_then(|mut d| d.read("WORDS.TXT").ok()).and_then(|b| crate::spelling::words(&b))?;
+    Some((img, words))
+}
+
+fn bundled_root() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods").canonicalize().unwrap()
+}
+
+type Edit<'a> = Option<&'a dyn Fn(String) -> String>;
+
+/// The bundled mod `id`, its `main.lua` passed through `edit` first (the negative controls run the old Lua): an
+/// edited mod is copied to a scratch folder.
+fn bundled_edited(id: &str, edit: Edit) -> crate::fork_ext::addons::discovery::DiscoveredAddon {
+    let mut a = crate::fork_ext::addons::discovery::discover(&bundled_root()).addons.into_iter().find(|a| a.id == id).unwrap_or_else(|| panic!("{id} is bundled"));
+    if let Some(edit) = edit {
+        let to = std::env::temp_dir().join(format!("eqoa-a6-{id}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&to);
+        std::fs::create_dir_all(&to).unwrap();
+        let to = to.canonicalize().unwrap();
+        let from = a.entry.parent().unwrap().to_path_buf();
+        for f in std::fs::read_dir(&from).unwrap().flatten().filter(|f| f.path().is_file()) {
+            std::fs::copy(f.path(), to.join(f.file_name())).unwrap();
+        }
+        let main = to.join("main.lua");
+        let text = std::fs::read_to_string(&main).unwrap();
+        let edited = edit(text.clone());
+        assert_ne!(text, edited, "the edit changed the Lua");
+        std::fs::write(&main, edited).unwrap();
+        a.entry = main;
+        a.script_root = to.clone();
+        a.package_root = to.clone();
+        a.module_dirs = vec![to.clone()];
+        a.resource_dirs = vec![to];
+    }
+    a
+}
+
+struct Running {
+    host: Host,
+    _bridge: crate::fork_ext::addons::bridge::Bridge,
+    vm: u64,
+}
+
+fn start_mod(a: &crate::fork_ext::addons::discovery::DiscoveredAddon) -> Running {
+    let host = Host::for_addon(a).unwrap();
+    let bridge = crate::fork_ext::addons::bridge::Bridge::install(&host).unwrap();
+    host.run_addon(a).unwrap();
+    let vm = native_events::bus(&host.lua).borrow().vm;
+    Running { host, _bridge: bridge, vm }
+}
+
+/// A Play with the disc's start menu tables, the Start Menu mod, the Chat mod (which holds the chat line, as it does
+/// for the owner) and the Spellbook mod (a hotkey window) running.
+struct Rig {
+    p: Play,
+    menu: Running,
+    chat: Running,
+    book: Running,
+}
+
+impl Rig {
+    fn new(img: &crate::client_image::ClientImage, words: &vi::strtab::StringTable, edit: Edit) -> Rig {
+        let mut p = ready();
+        crate::fork_ext::bindpage::reset_in_memory();
+        window_takeover::forget_switch_for_test();
+        p.words = Some(words.clone());
+        p.client_data(img);
+        p.session.expansion = 2;
+        let menu = start_mod(&bundled_edited("eqoa_start_menu", edit));
+        let chat = start_mod(&bundled_edited("eqoa_chat", None));
+        let book = start_mod(&bundled_edited("eqoa_spellbook", None));
+        assert!(window_takeover::is_taken(TakeoverKind::StartMenu), "the Start Menu mod holds the Start key");
+        assert!(window_takeover::is_taken(TakeoverKind::ChatEntry), "the Chat mod holds the chat line");
+        Rig { p, menu, chat, book }
+    }
+
+    /// One game step, and what each mod is told after it.
+    fn step(&mut self) {
+        super::super::begin_iteration(&mut self.p, true);
+        native_core::flush_deferred();
+        for m in [&self.menu, &self.chat, &self.book] {
+            native_events::dispatch(&m.host).unwrap();
+        }
+    }
+
+    /// A key down as the viewer routes it (`runtime::route_key`): a mod hears it only in plain play, and the game gets
+    /// it unless a mod's claim (or an open text box) holds it there. Returns whether the game got it.
+    fn key(&mut self, name: &str, combo: &str, code: u8) -> bool {
+        let plain = self.p.addon_input_available();
+        // the claim is read as the key arrives; the mods hear the key a step later (`native_core::defer`), so a claim a
+        // mod lets go of in answer to this very key still held it
+        let to_game = !crate::fork_ext::addons::input::wants_key_capture(false, Some(code), false, plain);
+        if plain {
+            native_core::CORE.with(|c| {
+                c.borrow_mut().emit("input.key", json!({"key": name, "combo": combo, "down": true, "repeat": false, "synthetic": false, "text": ""}))
+            });
+            for m in [&self.menu, &self.chat, &self.book] {
+                native_events::dispatch(&m.host).unwrap();
+            }
+        }
+        to_game
+    }
+
+    /// The game's own Escape: in play it opens the Start menu; in its spell book it backs out of the book (`Out::Close`,
+    /// back to the Start menu); in its Start menu or any other window it closes.
+    fn escape(&mut self) {
+        if !self.key("escape", "escape", 0x1b) {
+            return;
+        }
+        match self.p.mode {
+            0 => self.p.open_start_menu(true),
+            5 => {
+                let bars = self.p.ability_bars();
+                let out = self.p.book.key(&self.p.abilities, bars, 27, true, 0);
+                self.p.book_actions(out);
+            }
+            13 => self.p.start_actions(vec![(0, 0)]),
+            // another window: it closes the way each does, back to the Start menu
+            _ => {
+                self.p.mode = 0;
+                self.p.open_start_menu(false);
+            }
+        }
+    }
+
+    /// The game's own Enter: in play it opens the chat line (`Play::chat_key`), the key the Start menu must not leak.
+    fn enter(&mut self) {
+        if self.key("return", "return", 0x0d) && self.p.mode == 0 {
+            self.p.chat_key("", true);
+        }
+    }
+
+    fn arrow(&mut self, name: &str) {
+        let _ = self.key(name, name, 0);
+    }
+
+    fn menu_session(&self) -> Option<ws::Session> {
+        ws::get(self.menu.vm, "start_menu")
+    }
+
+    fn chat_line(&self) -> Option<ws::Session> {
+        ws::get(self.chat.vm, "chat_entry")
+    }
+
+    /// Down to the entry at `path` (indexes from 0 through the sub-menus), and Enter on it.
+    fn choose(&mut self, path: &[usize]) {
+        for (depth, &index) in path.iter().enumerate() {
+            for _ in 0..index {
+                self.arrow("down");
+            }
+            if depth + 1 < path.len() {
+                self.enter();
+            }
+        }
+        self.enter();
+    }
+}
+
+/// The leaf entries (commands) of the menu data: each one's path of indexes, label and command.
+fn leaves(entries: &Value, at: &mut Vec<usize>, out: &mut Vec<(Vec<usize>, String, String)>) {
+    for (i, e) in entries.as_array().unwrap().iter().enumerate() {
+        at.push(i);
+        if let Some(sub) = e.get("entries") {
+            leaves(sub, at, out);
+        } else if let Some(c) = e["command"].as_str() {
+            out.push((at.clone(), e["text"].as_str().unwrap().to_string(), c.to_string()));
+        }
+        at.pop();
+    }
+}
+
+/// After an entry ran and its window closed: nothing of the menu or the chat holds a key or the keyboard, Escape opens
+/// the Start menu again and closes it, and another window opens on its hotkey.
+fn the_player_is_free(r: &mut Rig, what: &str) {
+    assert!(r.menu_session().is_none(), "{what}: the menu is closed");
+    assert!(r.chat_line().is_none(), "{what}: no chat line of the Chat mod is open");
+    assert!(!crate::fork_ext::addons::input::is_key_claimed(0x1b), "{what}: Escape is the game's again");
+    assert!(!crate::fork_ext::addons::input::is_key_claimed(0x0d), "{what}: Enter is the game's again");
+    r.escape();
+    r.step();
+    assert!(r.menu_session().is_some(), "{what}: Escape opens the Start menu again (mode {})", r.p.mode);
+    r.escape();
+    assert!(r.menu_session().is_none(), "{what}: Escape closes the menu");
+    r.step();
+    assert!(r.key("k", "shift+k", b'K'));
+    assert!(ws::get(r.book.vm, "spellbook").is_some(), "{what}: Shift+K opens the Spellbook window (mode {})", r.p.mode);
+    let id = ws::get(r.book.vm, "spellbook").unwrap().id;
+    ws::close(r.book.vm, &id, "test").unwrap();
+    r.step();
+}
+
+/// Owner test 2026-11-24 through the real key path: Escape for the menu, down to Ability, Enter. The negative control
+/// runs the same keys on the old Lua (no claim on Enter).
+fn ability_walk(edit: Edit) -> Option<Rig> {
+    let Some((img, words)) = disc_menu() else {
+        eprintln!("SKIP a6 ability walk: no disc");
+        return None;
+    };
+    let mut r = Rig::new(&img, &words, edit);
+    r.escape();
+    r.step();
+    assert!(r.menu_session().is_some(), "Escape opened the mod's Start menu");
+    r.choose(&[3]);
+    r.step();
+    r.step();
+    Some(r)
+}
+
+#[test]
+fn a6_ability_opens_the_games_page_and_the_player_gets_every_key_back() {
+    let Some(mut r) = ability_walk(None) else { return };
+    assert_eq!(r.p.mode, 5, "the game's Ability page (the spell book) is up");
+    assert!(r.chat_line().is_none(), "the Enter that chose Ability did not also open the chat line");
+    // Escape in the page goes back to the Start menu, which is the mod's
+    r.escape();
+    r.step();
+    assert!(r.menu_session().is_some(), "the page's Escape returns to the mod's Start menu (mode {})", r.p.mode);
+    assert_eq!(r.p.mode, 0);
+    // Escape closes the menu
+    r.escape();
+    r.step();
+    the_player_is_free(&mut r, "after Ability");
+}
+
+/// The negative control: the Start Menu Lua without the claim on Enter. The same keys leave the Chat mod holding a chat
+/// line (its text box takes every key) under the game's page.
+#[test]
+fn a6_ability_without_the_enter_claim_leaves_a_chat_line_open_the_old_bug() {
+    let strip = |s: String| s.replace("    state.enter = eqoa.input.claim(\"Enter\", true)\n", "");
+    let Some(r) = ability_walk(Some(&strip)) else { return };
+    assert!(r.chat_line().is_some(), "the old Lua: Enter also opened the chat line and the Chat mod holds it");
+    assert_eq!(r.p.mode, 5, "under the game's Ability page");
+}
+
+/// Every entry of the disc's menu, through its real keys: after it the game's page (if any) closes and the player can
+/// open the menu again and a hotkey window. The mods an entry may route to are off here, so each runs the game's own
+/// command (the routes are in `menu_routes_tests`).
+#[test]
+fn a6_every_entry_of_the_discs_menu_leaves_the_player_able_to_go_on() {
+    let Some((img, words)) = disc_menu() else {
+        eprintln!("SKIP a6 walk of every entry: no disc");
+        return;
+    };
+    let data = {
+        let mut p = ready();
+        p.words = Some(words.clone());
+        p.client_data(&img);
+        p.session.expansion = 2;
+        start_menu_data(&mut p).unwrap()
+    };
+    let mut all = Vec::new();
+    leaves(&data["entries"], &mut Vec::new(), &mut all);
+    assert!(all.len() > 40, "the disc's menu has its entries: {}", all.len());
+    let mut walked = Vec::new();
+    for (path, label, command) in all {
+        let what = format!("{label} ({command}) at {path:?}");
+        let mut r = Rig::new(&img, &words, None);
+        r.escape();
+        r.step();
+        assert!(r.menu_session().is_some(), "{what}: the menu opens");
+        r.choose(&path);
+        r.step();
+        r.step();
+        // the entries that are the chat line (Message > Compose, Tell, Reply) open it, as the game's own do: the Chat
+        // mod holds it and the player closes it; no other entry may bring one up with its Enter
+        let is_chat_entry = ["0x3010000:", "0xb0d0000:", "0xb0d0001:"].iter().any(|c| command.starts_with(c));
+        if is_chat_entry {
+            if let Some(line) = r.chat_line() {
+                ws::close(r.chat.vm, &line.id, "test").unwrap();
+                r.step();
+            }
+        }
+        assert!(r.chat_line().is_none(), "{what}: the Enter did not also open the chat line");
+        assert!(r.menu_session().is_none(), "{what}: the menu ended when the entry ran");
+        // Support (the game's report routes) is the player's to press in the game's own menu: the hand-off opens it
+        if command.starts_with("0xb0b1") {
+            assert_eq!(r.p.mode, 13, "{what}: the game's own Start menu opened for the Support forms");
+        }
+        // the game's window (if any) closes the way the game's own do
+        match r.p.mode {
+            0 => {}
+            13 => r.p.start_actions(vec![(0, 0)]),
+            _ => {
+                r.p.mode = 0;
+                r.p.open_start_menu(false);
+                r.step();
+                assert!(r.menu_session().is_some(), "{what}: the window's return opens the mod's menu (mode {})", r.p.mode);
+                r.escape();
+                r.step();
+            }
+        }
+        assert_eq!(r.p.mode, 0, "{what}: play again");
+        the_player_is_free(&mut r, &what);
+        walked.push(label);
+        window_takeover::reset_all_for_test();
+        ws::reset_for_test();
+    }
+    eprintln!("walked {} entries: {walked:?}", walked.len());
+}
