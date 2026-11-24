@@ -413,6 +413,11 @@ pub(crate) fn install(host: &Host, once_mode: bool) -> Result<()> {
     )?;
     Ok(())
 }
+/// Tests: how many pointer clicks or wheel turns wait in this mod's queue.
+#[cfg(test)]
+pub(crate) fn pending_pointer_events(host: &Host) -> usize {
+    bus(&host.lua).borrow().pending.iter().filter(|(e, _)| e.name.starts_with("pointer.")).count()
+}
 pub(crate) fn dispatch(host: &Host) -> Result<()> {
     let polls = super::addon_perf::section("dispatch.polls");
     super::async_json::poll(&host.lua)?;
@@ -993,6 +998,8 @@ pub(crate) fn publish(event: &Event) {
                 if b.active
                     && (!matches!(event.name.as_str(), "guide.lost" | "windows.session" | "windows.key" | "confirm.closed")
                         || event.data["owner"].as_u64() == Some(b.vm))
+                    // a click or wheel goes to the window in front under the pointer only (`pointer_api::covered`)
+                    && super::pointer_api::delivers(&event.name, &event.data, event.frame, b.vm)
                 {
                     enqueue(&mut b, event.clone(), None);
                 }
