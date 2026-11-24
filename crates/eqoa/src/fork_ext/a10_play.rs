@@ -555,9 +555,10 @@ fn mail_inbox_action(play: &mut Play, action: &A10Action) -> DispatchOutcome {
 }
 
 /// The names a To line stands for, as the game's compose sends them: the live client's list, or the disc's one name.
-fn recipients(to: &str) -> Vec<Vec<u8>> {
+/// `live` is the gram client's own (the server's offer of the live forms), as the compose window reads it.
+fn recipients(to: &str, live: bool) -> Vec<Vec<u8>> {
     let w = crate::ui::wide(to);
-    if live() {
+    if live {
         return crate::gram::parse_recipients(&w);
     }
     // `Compose::select`: str16to8 into 24 bytes, then CapitalizeName
@@ -577,7 +578,7 @@ fn mail_send(play: &mut Play, action: &A10Action) -> DispatchOutcome {
         return e;
     }
     // the game's own checks, in its order (words 1632, 1808, 873)
-    let names = recipients(to);
+    let names = recipients(to, play.mail.grams.live);
     if names.is_empty() {
         return refuse("invalid_argument", "to names nobody");
     }
@@ -587,7 +588,8 @@ fn mail_send(play: &mut Play, action: &A10Action) -> DispatchOutcome {
     if body.trim().is_empty() {
         return refuse("invalid_argument", "the mail needs some text");
     }
-    let limit = if live() { 511 } else { 512 };
+    let gram_live = play.mail.grams.live;
+    let limit = if gram_live { 511 } else { 512 };
     if body.chars().count() > limit {
         return refuse("out_of_range", format!("the text is longer than {limit} characters"));
     }
@@ -596,7 +598,7 @@ fn mail_send(play: &mut Play, action: &A10Action) -> DispatchOutcome {
     if *tunar == 0 && item.is_none() {
         // plain mail: the game's compose has no question
         let g = &mut play.mail.grams;
-        if live() {
+        if gram_live {
             g.send_gram_live(&names, &subject_w, &body_w);
         } else {
             g.send_gram(&names[0], &subject_w, &body_w);
@@ -959,7 +961,7 @@ pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
                     Some((*key, *count))
                 }
             };
-            let names = recipients(to);
+            let names = recipients(to, play.mail.grams.live);
             if names.len() != 1 {
                 return Err("a mail that carries something goes to one name".into());
             }

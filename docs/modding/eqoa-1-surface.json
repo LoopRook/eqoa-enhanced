@@ -3391,8 +3391,8 @@
         "eqoa.auction.State.results",
         "eqoa.auction.State.revision",
         "eqoa.auction.State.sellable",
-        "eqoa.auction.State.timed_out",
-        "eqoa.auction.State.tunar"
+        "eqoa.auction.State.tunar",
+        "eqoa.auction.State.uncertain"
       ],
       "path": "eqoa.auction.State",
       "reason": null,
@@ -3506,7 +3506,7 @@
     },
     {
       "children": [],
-      "path": "eqoa.auction.State.timed_out",
+      "path": "eqoa.auction.State.tunar",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -3514,7 +3514,7 @@
     },
     {
       "children": [],
-      "path": "eqoa.auction.State.tunar",
+      "path": "eqoa.auction.State.uncertain",
       "reason": null,
       "revision": 1,
       "round": 8,

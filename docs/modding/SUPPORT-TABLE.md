@@ -856,8 +856,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.auction.State.results` | supported | 8 |  |
 | `eqoa.auction.State.revision` | supported | 8 |  |
 | `eqoa.auction.State.sellable` | supported | 8 |  |
-| `eqoa.auction.State.timed_out` | supported | 8 |  |
 | `eqoa.auction.State.tunar` | supported | 8 |  |
+| `eqoa.auction.State.uncertain` | supported | 8 |  |
 | `eqoa.camera.Camera` | supported | 6 |  |
 | `eqoa.camera.Camera.distance` | supported | 6 |  |
 | `eqoa.camera.Camera.heading` | supported | 6 |  |

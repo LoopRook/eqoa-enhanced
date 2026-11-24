@@ -367,6 +367,7 @@
   "eqoa.auction.State.revision",
   "eqoa.auction.State.sellable",
   "eqoa.auction.State.tunar",
+  "eqoa.auction.State.uncertain",
   "eqoa.auction.get",
   "eqoa.bank",
   "eqoa.bank.get",
