@@ -3336,7 +3336,8 @@
         "eqoa.auction.Sellable.id",
         "eqoa.auction.Sellable.name",
         "eqoa.auction.Sellable.quantity",
-        "eqoa.auction.Sellable.slot"
+        "eqoa.auction.Sellable.slot",
+        "eqoa.auction.Sellable.value"
       ],
       "path": "eqoa.auction.Sellable",
       "reason": null,
@@ -3371,6 +3372,14 @@
     {
       "children": [],
       "path": "eqoa.auction.Sellable.slot",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.Sellable.value",
       "reason": null,
       "revision": 1,
       "round": 8,

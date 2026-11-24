@@ -1397,6 +1397,7 @@ mod mods {
             local require = function() return B end
             AL = (function() {src} end)()
             AL.available = function() return true end
+            AL.sell_action = function(args) return eqoa.actions.auction_sell(args) end
             eqoa.events.on("confirm.closed", function(e) AL.on_confirm_closed(e.data) end)
             "#
         ))

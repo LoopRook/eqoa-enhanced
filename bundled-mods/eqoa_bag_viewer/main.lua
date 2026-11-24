@@ -6,6 +6,7 @@ local HP = require("helpers")
 local X = require("multi") -- multi-select (Ctrl+click, Shift+click): one menu for several items
 local AL = require("auction_list") -- listing a bank item at the auction (the bank item menu, the group menu)
 B.auction_list = AL
+AL.sell_action = function(args) return eqoa.actions.auction_sell(args) end
 
 -- Sizes are in HUD frame pixels (640x448), scaled as the HUD is.
 local W, PAD, SLOT, GAP, LINE = 318, 8, 36, 2, 12

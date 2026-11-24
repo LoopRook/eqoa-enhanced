@@ -352,6 +352,7 @@
   "eqoa.auction.Sellable.name",
   "eqoa.auction.Sellable.quantity",
   "eqoa.auction.Sellable.slot",
+  "eqoa.auction.Sellable.value",
   "eqoa.auction.State",
   "eqoa.auction.State.banked",
   "eqoa.auction.State.bidders",

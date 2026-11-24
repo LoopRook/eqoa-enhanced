@@ -6,7 +6,8 @@
 -- time, each with its own question showing its own price.
 local B = require("bags")
 
-local L = { session = nil, form = nil, queue = nil, waiting = false, total = 0, done = 0 }
+-- `sell_action` is set by main.lua (the one place the mod's eqoa.actions calls are made)
+local L = { sell_action = nil, session = nil, form = nil, queue = nil, waiting = false, total = 0, done = 0 }
 
 local HOURS = { 12, 24, 48, 72 }
 local MAX_PRICE = 999999999
@@ -61,7 +62,7 @@ end
 
 local function sell(f)
     local function go(count)
-        return eqoa.actions.auction_sell({ slot = f.s.slot, id = f.s.id, count = count, price = f.price, buyout = f.buyout, hours = f.hours })
+        return L.sell_action({ slot = f.s.slot, id = f.s.id, count = count, price = f.price, buyout = f.buyout, hours = f.hours })
     end
     local count = math.max(1, f.s.quantity or 1)
     local r, e = go(count)
