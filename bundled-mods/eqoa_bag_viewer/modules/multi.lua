@@ -55,13 +55,13 @@ function X.drop_selection() X.sel, X.n = {}, 0 end
 
 -- Closing the window, zoning, changing tab, the end of an action: nothing stays selected.
 function X.clear()
-    X.sel, X.n, X.anchor = {}, 0, nil
+    X.sel, X.n, X.anchor, X.destroy_note = {}, 0, nil, nil
 end
 
 local function add(it)
     local k = key_of(it)
     if not X.sel[k] then
-        X.sel[k] = {key = k, list = it.list, id = it.id, name = it.name}
+        X.sel[k] = {key = k, list = it.list, id = it.id, name = it.name, qty = it.quantity or 1}
         X.n = X.n + 1
     end
 end
@@ -206,39 +206,75 @@ end
 -- Destroy: one question for the whole list. The game's own "are you sure?" is the client's (it names every item and starts
 -- on No); nothing is destroyed without the player's Yes, and a worn item is not on the list at all.
 local function destroy(items, worn)
-    local refs = {}
-    for _, it in ipairs(items) do refs[#refs + 1] = it.ref end
+    if X.busy() then
+        B.result = {text = "Destroy: another action is still running", ok = false}
+        B.dirty()
+        return
+    end
+    local refs, keys = {}, {}
+    for _, it in ipairs(items) do refs[#refs + 1] = it.ref; keys[#keys + 1] = key_of(it) end
     local req, err = eqoa.actions.destroy_many(refs)
     if not req then
         B.result = {text = "Destroy: " .. tostring(err and (err.message or err.code) or "refused"), ok = false}
         B.dirty()
         return
     end
-    X.destroy_note = {total = #items, worn = worn}
+    X.destroy_note = {total = #items, worn = worn, keys = keys}
     B.ask_req = req
     B.result = {text = "Destroy: answer the question on the screen", ok = nil}
     B.dirty()
 end
 
+-- How many of the stacks that were asked about are gone from the pack now (the server's answers, not the requests sent);
+-- nil when the pack cannot be read.
+local function gone_count(keys)
+    local inv = eqoa.inventory.get()
+    if not inv then return nil end
+    local have = {}
+    for _, it in ipairs(inv.items) do have[key_of(it)] = true end
+    local n = 0
+    for _, k in ipairs(keys or {}) do
+        if not have[k] then n = n + 1 end
+    end
+    return n
+end
+
+-- The answers that end the world the stacks were in: the pack cannot say what the server did with them.
+local WORLD_ENDS = {zoning = true, death = true, left_world = true}
+
 function X.on_destroy_closed(d)
-    local note = X.destroy_note or {total = 0, worn = {}}
+    local note = X.destroy_note or {total = 0, worn = {}, keys = {}}
     X.destroy_note = nil
     local det = d.detail or {}
+    local sent = det.sent_count or 0
+    local total = det.total or note.total
     local text, ok
-    if d.answer == "yes" then
-        local total = det.total or note.total
-        local sent = det.sent_count or 0
-        text = string.format("Destroyed %d of %d", sent, total)
-        local skipped = det.skipped or {}
-        if #skipped > 0 then text = text .. ": " .. tostring(skipped[1]) .. " had moved" .. (#skipped > 1 and (" and " .. (#skipped - 1) .. " more") or "") end
-        if det.reason and #skipped == 0 and sent < total then text = text .. ": " .. tostring(det.reason) end
-        ok = sent == total
-    elseif d.answer == "no" then
+    if d.answer == "no" then
         text, ok = "Destroy: kept", true
-    else
+    elseif d.answer ~= "yes" and sent == 0 then
         text, ok = "Destroy: kept (" .. tostring(d.answer) .. ")", true
+    else
+        -- the Yes was given and the run went (all the way, or until `stopped`)
+        local stopped = d.answer ~= "yes" and tostring(d.answer) or det.reason
+        local done
+        if not (WORLD_ENDS[d.answer] or det.reason == "not in the world") then done = gone_count(note.keys) end
+        local head, parts = nil, {}
+        if done == nil then
+            head = string.format("Asked to destroy %d of %d", sent, total)
+        else
+            head = string.format("Destroyed %d of %d", done, total)
+            if done < sent then parts[#parts + 1] = string.format("%d not confirmed by the server yet", sent - done) end
+        end
+        local skipped = det.skipped or {}
+        if #skipped > 0 then
+            parts[#parts + 1] = tostring(skipped[1]) .. " had moved" .. (#skipped > 1 and (" and " .. (#skipped - 1) .. " more") or "")
+        end
+        local untried = total - sent - #skipped
+        if stopped and untried > 0 then parts[#parts + 1] = string.format("%d not tried", untried) end
+        if stopped then parts[#parts + 1] = "stopped: " .. stopped end
+        text = head .. (#parts > 0 and (": " .. table.concat(parts, "; ")) or "") .. worn_line(note.worn)
+        ok = #parts == 0 and (done or sent) == total
     end
-    if d.answer == "yes" then text = text .. worn_line(note.worn) end
     B.result = {text = text, ok = ok}
     say_log(text)
     X.clear()
@@ -317,7 +353,11 @@ function X.build_menu(fx, fy)
         row(string.format("Put in bank (%d)", #usable), dep_deny == nil, dep_deny,
             function() X.start("deposit", usable, worn) end,
             {far_kind = (#usable > 0 and dep_far) and "bank" or nil})
-        row("Destroy...", #usable > 0, "all selected items are worn", function() destroy(usable, worn) end)
+        -- not while a merchant window is open (what the server answers there is unproven) or another group action is going
+        local destroy_deny = (#usable == 0 and "all selected items are worn")
+            or (merch_open and "close the merchant first")
+            or (X.busy() and "another action is still running") or nil
+        row("Destroy...", destroy_deny == nil, destroy_deny, function() destroy(usable, worn) end)
     end
     B.menu = {title = string.format("%d %s selected", n, plural(n, "item", "items")), rows = rows, fx = fx or 8, fy = fy or 46,
         group = true}
@@ -352,8 +392,8 @@ end
 
 -- ---------------------------------------------------------------- the run (Sell, Put in bank, Take out of bank)
 
-local function step_for(kind, it)
-    local qty = it.quantity or 1
+local function step_for(kind, it, entry)
+    local qty = math.min(entry and entry.qty or math.huge, it.quantity or 1)
     if kind == "sell" then return {kind = "sell", item = it.ref, count = qty} end
     return {kind = "bank_move", item = it.ref, count = qty, from = kind == "deposit" and "inventory" or "bank"}
 end
@@ -405,7 +445,7 @@ function X.launch()
         if not cur or cur.equipped then
             run.skipped[#run.skipped + 1] = entry
         else
-            steps[#steps + 1] = step_for(run.kind, cur)
+            steps[#steps + 1] = step_for(run.kind, cur, entry)
             entries[#entries + 1] = entry
         end
     end
@@ -440,17 +480,25 @@ function X.go()
 end
 
 -- items: the selected items now (worn ones already left out, named in `worn`).
-function X.start(kind, items, worn)
+-- Is a group action, a batch, a talk to a merchant or banker, or a destroy question still going?
+function X.busy()
     -- a run whose batch and talk are both over (the merchant never answered) is not running
     if X.run and not B.batch_id and not B.pending_open then X.run = nil end
-    if X.run or B.batch_id or B.pending_open then
+    return X.run ~= nil or B.batch_id ~= nil or B.pending_open ~= nil or X.destroy_note ~= nil
+end
+
+function X.start(kind, items, worn)
+    if X.busy() then
         B.result = {text = KINDS[kind].label .. ": another action is still running", ok = false}
         B.dirty()
         return false
     end
     local run = {kind = kind, items = {}, total = #items, done = 0, failed = {}, skipped = {}, worn = worn, next = 1}
     for _, it in ipairs(items) do
-        run.items[#run.items + 1] = {key = key_of(it), list = it.list, name = it.name, idx = #run.items + 1}
+        -- how many the player selected: a stack that grew since is not sold or moved whole
+        local picked = X.sel[key_of(it)]
+        run.items[#run.items + 1] = {key = key_of(it), list = it.list, name = it.name, idx = #run.items + 1,
+            qty = picked and picked.qty or it.quantity}
     end
     X.run = run
     X.go()

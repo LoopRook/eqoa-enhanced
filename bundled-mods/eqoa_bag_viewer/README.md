@@ -106,13 +106,16 @@ selected item for one menu titled **"N items selected"**:
   "too far from the merchant"; the same reach rules as the other buttons, and a second click tries anyway). They go item by item
   at the game's own pace, never faster than the game's own single actions: one batch at a time, each item looked up again by its
   own identity before its turn, so a stack that moved, emptied or changed while the run goes is skipped, not acted on by its
-  slot. A refused item does not stop the rest. The result line says what happened, for example "Sold 4 of 5: Rusty Sword was
+  slot. A refused item does not stop the rest, and a stack that grew since you selected it is sold only as far as you selected it. The result line says what happened, for example "Sold 4 of 5: Rusty Sword was
   refused; 1 moved or gone; 1 worn item kept" (the reasons go to the game's log).
-- **Destroy...** puts the game's own question on the screen once, listing every item (starting on **No**); nothing is destroyed
-  without your own Yes. The items are then destroyed one at a time.
+- **Destroy...** puts the game's own question on the screen once, starting on **No**, listing the items (the first 12, then
+  "...and N more", so Yes and No stay on the screen); nothing is destroyed without your own Yes. The items are then destroyed
+  one at a time. It is greyed while a merchant window is open ("close the merchant first") and while another group action is
+  running. The result line counts what the server really removed ("Destroyed 3 of 5"), and if zoning or closing the window stopped
+  it, says how far it got and why.
 - On the **Bank** tab the menu has **Take out of bank (N)**, which works the same way.
 
-A worn item is never sold, banked or destroyed by a group action: it is skipped and the result line says so. The selection clears when
+A worn item is never sold, banked or destroyed by a group action (the client refuses a worn stack in a group destroy for every mod, and skips one put on while it runs): it is skipped and the result line says so. The selection clears when
 you close the window, zone, change tab, or when the action finishes. The controller does not multi-select (its d-pad and confirm
 work as before). The mod uses `eqoa.actions.destroy_many` and the `ctrl` and `shift` fields of `pointer.pressed` (both
 additions to `eqoa/1`).

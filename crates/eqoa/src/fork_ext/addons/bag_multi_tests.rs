@@ -351,21 +351,105 @@ fn multi_destroy_sends_one_question_for_the_whole_list_without_the_worn_and_noth
     run(&lua, "B.on_confirm_closed({kind = 'destroy_many', answer = 'no'})");
     assert_eq!(string(&lua, "B.result.text"), "Destroy: kept");
     assert_eq!(int(&lua, "X.n"), 0);
-    // Yes: what the client sent, with what was skipped
-    run(&lua, "view(); ctrl(1); ctrl(2); ctrl(3); group_menu(2); choose('Destroy'); B.on_confirm_closed({kind = 'destroy_many', answer = 'yes', detail = {sent = true, sent_count = 1, total = 2, skipped = {'Rat Pelt'}}})");
+    // Yes: counted by what the pack shows gone (the server's answers), with what was skipped
+    let word = "view(); ctrl(1); ctrl(2); ctrl(3); group_menu(2); choose('Destroy')";
+    let sword = "it_(1, 'Rusty Sword', {worn = true, tabs = {'equipment'}})";
+    run(&lua, &format!("{word}; set_pack({{{sword}, it_(3, 'Rat Pelt', {{q = 3}})}}); B.on_confirm_closed({{kind = 'destroy_many', answer = 'yes', detail = {{sent = true, sent_count = 1, total = 2, skipped = {{'Rat Pelt'}}}}}})"));
     assert_eq!(string(&lua, "B.result.text"), "Destroyed 1 of 2: Rat Pelt had moved; 1 worn item kept");
-    run(&lua, "view(); ctrl(2); ctrl(3); group_menu(2); choose('Destroy'); B.on_confirm_closed({kind = 'destroy_many', answer = 'yes', detail = {sent = true, sent_count = 2, total = 2, skipped = {}}})");
+    run(&lua, &format!("view({{{sword}, it_(2, 'Healing Potion', {{q = 5, quick = 1}}), it_(3, 'Rat Pelt', {{q = 3}})}}); X.clear(); ctrl(2); ctrl(3); group_menu(2); choose('Destroy'); set_pack({{{sword}}}); B.on_confirm_closed({{kind = 'destroy_many', answer = 'yes', detail = {{sent = true, sent_count = 2, total = 2, skipped = {{}}}}}})"));
     assert_eq!(string(&lua, "B.result.text"), "Destroyed 2 of 2");
     assert!(boolean(&lua, "B.result.ok == true"));
+    // requests the pack does not show gone are not claimed as destroyed
+    let pack3 = format!("view({{{sword}, it_(2, 'Healing Potion', {{q = 5, quick = 1}}), it_(3, 'Rat Pelt', {{q = 3}})}}); X.clear(); ctrl(2); ctrl(3); group_menu(2); choose('Destroy')");
+    run(&lua, &pack3);
+    run(&lua, "B.on_confirm_closed({kind = 'destroy_many', answer = 'yes', detail = {sent = true, sent_count = 2, total = 2, skipped = {}}})");
+    assert_eq!(string(&lua, "B.result.text"), "Destroyed 0 of 2: 2 not confirmed by the server yet");
+    assert!(boolean(&lua, "B.result.ok == false"));
+    // a run cut short by zoning or the window: how far it got, and why it stopped, never "kept"
+    run(&lua, &pack3);
+    run(&lua, "B.on_confirm_closed({kind = 'destroy_many', answer = 'zoning', detail = {sent = true, sent_count = 1, total = 2, skipped = {}}})");
+    assert_eq!(string(&lua, "B.result.text"), "Asked to destroy 1 of 2: 1 not tried; stopped: zoning");
+    run(&lua, &pack3);
+    run(&lua, &format!("set_pack({{{sword}, it_(3, 'Rat Pelt', {{q = 3}})}}); B.on_confirm_closed({{kind = 'destroy_many', answer = 'closed', detail = {{sent = true, sent_count = 1, total = 2, skipped = {{}}}}}})"));
+    assert_eq!(string(&lua, "B.result.text"), "Destroyed 1 of 2: 1 not tried; stopped: closed");
+    // nothing had been sent: the question was simply ended
+    run(&lua, &pack3);
+    run(&lua, "B.on_confirm_closed({kind = 'destroy_many', answer = 'zoning', detail = {sent = false, sent_count = 0, total = 2, skipped = {}}})");
+    assert_eq!(string(&lua, "B.result.text"), "Destroy: kept (zoning)");
+    // the server went quiet after a stack and one was skipped: the reason and the untried count are both kept
+    run(&lua, &pack3);
+    run(&lua, "B.on_confirm_closed({kind = 'destroy_many', answer = 'yes', detail = {sent = true, sent_count = 1, total = 3, skipped = {'Rat Pelt'}, reason = 'the server did not answer'}})");
+    assert_eq!(string(&lua, "B.result.text"), "Destroyed 0 of 3: 1 not confirmed by the server yet; Rat Pelt had moved; 1 not tried; stopped: the server did not answer");
     // the single Destroy's answer is not taken for the group's
     run(&lua, "B.result = nil; B.on_confirm_closed({kind = 'destroy', answer = 'yes', detail = {sent = true}})");
     assert_eq!(string(&lua, "B.result.text"), "Destroy: sent");
 
     // negative control: a worn item is not left out of the question
-    let worn = mutated(&[("row(\"Destroy...\", #usable > 0, \"all selected items are worn\", function() destroy(usable, worn) end)", "row(\"Destroy...\", #usable > 0, \"x\", function() destroy(items, worn) end)")]);
+    let worn = mutated(&[("row(\"Destroy...\", destroy_deny == nil, destroy_deny, function() destroy(usable, worn) end)", "row(\"Destroy...\", destroy_deny == nil, destroy_deny, function() destroy(items, worn) end)")]);
     run(&worn, setup);
     run(&worn, "choose('Destroy')");
     assert_eq!(int(&worn, "#DESTROYS[1]"), 3, "negative control: the worn sword would be on the list");
+    // negative controls for the end-of-run lines: a cut-short run said "kept"; a stop reason was dropped
+    let kept = mutated(&[("elseif d.answer ~= \"yes\" and sent == 0 then", "elseif d.answer ~= \"yes\" then")]);
+    run(&kept, &pack3);
+    run(&kept, "B.on_confirm_closed({kind = 'destroy_many', answer = 'zoning', detail = {sent = true, sent_count = 1, total = 2, skipped = {}}})");
+    assert_eq!(string(&kept, "B.result.text"), "Destroy: kept (zoning)", "negative control: the old line said kept");
+    let no_reason = mutated(&[("if stopped then parts[#parts + 1] = \"stopped: \" .. stopped end", "")]);
+    run(&no_reason, &pack3);
+    run(&no_reason, "B.on_confirm_closed({kind = 'destroy_many', answer = 'yes', detail = {sent = true, sent_count = 1, total = 3, skipped = {'Rat Pelt'}, reason = 'the server did not answer'}})");
+    assert!(!string(&no_reason, "B.result.text").contains("stopped:"), "negative control: the reason is dropped");
+    let requests = mutated(&[("done = gone_count(note.keys)", "done = sent")]);
+    run(&requests, &pack3);
+    run(&requests, "B.on_confirm_closed({kind = 'destroy_many', answer = 'yes', detail = {sent = true, sent_count = 2, total = 2, skipped = {}}})");
+    assert_eq!(string(&requests, "B.result.text"), "Destroyed 2 of 2", "negative control: requests counted as destroyed");
+}
+
+#[test]
+fn multi_destroy_waits_for_a_closed_merchant_and_for_other_group_actions_and_sell_never_sells_a_grown_stack() {
+    // no Destroy while a merchant window is open (what the server answers there is unproven): greyed, with the reason
+    let two = "view({it_(1, 'Rat Pelt', {q = 3}), it_(2, 'Chipped Tooth')}); put_npcs(3.0, 3.0); ctrl(1); ctrl(2)";
+    let lua = world();
+    run(&lua, two);
+    run(&lua, "open_merchant({}); group_menu(1)");
+    assert!(boolean(&lua, "row('Destroy').enabled == false and row('Destroy').reason == 'close the merchant first'"));
+    run(&lua, "choose('Destroy')");
+    assert_eq!(int(&lua, "#DESTROYS"), 0, "nothing is asked of the client");
+    run(&lua, "close_merchant(); group_menu(1)");
+    assert!(boolean(&lua, "row('Destroy').enabled"), "with the merchant closed it is offered again");
+    let open_shop = mutated(&[("or (merch_open and \"close the merchant first\")", "")]);
+    run(&open_shop, two);
+    run(&open_shop, "open_merchant({}); group_menu(1)");
+    assert!(boolean(&open_shop, "row('Destroy').enabled"), "negative control: Destroy offered at an open merchant");
+    // no Destroy while a bank run is going, and no Sell or Put in bank while the destroy question is up
+    let busy = world();
+    run(&busy, "BANK.open = true; view({it_(1, 'A'), it_(2, 'B')}); ctrl(1); ctrl(2); group_menu(1); choose('Put in bank (2)')");
+    assert_eq!(int(&busy, "#BATCHES"), 1);
+    run(&busy, "group_menu(1)");
+    assert!(boolean(&busy, "row('Destroy').enabled == false and row('Destroy').reason == 'another action is still running'"));
+    run(&busy, "choose('Destroy')");
+    assert_eq!(int(&busy, "#DESTROYS"), 0, "the second action is not started");
+    let no_guard = mutated(&[("or (X.busy() and \"another action is still running\")", ""), ("    if X.busy() then
+        B.result = {text = \"Destroy:", "    if false then
+        B.result = {text = \"Destroy:")]);
+    run(&no_guard, "BANK.open = true; view({it_(1, 'A'), it_(2, 'B')}); ctrl(1); ctrl(2); group_menu(1); choose('Put in bank (2)'); group_menu(1); choose('Destroy')");
+    assert_eq!(int(&no_guard, "#DESTROYS"), 1, "negative control: Destroy started over a running bank run");
+    let asked = world();
+    run(&asked, two);
+    run(&asked, "group_menu(1); choose('Destroy'); open_merchant({}); group_menu(1); choose('Sell (2)')");
+    assert_eq!(int(&asked, "#DESTROYS"), 1);
+    assert_eq!(int(&asked, "#BATCHES"), 0, "no sale while the destroy question is up");
+    assert!(string(&asked, "B.result.text").contains("another action is still running"));
+    // a stack that grew since it was selected is not sold whole
+    let grown = "view({it_(1, 'Rat Pelt', {q = 2}), it_(2, 'Chipped Tooth')}); put_npcs(3.0, nil); open_merchant({}); ctrl(1); ctrl(2); set_pack({it_(1, 'Rat Pelt', {q = 5}), it_(2, 'Chipped Tooth')}); view(); group_menu(1); choose('Sell (2)')";
+    let lua = world();
+    run(&lua, grown);
+    assert_eq!(string(&lua, "steps_of(1)[1].item .. ':' .. steps_of(1)[1].count"), "ref1:2", "the 2 that were selected, not the 5 there now");
+    let shrunk = world();
+    run(&shrunk, "view({it_(1, 'Rat Pelt', {q = 4}), it_(2, 'Chipped Tooth')}); put_npcs(3.0, nil); open_merchant({}); ctrl(1); ctrl(2); set_pack({it_(1, 'Rat Pelt', {q = 1}), it_(2, 'Chipped Tooth')}); view(); group_menu(1); choose('Sell (2)')");
+    assert_eq!(int(&shrunk, "steps_of(1)[1].count"), 1, "a stack that shrank sells what is there");
+    let whole = mutated(&[("local qty = math.min(entry and entry.qty or math.huge, it.quantity or 1)", "local qty = it.quantity or 1")]);
+    run(&whole, grown);
+    assert_eq!(int(&whole, "steps_of(1)[1].count"), 5, "negative control: the grown stack is sold whole");
 }
 
 #[test]
