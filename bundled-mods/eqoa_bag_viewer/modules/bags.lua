@@ -201,16 +201,16 @@ function M.within_reach(kind, dist)
 end
 
 -- The nearest `kind` NPC's distance (nil when none is in the zone). `fresh` asks the zone again first.
-function M.npc_distance(kind, fresh)
+function M.npc_distance(kind, fresh, ttl)
     if fresh then M.scan_reset() end
-    local npc, d2 = M.nearby_npc(kind)
+    local npc, d2 = M.nearby_npc(kind, ttl)
     if not npc then return nil end
     return math.sqrt(d2 or 0), npc
 end
 
 -- Why a button for `kind` is out of reach ("too far from the banker"), or nil when it is in reach or there is none.
-function M.too_far(kind)
-    local dist = M.npc_distance(kind)
+function M.too_far(kind, ttl)
+    local dist = M.npc_distance(kind, nil, ttl)
     if dist == nil or M.within_reach(kind, dist) then return nil end
     return TOO_FAR[kind]
 end
@@ -313,7 +313,7 @@ end
 function M.visible_tabs()
     local tabs = {}
     for _, t in ipairs(M.TABS) do tabs[#tabs + 1] = t end
-    if eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse() ~= nil then
+    if eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse(M.DRAW_TTL) ~= nil then
         local t = M.CORPSE_TAB
         tabs[#tabs + 1] = {key = t.key, label = t.label, idx = 7}
     end
