@@ -60,7 +60,7 @@ local C = {}
 local function colors()
     if C.white then return end
     local function u(r, g, b, a) return ui.GetColorU32(r, g, b, a or 1) end
-    C.white, C.shadow = u(1, 1, 1), u(0, 0, 0, 0.9)
+    C.white, C.shadow, C.back = u(1, 1, 1), u(0, 0, 0, 0.9), u(0, 0, 0, 0.5)
     C.target, C.group = u(1, 0.9, 0.35), u(0.4, 1, 0.45)
     C.mark, C.tag, C.dim = u(1, 0.86, 0.1), u(0.75, 0.75, 0.75), u(0.6, 0.6, 0.6)
     C.bar_bg, C.bar_edge = u(0.05, 0.05, 0.05, 0.85), u(0, 0, 0, 0.9)
@@ -105,6 +105,7 @@ local function width(text, k)
     return w
 end
 
+-- text with a one-pixel shadow (a few numbers a frame); plates use `plain` over one backing rectangle instead
 local function put(dl, x, y, color, text, k)
     if font and k ~= 1 then
         local size = base_size * k
@@ -114,6 +115,26 @@ local function put(dl, x, y, color, text, k)
         dl:AddText(ui.vec2(x + 1, y + 1), C.shadow, text)
         dl:AddText(ui.vec2(x, y), color, text)
     end
+end
+
+local function plain(dl, x, y, color, text, k)
+    if font and k ~= 1 then
+        dl:AddText(font, base_size * k, ui.vec2(x, y), color, text)
+    else
+        dl:AddText(ui.vec2(x, y), color, text)
+    end
+end
+
+local function backing(dl, x1, y1, x2, y2)
+    dl:AddRectFilled(ui.vec2(x1, y1), ui.vec2(x2, y2), C.back)
+end
+
+-- the level as text, made once per level
+local level_text = {}
+local function level_str(level)
+    local t = level_text[level]
+    if not t then t = tostring(level) level_text[level] = t end
+    return t
 end
 
 -- ---- plates -----------------------------------------------------------------------------------------------------
@@ -172,7 +193,7 @@ local function draw_plate(dl, e, x, y, k, is_target, mine, consider)
     local tk = font and k or 1
     local line = (font and base_size or 14) * tk
     local name = short(e.name)
-    local lvl = e.level and tostring(e.level) or nil
+    local lvl = e.level and level_str(e.level) or nil
     local tint = is_target and C.target or (group_ids[e.id] and C.group or C.white)
     local lvl_col = (consider and consider.color) and ui.GetColorU32(consider.color.r, consider.color.g, consider.color.b, 1)
         or level_color(e.level, mine)
@@ -195,18 +216,20 @@ local function draw_plate(dl, e, x, y, k, is_target, mine, consider)
     if is_target then
         dl:AddRect(ui.vec2(left - 3 * k, top - 1), ui.vec2(left + total + 3 * k, top + line + 1), C.target)
     end
-    if lvl then put(dl, left, top, lvl_col, lvl, tk) end
-    put(dl, left + lw, top, tint, name, tk)
+    backing(dl, left - 2, top - 1, left + total + 2, top + line + 1)
+    if lvl then plain(dl, left, top, lvl_col, lvl, tk) end
+    plain(dl, left + lw, top, tint, name, tk)
     local above = top
     if e.merc_tag then
         local tw = width(e.merc_tag, tk * 0.85)
         above = above - line * 0.85
-        put(dl, x - tw / 2, above, C.tag, e.merc_tag, tk * 0.85)
+        backing(dl, x - tw / 2 - 2, above - 1, x + tw / 2 + 2, above + line * 0.85 + 1)
+        plain(dl, x - tw / 2, above, C.tag, e.merc_tag, tk * 0.85)
     end
     if e.head_mark then
         local mw = width(e.head_mark, tk * 1.6)
         above = above - line * 1.6
-        put(dl, x - mw / 2, above, C.mark, e.head_mark, tk * 1.6)
+        plain(dl, x - mw / 2, above, C.mark, e.head_mark, tk * 1.6)
     end
 end
 

@@ -288,7 +288,7 @@ fn nameplates_kinds_options_and_long_names() {
 
 #[test]
 fn nameplates_draws_quest_marks_and_merc_tags_and_a_bigger_plate_with_the_size_option() {
-    let plain = entity(7001, "Gnoll Pup", "npc", [0.0, 0.0, -10.0]);
+    let plain = entity(7001, "Rat", "npc", [0.0, 0.0, -10.0]);
     let mut marked = plain.clone();
     marked["head_mark"] = json!("!");
     marked["merc_tag"] = json!("<Lonewulf's Mercenary>");
@@ -385,7 +385,8 @@ fn nameplates_cost_per_frame_with_fifty_entities() {
     let list = part("local l = eqoa.entities.list(); for i = 1, #l do local e = l[i]; local _ = e.id, e.name, e.kind, e.corpse, e.npc_flags, e.actor_position.x, e.actor_position.y, e.actor_position.z end");
     let project = part("for i = 0, 49 do assert(eqoa.camera.project_entity(8000 + i, 0.25)) end");
     println!(
-        "NAMEPLATES 50 entities in range (debug build): frame with the mod {with_mod:?}, without {baseline:?}, the mod itself {:?}; of it, reading the list and 8 fields each {list:?}, 50 project_entity calls {project:?}",
+        "NAMEPLATES 50 entities in range ({} build): frame with the mod {with_mod:?}, without {baseline:?}, the mod itself {:?}; of it, reading the list and 8 fields each {list:?}, 50 project_entity calls {project:?}",
+        if cfg!(debug_assertions) { "debug" } else { "release" },
         with_mod.saturating_sub(baseline)
     );
     assert!(with_mod.saturating_sub(baseline) < std::time::Duration::from_millis(60), "{with_mod:?} vs {baseline:?}");
