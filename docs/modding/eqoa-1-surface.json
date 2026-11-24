@@ -3108,6 +3108,7 @@
         "eqoa.blacksmith.Item.condition",
         "eqoa.blacksmith.Item.cost",
         "eqoa.blacksmith.Item.id",
+        "eqoa.blacksmith.Item.inventory_key",
         "eqoa.blacksmith.Item.name",
         "eqoa.blacksmith.Item.quantity",
         "eqoa.blacksmith.Item.slot",
@@ -3153,6 +3154,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.blacksmith.Item.inventory_key",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.blacksmith.Item.name",
       "reason": null,
       "revision": 1,
@@ -3186,9 +3195,11 @@
     {
       "children": [
         "eqoa.blacksmith.State.coin",
+        "eqoa.blacksmith.State.held",
         "eqoa.blacksmith.State.items",
         "eqoa.blacksmith.State.repair_pending",
-        "eqoa.blacksmith.State.revision"
+        "eqoa.blacksmith.State.revision",
+        "eqoa.blacksmith.State.total"
       ],
       "path": "eqoa.blacksmith.State",
       "reason": null,
@@ -3199,6 +3210,14 @@
     {
       "children": [],
       "path": "eqoa.blacksmith.State.coin",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.State.held",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -3223,6 +3242,14 @@
     {
       "children": [],
       "path": "eqoa.blacksmith.State.revision",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.State.total",
       "reason": null,
       "revision": 1,
       "round": 8,
