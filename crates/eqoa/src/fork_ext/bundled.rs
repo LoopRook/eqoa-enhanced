@@ -45,6 +45,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_social",
     "eqoa_start_menu",
     "eqoa_chat",
+    "eqoa_world_map",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -732,6 +733,31 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         package: "eqoa_social",
         data: include_bytes!("../../../../bundled-mods/eqoa_social/README.md"),
     },
+    BundledFile {
+        path: "eqoa_world_map/mod.json",
+        package: "eqoa_world_map",
+        data: include_bytes!("../../../../bundled-mods/eqoa_world_map/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_world_map/main.lua",
+        package: "eqoa_world_map",
+        data: include_bytes!("../../../../bundled-mods/eqoa_world_map/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_world_map/README.md",
+        package: "eqoa_world_map",
+        data: include_bytes!("../../../../bundled-mods/eqoa_world_map/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_world_map/resources/OFL.txt",
+        package: "eqoa_world_map",
+        data: include_bytes!("../../../../bundled-mods/eqoa_world_map/resources/OFL.txt"),
+    },
+    BundledFile {
+        path: "eqoa_world_map/resources/SpaceMono-Regular.ttf",
+        package: "eqoa_world_map",
+        data: include_bytes!("../../../../bundled-mods/eqoa_world_map/resources/SpaceMono-Regular.ttf"),
+    },
 ];
 
 pub fn bundled_registry_path(config_dir: &Path) -> PathBuf {
@@ -1320,7 +1346,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_world_map"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1623,7 +1650,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_world_map"
             ]
         );
 
@@ -1679,7 +1707,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_world_map"
             ]
         );
 
@@ -1709,7 +1738,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_world_map"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1805,7 +1835,8 @@ mod tests {
                 "eqoa_crafting",
                 "eqoa_social",
                 "eqoa_start_menu",
-                "eqoa_chat"
+                "eqoa_chat",
+                "eqoa_world_map"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );
