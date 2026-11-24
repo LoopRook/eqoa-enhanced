@@ -31,6 +31,7 @@ enum Mouse {
     Drag(f64, f64),
     Wheel(f32),
     Ctrl(bool),
+    Shift(bool),
 }
 
 #[derive(Debug, PartialEq)]
@@ -183,6 +184,11 @@ impl Mouse {
                 "up" => false,
                 _ => return None,
             }),
+            "shift" => Self::Shift(match args {
+                "down" => true,
+                "up" => false,
+                _ => return None,
+            }),
             _ => return None,
         })
     }
@@ -252,6 +258,13 @@ impl Mouse {
                 modifiers.set(ModifiersState::SHIFT, app.mods.2);
                 app.window_event(el, window, WindowEvent::ModifiersChanged(modifiers.into()));
             }
+            Self::Shift(down) => {
+                let mut modifiers = ModifiersState::empty();
+                modifiers.set(ModifiersState::CONTROL, app.mods.0);
+                modifiers.set(ModifiersState::ALT, app.mods.1);
+                modifiers.set(ModifiersState::SHIFT, down);
+                app.window_event(el, window, WindowEvent::ModifiersChanged(modifiers.into()));
+            }
         }
     }
 }
@@ -316,6 +329,15 @@ mod tests {
             .next(i64::MAX)
             .is_none()
         );
+    }
+
+    #[test]
+    fn scripted_input_shift_steps_parse_and_a_bad_one_is_refused() {
+        let mut replay = Replay::parse(Some("shift down@10;shift up@20;shift sideways@30;ctrl down@40"), None);
+        assert_eq!(replay.next(10), Some(Input::Mouse(Mouse::Shift(true))));
+        assert_eq!(replay.next(20), Some(Input::Mouse(Mouse::Shift(false))));
+        assert_eq!(replay.next(30), Some(Input::Mouse(Mouse::Ctrl(true))), "the bad step is dropped, not queued");
+        assert_eq!(replay.next(i64::MAX), None);
     }
 
     #[test]
