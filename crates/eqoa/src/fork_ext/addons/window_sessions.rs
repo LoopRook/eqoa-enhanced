@@ -24,7 +24,7 @@ use std::cell::{Cell, RefCell};
 /// The windows a mod may open for itself (views: the game's window of that name stays where it is). Round A8 adds
 /// the crafting book and the experiment: while a mod holds one, the client reads the server's crafting replies
 /// (`native_a8`, `fork_ext/a8_play.rs`).
-pub(crate) const OWN_KINDS: [&str; 12] = [
+pub(crate) const OWN_KINDS: [&str; 15] = [
     "inventory",
     "spellbook",
     "quest_log",
@@ -37,6 +37,10 @@ pub(crate) const OWN_KINDS: [&str; 12] = [
     "group_search",
     "recipe_book",
     "experiment",
+    // round A10: mail and the auction (`native_a10`, `fork_ext/a10_play.rs`)
+    "mail_inbox",
+    "mail_compose",
+    "auction_search",
 ];
 /// Most sessions one mod may hold at once.
 const MAX_PER_VM: usize = 8;
