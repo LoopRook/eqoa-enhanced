@@ -398,7 +398,9 @@ fn a11_fishing_requests_are_the_windows_own_bytes_and_not_repeated() {
     // Escape at a waiting line is 2
     assert!(matches!(dispatch(&mut p, &A11Action::FishCancel), DispatchOutcome::Completed { .. }));
     assert_eq!(sent(&mut p), vec![crate::fishing::sub_msg(2)]);
-    assert!(matches!(dispatch(&mut p, &A11Action::FishCancel), DispatchOutcome::Refused { code: "busy", .. }), "not twice before an answer");
+    // a cancel is never held back (the player can always get out), so a second one goes too
+    assert!(matches!(dispatch(&mut p, &A11Action::FishCancel), DispatchOutcome::Completed { .. }));
+    sent(&mut p);
     // the server stops the session; a new one starts at the very same (waiting, no catch): cancel works again.
     // Negative control: the old guard never let go and refused here for the whole second session.
     p.fish.part.state = state::OFF;
@@ -695,4 +697,243 @@ fn a11_a_held_fishing_window_keeps_the_meter_and_sends_the_games_cast() {
     p.fishing_opcode(crate::fishing::OP_IN, &[2]);
     step(&mut p, &host);
     assert!(!session_ok(&host, "fishing"));
+}
+
+// ---- fix round 2 ---------------------------------------------------------------------------------------------------------
+
+fn merc_open_held(p: &mut Play, kind_mode: i32, host: &Host) {
+    if kind_mode == crate::play::mercplay::ITEMS_MODE {
+        p.merc_win_opcode(net::mercwin::OP_MERC_WINDOW_STATE, &window_body(OPEN, 1, "Kel", &merc_items()));
+    } else {
+        p.merc_win_opcode(net::mercwin::OP_MERC_SPELLS_STATE, &spells_body(OPEN, &[(950, 5, -1)], [0; SLOTS]));
+    }
+    post_event(p);
+    step(p, host);
+}
+
+/// H1: a window given back (or waiting) opens whatever the last state's flags say: the server clears the open flag with
+/// every later state. Negative control: the old test of the open flag dropped both.
+#[test]
+fn a11_r2_a_merc_window_given_back_or_waiting_opens_after_any_state_update() {
+    let (mut p, host) = rig();
+    hold(&host, TakeoverKind::MercItems);
+    merc_open_held(&mut p, crate::play::mercplay::ITEMS_MODE, &host);
+    p.merc_win_opcode(net::mercwin::OP_MERC_WINDOW_STATE, &window_body(0, 1, "Kel", &merc_items()));
+    host.execute("assert(eqoa.windows.pass(eqoa.windows.session('mercenary_items').ref))").unwrap();
+    step(&mut p, &host);
+    assert_eq!(p.mode, crate::play::mercplay::ITEMS_MODE, "passed after a state with no open flag: the game's window opens");
+    // a plain wait behind a hidden session, with a state update in between
+    let mut p = ready();
+    hide_a_session(&mut p);
+    open_merc(&mut p);
+    p.merc_win_opcode(net::mercwin::OP_MERC_WINDOW_STATE, &window_body(0, 1, "Kel", &merc_items()));
+    window_takeover::set_hidden_inactive(TakeoverKind::Bank);
+    tick(&mut p, true);
+    assert_eq!(p.mode, crate::play::mercplay::ITEMS_MODE, "the wait survives a state update");
+}
+
+/// H2 and M3: a fishing window given back with a catch on the line has its list; given back under another window it
+/// waits (nothing is cancelled) and opens with the list; the idle limit does not run while something is on the line.
+/// Negative control: the old give-back left no list, cancelled under a window, and idled out.
+#[test]
+fn a11_r2_a_fishing_window_given_back_with_a_catch_is_usable() {
+    let (mut p, host) = rig();
+    hold(&host, TakeoverKind::Fishing);
+    assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
+    post_event(&mut p);
+    step(&mut p, &host);
+    let mut fish = net::dump::NetItem { quantity: 3, equip_slot: -1, quick_slot: -1, inv_index: 10, ..Default::default() };
+    fish.item.name = "Perch".into();
+    p.fish.part.catch.items.push(fish);
+    p.fish.part.state = state::CAUGHT;
+    // idle: two 100 s stretches in a row would pass the 120 s limit; something on the line keeps the session
+    for _ in 0..2 {
+        crate::fork_ext::addons::dialog_sessions::age_for_test(std::time::Duration::from_secs(100));
+        step(&mut p, &host);
+    }
+    assert!(session_ok(&host, "fishing"), "the idle limit does not run with a catch on the line");
+    // given back under another window: waits, nothing is cancelled
+    sent(&mut p);
+    p.mode = 13;
+    host.execute("assert(eqoa.windows.pass(eqoa.windows.session('fishing').ref))").unwrap();
+    step(&mut p, &host);
+    assert_eq!(p.mode, 13);
+    assert!(sent_op(&mut p, 0x01, 0x0F).is_empty(), "no cancel: the session is not lost");
+    assert!(p.chat.iter().any(|(t, _)| t.starts_with("Fishing:")), "the player is told");
+    p.mode = 0;
+    step(&mut p, &host);
+    assert_eq!(p.mode, 36);
+    assert!(p.fish.wnd.list_visible, "the catch's list is up: something can be done with the catch");
+}
+
+/// H3: closing a held fishing window with a catch on the line is the game's Escape: the catch is let go (4) and the
+/// window stays until the server stops the session; closing again at a waiting line cancels (2) and ends it.
+/// Negative control: the old close ended the session after the 4 and stranded the server's session.
+#[test]
+fn a11_r2_closing_a_held_fishing_window_with_a_catch_keeps_it_until_the_server_answers() {
+    let (mut p, host) = rig();
+    hold(&host, TakeoverKind::Fishing);
+    assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
+    post_event(&mut p);
+    step(&mut p, &host);
+    p.fish.part.state = state::CAUGHT;
+    sent(&mut p);
+    let (ok, _) = ask(&mut p, &host, "return eqoa.actions.close_window(eqoa.windows.session('fishing').ref)");
+    assert!(ok);
+    assert_eq!(sent_op(&mut p, 0x01, 0x0F), vec![crate::fishing::sub_msg(4)]);
+    assert!(session_ok(&host, "fishing"), "the session stays: the server's fishing goes on");
+    p.fish.part.state = state::WAITING;
+    let (ok, _) = ask(&mut p, &host, "return eqoa.actions.close_window(eqoa.windows.session('fishing').ref)");
+    assert!(ok);
+    assert_eq!(sent_op(&mut p, 0x01, 0x0F), vec![crate::fishing::sub_msg(2)]);
+    assert!(!session_ok(&host, "fishing"));
+}
+
+/// M1 and M7: a window passed while another window is up waits for the game and is never made the mod's session by a
+/// packet that comes meanwhile; two windows given back together both open, one after the other. Negative control: the
+/// old single slot lost one, and the old wait bounced a pass back to the mod.
+#[test]
+fn a11_r2_passed_merc_windows_wait_for_the_game_and_two_survive() {
+    let (mut p, host) = rig();
+    let vm = hold(&host, TakeoverKind::MercItems);
+    hold(&host, TakeoverKind::MercSpells);
+    merc_open_held(&mut p, crate::play::mercplay::ITEMS_MODE, &host);
+    merc_open_held(&mut p, crate::play::mercplay::SPELLS_MODE, &host);
+    // another game window is up: the pass waits
+    p.mode = 13;
+    host.execute("assert(eqoa.windows.pass(eqoa.windows.session('mercenary_items').ref))").unwrap();
+    step(&mut p, &host);
+    // a packet comes: the passed window is not taken for the mod
+    p.merc_win_opcode(net::mercwin::OP_MERC_WINDOW_STATE, &window_body(OPEN, 1, "Kel", &merc_items()));
+    post_event(&mut p);
+    step(&mut p, &host);
+    assert!(!session_ok(&host, "mercenary_items"), "the game's window, not a new session of the mod");
+    // the mod is disabled with the spells window still held: both come back, one at a time
+    window_takeover::release_vm(vm);
+    p.mode = 0;
+    step(&mut p, &host);
+    assert_eq!(p.mode, crate::play::mercplay::ITEMS_MODE);
+    p.mode = 0;
+    step(&mut p, &host);
+    assert_eq!(p.mode, crate::play::mercplay::SPELLS_MODE, "the second window was not lost");
+}
+
+/// M2: zoning leaves nothing of a held window in the new world: the picker's token is gone, so is a waiting window.
+/// Negative control: the old state survived and `eqoa.dye.get()` still named the old zone's picker.
+#[test]
+fn a11_r2_zoning_clears_the_held_dye_and_the_waiting_windows() {
+    let (mut p, host) = rig();
+    hold(&host, TakeoverKind::DyePicker);
+    let bytes = dye_open(0xAABB_CCDD, true);
+    pre_event(&p, &dye_packet(bytes.clone()));
+    p.dyepick_opcode(&bytes);
+    post_event(&mut p);
+    step(&mut p, &host);
+    host.execute("assert(eqoa.dye.get().token == 0xAABBCCDD)").unwrap();
+    p.world_change = Some(("zone".to_string(), crate::play::Spawn { pos: [0.0; 3], heading: 0.0, placing: crate::play::Placing::AsGiven }));
+    step(&mut p, &host);
+    p.world_change = None;
+    window_takeover::release_all();
+    step(&mut p, &host);
+    host.execute("assert(eqoa.dye.get() == nil)").unwrap();
+    assert!(LOCAL.with(|l| l.borrow().dye.is_none() && l.borrow().merc_waits.is_empty()));
+}
+
+/// M4: the one-request guard lets go at any answer of the fishing server, even one that changes nothing.
+/// Negative control: the old guard stayed busy while state and catch size were the same.
+#[test]
+fn a11_r2_the_fishing_guard_lets_go_at_any_answer() {
+    let mut p = ready();
+    assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
+    p.fish.part.state = state::CAUGHT;
+    p.fish.wnd.list_visible = true;
+    let mut fish = net::dump::NetItem { quantity: 3, equip_slot: -1, quick_slot: -1, inv_index: 10, ..Default::default() };
+    fish.item.name = "Perch".into();
+    p.fish.part.catch.items.push(fish);
+    assert!(matches!(dispatch(&mut p, &A11Action::FishReel), DispatchOutcome::Completed { .. }));
+    assert!(matches!(dispatch(&mut p, &A11Action::FishReel), DispatchOutcome::Refused { code: "busy", .. }));
+    // the answer changes nothing the guard can see (a full pack)
+    pre_event(&p, &net::session::Event::Opcode { op: crate::fishing::OP_IN, data: vec![4, 0, 0, 0, 0, 0, 0, 0, 0] });
+    post_event(&mut p);
+    assert!(matches!(dispatch(&mut p, &A11Action::FishReel), DispatchOutcome::Completed { .. }), "an answer arrived");
+    // and a cancel is never held back
+    assert!(matches!(dispatch(&mut p, &A11Action::FishCancel), DispatchOutcome::Completed { .. }));
+}
+
+/// M5, M6: a held fishing session starts over a hidden session (it is the mod's window, nothing is cancelled), and
+/// walking more than 25 units from where it opened ends it with the game's cancel. Negative control: the old hook
+/// cancelled the start, and a held session let the player walk away for good.
+#[test]
+fn a11_r2_held_fishing_over_a_hidden_session_and_walking_away() {
+    let (mut p, host) = rig();
+    hold(&host, TakeoverKind::Fishing);
+    hide_a_session(&mut p);
+    sent(&mut p);
+    p.self_at = Some(([0.0, 0.0, 0.0], Default::default()));
+    assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
+    post_event(&mut p);
+    step(&mut p, &host);
+    assert!(session_ok(&host, "fishing"), "the mod's window, even over a hidden session");
+    assert!(sent_op(&mut p, 0x01, 0x0F).is_empty(), "not cancelled");
+    p.self_at = Some(([30.0, 0.0, 0.0], Default::default()));
+    host.execute("ev2 = {}; eqoa.events.on('windows.session', function(e) ev2[#ev2 + 1] = e.data.phase .. ':' .. tostring(e.data.reason) end)").unwrap();
+    step(&mut p, &host);
+    assert_eq!(sent_op(&mut p, 0x01, 0x0F), vec![crate::fishing::sub_msg(2)], "the game's own cancel");
+    host.execute("assert(ev2[#ev2] == 'closed:walked_away', ev2[#ev2])").unwrap();
+}
+
+/// L1, L2, L3, L8: no cast after the server's Stop; the merc's waiting flag is reset by a new session; a second dye open
+/// cancels the first; the quality of a throw is pinned (1.6 s of the meter is a poor throw, 1.99 s a perfect one).
+#[test]
+fn a11_r2_small_things() {
+    let (mut p, host) = rig();
+    hold(&host, TakeoverKind::Fishing);
+    hold(&host, TakeoverKind::MercItems);
+    hold(&host, TakeoverKind::DyePicker);
+    // L2
+    p.merc.waiting = true;
+    merc_open_held(&mut p, crate::play::mercplay::ITEMS_MODE, &host);
+    assert!(!p.merc.waiting, "a new session starts with no answer owed");
+    // L3
+    let first = dye_open(0x11, true);
+    pre_event(&p, &dye_packet(first.clone()));
+    p.dyepick_opcode(&first);
+    post_event(&mut p);
+    sent(&mut p);
+    let second = dye_open(0x22, true);
+    pre_event(&p, &dye_packet(second.clone()));
+    p.dyepick_opcode(&second);
+    post_event(&mut p);
+    assert_eq!(sent_op(&mut p, 0x96, 0x7E), vec![net::dyepick::cancelled(0x11)], "the game cancels the picker it replaces");
+    // L8 and L1
+    assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
+    post_event(&mut p);
+    let mut pole = net::dump::NetItem { quantity: 1, equip_slot: 14, quick_slot: -1, cur_hp: 5, inv_index: 1, ..Default::default() };
+    pole.item.wear_slot = 20;
+    let mut bait = net::dump::NetItem { quantity: 3, equip_slot: 15, quick_slot: -1, inv_index: 2, ..Default::default() };
+    bait.item.wear_slot = 21;
+    p.dump.inventory.items = vec![pole, bait];
+    let zero = (vi::vect::Vect3::default(), vi::vect::Vect3::default());
+    for (ms, quality) in [(1600, 15), (1990, 0)] {
+        let t = p.session.timer();
+        p.fish.wnd.cast(t - ms);
+        p.fish.wnd.release = true;
+        p.fish.wnd.hit = false;
+        hidden_fishing_step(&mut p, zero);
+        assert_eq!(p.fish.wnd.quality, quality, "a release {ms} ms into the meter");
+        p.fish.wnd.splash_time -= 3000;
+        p.fish.wnd.hit = true;
+        sent(&mut p);
+        hidden_fishing_step(&mut p, zero);
+        assert_eq!(sent_op(&mut p, 0x01, 0x0F), vec![crate::fishing::cast_msg(quality)]);
+        p.fish.part.state = state::WAITING;
+    }
+    // L1: after Stop (state OFF) a splash that ends sends no cast
+    let t = p.session.timer();
+    p.fish.wnd.cast(t - 1600);
+    p.fish.wnd.release = true;
+    p.fish.part.state = state::OFF;
+    sent(&mut p);
+    hidden_fishing_step(&mut p, zero);
+    assert!(sent(&mut p).is_empty());
 }

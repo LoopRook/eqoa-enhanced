@@ -416,7 +416,10 @@ fn press(play: &mut Play, item: &Item, option: usize) -> Result<bool, DispatchOu
             if option != 0 {
                 return Err(refuse("unsupported", "this window has no numbered answers: use its own actions, or close_window"));
             }
-            super::a11_play::close_window(play, *kind);
+            if !super::a11_play::close_window(play, *kind) {
+                // a fishing catch let go: the window stays until the server's Stop, as the game's Escape leaves it
+                return Err(DispatchOutcome::Completed { detail: Some(json!({"sent": true, "ended": false})) });
+            }
             Ok(true)
         }
         Item::Offer { text, .. } => {

@@ -991,6 +991,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         (
             "actions",
             "merc_give merc_equip merc_unequip merc_take merc_stock merc_spell_set merc_spells_clear merc_dismiss dye_pick dye_no_dye dye_cancel fishing_cast fishing_release fishing_reel fishing_keep fishing_pull fishing_cancel",
+            8,
+        ),
         // round A10: mail and the auction
         ("mail", "get", 8),
         ("auction", "get", 8),

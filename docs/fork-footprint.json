@@ -320,7 +320,7 @@
     "crates/eqoa/src/mercplay.rs": {
       "added": 5,
       "deleted": 5,
-      "reason": "Round A11 (2026-11-24): the server's merc, dye and fishing windows must not open over a hidden session of a mod (the game's mode reads 0 there): one condition added to the line that decides whether the window may open, calling fork_hooks::server_window_blocked, which says what the game does with a window up (merc: not opened; dye: waits; fishing: cancelled). Backlog item of 2026-11-18, owner-approved plan row A11. Fix round: the merc windows wait for the hidden session instead of being dropped (two hook conditions) and three MercPlay fields (items_open, book_open, keys) became pub(crate) so the fork can open the waiting window."
+      "reason": "Round A11 (2026-11-24): the server's merc, dye and fishing windows must not open over a hidden session of a mod (the game's mode reads 0 there): two conditions added to the lines that open the merc windows, calling fork_hooks::merc_open_waits, which makes them wait like the dye picker while a hidden session holds the game (and lets a mod that holds the kind take them). Backlog item of 2026-11-18, owner-approved plan row A11. Fix round: the merc windows wait for the hidden session instead of being dropped (two hook conditions) and three MercPlay fields (items_open, book_open, keys) became pub(crate) so the fork can open the waiting window."
     },
     "crates/eqoa/src/fishplay.rs": {
       "added": 3,

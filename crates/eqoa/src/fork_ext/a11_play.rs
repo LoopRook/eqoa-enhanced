@@ -42,11 +42,13 @@ struct Local {
     /// What the fishing session looked like when its last reel, keep or pull went out: `(state, catch count)`. Another
     /// of the three waits until the server has changed one of them (nothing is replayed).
     fish_sent: Option<(i32, usize)>,
-    /// A mercenary window (its mode) the server asked to open while a hidden session held the game: it opens when the
-    /// session ends, as the dye picker's open waits.
-    merc_wait: Option<i32>,
-    /// The waiting window was passed to the game: it opens natively, whoever holds the kind.
-    merc_bypass: bool,
+    /// Mercenary windows (mode, passed-to-the-game) waiting to open: the server asked while a hidden session or another
+    /// window held the game, or a mod gave one back. A passed one opens natively whoever holds the kind; the rest
+    /// become a mod's session when a mod holds the kind. At most one of each mode.
+    merc_waits: Vec<(i32, bool)>,
+    /// A fishing window given back to the game, waiting for plain play.
+    fish_wait: bool,
+    pre_fish_event: bool,
     /// The dye picker a mod holds (its Open as the server sent it).
     dye: Option<net::dyepick::Open>,
     /// What the game looked like when the packet now being handled arrived.
@@ -60,9 +62,6 @@ thread_local! {
     static LOCAL: RefCell<Local> = RefCell::new(Local::default());
 }
 
-/// A hidden session of a mod (a corpse, merchant or bank) holds the game in a window of its own while the game's mode
-/// reads 0. Asked by the hooks in `mercplay.rs`, `dyeplay.rs` and `fishplay.rs`; true means "act as the game does with
-/// a window up". `what` names the window for the log.
 /// A mod holds a session of this server window now.
 fn up(kind: TakeoverKind) -> bool {
     dialog_sessions::windows().iter().any(|a| a.item.kind() == kind)
@@ -76,7 +75,12 @@ fn hidden_held() -> bool {
 pub(crate) fn merc_waits(mode: i32) -> bool {
     let wait = blocked("mercenary window");
     if wait {
-        LOCAL.with(|l| l.borrow_mut().merc_wait = Some(mode));
+        LOCAL.with(|l| {
+            let mut l = l.borrow_mut();
+            if !l.merc_waits.iter().any(|(m, _)| *m == mode) {
+                l.merc_waits.push((mode, false));
+            }
+        });
     }
     wait
 }
@@ -84,6 +88,10 @@ pub(crate) fn merc_waits(mode: i32) -> bool {
 /// A fishing session starts while a hidden session holds the game: the game's cancel goes out (the caller), and the
 /// player is told why, in one line.
 pub(crate) fn fishing_blocked(play: &mut Play) -> bool {
+    // a mod that holds fishing takes the session whatever hidden session runs: it is the mod's window, not a game window
+    if window_takeover::is_taken(TakeoverKind::Fishing) {
+        return false;
+    }
     let wait = blocked("fishing session");
     if wait {
         play.add_chat("Fishing stopped: a mod window was busy, cast again".into(), [1.0, 0.25, 0.25, 1.0]);
@@ -91,6 +99,8 @@ pub(crate) fn fishing_blocked(play: &mut Play) -> bool {
     wait
 }
 
+/// A hidden session of a mod (a corpse, merchant or bank) holds the game in a window of its own while the game's mode
+/// reads 0. True means "act as the game does with a window up". `what` names the window for the log.
 pub(crate) fn blocked(what: &'static str) -> bool {
     let held = hidden_held();
     LOCAL.with(|l| {
@@ -249,7 +259,18 @@ fn fishing_state(play: &Play) -> Option<Json> {
 /// when the server has answered; and what the three windows hold, for `eqoa.merc.get`, `eqoa.dye.get` and
 /// `eqoa.fishing.get`.
 pub(crate) fn tick(play: &mut Play, game_step: bool) {
+    if play.world_change.is_some() {
+        // zoning: the old world's windows are gone, and nothing of them may come back in the new one
+        LOCAL.with(|l| {
+            let mut l = l.borrow_mut();
+            l.merc_waits.clear();
+            l.dye = None;
+            l.fish_wait = false;
+            l.fish_sent = None;
+        });
+    }
     resume_merc(play);
+    resume_fishing(play);
     if game_step {
         tick_windows(play);
     }
@@ -274,44 +295,68 @@ pub(crate) fn tick(play: &mut Play, game_step: bool) {
 }
 
 fn resume_merc(play: &mut Play) {
-    let Some(mode) = LOCAL.with(|l| l.borrow().merc_wait) else { return };
+    let waits = LOCAL.with(|l| l.borrow().merc_waits.clone());
+    if waits.is_empty() {
+        return;
+    }
     let (items, spells) = (crate::play::mercplay::ITEMS_MODE, crate::play::mercplay::SPELLS_MODE);
-    let wants = match mode {
-        m if m == items => play.merc.window.as_ref().is_some_and(|w| w.flags & OPEN != 0),
-        m if m == spells => play.merc.spells.as_ref().is_some_and(|s| s.flags & OPEN != 0),
-        _ => false,
-    };
-    if !wants {
-        // the hire went (a state with the gone flag): nothing to open
-        LOCAL.with(|l| l.borrow_mut().merc_wait = None);
-        return;
+    let mut keep: Vec<(i32, bool)> = Vec::new();
+    let mut opened = false;
+    for (mode, bypass) in waits {
+        // the window is still the server's to show while its state is there (every later state update clears the open
+        // flag, the gone flag clears the state): the hire gone means nothing to open
+        let present = if mode == items { play.merc.window.is_some() } else { play.merc.spells.is_some() };
+        if !present {
+            continue;
+        }
+        let kind = if mode == items { TakeoverKind::MercItems } else { TakeoverKind::MercSpells };
+        if window_takeover::is_taken(kind) && !bypass {
+            // a mod holds the window: it is the mod's session, not the game's window (a hidden session does not matter)
+            hold_window(play, kind);
+            continue;
+        }
+        if opened || hidden_held() || play.mode != 0 {
+            keep.push((mode, bypass));
+            continue;
+        }
+        opened = true;
+        play.merc.keys.clear();
+        if mode == items {
+            play.merc.items_open = true;
+        } else {
+            play.merc.book_open = true;
+        }
+        play.mode = mode;
+        window_takeover::log("takeover: the mercenary window that waited opens now".into());
     }
-    let kind = if mode == items { TakeoverKind::MercItems } else { TakeoverKind::MercSpells };
-    let bypass = LOCAL.with(|l| l.borrow().merc_bypass);
-    if window_takeover::is_taken(kind) && !bypass {
-        // a mod holds the window: it is the mod's session, not the game's window (a hidden session does not matter)
-        LOCAL.with(|l| l.borrow_mut().merc_wait = None);
-        hold_window(play, kind);
-        return;
-    }
-    if hidden_held() || play.mode != 0 {
-        return;
-    }
-    LOCAL.with(|l| {
-        let mut l = l.borrow_mut();
-        l.merc_wait = None;
-        l.merc_bypass = false;
-    });
-    play.merc.keys.clear();
-    if mode == items {
-        play.merc.items_open = true;
-    } else {
-        play.merc.book_open = true;
-    }
-    play.mode = mode;
-    window_takeover::log("takeover: the mercenary window that waited for a hidden session opens now".into());
+    LOCAL.with(|l| l.borrow_mut().merc_waits = keep);
 }
 
+/// The game's fishing window opened again for a session a mod gave back: the window as the game shows it, with the
+/// catch's list when something is on the line (`Recv::Loot` opens it, and focusing the window shuts it).
+fn open_fishing_window(play: &mut Play) {
+    play.mode = 36;
+    let mut cues = Vec::new();
+    play.fish.wnd.focus(&mut cues);
+    let st = play.fish.part.state;
+    if (st == crate::fishing::state::CAUGHT || st == crate::fishing::state::KEEPING) && !play.fish.part.catch.items.is_empty() {
+        let now_ms = play.hud.as_ref().map_or(0, |h| h.0.time);
+        play.fish.wnd.open_bait(play.wnd_chat.as_mut(), now_ms, &mut cues);
+    }
+    play.cues.extend(cues.into_iter().map(crate::sound::Cue::Ui));
+}
+
+fn resume_fishing(play: &mut Play) {
+    if !LOCAL.with(|l| l.borrow().fish_wait) {
+        return;
+    }
+    if play.fish.part.state == crate::fishing::state::OFF {
+        LOCAL.with(|l| l.borrow_mut().fish_wait = false);
+    } else if play.mode == 0 && !hidden_held() && !up(TakeoverKind::Fishing) {
+        LOCAL.with(|l| l.borrow_mut().fish_wait = false);
+        open_fishing_window(play);
+    }
+}
 
 // ---- the windows a mod holds (takeover kinds `mercenary_items`, `mercenary_spells`, `dye_picker`, `fishing`) ----------
 
@@ -324,6 +369,8 @@ fn window_data(play: &Play, kind: TakeoverKind) -> Json {
     };
     if let Some(o) = v.as_object_mut() {
         o.remove("revision");
+        // the meter changes every frame: a mod reads it with `eqoa.fishing.get()`, it is not a session change
+        o.remove("power");
         if kind == TakeoverKind::MercItems {
             o.remove("spells");
         } else if kind == TakeoverKind::MercSpells {
@@ -336,6 +383,10 @@ fn window_data(play: &Play, kind: TakeoverKind) -> Json {
 fn hold_window(play: &mut Play, kind: TakeoverKind) {
     let pos = play.self_at.map(|(p, _)| p);
     let data = window_data(play, kind);
+    if matches!(kind, TakeoverKind::MercItems | TakeoverKind::MercSpells) {
+        // the native window resets this as it opens: one lost answer must not block the mod for good
+        play.merc.waiting = false;
+    }
     dialog_sessions::hold(Item::Window { kind, data }, pos);
     window_takeover::log(format!("takeover: {} HIDDEN for the mod (a window the server opened; scope all)", kind.name()));
 }
@@ -353,11 +404,13 @@ pub(crate) fn pre_event(play: &Play, event: &net::session::Event) {
             None => {}
         }
     }
+    let fish = matches!(event, net::session::Event::Opcode { op, .. } if *op == crate::fishing::OP_IN);
     LOCAL.with(|l| {
         let mut l = l.borrow_mut();
         l.pre_mode = play.mode;
         l.pre_dye_event = dye_open;
         l.pre_dye_close = dye_close;
+        l.pre_fish_event = fish;
     });
 }
 
@@ -366,6 +419,10 @@ pub(crate) fn pre_event(play: &Play, event: &net::session::Event) {
 pub(crate) fn post_event(play: &mut Play) {
     let (pre, dye_open, dye_close) = LOCAL.with(|l| {
         let mut l = l.borrow_mut();
+        // any answer of the fishing server lets the one-request guard go, even one that changes nothing (a full pack)
+        if std::mem::take(&mut l.pre_fish_event) {
+            l.fish_sent = None;
+        }
         (l.pre_mode, std::mem::take(&mut l.pre_dye_event), l.pre_dye_close.take())
     });
     if play.is_dead() || !window_takeover::has_activity() {
@@ -377,7 +434,8 @@ pub(crate) fn post_event(play: &mut Play) {
             continue;
         }
         let opened = play.mode == mode && pre != mode;
-        let waiting = LOCAL.with(|l| l.borrow().merc_wait) == Some(mode);
+        // a window passed to the game (the bypass) is the game's whoever holds the kind
+        let waiting = LOCAL.with(|l| l.borrow().merc_waits.iter().any(|(m, bypass)| *m == mode && !*bypass));
         if opened || waiting {
             if opened {
                 play.mode = pre;
@@ -385,13 +443,16 @@ pub(crate) fn post_event(play: &mut Play) {
                 play.merc.book_open = false;
                 play.merc.keys.clear();
             }
-            LOCAL.with(|l| l.borrow_mut().merc_wait = None);
+            LOCAL.with(|l| l.borrow_mut().merc_waits.retain(|(m, bypass)| *m != mode || *bypass));
             hold_window(play, kind);
         }
     }
     if dye_open && window_takeover::is_taken(TakeoverKind::DyePicker) {
         if let Some(o) = play.dyepick.pending.take() {
-            LOCAL.with(|l| l.borrow_mut().dye = Some(o));
+            // the game cancels the picker it replaces
+            if let Some(old) = LOCAL.with(|l| l.borrow_mut().dye.replace(o.clone())).filter(|old| old.token != o.token) {
+                play.session.send(&net::dyepick::cancelled(old.token));
+            }
             hold_window(play, TakeoverKind::DyePicker);
         }
     }
@@ -420,11 +481,13 @@ fn end_window(kind: TakeoverKind, reason: &str) {
 pub(crate) fn give_window(play: &mut Play, kind: TakeoverKind) {
     match kind {
         TakeoverKind::MercItems | TakeoverKind::MercSpells => {
+            // whatever the last state's flags say, the game's window opens (it waits for plain play, as the dye picker
+            // does, and several given back together all wait)
             let mode = if kind == TakeoverKind::MercItems { crate::play::mercplay::ITEMS_MODE } else { crate::play::mercplay::SPELLS_MODE };
             LOCAL.with(|l| {
                 let mut l = l.borrow_mut();
-                l.merc_wait = Some(mode);
-                l.merc_bypass = true;
+                l.merc_waits.retain(|(m, _)| *m != mode);
+                l.merc_waits.push((mode, true));
             });
         }
         TakeoverKind::DyePicker => {
@@ -435,12 +498,11 @@ pub(crate) fn give_window(play: &mut Play, kind: TakeoverKind) {
         _ => {
             if play.fish.part.state != crate::fishing::state::OFF {
                 if play.mode == 0 && !hidden_held() {
-                    play.mode = 36;
-                    let mut cues = Vec::new();
-                    play.fish.wnd.focus(&mut cues);
-                    play.cues.extend(cues.into_iter().map(crate::sound::Cue::Ui));
+                    open_fishing_window(play);
                 } else {
-                    play.session.send(&crate::fishing::sub_msg(2));
+                    // another window is up: the session waits for plain play, nothing is cancelled
+                    LOCAL.with(|l| l.borrow_mut().fish_wait = true);
+                    play.add_chat("Fishing: the fishing window opens when the other window closes".into(), [1.0, 1.0, 1.0, 1.0]);
                 }
             }
         }
@@ -449,7 +511,7 @@ pub(crate) fn give_window(play: &mut Play, kind: TakeoverKind) {
 
 /// The mod closes its window with `close_window(ref)`: what the game's own close does, so the server's state ends as
 /// it ends there.
-pub(crate) fn close_window(play: &mut Play, kind: TakeoverKind) {
+pub(crate) fn close_window(play: &mut Play, kind: TakeoverKind) -> bool {
     match kind {
         TakeoverKind::MercItems => {
             let slot = play.merc.window.as_ref().map_or(0, |w| w.slot);
@@ -466,8 +528,12 @@ pub(crate) fn close_window(play: &mut Play, kind: TakeoverKind) {
             if st != crate::fishing::state::OFF {
                 play.session.send(&crate::fishing::sub_msg(if st == crate::fishing::state::CAUGHT { 4 } else { 2 }));
             }
+            // as the game's Escape: with a catch on the line it is let go and the window stays until the server stops the
+            // session (close again, or the server's Stop, ends it)
+            return st != crate::fishing::state::CAUGHT;
         }
     }
+    true
 }
 
 /// Each step for the held windows: what ended on the server's side ends the session; a death ends them as the game's
@@ -503,6 +569,23 @@ fn tick_windows(play: &mut Play) {
             dialog_sessions::finish(&a.id, "server");
             continue;
         }
+        if kind == TakeoverKind::Fishing {
+            use crate::fishing::state;
+            // something on the line, or a cast under way, is the mod at work: the idle limit does not run
+            if play.fish.wnd.casting || matches!(play.fish.part.state, state::CAST | state::CAUGHT | state::KEEPING) {
+                dialog_sessions::touch(&a.id);
+            }
+            // as a held dialog: more than 25 units from where it opened ends it with the game's own cancel
+            if let (Some(from), Some((now, _))) = (a.pos, play.self_at) {
+                let d = [now[0] - from[0], now[1] - from[1], now[2] - from[2]];
+                if ee::lt(625.0, d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) {
+                    play.session.send(&crate::fishing::sub_msg(2));
+                    window_takeover::log("takeover: fishing ended (walked away more than 25 units)".into());
+                    dialog_sessions::finish(&a.id, "walked_away");
+                    continue;
+                }
+            }
+        }
         let data = window_data(play, kind);
         if data != a.item.data() {
             dialog_sessions::refresh_window(&a.id, data);
@@ -520,7 +603,7 @@ pub(crate) fn hidden_fishing_frame(play: &mut Play, walker: &crate::walker::Walk
 
 /// The cast logic of a held fishing window, at the walk's committed place and heading.
 pub(crate) fn hidden_fishing_step(play: &mut Play, place: (vi::vect::Vect3<vi::fpu::Ee>, vi::vect::Vect3<vi::fpu::Ee>)) {
-    if play.mode == 36 || !up(TakeoverKind::Fishing) || !play.fish.wnd.casting {
+    if play.mode == 36 || !up(TakeoverKind::Fishing) || !play.fish.wnd.casting || play.fish.part.state == crate::fishing::state::OFF {
         return;
     }
     let now = play.session.timer();
@@ -759,6 +842,10 @@ fn dispatch_fishing(play: &mut Play, action: &A11Action) -> DispatchOutcome {
     if play.mode != 36 && !held {
         return refuse("not_ready", "no fishing window is up");
     }
+    // a mod that acts is showing its window
+    if let Some(a) = dialog_sessions::windows().into_iter().find(|a| a.item.kind() == TakeoverKind::Fishing) {
+        dialog_sessions::touch(&a.id);
+    }
     let st = play.fish.part.state;
     let catch_len = play.fish.part.catch.items.len();
     let guard_waits = LOCAL.with(|l| l.borrow().fish_sent == Some((st, catch_len)));
@@ -827,9 +914,6 @@ fn dispatch_fishing(play: &mut Play, action: &A11Action) -> DispatchOutcome {
         A11Action::FishCancel => {
             if st == state::OFF {
                 return refuse("not_ready", "no fishing session is going");
-            }
-            if guard_waits {
-                return refuse("busy", "the server has not answered the last fishing request");
             }
             play.session.send(&sub_msg(if st == state::CAUGHT { 4 } else { 2 }));
             LOCAL.with(|l| l.borrow_mut().fish_sent = Some((st, catch_len)));
