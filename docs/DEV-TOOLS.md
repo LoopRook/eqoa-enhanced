@@ -256,11 +256,62 @@ for the open request, hidden loot window, and hidden session close. The round 6.
 must also include the scripted addon input changes. `--exe <path>` selects a specific
 build if the executable in the shared Cargo directory is from another branch.
 
+### Owner-test scene suite (`tools/scene_suite.py`)
+
+One command runs the owner's hand tests as scripted scenes against the local server and prints PASS, FAIL or SKIP
+for each, with the screenshot paths:
+
+```powershell
+python -B tools/scene_suite.py                      # builds this tree's release client under the cargo lock, runs all scenes
+python -B tools/scene_suite.py --exe <release exe>  # use an existing build (no cargo lock)
+python -B tools/scene_suite.py --only 1,5           # chosen scenes (5 = 5a and 5b)
+python -B tools/scene_suite.py --control            # negative controls: each scene run with its behaviour removed
+```
+
+It reuses `local_scene.py` (the server copy, the `lsgm` account, `EQOA_MOUSE`, `EQOA_MOD_KEYS`, `EQOA_SHOTS`): one server
+for the whole suite, one client launch per scene, a fresh scratch profile per launch with only that scene's mods on.
+A run folder `suite-<stamp>` under the local server's `runs/` holds, per scene, `client.log`, the screenshots and the
+mods folder; `summary.txt` sits beside them. Nothing is written inside the repository. It needs Pillow for the
+screenshot checks (without it those checks FAIL with that reason, never pass silently).
+
+| Scene | What it proves |
+|---|---|
+| 1 | Hail Commander Nothard (the `Q` key on the target) with the Dialog Window mod on: the dialog is the mod's, Enter presses Done and the server's next dialog follows, the reply is answered, no chat line is left open, then Enter opens chat and typed text reaches the server (`Lsgm shouts: hello there`). |
+| 2 | Start Menu mod: opens every top-level entry of this server's menu (TEST, Community, Character, Inventory, Ability, Auction, Pet, Quest, Support, Options; Quit is left out), one screenshot each (something opened), Escape back, then `B` still opens the Bag Viewer (the player can go on). |
+| 3 | Chat mod: Enter, type, send (`Lsgm: hello chat`); `/g ` then type (the server answers `You are not in a group.`); Shift+T then type is a tell (`You told Lsgm`, `Lsgm tells you`). |
+| 4 | Bag Viewer opened over Character: a click on a spot both windows cover opens the item menu of the front window only; Character is still on its Summary tab afterwards. |
+| 5a | Bag Viewer: Ctrl+click three items, right-click, Sell (3) with the Yes, at the merchant 1.5 units from the start spot: `Sold 3 of 3`, the hidden merchant session opens and closes, the database keeps 1 of the 4 items. |
+| 5b | The same three items, Destroy... then Right and Enter (Yes) on the game's question: `Destroyed 3 of 3`, 1 item left in the database. |
+| 6 | Six drags of the chat window by its grip (`press l`, `move`, `release l`): no `stall:` line in the client log, and the window really moved. |
+| 7 | 60 s at the start spot with `EQOA_PERF=1` (Chat, Bag Viewer, Start Menu and Dialog Window on): median fps, cpu ms/frame and hud ms of the 5 s windows (the first, which includes loading, is dropped) are appended to `scene-suite-history.json` beside the local server folder (`--history <file>` to move it, `--no-history` to skip) with the build name (git commit, a `+local` mark when the tree has uncommitted changes, and the exe's hash). Each run prints the change against the previous recorded run. Compare runs only on a quiet PC: other builds share the CPU. |
+
+Each scene checks log lines (the client's `chat:`, `takeover:`, `script:` lines and the mods' own `addon <id>: [info]`
+lines) in order, lines that must never appear, and screenshots (the share of dark pixels where a mod's panel sits, or
+how much a region changed). A scene the server cannot support reports SKIP with the reason, never PASS; a part of a
+scene that cannot be tested prints as `SKIP part:` (5a and 5b: worn items are not tested, because the seed character's
+four heirloom items cannot be worn).
+
+**Negative controls.** `--control` re-runs each scene with the behaviour taken away and expects FAIL (`CONTROL OK`):
+1 and 2 and 3 run with the mod's own `main.lua` edited (Dialog Window without its Enter claim, Start Menu without its
+Enter claim, Chat with the T key opening a Say line) through a copy in the run's scratch mods folder (the client keeps a
+player-edited file); 4 runs with the Bag Viewer's pointer claim switched off; 5a and 5b leave out the Yes; 6 presses
+inside the window instead of on its grip. The stall assertion itself is checked in `test_scene_suite.py` against a log
+that contains a `stall:` line.
+
+**What it cannot tell you.** How anything feels (a frame that is slow only on the owner's PC, mouse feel, a hitch the
+offscreen path does not have), anything that needs a live server's data (the real shard's menus, merchants, quests,
+group play, other players), the owner's controller (the scripted input is keyboard and mouse), and the release build's
+packaging (it runs the shared release client, not the signed package). The local server's menu has extra entries (TEST,
+Auction), so a retail shard's Start Menu would need the `START_ENTRIES` list changed. The scripted `shift down|up` step
+of `EQOA_MOUSE` was added for scene 3 (Shift+T).
+
+Tests of the tool itself: `python -m unittest discover -s tools` (`tools/test_scene_suite.py`).
+
 ### Addon input replay
 
 - `EQOA_MOUSE` accepts `click X Y@ms`, `rclick @creature name@ms`, `wheel N@ms`,
   `press l|r@ms`, `release l|r@ms`, `move DX DY@ms`, `drag DX DY@ms`,
-  `ctrl down|up@ms`, and `linkclick [index]@ms`. In the
+  `ctrl down|up@ms`, `shift down|up@ms` (held for the keys that follow) and `linkclick [index]@ms`. In the
   native window these use the same mouse event dispatcher, pointer claims, and ImGui
   handlers as a physical mouse. `X Y` is measured in screenshot pixels when offscreen.
 - `EQOA_MOD_KEYS` accepts `b@ms`, `enter@ms`, and `text abc@ms`. A named key is
