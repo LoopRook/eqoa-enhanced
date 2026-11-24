@@ -188,6 +188,8 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
         }
         // round A5: the character window's steps are carried out where they are judged (`a5_capture`)
         Act::TrainStats { .. } | Act::Mastery { .. } => super::api_capture::a5::carry_out(play, &p.act),
+        // round A11: the mercenary's dismissal and the dye picker's colour
+        Act::DismissMerc | Act::DyeAnswer { .. } => super::a11_play::carry_out(play, &p.act),
     }
 }
 

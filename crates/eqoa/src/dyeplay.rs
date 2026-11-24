@@ -216,7 +216,7 @@ impl Play {
     }
 
     /// OK or Cancel: told to the server, the picker down.
-    fn dyepick_done(&mut self, up: PickerUp) {
+    pub(crate) fn dyepick_done(&mut self, up: PickerUp) {
         let Some(o) = self.dyepick.open.take() else {
             self.dyepick_close(false);
             return;
@@ -252,7 +252,7 @@ impl Play {
         let now = self.dyepick_now();
         // an open waiting: up where a window may come (play, the dyer's box
         // answered, the chat line's history)
-        if self.dyepick.pending.is_some() && matches!(self.mode, 0 | 7 | 9 | MODE) {
+        if self.dyepick.pending.is_some() && matches!(self.mode, 0 | 7 | 9 | MODE) && !super::fork_hooks::server_window_blocked("dye picker") {
             let o = self.dyepick.pending.take().unwrap_or_default();
             if let Some(old) = self.dyepick.open.take().filter(|old| old.token != o.token && self.dyepick.picker.open) {
                 self.session.send(&net::dyepick::cancelled(old.token));

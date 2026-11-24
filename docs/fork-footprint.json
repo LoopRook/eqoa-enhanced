@@ -308,6 +308,21 @@
       "added": 5,
       "deleted": 0,
       "reason": "Round A4 (owner-approved 2026-11-22, HUD completion): 4 firm seam lines + 1 optional rolls_up guard — `#[path = \"fork_ext/win_raid.rs\"] pub(super) mod fork_win;` (seam 7), `fork_win::run_strips` after both `expire` calls in `run_rolls` (seam 8), `fork_win::roll_key` in `roll_key` (seam 9), `fork_win::roll_point` in `roll_point` (seam 10), and `fork_win::rolls_up` in `rolls_up` so taken ready-check/loot-roll strips stop drawing and taking input while timers keep running."
+    },
+    "crates/eqoa/src/mercplay.rs": {
+      "added": 1,
+      "deleted": 1,
+      "reason": "Round A11 (2026-11-24): the server's merc, dye and fishing windows must not open over a hidden session of a mod (the game's mode reads 0 there): one condition added to the line that decides whether the window may open, calling fork_hooks::server_window_blocked, which says what the game does with a window up (merc: not opened; dye: waits; fishing: cancelled). Backlog item of 2026-11-18, owner-approved plan row A11."
+    },
+    "crates/eqoa/src/fishplay.rs": {
+      "added": 1,
+      "deleted": 1,
+      "reason": "Round A11 (2026-11-24): the server's merc, dye and fishing windows must not open over a hidden session of a mod (the game's mode reads 0 there): one condition added to the line that decides whether the window may open, calling fork_hooks::server_window_blocked, which says what the game does with a window up (merc: not opened; dye: waits; fishing: cancelled). Backlog item of 2026-11-18, owner-approved plan row A11."
+    },
+    "crates/eqoa/src/dyeplay.rs": {
+      "added": 2,
+      "deleted": 2,
+      "reason": "Round A11 (2026-11-24): the server's merc, dye and fishing windows must not open over a hidden session of a mod (the game's mode reads 0 there): one condition added to the line that decides whether the window may open, calling fork_hooks::server_window_blocked, which says what the game does with a window up (merc: not opened; dye: waits; fishing: cancelled). Backlog item of 2026-11-18, owner-approved plan row A11. Plus dyepick_done made pub(crate) so the mod's answer closes the picker through the game's own path."
     }
   },
   "immutable": [
@@ -633,6 +648,24 @@
       "name": "raid strip takeover hooks",
       "pattern": "fork_win::(run_strips|roll_key|roll_point|rolls_up)\\(",
       "count": 4
+    },
+    {
+      "path": "crates/eqoa/src/mercplay.rs",
+      "name": "A11 merc window gate",
+      "pattern": "fork_hooks::server_window_blocked\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/dyeplay.rs",
+      "name": "A11 dye picker gate",
+      "pattern": "fork_hooks::server_window_blocked\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/fishplay.rs",
+      "name": "A11 fishing session gate",
+      "pattern": "fork_hooks::server_window_blocked\\(",
+      "count": 1
     }
   ]
 }

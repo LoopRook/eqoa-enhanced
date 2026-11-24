@@ -140,7 +140,7 @@ impl Play {
     /// Whether a window may open over what is up: play, or the merc's box the
     /// player answered (its menu's Inventory, Spells) and the NPC's words.
     fn merc_win_may_open(&self) -> bool {
-        matches!(self.mode, 0 | 7 | 9 | ITEMS_MODE | SPELLS_MODE)
+        matches!(self.mode, 0 | 7 | 9 | ITEMS_MODE | SPELLS_MODE) && !super::fork_hooks::server_window_blocked("mercenary window")
     }
 
     /// The windows' opcodes (0x7E74, 0x7E75, 0x7E77); true when handled.

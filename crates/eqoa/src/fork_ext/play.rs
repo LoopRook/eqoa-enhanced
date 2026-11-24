@@ -38,6 +38,10 @@ mod a2_play;
 #[path = "a8_play.rs"]
 mod a8_play;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "a11_play.rs"]
+mod a11_play;
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "map_mod_tests.rs"]
 mod map_mod_tests;
@@ -843,6 +847,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         a7_play::tick(_play);
         a2_play::tick(_play);
         a8_play::tick(_play, _game_step);
+        a11_play::tick(_play, _game_step);
         api_capture::a5::tick(_play);
         if crate::fork_ext::addons::native_core::capture_requested()
             || crate::fork_ext::addons::window_takeover::has_activity()
@@ -1077,6 +1082,21 @@ pub(super) fn dropped(_play: &mut Play) {
     // round A8: nothing of a mod's crafting window is left to read
     #[cfg(not(target_arch = "wasm32"))]
     a8_play::dropped();
+    // round A11: nor of a mercenary, dye or fishing window
+    #[cfg(not(target_arch = "wasm32"))]
+    a11_play::dropped();
+}
+
+/// Round A11: whether a window the server opens (a mercenary's, the dye picker, a fishing session) must act as the game
+/// acts with a window up, because a hidden session of a mod holds the game while its mode reads 0 (`a11_play::blocked`).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn server_window_blocked(what: &'static str) -> bool {
+    a11_play::blocked(what)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn server_window_blocked(_: &'static str) -> bool {
+    false
 }
 
 /// Round A8: the server's crafting reply (0x1102), offered to a mod's crafting window before the game's own
@@ -3282,6 +3302,7 @@ fn dispatch_broker_action(
         ActionKind::A1(action) => a1_play::dispatch(play, action),
         ActionKind::A6(action) => a6_play::dispatch(play, action),
         ActionKind::A8(action) => a8_play::dispatch(play, action),
+        ActionKind::A11(action) => a11_play::dispatch(play, action),
         ActionKind::A7(action) => a7_play::dispatch(play, action),
         ActionKind::A5(action) => api_capture::a5::dispatch(play, action),
         ActionKind::DropQuest { .. }

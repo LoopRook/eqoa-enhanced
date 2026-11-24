@@ -983,6 +983,15 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             "craft_list craft_inspect craft_tray_add craft_tray_remove craft_tray_clear craft_fill craft_combine craft_keep",
             8,
         ),
+        // round A11: the mercenary windows, the dye picker and fishing
+        ("merc", "get", 8),
+        ("dye", "get", 8),
+        ("fishing", "get", 8),
+        (
+            "actions",
+            "merc_give merc_equip merc_unequip merc_take merc_stock merc_spell_set merc_spells_clear merc_dismiss dye_pick dye_no_dye dye_cancel fishing_cast fishing_release fishing_reel fishing_keep fishing_pull fishing_cancel",
+            8,
+        ),
         // round A7: community (friends, ignore, guild, who, group search)
         ("social", "friends ignored friend_request", 8),
         ("guild", "get invite", 8),
@@ -1141,6 +1150,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_a1::install(host)?;
     super::native_a6::install(host)?;
     super::native_a8::install(host)?;
+    super::native_a11::install(host)?;
     super::native_a7::install(host)?;
     super::native_a5::install(host)?;
     super::frame_actions::install(host)?;
@@ -1314,7 +1324,7 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.guild.Guild", "members") => Some("eqoa.guild.GuildMember"),
         ("eqoa.who.WhoState", "entries") => Some("eqoa.who.WhoEntry"),
         ("eqoa.lfg.LfgState", "entries") => Some("eqoa.lfg.LfgEntry"),
-        _ => None,
+        _ => super::native_a11::nested_type(path, key),
     }
 }
 fn install_fields(lua: &Lua) {

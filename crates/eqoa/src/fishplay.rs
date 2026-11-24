@@ -84,7 +84,7 @@ impl Play {
     /// window's focus (`UpdateMode`); from any other window the session is
     /// cancelled.
     fn open_fishing(&mut self) {
-        if self.mode == 0 {
+        if self.mode == 0 && !super::fork_hooks::server_window_blocked("fishing session") {
             self.mode = 36;
             let mut cues = Vec::new();
             self.fish.wnd.focus(&mut cues);
