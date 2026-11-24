@@ -469,8 +469,7 @@ pub(crate) fn mail_send_text(to: &str, subject: &str, tunar: u32, item: Option<(
     if let Some((name, count)) = item {
         parts.push(if count > 1 { format!("{count} x \"{name}\"") } else { format!("\"{name}\"") });
     }
-    let subject = subject.replace('
-', " ");
+    let subject = subject.replace('\n', " ");
     let mut text = format!("Send {} to {to} in the mail \"{subject}\"?", parts.join(" and "));
     if postage > 0 {
         text.push_str(&format!(" The postage is {postage} tunar."));

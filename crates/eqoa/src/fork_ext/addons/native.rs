@@ -943,6 +943,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ("loot", "get", 5),
         ("map", "get open markers view set_guide clear_guide", 4),
         ("map", "set_waypoint clear_waypoint", 7),
+        ("map", "terrain", 8),
         ("mastery", "get skills selected", 6),
         ("mods", "send", 4),
         (
@@ -1155,6 +1156,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::frame_actions::install(host)?;
     super::raid_strips::install(host)?;
     super::map_views::install(host)?;
+    super::map_terrain::install(host)?;
     super::guides::install(host)?;
     super::pointer_api::install(host)?;
     let modules: Table = lua.named_registry_value("eqoa_modules")?;

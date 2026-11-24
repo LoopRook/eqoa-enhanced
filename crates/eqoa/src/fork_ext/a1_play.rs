@@ -234,6 +234,12 @@ pub(crate) fn tick(play: &mut Play) {
     ]);
     // a pass: the game's own window for a held session, as the server's reply would have opened it
     for (vm, kind) in window_sessions::take_passes() {
+        if kind == TakeoverKind::Map {
+            // round A13: the game's own map for the mod's map session; a map that cannot open now leaves the session
+            let _ = super::a13_play::pass(play, vm);
+            window_sessions::cancel_pass(vm, kind);
+            continue;
+        }
         if matches!(kind, TakeoverKind::FriendRequest | TakeoverKind::GuildInvite) {
             if play.mode != 0 || !super::a7_play::pass_request(play, vm, kind) {
                 window_sessions::cancel_pass(vm, kind);

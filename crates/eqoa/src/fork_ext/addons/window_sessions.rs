@@ -269,7 +269,7 @@ pub(crate) fn open(
 }
 
 /// The kinds the client opens itself for the mod that holds them (round A6): the Start key's menu and the chat line.
-pub(crate) const CLIENT_KINDS: [&str; 2] = ["start_menu", "chat_entry"];
+pub(crate) const CLIENT_KINDS: [&str; 3] = ["start_menu", "chat_entry", "map"];
 
 /// The client opens (or, if it is already open, refreshes) `vm`'s session of a client-opened kind with its data.
 /// `opened_from` is `"key"` (the player's key or pad button) or `"game"` (a game window returning to it).
@@ -623,6 +623,18 @@ pub(crate) fn pass(vm: u64, id: &str) -> std::result::Result<(), (&'static str, 
     if session.held.is_some_and(|k| TakeoverKind::DIALOGS.contains(&k)) {
         // round A2: the game's own window shows this dialog or offer; the client does it at the next step
         return super::dialog_sessions::request_pass(&session.id);
+    }
+    if session.kind == "map" {
+        // round A13: the game's own map opens for the mod's map session (`a13_play::pass`)
+        return with(|s| {
+            if !s.env.plain || !s.env.passable {
+                return Err(("busy", "the game's map cannot open now: another window or box is up, or the camera is manual".into()));
+            }
+            if !s.passes.contains(&(vm, TakeoverKind::Map)) {
+                s.passes.push((vm, TakeoverKind::Map));
+            }
+            Ok(())
+        });
     }
     let Some(kind) = session.held else {
         return Err((

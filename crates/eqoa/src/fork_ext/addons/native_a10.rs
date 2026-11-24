@@ -224,8 +224,7 @@ fn parse_send(arg: &Value) -> std::result::Result<A10Action, Refusal> {
     };
     let to = field_text(t, "to", 512)?.unwrap_or_default();
     let subject = field_text(t, "subject", 32)?.unwrap_or_default();
-    if subject.contains('
-') {
+    if subject.contains('\n') {
         return Err(bad("the subject is one line"));
     }
     let body = field_text(t, "body", 512)?.unwrap_or_default();
