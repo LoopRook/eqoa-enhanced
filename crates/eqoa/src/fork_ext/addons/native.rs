@@ -998,6 +998,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ("factions", "list", 8),
         ("combat", "record", 8),
         ("actions", "train_stats request_factions request_combat_record", 8),
+        // round A12: world overlays
+        ("camera", "project project_entity", 8),
     ] {
         let module_path = format!("eqoa.{module}");
         let backing = match modules.get::<Value>(module)? {
@@ -1142,6 +1144,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_a1::install(host)?;
     super::native_a6::install(host)?;
     super::native_a8::install(host)?;
+    super::native_a12::install(host)?;
     super::native_a7::install(host)?;
     super::native_a5::install(host)?;
     super::frame_actions::install(host)?;
@@ -1375,7 +1378,7 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.entities.Entity",
-            "ref id name level position actor_position hp_fraction power kind world_id entity_type is_creature corpse search_flags npc_flags class_code target_id status_flags poisoned diseased disposition disposition_name",
+            "ref id name level position actor_position hp_fraction power kind world_id entity_type is_creature corpse search_flags npc_flags class_code target_id status_flags poisoned diseased disposition disposition_name head_mark merc_tag",
         ),
         (
             "eqoa.group.Group",
@@ -1469,6 +1472,8 @@ fn install_fields(lua: &Lua) {
                 Some(6)
             } else if (path, field) == ("eqoa.hotbar.HotbarSlot", "item") {
                 Some(5)
+            } else if matches!((path, field), ("eqoa.entities.Entity", "head_mark" | "merc_tag")) {
+                Some(8)
             } else if (path, field) == ("eqoa.abilities.Ability", "learned") {
                 Some(8)
             } else if matches!(

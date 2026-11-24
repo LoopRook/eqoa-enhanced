@@ -3003,8 +3003,11 @@
     {
       "children": [
         "eqoa.camera.Camera",
+        "eqoa.camera.Projection",
         "eqoa.camera.compass",
-        "eqoa.camera.get"
+        "eqoa.camera.get",
+        "eqoa.camera.project",
+        "eqoa.camera.project_entity"
       ],
       "path": "eqoa.camera",
       "reason": null,
@@ -3067,6 +3070,60 @@
       "status": "supported"
     },
     {
+      "children": [
+        "eqoa.camera.Projection.behind",
+        "eqoa.camera.Projection.depth",
+        "eqoa.camera.Projection.on_screen",
+        "eqoa.camera.Projection.x",
+        "eqoa.camera.Projection.y"
+      ],
+      "path": "eqoa.camera.Projection",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.behind",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.depth",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.on_screen",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.x",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.Projection.y",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
       "children": [],
       "path": "eqoa.camera.compass",
       "reason": null,
@@ -3080,6 +3137,22 @@
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.project",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.camera.project_entity",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -4764,11 +4837,13 @@
         "eqoa.entities.Entity.disposition",
         "eqoa.entities.Entity.disposition_name",
         "eqoa.entities.Entity.entity_type",
+        "eqoa.entities.Entity.head_mark",
         "eqoa.entities.Entity.hp_fraction",
         "eqoa.entities.Entity.id",
         "eqoa.entities.Entity.is_creature",
         "eqoa.entities.Entity.kind",
         "eqoa.entities.Entity.level",
+        "eqoa.entities.Entity.merc_tag",
         "eqoa.entities.Entity.name",
         "eqoa.entities.Entity.npc_flags",
         "eqoa.entities.Entity.poisoned",
@@ -4844,6 +4919,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.entities.Entity.head_mark",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.entities.Entity.hp_fraction",
       "reason": null,
       "revision": 1,
@@ -4880,6 +4963,14 @@
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.entities.Entity.merc_tag",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {

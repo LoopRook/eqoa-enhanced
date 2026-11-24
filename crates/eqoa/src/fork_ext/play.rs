@@ -5854,3 +5854,28 @@ impl Play {
     }
 }
 
+impl Play {
+    /// What the game's plate over this creature carries besides its name, as `Play::plates` reads it: the quest mark
+    /// ("!" to take, "?" to hand in; only while Extended's Quest Markers is on) and a mercenary's hirer tag.
+    pub(crate) fn fork_plate_extras(&self, e: &net::entity::Entity) -> (Option<&'static str>, Option<String>) {
+        let mark = crate::settings::head_marks().then(|| self.session.head_mark(e.id)).flatten().and_then(net::headmarks::sign);
+        (mark, e.creature.as_ref().and_then(|c| self.merc_tag(c)))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn fork_plate_points(&self) -> Vec<(u32, [f32; 3])> {
+        if self.loading.up() {
+            return Vec::new();
+        }
+        crate::fork_ext::addons::native_a12::plate_points_of(self.entities.slots.iter().enumerate().filter_map(|(slot, e)| {
+            let (e, p) = (e.as_ref()?, self.puppets.get(slot)?.as_ref()?);
+            Some(crate::fork_ext::addons::native_a12::PlateSource {
+                id: e.id,
+                has_creature: e.creature.is_some(),
+                name_empty: e.creature.as_ref().is_none_or(|c| c.name.is_empty()),
+                shown: p.shown,
+                name_at: p.name_at,
+            })
+        }))
+    }
+}

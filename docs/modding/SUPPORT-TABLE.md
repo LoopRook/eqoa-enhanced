@@ -156,6 +156,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.camera` | supported | 6 |  |
 | `eqoa.camera.compass` | supported | 6 |  |
 | `eqoa.camera.get` | supported | 6 |  |
+| `eqoa.camera.project` | supported | 8 |  |
+| `eqoa.camera.project_entity` | supported | 8 |  |
 
 ## eqoa.capabilities
 
@@ -789,6 +791,12 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.camera.Camera.mode` | supported | 6 |  |
 | `eqoa.camera.Camera.pitch` | supported | 6 |  |
 | `eqoa.camera.Camera.position` | supported | 6 |  |
+| `eqoa.camera.Projection` | supported | 8 |  |
+| `eqoa.camera.Projection.behind` | supported | 8 |  |
+| `eqoa.camera.Projection.depth` | supported | 8 |  |
+| `eqoa.camera.Projection.on_screen` | supported | 8 |  |
+| `eqoa.camera.Projection.x` | supported | 8 |  |
+| `eqoa.camera.Projection.y` | supported | 8 |  |
 | `eqoa.capabilities.Capability` | supported | 2 |  |
 | `eqoa.capabilities.Capability.children` | supported | 2 |  |
 | `eqoa.capabilities.Capability.path` | supported | 2 |  |
@@ -951,11 +959,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.entities.Entity.disposition` | supported | 2 |  |
 | `eqoa.entities.Entity.disposition_name` | supported | 2 |  |
 | `eqoa.entities.Entity.entity_type` | supported | 2 |  |
+| `eqoa.entities.Entity.head_mark` | supported | 8 |  |
 | `eqoa.entities.Entity.hp_fraction` | supported | 2 |  |
 | `eqoa.entities.Entity.id` | supported | 2 |  |
 | `eqoa.entities.Entity.is_creature` | supported | 2 |  |
 | `eqoa.entities.Entity.kind` | supported | 2 |  |
 | `eqoa.entities.Entity.level` | supported | 2 |  |
+| `eqoa.entities.Entity.merc_tag` | supported | 8 |  |
 | `eqoa.entities.Entity.name` | supported | 2 |  |
 | `eqoa.entities.Entity.npc_flags` | supported | 6 |  |
 | `eqoa.entities.Entity.poisoned` | supported | 2 |  |

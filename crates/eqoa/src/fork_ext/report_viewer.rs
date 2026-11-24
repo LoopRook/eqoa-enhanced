@@ -209,6 +209,11 @@ mod tests {
     }
 }
 
+/// Round A12: this frame's view for `eqoa.camera.project`, before the mods' Lua runs over the frame.
+pub(super) fn view(view_proj: glam::Mat4, size: (u32, u32)) {
+    crate::fork_ext::addons::native_a12::set_view(view_proj, size);
+}
+
 /// Run Lua before the native HUD consumes its drawing, but record the ImGui
 /// overlay separately: submission stays after the scene's final scale resolve.
 pub(super) fn prepare_addons(
@@ -223,6 +228,7 @@ pub(super) fn prepare_addons(
         .or(g.offscreen.as_ref())?
         .create_view(&Default::default());
     let snapshot = play.map_or_else(Default::default, |p| p.forge_snapshot(walker));
+    crate::fork_ext::addons::native_a12::set_plates(play.map(|p| p.fork_plate_points()).unwrap_or_default());
     let mut encoder = g.device.create_command_encoder(&Default::default());
     g.forge_runtime.draw(
         &g.window,
