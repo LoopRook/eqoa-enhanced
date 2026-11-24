@@ -1081,7 +1081,7 @@ mod mods {
     use super::*;
     use crate::fork_ext::addons::{
         bridge::Bridge,
-        discovery::{DiscoveredAddon, EntryMode},
+        discovery::DiscoveredAddon,
     };
     use dear_imgui_rs::Context;
     use serde_json::json;
@@ -1092,24 +1092,11 @@ mod mods {
     }
 
     fn addon(id: &str) -> DiscoveredAddon {
-        let r = root(id);
-        let m: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(r.join("mod.json")).unwrap()).unwrap();
-        DiscoveredAddon {
-            id: id.into(),
-            name: id.into(),
-            entry: r.join("main.lua"),
-            script_root: r.clone(),
-            package_root: r.clone(),
-            module_dirs: vec![r.clone()],
-            resource_dirs: vec![r],
-            api: Some("eqoa/1".into()),
-            entry_mode: EntryMode::Once,
-            capabilities_declared: true,
-            requested_capabilities: m["capabilities"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()).collect(),
-            extensions: Default::default(),
-            initially_enabled: false,
-            mods_root: None,
-        }
+        crate::fork_ext::addons::discovery::discover(root(id).parent().unwrap())
+            .addons
+            .into_iter()
+            .find(|a| a.id == id)
+            .unwrap_or_else(|| panic!("{id} is bundled"))
     }
 
     fn context() -> Context {
@@ -1216,7 +1203,7 @@ mod mods {
     }
 
     fn auction_rig_mod() -> Rig {
-        rig_with("eqoa_auction", 380.0, 336.0, "shift+a", "a", |_| {})
+        rig_with("eqoa_auction", 380.0, 336.0, "shift+u", "u", |_| {})
     }
 
     #[test]
@@ -1328,7 +1315,7 @@ mod mods {
     #[test]
     fn mods_auction_a_search_is_the_games_bytes_and_a_bid_or_a_buy_now_asks_first_with_the_price() {
         let mut r = auction_rig_mod();
-        assert!(ws::any_open_of(&["auction_search"]), "Shift+A opened an auction_search session; {}", r.why());
+        assert!(ws::any_open_of(&["auction_search"]), "Shift+U opened an auction_search session; {}", r.why());
         let mut want = r.p.bank.auction.clone();
         let q = Query {
             kind: 12,
@@ -1353,9 +1340,9 @@ mod mods {
         let page = r.p.bank.auction.page as i64;
         r.p.bank_opcode(0x1206, &page_reply(page, &[(501, 1, 400)]));
         r.settle();
-        r.tap(60.0, 90.0);
+        r.tap(60.0, 96.0);
         let n = sent().len();
-        r.tap(256.0, 242.0);
+        r.tap(256.0, 248.0);
         assert_eq!(sent().len(), n, "negative control: the click alone bids nothing; {}", r.why());
         let q = confirm::current_for_test().expect("the question is up");
         assert!(!q.yes && q.text.contains("Bid 10 tunar") && q.text.contains("buyout is 400"), "{}", q.text);
@@ -1366,7 +1353,7 @@ mod mods {
         // answered; buy now asks with its price
         r.p.bank.state = 0;
         r.settle();
-        r.tap(330.0, 242.0);
+        r.tap(330.0, 248.0);
         let q = confirm::current_for_test().expect("the buy now question is up");
         assert!(q.text.contains("Buy out") && q.text.contains("400"), "{}", q.text);
         assert_eq!(sent().len(), n + 1);
@@ -1379,7 +1366,7 @@ mod mods {
 
     #[test]
     fn mods_auction_with_no_auction_on_the_server_the_window_says_so_and_sends_nothing() {
-        let mut r = rig_with("eqoa_auction", 380.0, 336.0, "shift+a", "a", |p| p.dump.bank.p78cc = false);
+        let mut r = rig_with("eqoa_auction", 380.0, 336.0, "shift+u", "u", |p| p.dump.bank.p78cc = false);
         r.settle();
         r.tap(200.0, 67.0);
         assert!(sent().is_empty(), "{}", r.why());
@@ -1389,7 +1376,7 @@ mod mods {
     fn mods_zoning_and_a_new_world_end_the_windows_and_nothing_stale_is_left_to_reopen_with() {
         for (id, w, combo, key, kinds) in [
             ("eqoa_mail", 360.0, "shift+m", "m", vec!["mail_inbox", "mail_compose"]),
-            ("eqoa_auction", 380.0, "shift+a", "a", vec!["auction_search"]),
+            ("eqoa_auction", 380.0, "shift+u", "u", vec!["auction_search"]),
         ] {
             for how in ["zoning", "state.reset", "world.entered"] {
                 let mut r = rig_with(id, w, 336.0, combo, key, |_| {});
@@ -1431,111 +1418,348 @@ mod mods {
         }
     }
 
-    // ---- the Bag Viewer's listing module, with the real client behind it ----
+    // ---- the fix round: the real mods, real clicks and keys, the real game state behind them ----
 
-    fn load_listing(host: &Host) {
-        let src = std::fs::read_to_string(root("eqoa_bag_viewer").join("modules").join("auction_list.lua")).unwrap();
-        host.execute(&format!(
-            r#"
-            B = {{ result = nil, menu = {{ title = "x", fx = 8, fy = 46, rows = {{}} }}, last = nil }}
-            function B.run_asking(label, fn) local r, e = fn(); B.last = {{ r = r, e = e }}; return r, e end
-            function B.dirty() end
-            local require = function() return B end
-            AL = (function() {src} end)()
-            AL.available = function() return true end
-            AL.sell_action = function(args) return eqoa.actions.auction_sell(args) end
-            eqoa.events.on("confirm.closed", function(e) AL.on_confirm_closed(e.data) end)
-            "#
-        ))
-        .unwrap();
+    /// The window pixels of a thing the Bag Viewer drew, read from its own tables.
+    fn bv_point(r: &Rig, expr: &str) -> (f64, f64) {
+        let (x, y): (f64, f64) = r.host.lua.load(expr).eval().unwrap_or_else(|e| panic!("{expr}: {e}"));
+        (x, y)
     }
 
-    fn al_step(p: &mut Play, host: &Host) {
-        host.execute("AL.tick()").unwrap();
-        step(p, host);
+    impl Rig {
+        /// A press at window pixels (not HUD pixels), with a modifier or another button.
+        fn press_px(&mut self, x: f64, y: f64, button: &str, ctrl: bool) {
+            CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": x, "y": y, "inside_window": true, "button": button, "ctrl": ctrl, "shift": false, "alt": false})));
+            native_events::dispatch(&self.host).unwrap();
+            self.settle();
+        }
+
+        /// A click in the HUD pixels of the window, drawn BEFORE the game steps (as the client's frame runs), so what
+        /// the mod draws on that frame is the state before the click's action.
+        fn tap_then_draw_first(&mut self, x: f64, y: f64) {
+            self.relayout();
+            let (px, py) = (self.x0 + x * self.k, self.y0 + y * self.k);
+            CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": px, "y": py, "inside_window": true, "button": "left"})));
+            native_events::dispatch(&self.host).unwrap();
+            self.frames(1);
+            step(&mut self.p, &self.host);
+            self.frames(1);
+        }
+    }
+
+    fn writes(r: &mut Rig, to: &str, subject: &str, body: &str) {
+        r.tap(30.0, 58.0);
+        r.type_text(to);
+        r.key("tab", "");
+        r.type_text(subject);
+        r.key("tab", "");
+        r.type_text(body);
+        r.key("escape", "");
     }
 
     #[test]
-    fn mods_listing_sets_price_buyout_and_time_within_the_games_limits_and_asks_first() {
-        let (mut p, host) = bank_rig();
-        p.dump.bank.items.items[0].item.value = 50;
-        load_listing(&host);
-        let it = "{id = 700001, name = 'Gold Ring', quantity = 1}";
-        // the first look: the client has not published the auction yet
-        host.execute(&format!("AL.begin({it})")).unwrap();
-        assert!(confirm::current_for_test().is_none() && sent().is_empty());
-        step(&mut p, &host);
-        host.execute(&format!("AL.begin({it})")).unwrap();
-        lua_ok(
-            &host,
-            r#"assert(B.menu.title:find('Gold Ring') and #B.menu.rows == 7, B.result and B.result.text)
-            assert(B.menu.rows[1].label:find('Price 50') and B.menu.rows[3].label:find('Buy now 100') and B.menu.rows[5].label:find('12 hours'))"#,
-        );
-        // steps: price up a tenth (50 -> 55), down below its floor stays at the item's value, time round
-        lua_ok(&host, "B.menu.rows[2].run(); assert(B.menu.rows[1].label:find('Price 55'), B.menu.rows[1].label)");
-        lua_ok(&host, "for i = 1, 5 do B.menu.rows[1].run() end; assert(B.menu.rows[1].label:find('Price 50'), B.menu.rows[1].label)");
-        lua_ok(&host, "B.menu.rows[2].run(); B.menu.rows[5].run(); assert(B.menu.rows[5].label:find('24 hours'))");
-        lua_ok(&host, "B.menu.rows[5].run(); B.menu.rows[5].run(); B.menu.rows[5].run(); assert(B.menu.rows[5].label:find('12 hours'), 'round again')");
-        // the buyout never goes under the price
-        lua_ok(&host, "for i = 1, 20 do B.menu.rows[3].run() end; assert(B.menu.rows[3].label:find('Buy now 55'), B.menu.rows[3].label)");
-        lua_ok(&host, "B.menu.rows[4].run(); B.menu.rows[4].run()");
+    fn fix_h1_the_item_picker_wins_the_click_and_the_item_goes_with_the_mail() {
+        let mut r = mail_rig(|p| {
+            p.mail.grams.live = true;
+            p.mail.grams.attach.offer = Some(Offer { items: 1, postage: 0 });
+        });
+        r.p.mail_recv(&inbox_reply(&[header(11, "Ann", "One")]));
+        r.settle();
+        r.tap(110.0, 28.0);
+        writes(&mut r, "Bob", "Gift", "yo");
+        // Attach an item, then its first row: the picker is in front of the Text box
+        r.tap(260.0, 198.0);
+        r.tap(200.0, 112.0);
         let n = sent().len();
-        // List it: only the question, with the price
-        lua_ok(&host, "B.menu.rows[6].run()");
-        step(&mut p, &host);
-        assert_eq!(sent().len(), n, "negative control: the row alone lists nothing");
-        let q = confirm::current_for_test().expect("the client's question is up");
-        assert!(!q.yes && q.text.contains("Gold Ring") && q.text.contains("from 55 tunar"), "{}", q.text);
+        r.tap(30.0, 304.0);
+        assert_eq!(sent().len(), n, "the question comes first; {}", r.why());
+        let q = confirm::current_for_test().expect("the question is up: the item was attached");
+        assert!(q.text.contains("Rusty Sword"), "{}", q.text);
         say_yes();
-        step(&mut p, &host);
-        assert_eq!(sent().len(), n + 1);
-        let bytes = sent().last().unwrap().clone();
-        assert_eq!(&bytes[..3], &[0x05, 0x12, 5], "the game's sell request");
-        assert_eq!(bytes[3..7], 77u32.to_le_bytes(), "the banker the bank was opened with");
-        assert_eq!(bytes[7..11], 21u32.to_le_bytes(), "the bank record's key");
+        r.settle();
+        assert_eq!(
+            sent().last().unwrap(),
+            &crate::mailattach::send(&[b"Bob".to_vec()], &crate::ui::wide("Gift"), &crate::ui::wide("yo"), 0, Some((11, 1)))
+        );
     }
 
     #[test]
-    fn mods_listing_a_group_is_one_question_a_time_each_with_its_own_price_and_a_no_stops_it() {
-        let (mut p, host) = bank_rig();
-        p.dump.bank.items.items[0].item.value = 50;
-        p.dump.bank.items.items[1].item.no_trade = 0;
-        p.dump.bank.items.items[1].item.value = 80;
-        load_listing(&host);
-        let items = "{{id = 700001, name = 'Gold Ring', quantity = 1}, {id = 700002, name = 'Soul Shard', quantity = 1}}";
-        step(&mut p, &host);
-        host.execute("AL.begin({id = 700001, name = 'x', quantity = 1})").unwrap(); // opens the session
-        step(&mut p, &host);
-        host.execute("B.menu = {rows = {}}; AL.form = nil").unwrap();
-        host.execute(&format!("AL.start_group({items})")).unwrap();
-        al_step(&mut p, &host);
+    fn fix_h4_after_a_failed_send_the_next_send_is_judged_by_its_own_answer_and_never_goes_twice() {
+        let mut r = mail_rig(|_| {});
+        r.p.mail_recv(&inbox_reply(&[header(11, "Ann", "One")]));
+        r.settle();
+        r.tap(110.0, 28.0);
+        writes(&mut r, "Bbo", "Hi", "yo");
+        r.tap(30.0, 304.0);
+        assert_eq!(sent().len(), 2, "one inbox request and the first send; {}", r.why());
+        // the server: no such name
+        r.p.mail_recv(&[1, 9]);
+        r.settle();
+        // the name is put right and Send is clicked: the window draws BEFORE the client has sent (the real frame order)
+        r.tap(30.0, 58.0);
+        r.key("backspace", "");
+        r.key("backspace", "");
+        r.key("backspace", "");
+        r.type_text("Bob");
+        r.key("escape", "");
+        r.tap_then_draw_first(30.0, 304.0);
+        assert_eq!(sent().len(), 3, "the second send went; {}", r.why());
+        // the server takes it
+        r.p.mail_recv(&[1, 1]);
+        r.settle();
+        // the form is empty and Send is off: another click sends nothing (the old code showed the first failure, kept
+        // the form, and a second click sent the mail twice)
+        r.tap(30.0, 304.0);
+        assert_eq!(sent().len(), 3, "never a second send; {}", r.why());
+    }
+
+    #[test]
+    fn fix_m5_a_send_the_client_refuses_leaves_send_ready_again() {
+        let mut r = mail_rig(|_| {});
+        r.p.mail_recv(&inbox_reply(&[header(11, "Ann", "One")]));
+        r.settle();
+        r.tap(110.0, 28.0);
+        // a text of spaces: the client's own check refuses it
+        writes(&mut r, "Bob", "Hi", "   ");
+        r.tap(30.0, 304.0);
+        let n = sent().len();
+        // the text corrected: Send works at once (it stayed off before)
+        r.tap(90.0, 304.0);
+        writes(&mut r, "Bob", "Hi", "yo");
+        r.tap(30.0, 304.0);
+        assert_eq!(sent().len(), n + 1, "{}", r.why());
+    }
+
+    #[test]
+    fn fix_m7_a_reply_to_a_mail_with_accented_letters_cuts_by_characters_and_the_window_stays() {
+        let accents = "\u{e9}".repeat(31);
+        let mut r = mail_rig(|_| {});
+        r.p.mail_recv(&inbox_reply(&[header(12, "Bob", &accents)]));
+        r.settle();
+        r.tap(60.0, 46.0);
+        r.p.mail_recv(&message_reply(12, "hello"));
+        r.settle();
+        r.tap(90.0, 304.0);
+        r.frames(3);
+        assert!(ws::any_open_of(&["mail_compose"]), "the Write tab is up and the window still draws: {}", r.why());
+        r.tap(30.0, 86.0);
+        r.type_text("\u{e9}");
+        r.type_text("\u{e9}");
+        r.frames(2);
+        let logs = r.host.drain_logs().unwrap();
+        assert!(logs.is_empty(), "no error from a cut letter: {logs:?}");
+        assert!(ws::any_open_of(&["mail_compose"]));
+    }
+
+    #[test]
+    fn fix_m8_a_right_click_ends_the_typing_and_lets_go_of_enter() {
+        let mut r = mail_rig(|_| {});
+        r.tap(110.0, 28.0);
+        r.tap(30.0, 58.0);
+        // another mod's claim on Enter is refused while the box is typed in (the control) and given after the click
+        let other = Host::with_test_capabilities(&["eqoa.input.claim"]).unwrap();
+        let held: bool = other.lua.load("local t, e = eqoa.input.claim('Enter', true); return t == nil").eval().unwrap();
+        assert!(held, "control: the mail window holds Enter while a box is typed in");
+        r.relayout();
+        let (px, py) = (r.x0 + 200.0 * r.k, r.y0 + 150.0 * r.k);
+        r.press_px(px, py, "right", false);
+        let free: bool = other.lua.load("local t, e = eqoa.input.claim('Enter', true); return t ~= nil").eval().unwrap();
+        assert!(free, "a right-click ended the typing: Enter is the game's again");
+    }
+
+    // ---- the Bag Viewer: from a closed bank to a sent sale, and a group, through its own window ----
+
+    fn banker(p: &mut Play) {
+        p.entities.slots[1] = Some(net::entity::Entity {
+            id: 0x3001,
+            world: p.player.world as i8,
+            kind: net::entity::TYPE_CREATURE,
+            pos: [0.0, 0.0, -3.0],
+            actor_pos: [0.0, 0.0, -3.0],
+            p18: 1,
+            p19: 255,
+            creature: Some(net::entity::Creature { name: "Banker".into(), p256: 1, npc_flags: 2, ..Default::default() }),
+            ..Default::default()
+        });
+    }
+
+    fn bag_rig() -> Rig {
+        let mut r = rig_with("eqoa_bag_viewer", 318.0, 300.0, "shift+b", "b", |p| {
+            banker(p);
+            p.dump.bank.items = net::dump::ItemList {
+                p04: 0,
+                items: vec![item(700_001, "Gold Ring", 21, 1), item(700_002, "Silver Ring", 22, 1)],
+            };
+            p.dump.bank.items.items[1].item.value = 80;
+        });
+        r.host.execute("local B = require('bags'); B.select(6)").unwrap();
+        r.settle();
+        r
+    }
+
+    /// The Bags window's own slot `n` (1-based, first row) in window pixels.
+    fn bag_slot(r: &Rig, n: usize) -> (f64, f64) {
+        bv_point(r, &format!("local rc = require('bags').rect; return rc.x + (8 + {} * 38 + 18) * rc.k, rc.y + (46 + 18) * rc.k", n - 1))
+    }
+
+    fn menu_row(r: &Rig, label: &str) -> (f64, f64) {
+        bv_point(r, &format!("for _, h in ipairs(require('bags').menu_hits) do if h.row.label == '{label}' then return h.x + h.w / 2, h.y + h.h / 2 end end error('no menu row {label}: ' .. #require('bags').menu_hits)"))
+    }
+
+    fn form_hit(r: &Rig, label: &str) -> (f64, f64) {
+        bv_point(r, &format!("for _, h in ipairs(require('auction_list').hits) do if h.label == '{label}' then return h.x + h.w / 2, h.y + h.h / 2 end end error('no form control {label}')"))
+    }
+
+    fn state_of(r: &Rig, expr: &str) -> String {
+        r.host.lua.load(expr).eval::<String>().unwrap_or_else(|e| format!("({e})"))
+    }
+
+    #[test]
+    fn fix_h2_listing_opens_the_bank_itself_from_a_closed_bank_and_ends_in_the_games_sale() {
+        let mut r = bag_rig();
+        let (x, y) = bag_slot(&r, 1);
+        r.press_px(x, y, "left", false);
+        let (mx, my) = menu_row(&r, "List on auction...");
+        // the row is enabled with a banker near and the bank closed (it was greyed before)
+        assert_eq!(state_of(&r, "for _, h in ipairs(require('bags').menu_hits) do if h.row.label == 'List on auction...' then return tostring(h.row.enabled) end end"), "true");
+        r.press_px(mx, my, "left", false);
+        // the client talks to the banker; the server's reply opens the bank hidden for the Bag Viewer
+        r.settle();
+        r.p.bank_opcode(0x124D, &[]);
+        r.settle();
+        r.frames(4);
+        assert_eq!(state_of(&r, "return tostring(require('auction_list').form and require('auction_list').form.mode)"), "form", "the form is up; {}", r.why());
+        // the lowest price is filled in and shown; List it asks the client's question with it
+        let n = sent().len();
+        let (lx, ly) = form_hit(&r, "List it");
+        r.press_px(lx, ly, "left", false);
+        r.settle();
+        assert_eq!(sent().len(), n, "the form alone lists nothing; {}", r.why());
+        let q = confirm::current_for_test().expect("the client's question is up");
+        assert!(q.text.contains("Gold Ring") && q.text.contains("from 50 tunar"), "{}", q.text);
+        say_yes();
+        r.settle();
+        assert_eq!(sent().len(), n + 1, "{}", r.why());
+        assert_eq!(sent().last().unwrap(), &Auction::sell(0x3001, 21, 1, 50, 100, 720), "the banker the bank was opened with, the row's key");
+    }
+
+    #[test]
+    fn fix_m4_the_price_is_typed_and_the_games_limits_hold_in_the_form() {
+        let mut r = bag_rig();
+        let (x, y) = bag_slot(&r, 1);
+        r.press_px(x, y, "left", false);
+        let (mx, my) = menu_row(&r, "List on auction...");
+        r.press_px(mx, my, "left", false);
+        r.settle();
+        r.p.bank_opcode(0x124D, &[]);
+        r.settle();
+        r.frames(4);
+        // a price under the item's value is not sent: the form says so
+        let (px, py) = form_hit(&r, "price");
+        r.press_px(px, py, "left", false);
+        for _ in 0..3 {
+            r.key("backspace", "");
+        }
+        r.type_text("49");
+        r.key("escape", "");
+        let n = sent().len();
+        let (lx, ly) = form_hit(&r, "List it");
+        r.press_px(lx, ly, "left", false);
+        assert!(!confirm::is_open() && sent().len() == n, "under the lowest price: nothing asked");
+        assert!(state_of(&r, "return require('auction_list').form.msg or ''").contains("lowest starting price"));
+        // a price and a time within the limits go
+        let (px, py) = form_hit(&r, "price");
+        r.press_px(px, py, "left", false);
+        r.key("backspace", "");
+        r.key("backspace", "");
+        r.type_text("120");
+        r.key("escape", "");
+        let (bx, by) = form_hit(&r, "buyout");
+        r.press_px(bx, by, "left", false);
+        for _ in 0..4 {
+            r.key("backspace", "");
+        }
+        r.type_text("400");
+        r.key("escape", "");
+        let (hx, hy) = form_hit(&r, "hours48");
+        r.press_px(hx, hy, "left", false);
+        let (lx, ly) = form_hit(&r, "List it");
+        r.press_px(lx, ly, "left", false);
+        let q = confirm::current_for_test().expect("the question");
+        assert!(q.text.contains("from 120 tunar") && q.text.contains("buyout 400") && q.text.contains("48 hours"), "{}", q.text);
+        say_yes();
+        r.settle();
+        assert_eq!(sent().last().unwrap(), &Auction::sell(0x3001, 21, 1, 120, 400, 2880));
+    }
+
+    #[test]
+    fn fix_h3_a_group_opens_its_own_session_asks_each_item_in_turn_and_runs_to_the_end() {
+        let mut r = bag_rig();
+        // both rings selected (Ctrl+click), then the group menu from a right-click on one
+        let (x1, y1) = bag_slot(&r, 1);
+        let (x2, y2) = bag_slot(&r, 2);
+        r.press_px(x1, y1, "left", true);
+        r.press_px(x2, y2, "left", true);
+        r.press_px(x1, y1, "right", false);
+        let (mx, my) = menu_row(&r, "List on auction (2)");
+        r.press_px(mx, my, "left", false);
+        r.settle();
+        r.p.bank_opcode(0x124D, &[]);
+        r.settle();
+        r.frames(4);
+        assert_eq!(state_of(&r, "return tostring(require('auction_list').form and require('auction_list').form.mode)"), "form", "the first form; {}", r.why());
+        assert!(ws::any_open_of(&["auction_search"]), "the group opened the session itself");
+        let n = sent().len();
+        let (lx, ly) = form_hit(&r, "List it");
+        r.press_px(lx, ly, "left", false);
         let q = confirm::current_for_test().expect("the first question");
         assert!(q.text.contains("Gold Ring") && q.text.contains("from 50 tunar"), "{}", q.text);
-        let n = sent().len();
+        // the Yes lands on a frame that is not a game step (the client carries it out on every drawn frame)
         say_yes();
-        al_step(&mut p, &host);
-        assert_eq!(sent().len(), n + 1, "the first goes on its Yes");
-        // the second waits for the server's answer to the first, then asks with its own price
-        al_step(&mut p, &host);
-        assert!(confirm::current_for_test().is_none(), "one at a time: the second waits for the first's answer");
-        p.bank.state = 0;
-        al_step(&mut p, &host);
-        al_step(&mut p, &host);
-        let q = confirm::current_for_test().expect("the second question");
-        assert!(q.text.contains("Soul Shard") && q.text.contains("from 80 tunar"), "{}", q.text);
-        // a No stops the rest: the question's answer is no, nothing more is asked
-        confirm::reset_for_test();
-        host.execute(&format!("AL.queue = nil; AL.waiting = false; AL.start_group({items})")).unwrap();
-        p.bank.state = 0;
-        al_step(&mut p, &host);
-        al_step(&mut p, &host);
-        assert!(confirm::is_open());
-        let m = sent().len();
-        assert!(confirm::key(&Key::Named(NamedKey::Escape)));
-        for _ in 0..4 {
-            al_step(&mut p, &host);
+        super::super::begin_iteration(&mut r.p, false);
+        r.frames(1);
+        assert_eq!(sent().len(), n + 1, "the first sale went");
+        // the server answers, the second form comes with its own lowest price; nothing is silently listed
+        r.p.bank.state = 0;
+        for _ in 0..40 {
+            r.settle();
         }
-        assert!(!confirm::is_open(), "a No ends the group: no second question");
-        assert_eq!(sent().len(), m);
+        assert_eq!(state_of(&r, "return tostring(require('auction_list').form and require('auction_list').form.mode)"), "form", "the second form; {}", r.why());
+        assert!(state_of(&r, "return require('auction_list').form.price").contains("80"), "the second item's own lowest price");
+        assert_eq!(sent().len(), n + 1, "nothing for the second until the player says so");
+        let (sx, sy) = form_hit(&r, "Skip");
+        r.press_px(sx, sy, "left", false);
+        r.settle();
+        assert!(state_of(&r, "return require('bags').result and require('bags').result.text or ''").contains("1 of 2 put up"), "{}", state_of(&r, "return require('bags').result and require('bags').result.text or ''"));
+        assert!(!confirm::is_open());
+    }
+
+    #[test]
+    fn fix_h3_a_refused_sale_says_why_and_the_group_goes_on_instead_of_hanging() {
+        let mut r = bag_rig();
+        let (x1, y1) = bag_slot(&r, 1);
+        let (x2, y2) = bag_slot(&r, 2);
+        r.press_px(x1, y1, "left", true);
+        r.press_px(x2, y2, "left", true);
+        r.press_px(x1, y1, "right", false);
+        let (mx, my) = menu_row(&r, "List on auction (2)");
+        r.press_px(mx, my, "left", false);
+        r.settle();
+        r.p.bank_opcode(0x124D, &[]);
+        r.settle();
+        r.frames(4);
+        // a question of another mod is already up: the sale is refused busy; the form stays with its reason
+        r.p.bank.state = 3;
+        let (lx, ly) = form_hit(&r, "List it");
+        r.press_px(lx, ly, "left", false);
+        r.settle();
+        assert!(!confirm::is_open(), "refused: no question");
+        assert!(state_of(&r, "return require('auction_list').form.msg or ''").contains("Still waiting"), "{}", state_of(&r, "return require('auction_list').form.msg or ''"));
+        // the wait ends and the same form goes again
+        r.p.bank.state = 0;
+        r.settle();
+        let (lx, ly) = form_hit(&r, "List it");
+        r.press_px(lx, ly, "left", false);
+        assert!(confirm::is_open(), "the same item asks now");
     }
 }

@@ -8,7 +8,7 @@
   "entryMode": "once",
   "enabled": false,
   "provides": [
-    "Auction window (Shift+A)"
+    "Auction window (Shift+U)"
   ],
   "capabilities": [
     "eqoa.auction.get",

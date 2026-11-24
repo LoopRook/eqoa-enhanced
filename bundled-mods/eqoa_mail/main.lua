@@ -15,7 +15,8 @@ local state = {
     open = false, tab = "inbox", sessions = {}, tokens = {}, escape = nil, enter = nil,
     sel = nil, scroll = 0, field = nil, result = nil, last_req = nil, await = nil,
     to = "", subject = "", body = "", tunar = "", attach = nil, picking = false, pick_scroll = 0,
-    hits = {}, row_hits = {}, list_rect = nil, pick_rect = nil, rect = nil, m = nil,
+    hits = {}, row_hits = {}, top_hits = {}, list_rect = nil, pick_rect = nil, msg_rect = nil, rect = nil, m = nil,
+    msg_scroll = 0, was_down = false, fresh = false, deleting = nil, wrapped = nil,
 }
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
@@ -30,6 +31,10 @@ local function say(text, ok) state.result = { text = text, ok = ok } end
 local function chop(s)
     return s:match("^(.*)[%z\1-\127\194-\244][\128-\191]*$") or ""
 end
+-- text is cut by characters, never by bytes (a letter with an accent is two bytes)
+local function clen(s) local _, n = s:gsub("[^\128-\191]", ""); return n end
+local function limit_chars(s, n) while clen(s) > n do s = chop(s) end return s end
+local function drop_first(s) return s:match("^[%z\1-\127\194-\244][\128-\191]*(.*)$") or "" end
 
 -- what the gram client's state says in words
 local STATUS = {
@@ -62,7 +67,7 @@ local function several_names()
     return state.to:find("[,;]") ~= nil
 end
 
-local close, draw
+local close, draw, begin_await
 
 local function stop_typing()
     state.field = nil
@@ -72,6 +77,7 @@ end
 
 local function start_typing(field)
     state.field = field
+    state.fresh = true
     -- Enter is this window's while a box is typed in (the exact name: another spelling is refused and leaks to the game)
     if not state.enter then state.enter = eqoa.input.claim("Enter", true) end
 end
@@ -102,13 +108,13 @@ local function on_confirm(d)
         if d.answer == "yes" then
             say(d.detail and d.detail.sent and "Mail deleted" or ("Not deleted (" .. tostring(d.detail and d.detail.reason) .. ")"),
                 d.detail and d.detail.sent == true)
-            state.sel = nil
+            if state.sel == state.deleting then state.sel = nil end
         else
             say("Kept", true)
         end
     elseif d.kind == "mail_send" then
         if d.answer == "yes" and d.detail and d.detail.sent then
-            state.await = { seen = false }
+            begin_await()
         elseif d.answer == "yes" then
             say("Not sent (" .. tostring(d.detail and d.detail.reason) .. ")", false)
             state.await = nil
@@ -119,19 +125,36 @@ local function on_confirm(d)
     end
 end
 
--- A send's answer, read off the gram client's state.
+-- A send's answer, read off the gram client's state. The state of an earlier failure stays until the next request, so
+-- nothing is judged until the client has shown "sending" or its state is no longer what it was when the mail went;
+-- the form is emptied only when the mail really went, and Send stays off until then (never a second send on a guess).
 local function watch_send(m)
     local a = state.await
     if not a then return end
+    a.frames = a.frames + 1
     if m.status == "waiting_send" then a.seen = true; return end
-    if STATUS[m.status] and m.status ~= "waiting_inbox" and m.status ~= "waiting_message" and m.status ~= "waiting_delete" then
-        say(STATUS[m.status], false)
-        state.await = nil
-    elseif a.seen and m.status == "idle" then
-        say("Mail sent", true)
-        state.to, state.subject, state.body, state.tunar, state.attach = "", "", "", "", nil
+    local failed = STATUS[m.status] and m.status:sub(1, 7) ~= "waiting"
+    if a.seen or m.status ~= a.status0 then
+        if failed then
+            say(STATUS[m.status], false)
+            state.await = nil
+            return
+        elseif m.status == "idle" then
+            say("Mail sent", true)
+            state.to, state.subject, state.body, state.tunar, state.attach = "", "", "", "", nil
+            state.await = nil
+            return
+        end
+    end
+    if a.frames > 600 then
+        say("The server has not said whether the mail went: look before sending it again", false)
         state.await = nil
     end
+end
+
+begin_await = function()
+    local m = state.m
+    state.await = { seen = false, frames = 0, status0 = m and m.status or "idle" }
 end
 
 local function open(page)
@@ -147,6 +170,8 @@ local function open(page)
         local r = e.data
         if r and state.last_req ~= nil and r.request_id == state.last_req and r.ok == false then
             say(r.reason or r.code or "Refused", false)
+            -- a send the client refused is not waiting for any answer: Send is there again
+            state.await = nil
         end
     end)
     listen("confirm.closed", function(e) on_confirm(e.data) end)
@@ -166,18 +191,19 @@ local function open(page)
             if key == "escape" then stop_typing()
             elseif key == "enter" or key == "return" then
                 if f == "body" then
-                    if #state.body < LIMITS.body then state.body = state.body .. "\n" end
+                    if clen(state.body) < LIMITS.body then state.body = state.body .. "\n" end
                 elseif f == "to" then state.field = "subject"
                 elseif f == "subject" then state.field = "body"
                 else stop_typing() end
             elseif key == "tab" then
-                state.field = f == "to" and "subject" or (f == "subject" and "body" or (f == "body" and "tunar" or "to"))
+                local has_tunar = state.m and state.m.carries_offer
+                state.field = f == "to" and "subject" or (f == "subject" and "body" or (f == "body" and has_tunar and "tunar" or "to"))
             elseif key == "backspace" then state[f] = chop(state[f])
             elseif d.text and #d.text > 0 then
                 local t = d.text
                 if f == "tunar" then t = t:gsub("%D", "") end
                 if f ~= "body" then t = t:gsub("[\r\n]", " ") end
-                if #state[f] + #t <= LIMITS[f] then state[f] = state[f] .. t end
+                if clen(state[f]) + clen(t) <= LIMITS[f] then state[f] = state[f] .. t end
             end
         elseif key == "escape" and not d["repeat"] then
             if state.picking then state.picking = false else close() end
@@ -185,7 +211,17 @@ local function open(page)
     end)
     listen("pointer.pressed", function(e)
         local d = e.data
-        if d.button ~= "left" then return end
+        if state.picking then
+            -- the picker is in front of the Text box: its rows first, and a click inside it is not the box's
+            for _, h in ipairs(state.top_hits) do
+                if inside(d.x, d.y, h) and h.run then h.run(); return end
+            end
+            if inside(d.x, d.y, state.pick_rect) then return end
+        end
+        if d.button ~= "left" then
+            if state.field then stop_typing() end
+            return
+        end
         for _, h in ipairs(state.hits) do
             if inside(d.x, d.y, h) and h.run then h.run(); return end
         end
@@ -200,7 +236,9 @@ local function open(page)
         local delta = d.steps > 0 and -1 or 1
         local m = state.m
         if not m then return end
-        if state.picking and inside(d.x, d.y, state.pick_rect) then
+        if state.tab == "inbox" and inside(d.x, d.y, state.msg_rect) then
+            state.msg_scroll = math.max(0, state.msg_scroll + delta)
+        elseif state.picking and inside(d.x, d.y, state.pick_rect) then
             state.pick_scroll = math.max(0, math.min(math.max(0, #m.pack - PICK_ROWS), state.pick_scroll + delta))
         elseif state.tab == "inbox" and inside(d.x, d.y, state.list_rect) then
             state.scroll = math.max(0, math.min(math.max(0, #m.entries - LIST_ROWS), state.scroll + delta))
@@ -248,8 +286,19 @@ function draw()
     local y0 = math.max(0, math.min(dh - H * k, f.offset_y + (448 - H) / 2 * f.scale_y))
     local function at(x, y) return ImVec2.new(x0 + x * k, y0 + y * k) end
     state.rect = { x = x0, y = y0, w = W * k, h = H * k }
+    -- a press anywhere else (another mod's window, the other button) ends the typing: the capture is the player's
+    local down = ui.IsMouseDown(0) or ui.IsMouseDown(1)
+    if state.field and down and not state.was_down then
+        if state.fresh then state.fresh = false else
+            local p = eqoa.input.pointer()
+            if not (p and inside(p.x, p.y, state.field_rect)) then stop_typing() end
+        end
+    end
+    state.was_down = down
+    state.fresh = false
     -- the text capture lapses after about a second: renewed every frame a box is typed in
     if state.field then eqoa.input.capture_text(true) end
+    state.top_hits = {}
 
     ui.SetNextWindowPos(0, 0)
     ui.SetNextWindowSize(dw, dh)
@@ -272,14 +321,28 @@ function draw()
         while maxw and #value > 0 and ui.CalcTextSize(value) > maxw * k do value = chop(value) end
         dl:AddText(at(x, y), color or col.text, value)
     end
-    -- the words broken into lines that fit `maxw`, a new line where the text has one
+    -- the words broken into lines that fit `maxw`, a new line where the text has one; a word longer than a line is
+    -- broken by characters
     local function wrap(value, maxw)
         local lines = {}
+        local function fits(t) return ui.CalcTextSize(t) <= maxw * k end
         for para in (tostring(value) .. "\n"):gmatch("(.-)\n") do
             local line = ""
             for word in para:gmatch("%S+") do
+                while not fits(word) and clen(word) > 1 do
+                    -- the longest start of the word that fits (by characters)
+                    local head, rest = "", word
+                    for ch in word:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+                        if not fits(head .. ch) then break end
+                        head = head .. ch
+                    end
+                    if head == "" then break end
+                    if line ~= "" then lines[#lines + 1] = line; line = "" end
+                    lines[#lines + 1] = head
+                    word = word:sub(#head + 1)
+                end
                 local try = line == "" and word or (line .. " " .. word)
-                if line ~= "" and ui.CalcTextSize(try) > maxw * k then lines[#lines + 1] = line; line = word else line = try end
+                if line ~= "" and not fits(try) then lines[#lines + 1] = line; line = word else line = try end
             end
             lines[#lines + 1] = line
         end
@@ -305,6 +368,7 @@ function draw()
 
     if not m then
         text(PAD, 40, "Opening...", col.muted)
+        eqoa.input.claim_pointer({ x = x0, y = y0, width = W * k, height = H * k })
         ui.SetWindowFontScale(1)
         ui.End()
         return
@@ -339,6 +403,7 @@ function draw()
                 text(PAD + 84, y, e.subject, e.read and col.muted or col.text, 170)
                 text(PAD + 262, y, e.date:sub(1, 10), col.muted)
                 state.row_hits[#state.row_hits + 1] = hit(PAD, y, W - 2 * PAD, LINE, function()
+                    if state.sel ~= e.id then state.msg_scroll = 0 end
                     state.sel = e.id
                     if not waiting then run("Read", function() return eqoa.actions.mail_read(e.id) end) end
                 end)
@@ -352,11 +417,22 @@ function draw()
         if state.sel and msg and msg.id == state.sel then
             text(PAD, py, "From " .. msg.from .. "   " .. msg.date, col.muted, W - 2 * PAD)
             text(PAD, py + LINE, msg.subject, col.white, W - 2 * PAD)
-            local lines = wrap(msg.text, W - 2 * PAD)
-            for i = 1, BODY_LINES do
-                if lines[i] then text(PAD, py + (i + 1) * LINE, lines[i], col.text, W - 2 * PAD) end
+            -- wrapped once for a mail (its text and the window's scale), not every frame
+            local key = msg.id .. ":" .. #msg.text .. ":" .. k
+            if not state.wrapped or state.wrapped.key ~= key then
+                state.wrapped = { key = key, lines = wrap(msg.text, W - 2 * PAD) }
             end
-            if #lines > BODY_LINES then text(PAD, py + (BODY_LINES + 2) * LINE, "...", col.muted) end
+            local lines = state.wrapped.lines
+            state.msg_scroll = math.min(state.msg_scroll, math.max(0, #lines - BODY_LINES))
+            state.msg_rect = { x = x0 + PAD * k, y = y0 + (py + 2 * LINE) * k, w = (W - 2 * PAD) * k, h = BODY_LINES * LINE * k }
+            for i = 1, BODY_LINES do
+                local l = lines[state.msg_scroll + i]
+                if l then text(PAD, py + (i + 1) * LINE, l, col.text, W - 2 * PAD) end
+            end
+            if #lines > BODY_LINES then
+                text(W - PAD - 150, py + (BODY_LINES + 2) * LINE, string.format("line %d-%d of %d (wheel)", state.msg_scroll + 1,
+                    math.min(#lines, state.msg_scroll + BODY_LINES), #lines), col.muted, 150)
+            end
             local what = {}
             if msg.tunar > 0 then what[#what + 1] = msg.tunar .. " tunar" end
             for _, it in ipairs(msg.items) do what[#what + 1] = it end
@@ -376,8 +452,8 @@ function draw()
         button(PAD + 68, by, 52, "Reply", msg_ok, function()
             state.to = msg.from
             state.subject = (msg.subject:sub(1, 3):lower() == "re:" and "" or "Re: ") .. msg.subject
-            state.subject = state.subject:sub(1, LIMITS.subject)
-            state.body = ""
+            state.subject = limit_chars(state.subject, LIMITS.subject)
+            state.body, state.tunar, state.attach = "", "", nil
             switch_tab("write")
         end)
         local has_load = msg_ok and (msg.tunar > 0 or #msg.items > 0)
@@ -385,6 +461,7 @@ function draw()
             run("Take", function() return eqoa.actions.mail_take(msg.id) end)
         end)
         button(PAD + 224, by, 56, "Delete", state.sel ~= nil and not waiting, function()
+            state.deleting = state.sel
             run("Delete", function() return eqoa.actions.mail_delete(state.sel) end)
         end)
     else
@@ -404,7 +481,7 @@ function draw()
             else
                 local shown = value .. (state.field == field and "_" or "")
                 -- the end of a long line is the part typed
-                while #shown > 0 and ui.CalcTextSize(shown) > (W - 2 * PAD - 8) * k do shown = shown:sub(2) end
+                while #shown > 0 and ui.CalcTextSize(shown) > (W - 2 * PAD - 8) * k do shown = drop_first(shown) end
                 text(PAD + 4, by + 1, shown, col.text)
             end
             state.hits[#state.hits + 1] = hit(PAD, by, W - 2 * PAD, h, function()
@@ -430,7 +507,7 @@ function draw()
             text(PAD + 128, ay, "You carry " .. m.tunar, col.muted, 90)
             -- one item may go along
             local label = state.attach and (state.attach.name .. " x" .. state.attach.count) or "Attach an item"
-            button(PAD + 220, ay - 3, W - 2 * PAD - 220, label, true, function()
+            button(PAD + 220, ay - 3, W - 2 * PAD - 220, label, m.max_items > 0, function()
                 stop_typing(); state.picking = not state.picking; state.pick_scroll = 0
             end)
             if state.attach then
@@ -454,7 +531,7 @@ function draw()
                 return eqoa.actions.mail_send({ to = state.to, subject = state.subject, body = state.body,
                     tunar = tunar > 0 and tunar or nil, item = item })
             end)
-            if req and not carries() then state.await = { seen = false }
+            if req and not carries() then begin_await()
             elseif req then say("Answer the question on the screen", nil) end
         end)
         button(PAD + 68, by, 52, "Clear", true, function()
@@ -476,7 +553,7 @@ function draw()
                 if it then
                     local y = py + 4 + (i - 1) * LINE
                     text(px + 4, y, it.name .. (it.quantity > 1 and (" x" .. it.quantity) or ""), col.text, pw - 8)
-                    state.hits[#state.hits + 1] = hit(px, y, pw, LINE, function()
+                    state.top_hits[#state.top_hits + 1] = hit(px, y, pw, LINE, function()
                         state.attach = { slot = it.slot, id = it.id, name = it.name, count = 1, max = it.quantity }
                         state.picking = false
                     end)
@@ -489,6 +566,8 @@ function draw()
     local line = H - 20
     if state.result then
         text(PAD, line, state.result.text, state.result.ok == false and col.warn or col.muted, W - 2 * PAD)
+    elseif state.await then
+        text(PAD, line, "Sending...", col.muted)
     elseif STATUS[m.status] then
         text(PAD, line, STATUS[m.status], waiting and col.muted or col.warn, W - 2 * PAD)
     end

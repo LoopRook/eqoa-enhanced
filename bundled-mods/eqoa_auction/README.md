@@ -1,10 +1,11 @@
 # EQOA Auction
 
-Off by default. Enable it in Mods & Addons (F10); it shows **Provides: Auction window (Shift+A)**, **Mail and auction:
+Off by default. Enable it in Mods & Addons (F10); it shows **Provides: Auction window (Shift+U)**, **Mail and auction:
 can search the auction, look at your lots, look at your bids** and **Asks you first: bid at the auction, buy out an
 auction lot** before you do.
 
-An Auction window of its own, on **Shift+A** (the Controls page has an **Auction** row). With **EQOA Start Menu** on,
+An Auction window of its own, on **Shift+U** (Shift+A would be the strafe key; the Controls page has an **Auction** row
+if you want another key). With **EQOA Start Menu** on,
 its Auction entries (Search, My lots, My bids) open this window; the Bag Viewer has an **Auction** button on its
 title row too. It works anywhere the server has the auction (the same rule as the game's own Start menu entries); on a
 server without one it says so. It sits over play, and the game's own Auction pages are exactly as they were with the

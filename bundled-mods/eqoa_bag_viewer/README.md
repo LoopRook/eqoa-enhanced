@@ -122,10 +122,18 @@ additions to `eqoa/1`).
 
 ## List on auction (at a bank)
 
-With the bank open (the Bank tab), an item's menu has **List on auction...** and the group menu of several selected
-bank items has **List on auction (N)**, on servers that have the auction. The item's menu page lets you set the price
-(from the item's value, as the game's own form), the buy-now price (from the price up) and the time (12, 24, 48 or 72
-hours): click a row to step it. **List it** only asks: the client's own "Are you sure?" shows the item and its price,
-and only your answer lists it. A group is listed one item at a time, each with its own question. Mods & Addons shows
-**Asks you first: put an item up at the auction**. The **Auction** button on the title row opens the EQOA Auction mod's
+On the Bank tab, an item's menu has **List on auction...** and the group menu of several selected bank items has
+**List on auction (N)**. They are there whenever a banker is near or the bank is open, like Withdraw and Take out of
+bank, and they open the bank themselves the same way (if the game's own bank window is open, close it first: listing
+goes through this window). On a server without the auction the form says so.
+
+A small form opens over the Bags window for each item: **Price** and **Buy now** are boxes you type a number in (click
+a box, type, Tab moves on, Enter or a click elsewhere stops; the lowest price the game's own sell form allows, the
+item's value, is filled in, and buy now starts at twice that and must be at least the price), **Time** is 12, 24, 48 or
+72 hours, and on servers that sell by the stack a **Count** appears. **List it** only asks: the client's own "Are you
+sure?" shows the item and its price, and only your answer lists it. **Cancel** (or Escape) leaves.
+
+A group is listed one item at a time: the form comes again for each, with its own price box and **Skip** and **Stop**;
+the next waits until the server has answered the last. A line at the end says how many went up. Mods & Addons shows
+**Asks you first: put an item up at the auction**. The **Auction** button on the title row opens the EQOA Auction
 window when that mod is on.

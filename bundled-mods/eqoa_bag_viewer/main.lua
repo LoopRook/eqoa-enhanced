@@ -112,7 +112,7 @@ local function open()
     listen("loot.changed", function(e) B.on_loot_changed(e.data) end)
     listen("merchant.changed", function(e) B.on_merchant_changed(e.data) end)
     listen("state.reset", B.dirty)
-    listen("action.result", function(e) B.on_action_result(e.data) end)
+    listen("action.result", function(e) if not AL.on_action_result(e.data) then B.on_action_result(e.data) end end)
     listen("batch.progress", function(e) B.on_batch_progress(e.data) end)
     listen("batch.result", function(e) B.on_batch_result(e.data) end)
     -- what the player answered to the destroy question the client put to them
@@ -130,12 +130,14 @@ local function open()
         if session and d.ref == session.ref and d.down then pad_key(d.key) end
     end)
     listen("input.key", function(e)
+        if AL.on_key(e.data) then return end
         if e.data.down and not e.data["repeat"] and e.data.key:lower() == "escape" then
             if B.menu then B.menu, B.menu_rect = nil, nil else close() end
         end
     end)
     listen("pointer.pressed", function(e)
         local d = e.data
+        if AL.on_pointer(d) then return end
         if B.menu then
             if d.button == "right" then B.menu, B.menu_rect = nil, nil; return end
             if d.button == "left" then
@@ -680,6 +682,8 @@ function draw()
             dl:AddText(ImVec2.new(cx + 6 * k, cy + 4 * k + (i - 1) * LINE * k), kinds[l[2]], value)
         end
     end
+    -- the listing form, over the window, when one is up
+    AL.draw({ui = ui, k = k, c = c, x0 = x0, y0 = y0, W = W, fill = fill, frame = frame, text = text})
     ui.SetWindowFontScale(1)
     ui.End()
 end

@@ -58,6 +58,7 @@
     "eqoa.actions.link_item",
     "eqoa.actions.hide_look",
     "eqoa.auction.get",
+    "eqoa.input.capture_text",
     "eqoa.actions.auction_sell",
     "eqoa.mods.send"
   ],

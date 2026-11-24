@@ -15,19 +15,23 @@ your character can keep walking, and the game's own Mail windows are exactly as 
 - Your mails: who sent it, the subject, the date, and a **+** for a mail that carries tunar or an item. Unread mails
   are brighter. The mouse wheel scrolls past eight. The game keeps 100 mails.
 - Click a mail to read it (the game asks the server; it takes a moment). What it carries is listed under the text.
+  A long mail scrolls with the mouse wheel over its text (the line numbers show where you are).
 - **Refresh** asks for the inbox again. **Reply** opens the Write tab to the sender. **Take contents** takes the tunar
   and items a mail carries. **Delete** asks you first ("Are you sure?" with the mail's name); only your answer deletes.
 
 **Write tab**
 
 - **To** takes one name, **Subject** 32 letters, **Text** up to 500. Click a box and type. **Tab** moves to the next
-  box, **Enter** adds a line in the text (and moves on from To and Subject), **Escape** stops typing.
+  box, **Enter** adds a line in the text (and moves on from To and Subject), **Escape** or a click anywhere else
+  (a right-click, another window) stops typing. Letters with accents count as one letter each.
 - On servers whose mail carries things, **Tunar** and **Attach an item** (one item from your pack, with - and + for
-  how many) appear. A mail that carries something goes to **one name only**, and **Send** asks you first, showing
+  how many) appear (Attach an item only where the server takes items). A mail that carries something goes to **one name only**, and **Send** asks you first, showing
   the name, what goes and the postage. Plain text mail sends at once, as the game's own Compose does.
 - What the server says (sent, no such name, mailbox full...) shows at the bottom.
 
 It uses the window sessions of `eqoa/1` (`eqoa.windows.open_session`, kinds `mail_inbox` and `mail_compose`) and the
 `eqoa.mail.get` read; when you zone, die, turn the mod off or switch on **Use the game's windows**, the client closes
 it for you. Nothing is sent twice, and the game's own Mail windows cannot be open at the same time (the buttons
-say the game's window is busy while one is).
+say the game's window is busy while one is). After a send the window waits for the server's answer (the form empties only
+when the mail went, and Send is off meanwhile), so a mail is never sent twice by a click on a stale message. It
+has no controller use (mouse and keyboard only).

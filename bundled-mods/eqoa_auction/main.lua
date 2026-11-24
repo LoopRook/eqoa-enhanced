@@ -1,4 +1,4 @@
--- Auction: search, bid and buy now in a window of this mod's own (default Shift+A, or the Start menu's Auction).
+-- Auction: search, bid and buy now in a window of this mod's own (default Shift+U, or the Start menu's Auction).
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- It sits over play: the character keeps walking, and the game's own Auction pages are exactly as they were with the
 -- mod off. A bid and a buy now are asked of the player by the client ("Are you sure?", showing the price): nothing
@@ -16,7 +16,7 @@ local state = {
     open = false, tab = "search", session = nil, tokens = {}, escape = nil, enter = nil,
     name = "", min_level = "", max_level = "", wear = nil, bid = "", count = 1, sel = nil, scroll = 0,
     field = nil, result = nil, last_req = nil, picking = false, pick_scroll = 0, searched = false,
-    hits = {}, row_hits = {}, list_rect = nil, pick_rect = nil, field_rect = nil, a = nil,
+    hits = {}, row_hits = {}, list_rect = nil, pick_rect = nil, field_rect = nil, a = nil, was_down = false, fresh = false,
 }
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
@@ -29,6 +29,9 @@ end
 local function say(text, ok) state.result = { text = text, ok = ok } end
 
 local function chop(s) return s:match("^(.*)[%z\1-\127\194-\244][\128-\191]*$") or "" end
+-- text is cut by characters, never by bytes (a letter with an accent is two bytes)
+local function clen(s) local _, n = s:gsub("[^\128-\191]", ""); return n end
+local function drop_first(s) return s:match("^[%z\1-\127\194-\244][\128-\191]*(.*)$") or "" end
 
 local function run(fn)
     local request, err = fn()
@@ -57,6 +60,7 @@ end
 
 local function start_typing(field)
     state.field = field
+    state.fresh = true
     -- Enter is this window's while a box is typed in (the exact name: another spelling is refused and leaks to the game)
     if not state.enter then state.enter = eqoa.input.claim("Enter", true) end
 end
@@ -149,7 +153,7 @@ local function open(page)
             elseif d.text and #d.text > 0 then
                 local t = d.text
                 if f ~= "name" then t = t:gsub("%D", "") else t = t:gsub("[\r\n]", " ") end
-                if #state[f] + #t <= LIMITS[f] then state[f] = state[f] .. t end
+                if clen(state[f]) + clen(t) <= LIMITS[f] then state[f] = state[f] .. t end
             end
         elseif key == "escape" and not d["repeat"] then
             if state.picking then state.picking = false else close() end
@@ -157,7 +161,11 @@ local function open(page)
     end)
     listen("pointer.pressed", function(e)
         local d = e.data
-        if d.button ~= "left" then return end
+        if d.button ~= "left" then
+            -- the other buttons end the typing too
+            if state.field then stop_typing() end
+            return
+        end
         for _, h in ipairs(state.hits) do
             if inside(d.x, d.y, h) and h.run then h.run(); return end
         end
@@ -173,7 +181,7 @@ local function open(page)
         if state.picking and inside(d.x, d.y, state.pick_rect) then
             state.pick_scroll = math.max(0, math.min(math.max(0, #WEARS + 1 - 6), state.pick_scroll + delta))
         elseif inside(d.x, d.y, state.list_rect) and state.a then
-            local n = state.tab == "search" and #state.a.results or (state.tab == "lots" and #state.a.lots or #state.a.bids)
+            local n = state.tab == "search" and (state.a.mode == "search" and #state.a.results or 0) or (state.tab == "lots" and #state.a.lots or #state.a.bids)
             state.scroll = math.max(0, math.min(math.max(0, n - ROWS), state.scroll + delta))
         end
     end)
@@ -192,7 +200,7 @@ function close(from_client)
     state.hits, state.row_hits, state.a, state.picking = {}, {}, nil, false
 end
 
-eqoa.input.bind({ id = "open", label = "Auction", default_key = "shift+a" }, function()
+eqoa.input.bind({ id = "open", label = "Auction", default_key = "shift+u" }, function()
     if state.open then close() else open("search") end
 end)
 eqoa.events.on("mod.command", function(e)
@@ -223,6 +231,16 @@ function draw()
     local x0 = math.max(0, math.min(dw - W * k, f.offset_x + (640 - W) / 2 * f.scale_x))
     local y0 = math.max(0, math.min(dh - H * k, f.offset_y + (448 - H) / 2 * f.scale_y))
     local function at(x, y) return ImVec2.new(x0 + x * k, y0 + y * k) end
+    -- a press anywhere else (another mod's window, the other button) ends the typing: the capture is the player's
+    local down = ui.IsMouseDown(0) or ui.IsMouseDown(1)
+    if state.field and down and not state.was_down then
+        if state.fresh then state.fresh = false else
+            local p = eqoa.input.pointer()
+            if not (p and inside(p.x, p.y, state.field_rect)) then stop_typing() end
+        end
+    end
+    state.was_down = down
+    state.fresh = false
     -- the text capture lapses after about a second: renewed every frame a box is typed in
     if state.field then eqoa.input.capture_text(true) end
 
@@ -261,7 +279,7 @@ function draw()
         fill(bx, y - 2, bw, 14, col.raised)
         frame(bx, y - 2, bw, 14, state.field == field and col.white or col.border)
         local shown = state[field] .. (state.field == field and "_" or "")
-        while #shown > 0 and ui.CalcTextSize(shown) > (bw - 8) * k do shown = shown:sub(2) end
+        while #shown > 0 and ui.CalcTextSize(shown) > (bw - 8) * k do shown = drop_first(shown) end
         text(bx + 4, y, shown, col.text)
         state.hits[#state.hits + 1] = hit(bx, y - 2, bw, 14, function() start_typing(field); state.picking = false end)
         if state.field == field then state.field_rect = { x = x0 + bx * k, y = y0 + (y - 2) * k, w = bw * k, h = 14 * k } end
@@ -270,7 +288,7 @@ function draw()
     fill(0, 0, W, H, col.surface)
     frame(0, 0, W, H, col.border)
     text(PAD, 6, "Auction", col.white)
-    text(W - PAD - 110, 6, "Shift+A or Esc", col.muted)
+    text(W - PAD - 110, 6, "Shift+U or Esc", col.muted)
     state.hits, state.row_hits = {}, {}
     fill(W - 18, 4, 12, 12, col.raised)
     frame(W - 18, 4, 12, 12, col.border)
@@ -279,6 +297,7 @@ function draw()
 
     if not a then
         text(PAD, 40, "Opening...", col.muted)
+        eqoa.input.claim_pointer({ x = x0, y = y0, width = W * k, height = H * k })
         ui.SetWindowFontScale(1)
         ui.End()
         return
@@ -317,16 +336,17 @@ function draw()
         box(PAD, 62, 100, "Level", "min_level")
         box(PAD + 104, 62, 60, "to", "max_level")
         button(PAD + 180, 59, 60, "Search", not busy, search)
-        button(PAD + 244, 59, 50, "< Page", not busy and #a.results > 0, function() turn(false) end)
-        button(PAD + 298, 59, 56, "Page >", not busy and #a.results > 0, function() turn(true) end)
-        list_y = 84
+        local results = a.mode == "search" and a.results or {}
+        button(PAD + 244, 59, 50, "< Page", not busy and #results > 0, function() turn(false) end)
+        button(PAD + 298, 59, 56, "Page >", not busy and #results > 0, function() turn(true) end)
+        list_y = 90
         state.list_rect = { x = x0 + PAD * k, y = y0 + list_y * k, w = (W - 2 * PAD) * k, h = ROWS * LINE * k }
-        if #a.results == 0 then
+        if #results == 0 then
             text(PAD + 2, list_y, busy and "Searching..." or (state.searched and "Nothing found" or "Type what to look for and press Search"), col.muted)
         end
         local chosen
         for i = 1, ROWS do
-            local l = a.results[state.scroll + i]
+            local l = results[state.scroll + i]
             if l then
                 local y = list_y + (i - 1) * LINE
                 if state.sel == l.lot then fill(PAD, y, W - 2 * PAD, LINE, col.hl); chosen = l end
@@ -337,9 +357,9 @@ function draw()
                 state.row_hits[#state.row_hits + 1] = hit(PAD, y, W - 2 * PAD, LINE, function() select_lot(l) end)
             end
         end
-        text(PAD + 176, list_y - 11, "High bid", col.muted)
-        text(PAD + 236, list_y - 11, "Buy now", col.muted)
-        text(PAD + 296, list_y - 11, "Time left", col.muted)
+        text(PAD + 176, list_y - 12, "High bid", col.muted)
+        text(PAD + 236, list_y - 12, "Buy now (each)", col.muted)
+        text(PAD + 296, list_y - 12, "Time left", col.muted)
         -- the lot chosen
         local dy = list_y + ROWS * LINE + 6
         if chosen then
@@ -350,7 +370,7 @@ function draw()
             if chosen.mine then text(PAD, dy + 2 * LINE, "This is your own lot", col.mark) end
             local by = dy + 3 * LINE + 2
             box(PAD, by + 2, 120, "Bid", "bid")
-            if a.results[1] and a.results[1].next_bid ~= nil and chosen.quantity > 1 then
+            if a.stacks and chosen.quantity > 1 then
                 text(PAD + 128, by + 2, "Count", col.muted)
                 button(PAD + 160, by - 1, 20, "-", state.count > 1, function() state.count = state.count - 1 end)
                 text(PAD + 184, by + 2, state.count, col.text)
@@ -404,7 +424,7 @@ function draw()
     -- the type picker
     if state.picking and state.tab == "search" then
         local pw, ph = 150, 6 * LINE + 8
-        local px, py = PAD + 180, 80
+        local px, py = PAD + 180, 92
         fill(px, py, pw, ph, col.raised)
         frame(px, py, pw, ph, col.white)
         state.pick_rect = { x = x0 + px * k, y = y0 + py * k, w = pw * k, h = ph * k }
