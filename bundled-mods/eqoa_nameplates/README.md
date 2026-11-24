@@ -12,8 +12,15 @@ Mods & Addons.
   (the game does not mark critical hits, so "well above your usual" is the mod's own guess), and red for
   damage you take.
 - The consider colour is the server's own for your **target**; for others the level colour is worked out from
-  how far their level is from yours (red: 3 or more above, yellow: 1 to 2 above, white: the same, light blue,
-  blue and grey below).
+  how far their level is from yours (red: 3 or more above, yellow: 1 to 2 above, white: the same, then blue,
+  light blue, green and grey further below).
+
+## Things to know
+- **Plates show through walls.** The game hides its own plates behind scenery; a mod cannot ask the client whether
+  a point is behind a wall (the game uses the picture's depth, which mods cannot read, and its collision check is
+  not offered). Use the Distance option to keep far plates away.
+- At most 60 plates are drawn at once: the nearest ones, and always your target's.
+- Text size follows the Size option (the text is sized by the window, so it needs no font).
 
 ## Options
 Mods & Addons, **Name Plates: settings...** opens a small window: show **Players**, **NPCs** and
