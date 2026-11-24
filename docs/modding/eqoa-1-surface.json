@@ -17210,6 +17210,7 @@
         "eqoa.trade.Bag.no_trade",
         "eqoa.trade.Bag.quantity",
         "eqoa.trade.Bag.slot",
+        "eqoa.trade.Bag.text",
         "eqoa.trade.Bag.worn"
       ],
       "path": "eqoa.trade.Bag",
@@ -17268,6 +17269,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.trade.Bag.text",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.trade.Bag.worn",
       "reason": null,
       "revision": 1,
@@ -17279,7 +17288,8 @@
         "eqoa.trade.Item.id",
         "eqoa.trade.Item.name",
         "eqoa.trade.Item.quantity",
-        "eqoa.trade.Item.slot"
+        "eqoa.trade.Item.slot",
+        "eqoa.trade.Item.text"
       ],
       "path": "eqoa.trade.Item",
       "reason": null,
@@ -17314,6 +17324,14 @@
     {
       "children": [],
       "path": "eqoa.trade.Item.slot",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Item.text",
       "reason": null,
       "revision": 1,
       "round": 8,

@@ -1978,12 +1978,14 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.trade.Bag.no_trade` | supported | 8 |  |
 | `eqoa.trade.Bag.quantity` | supported | 8 |  |
 | `eqoa.trade.Bag.slot` | supported | 8 |  |
+| `eqoa.trade.Bag.text` | supported | 8 |  |
 | `eqoa.trade.Bag.worn` | supported | 8 |  |
 | `eqoa.trade.Item` | supported | 8 |  |
 | `eqoa.trade.Item.id` | supported | 8 |  |
 | `eqoa.trade.Item.name` | supported | 8 |  |
 | `eqoa.trade.Item.quantity` | supported | 8 |  |
 | `eqoa.trade.Item.slot` | supported | 8 |  |
+| `eqoa.trade.Item.text` | supported | 8 |  |
 | `eqoa.trade.Partner` | supported | 8 |  |
 | `eqoa.trade.Partner.id` | supported | 8 |  |
 | `eqoa.trade.Partner.name` | supported | 8 |  |
