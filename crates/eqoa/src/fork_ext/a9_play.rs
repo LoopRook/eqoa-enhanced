@@ -22,7 +22,7 @@
 //! The actions are the game's own builders: `TradeState::send_*`, `duel::Part`'s methods, the blacksmith's 0x0062 and
 //! 0x0063. They report `sent`, never `confirmed`, and nothing is ever sent twice.
 use super::Play;
-use crate::duel::{Do, INVITE_TIME, Invite, QUEUE};
+use crate::duel::{Do, Invite, QUEUE};
 use crate::fork_ext::addons::{
     action_broker::{self, DispatchOutcome},
     confirm::{self, Act},
@@ -41,9 +41,9 @@ use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
-/// A duel invitation lasts `INVITE_TIME` ticks of the client's clock (983.04 a second).
-fn invite_life() -> Duration {
-    Duration::from_secs_f64(f64::from(INVITE_TIME) / 983.04)
+/// A duel invitation's time in ticks of the client's clock (983.04 a second).
+fn ticks_life(ticks: u32) -> Duration {
+    Duration::from_secs_f64(f64::from(ticks.max(1)) / 983.04)
 }
 
 /// Who holds a window and since when.
@@ -62,6 +62,8 @@ struct Hold {
 struct InviteHold {
     hold: Hold,
     rec: Invite,
+    /// How long the invitation has left from `hold.since` (its own timer when it was taken, in the client's ticks).
+    life: Duration,
 }
 
 #[derive(Clone, Debug)]
@@ -81,6 +83,11 @@ struct Pre {
     trade: bool,
     invite: bool,
     wager: bool,
+    smith: bool,
+    /// The wager's partner had accepted before the packet.
+    their_acc: bool,
+    /// The byte at 7 of the packet (a wager's `mine` flag in sub 10 and 11).
+    flag: u8,
 }
 
 #[derive(Default)]
@@ -93,6 +100,13 @@ struct Local {
     /// The one repair out (held smith or the game's own): the item's game slot, its condition then, the purse then,
     /// and when it was sent.
     repair_out: Option<(u32, i64, i32, Instant)>,
+    /// A repair whose answer never came (3 s): the item's key and condition. The same item is not sent again until
+    /// a read shows its condition changed.
+    repair_uncertain: Option<(u32, i64)>,
+    /// Own offer changes sent and not yet echoed by the server (how many, and since when).
+    pending_own: Option<(u32, Instant)>,
+    /// The offer a Yes accepted: (a wager, its digest, the accept was seen on the window).
+    accepted: Option<(bool, u64, bool)>,
     /// Invitations that came while a wager was held, waiting as the game's queue would (with when they came).
     parked: Vec<(Invite, Instant)>,
     /// The partner's accept at the moment a held trade was passed back: put on the game's window after it opens.
@@ -225,7 +239,8 @@ fn trade_state(play: &Play) -> Option<(Json, Option<(Instant, Duration)>)> {
             None,
         ));
     }
-    if trade.is_some() || play.mode == 15 {
+    let responder_open = play.mode == 16 && trade_pass::window_started(play);
+    if trade.is_some() || play.mode == 15 || responder_open {
         let other = if st.with != u32::MAX { st.with } else { st.partner };
         let room = st.mine.len() < MAX_OFFER;
         let mine: Vec<Json> = st.mine.iter().enumerate().map(|(i, o)| item_row(i + 1, &o.item)).collect();
@@ -255,7 +270,7 @@ fn trade_state(play: &Play) -> Option<(Json, Option<(Instant, Duration)>)> {
             None,
         ));
     }
-    let request = ask.is_some() || (play.mode == 16 && st.with != u32::MAX);
+    let request = ask.is_some() || (play.mode == 16 && st.with != u32::MAX && !responder_open);
     if request {
         let timer = ask.as_ref().map(|h| (h.since, REQUEST_TIMEOUT));
         return Some((
@@ -305,7 +320,7 @@ fn duel_state(play: &Play) -> (Json, Option<(Instant, Duration)>) {
     } else {
         "none"
     };
-    let timer = held.as_ref().map(|h| (h.hold.since, invite_life()));
+    let timer = held.as_ref().map(|h| (h.hold.since, h.life));
     (
         json!({
             "enabled": part.on(),
@@ -386,6 +401,12 @@ fn take_ask(play: &mut Play) {
 }
 
 fn take_trade(play: &mut Play) {
+    // the mod's own Yes already holds this trade (the server's sub 2 came after it): only the window is put away
+    if local(|l| l.trade.is_some()) {
+        trade_pass::hide_trade_window(play, true);
+        play.mode = 0;
+        return;
+    }
     let st = &play.npcw.trade_state;
     let other = if st.with != u32::MAX { st.with } else { st.partner };
     let Some(hold) = hold_for(play, TakeoverKind::Trade, other, name_of(play, other)) else { return };
@@ -403,10 +424,20 @@ fn take_trade(play: &mut Play) {
 fn take_invite(play: &mut Play) {
     let Some(rec) = play.duel.wnd.invite.clone() else { return };
     let Some(hold) = hold_for(play, TakeoverKind::DuelInvite, rec.id, rec.name.clone()) else { return };
+    // out of the game's queue: `Part::process` shows the queue's first at mode 0 on every step, so a record left there
+    // would draw again over the hold (and take a fresh clock each time)
+    play.duel.part.queue.retain(|q| q.id != rec.id);
     duel_pass::hide_window(play);
     play.mode = 0;
+    if local(|l| l.invite.is_some()) {
+        // a hidden invitation holds one at a time: the newcomer is declined with the game's own decline
+        let (duel_id, name) = (play.duel.part.duel_id, play.dump.player.name.clone());
+        send_invite_decline(play, duel_id, rec.id, &name);
+        return;
+    }
     sync_session(TakeoverKind::DuelInvite, Some(&hold), "ended");
-    local(|l| l.invite = Some(InviteHold { hold, rec }));
+    let life = ticks_life(rec.timer);
+    local(|l| l.invite = Some(InviteHold { hold, rec, life }));
 }
 
 fn take_wager(play: &mut Play) {
@@ -419,6 +450,15 @@ fn take_wager(play: &mut Play) {
         c.mode = 0;
     }
     hold.other = play.duel.part.duel_id;
+    // what the game queued while another window was up waits behind the hidden wager, not over it
+    let queued = std::mem::take(&mut play.duel.part.queue);
+    local(|l| {
+        for r in queued {
+            if l.parked.len() < QUEUE {
+                l.parked.push((r, Instant::now()));
+            }
+        }
+    });
     sync_session(TakeoverKind::Duel, Some(&hold), "ended");
     local(|l| {
         l.wager = Some(hold);
@@ -487,7 +527,15 @@ fn end_wager(play: &mut Play, reason: &'static str) {
         sync_session(TakeoverKind::Duel, None, reason);
         closed("duel", reason);
     }
-    // the invitations that waited behind the wager are the game's queue again (their time ran meanwhile)
+    let _ = play;
+}
+
+/// With no hidden trade, wager or smith left, the invitations that waited are the game's queue again (their time
+/// ran meanwhile).
+fn release_parked(play: &mut Play) {
+    if local(|l| l.parked.is_empty() || l.trade.is_some() || l.wager.is_some() || l.smith.is_some()) {
+        return;
+    }
     let parked = local(|l| std::mem::take(&mut l.parked));
     for (mut rec, since) in parked {
         let used = (since.elapsed().as_secs_f64() * 983.04) as u32;
@@ -499,6 +547,10 @@ fn end_wager(play: &mut Play, reason: &'static str) {
 }
 
 fn end_smith(reason: &'static str) {
+    local(|l| {
+        l.repair_out = None;
+        l.repair_uncertain = None;
+    });
     if local(|l| l.smith.take()).is_some() {
         sync_session(TakeoverKind::Blacksmith, None, reason);
     }
@@ -512,10 +564,13 @@ fn send_trade_cancel(play: &mut Play, partner: u32) {
 }
 
 fn send_invite_decline(play: &mut Play, duel_id: u32, id: u32, name: &str) {
-    // `Part::decline` reads the id held at the time; the duel id the server last gave is what it expects back
-    let mut part = play.duel.part.clone();
-    part.duel_id = duel_id;
-    for d in part.decline(id, name) {
+    // `Part::decline` reads the id held at the time and drops the invitation from the real queue: the server is told
+    // once, and the game cannot offer the same invitation again
+    let saved = play.duel.part.duel_id;
+    play.duel.part.duel_id = duel_id;
+    let list = play.duel.part.decline(id, name);
+    play.duel.part.duel_id = saved;
+    for d in list {
         apply_do(play, d);
     }
 }
@@ -588,8 +643,8 @@ fn refuse_all(play: &mut Play, reason: &'static str) {
 pub(crate) fn pre_event(play: &Play, event: &net::session::Event) {
     use net::session::Event;
     let reset = matches!(event, Event::WorldEntry { .. } | Event::Teleport { .. } | Event::Disconnected(_));
-    let held = local(|l| (l.ask.is_some(), l.trade.is_some(), l.invite.is_some(), l.wager.is_some()));
-    if !(held.0 || held.1 || held.2 || held.3) && !reset && !window_takeover::has_activity() {
+    let held = local(|l| (l.ask.is_some(), l.trade.is_some(), l.invite.is_some(), l.wager.is_some(), l.smith.is_some()));
+    if !(held.0 || held.1 || held.2 || held.3 || held.4) && !reset && !window_takeover::has_activity() {
         local(|l| l.pre = None);
         return;
     }
@@ -615,6 +670,8 @@ pub(crate) fn pre_event(play: &Play, event: &net::session::Event) {
             v
         });
         local(|l| l.owed.extend(owed));
+        // the hold ends with the world, whichever step comes next
+        drop_holds();
     }
     let (op, sub, arg) = match event {
         Event::Opcode { op, data } => (
@@ -630,10 +687,16 @@ pub(crate) fn pre_event(play: &Play, event: &net::session::Event) {
         arg,
         mode: play.mode,
         // a new request must not overwrite what a held trade or request is made of
-        trade_state: (op == Some(0x0057) && (held.0 || held.1)).then(|| play.npcw.trade_state.clone()),
+        trade_state: (op == Some(0x0057) && (held.0 || held.1 || held.3 || held.4)).then(|| play.npcw.trade_state.clone()),
         trade: held.1,
         invite: held.2,
         wager: held.3,
+        smith: held.4,
+        their_acc: play.duel.part.their_acc,
+        flag: match event {
+            Event::Opcode { data, .. } => data.get(7).copied().unwrap_or(0),
+            _ => 0,
+        },
     };
     local(|l| l.pre = Some(pre));
 }
@@ -644,11 +707,13 @@ pub(crate) fn post_event(play: &mut Play) {
     if let Some(pre) = pre {
         handle_second_requests(play, &pre);
         note_endings(play, &pre);
+        note_echo(play, &pre);
     }
     if engaged() {
         take_new(play);
         check_closed(play);
         watch_question(play);
+        watch_accept(play);
         refresh(play);
     } else {
         local(|l| l.last_mode = play.mode);
@@ -667,7 +732,7 @@ fn handle_second_requests(play: &mut Play, pre: &Pre) {
         play.npcw.trade_state = old.clone();
         trade_pass::hide_trade_window(play, false);
         play.mode = 0;
-        let name = name_of(play, newcomer.1);
+        let name = play.entity_name(newcomer.1).unwrap_or_else(|| "Someone".to_string());
         let fmt = play.words.as_ref().map_or_else(|| "%s".to_string(), |w| w.get(626, 0).to_string());
         play.add_chat(fmt.replacen("%s", &name, 1).replacen("%S", &name, 1), [1.0; 4]);
         let mut w = net::stream::Writer::op(0x0056);
@@ -676,12 +741,12 @@ fn handle_second_requests(play: &mut Play, pre: &Pre) {
         return;
     }
     // an invitation (0x1502 sub 2) while a mod holds a hidden invitation or wager: it was shown over the hidden one
-    if pre.op == Some(crate::duel::OP_IN) && pre.sub == 2 && play.mode == 43 && pre.mode == 0 && (pre.invite || pre.wager) {
+    if pre.op == Some(crate::duel::OP_IN) && pre.sub == 2 && play.mode == 43 && pre.mode == 0 && (pre.invite || pre.wager || pre.trade || pre.smith) {
         let Some(rec) = play.duel.wnd.invite.clone() else { return };
         duel_pass::hide_window(play);
         play.mode = 0;
-        if pre.wager && local(|l| l.parked.len()) < QUEUE {
-            // as the game queues one that arrives while the wager is up
+        if !pre.invite && local(|l| l.parked.len()) < QUEUE {
+            // as the game queues one that arrives while a window is up
             local(|l| l.parked.push((rec, Instant::now())));
         } else {
             // the game queues it behind the open invitation (up to ten, then declines); a hidden invitation holds one
@@ -710,6 +775,12 @@ fn note_endings(play: &mut Play, pre: &Pre) {
                 end_wager(play, "closed");
             }
         }
+        (Some(op), 10..=12 | 15) if op == crate::duel::OP_IN && local(|l| l.wager.is_some()) && !pre.their_acc && play.duel.part.their_acc => {
+            a9::emit_event("trade.accepted", json!({"kind": "duel", "side": "theirs"}));
+            if pre.sub == 15 && play.duel.part.my_acc && play.duel.part.their_acc {
+                end_wager(play, "completed");
+            }
+        }
         (Some(op), 15) if op == crate::duel::OP_IN => {
             if local(|l| l.wager.is_some()) && play.duel.part.my_acc && play.duel.part.their_acc {
                 end_wager(play, "completed");
@@ -723,6 +794,94 @@ fn note_endings(play: &mut Play, pre: &Pre) {
             }
         }
         _ => {}
+    }
+}
+
+/// What the game's own windows would have drawn a frame ago is taken before it draws (`health_redraw`, as A7 hides a
+/// taken request): a window the game's own step opened, such as the first queued duel invitation.
+pub(crate) fn hide_taken(play: &mut Play) {
+    if engaged() {
+        take_new(play);
+    }
+}
+
+fn sent_own() {
+    local(|l| {
+        let n = l.pending_own.map_or(0, |p| p.0) + 1;
+        l.pending_own = Some((n, Instant::now()));
+    });
+}
+
+/// One of the player's own changes was sent and has not come back yet (a change the server never answers stops
+/// counting after 5 seconds).
+fn own_pending() -> bool {
+    local(|l| l.pending_own.is_some_and(|(n, t)| n > 0 && t.elapsed() < Duration::from_secs(5)))
+}
+
+/// The server echoed one of the player's own changes: the offer in the window is the server's again.
+fn note_echo(play: &Play, pre: &Pre) {
+    let own = match pre.op {
+        // as the trade's receiver numbers them: the initiator's own come as 3 to 5, the responder's as 8 to 10
+        Some(0x0056) => {
+            if play.npcw.trade_state.asked {
+                (3..=5).contains(&pre.sub)
+            } else {
+                (8..=10).contains(&pre.sub)
+            }
+        }
+        Some(op) if op == crate::duel::OP_IN => (matches!(pre.sub, 10 | 11) && pre.flag != 0) || pre.sub == 12,
+        _ => false,
+    };
+    if own {
+        local(|l| {
+            if let Some((n, _)) = l.pending_own.as_mut() {
+                *n = n.saturating_sub(1);
+            }
+        });
+    }
+}
+
+/// The offer a Yes accepted must stay the offer: when either side changes while the player's accept stands, the
+/// accept is taken back with the window's own unaccept, whatever the server does with it. The game's own client does
+/// nothing here (`npcw.rs`: `TradeMsg::Changed => {}`): it relies on the server's sub 7, and the player sees the window
+/// change. A hidden window shows nobody anything, so the client does it.
+fn watch_accept(play: &mut Play) {
+    let Some((duel, digest, seen)) = local(|l| l.accepted) else { return };
+    let live = if duel { local(|l| l.wager.is_some()) } else { local(|l| l.trade.is_some()) };
+    if !live {
+        local(|l| l.accepted = None);
+        return;
+    }
+    let w = if duel { Which::Wager } else { Which::Trade };
+    let on = match w {
+        Which::Trade => trade_pass::trade_marks(play).0,
+        Which::Wager => play.duel.part.my_acc,
+    };
+    if on && !seen {
+        local(|l| {
+            if let Some(a) = l.accepted.as_mut() {
+                a.2 = true;
+            }
+        });
+    }
+    if !on && seen {
+        // the accept was cleared (the server's sub 7, our own unaccept): nothing stands any more
+        local(|l| l.accepted = None);
+        return;
+    }
+    if describe_offers(play, &w).4 != digest {
+        match w {
+            Which::Trade => {
+                trade_pass::unmark_my_accept(play);
+                trade_pass::trade_send(play, 7);
+            }
+            Which::Wager => {
+                let d = play.duel.part.unaccept();
+                apply_do(play, d);
+            }
+        }
+        local(|l| l.accepted = None);
+        a9::emit_event("trade.accepted", json!({"kind": if duel { "duel" } else { "trade" }, "side": "changed"}));
     }
 }
 
@@ -780,15 +939,40 @@ pub(crate) fn tick(play: &mut Play) {
         return;
     }
     take_new(play);
+    drain_queue(play);
     lifecycle(play, dead);
     check_closed(play);
     watch_question(play);
+    watch_accept(play);
     expire(play);
+    release_parked(play);
     refresh(play);
+}
+
+/// What the game queued (an invitation that came while another window was up) must not be shown over a hidden wager,
+/// trade or smith: it waits as the game keeps it behind an open window.
+fn drain_queue(play: &mut Play) {
+    if local(|l| l.wager.is_some() || l.trade.is_some() || l.smith.is_some()) && !play.duel.part.queue.is_empty() {
+        let queued = std::mem::take(&mut play.duel.part.queue);
+        local(|l| {
+            for r in queued {
+                if l.parked.len() < QUEUE {
+                    l.parked.push((r, Instant::now()));
+                }
+            }
+        });
+    }
 }
 
 /// The world ended: what was held is gone from the client (the server's refusal was sent, `owed`).
 fn refuse_all_quiet(play: &mut Play) {
+    drop_holds();
+    let _ = play;
+}
+
+/// Every hold ends (the world did): the sessions close and the questions are answered No. The server's refusal is
+/// `owed`, sent by the next step with the bytes noted before the reset.
+fn drop_holds() {
     let any = local(|l| l.ask.is_some() || l.trade.is_some() || l.invite.is_some() || l.wager.is_some() || l.smith.is_some());
     if any {
         local(|l| {
@@ -798,6 +982,10 @@ fn refuse_all_quiet(play: &mut Play) {
             l.wager = None;
             l.smith = None;
             l.parked.clear();
+            l.accepted = None;
+            l.pending_own = None;
+            l.repair_out = None;
+            l.repair_uncertain = None;
         });
         for k in TakeoverKind::A9 {
             sync_session(k, None, "left_world");
@@ -805,7 +993,6 @@ fn refuse_all_quiet(play: &mut Play) {
         confirm::cancel_kind("trade_accept", "left_world");
         confirm::cancel_kind("duel_accept", "left_world");
     }
-    let _ = play;
 }
 
 fn refresh_cleared() {
@@ -924,7 +1111,7 @@ fn expire(play: &mut Play) {
     if local(|l| l.ask.as_ref().is_some_and(|h| h.since.elapsed() >= REQUEST_TIMEOUT)) {
         refuse_ask(play, "timeout");
     }
-    if local(|l| l.invite.as_ref().is_some_and(|h| h.hold.since.elapsed() >= invite_life())) {
+    if local(|l| l.invite.as_ref().is_some_and(|h| h.hold.since.elapsed() >= h.life)) {
         refuse_invite(play, "timeout");
     }
     local(|l| l.parked.retain(|(rec, since)| (since.elapsed().as_secs_f64() * 983.04) < f64::from(rec.timer)));
@@ -933,21 +1120,32 @@ fn expire(play: &mut Play) {
         trade_pass::mark_their_accept(play);
         local(|l| l.restore_they = false);
     }
-    // a repair the server never answered stops blocking the next one
+    // a repair the server never answered stops blocking OTHER items after 3 s, but the same item is not sent again until
+    // a read shows its condition changed (`repair_uncertain`)
     local(|l| {
-        if l.repair_out.as_ref().is_some_and(|p| p.3.elapsed() >= Duration::from_secs(3)) {
+        if let Some((key, hp, _, at)) = l.repair_out
+            && at.elapsed() >= Duration::from_secs(3)
+        {
             l.repair_out = None;
+            l.repair_uncertain = Some((key, hp));
         }
     });
     smith_settle(play);
 }
 
-/// The repair out is answered once the item's condition or the purse is not what it was.
+/// The repair out is answered once that item's own condition is not what it was (the purse can change for any other
+/// reason, so it says nothing about this repair).
 fn smith_settle(play: &Play) {
-    let Some((key, hp, coin, _)) = local(|l| l.repair_out) else { return };
-    let item = play.dump.inventory.items.iter().find(|it| it.inv_index == key);
-    if item.is_none_or(|it| it.cur_hp != hp) || purse(play) != coin {
+    let changed = |key: u32, hp: i64| play.dump.inventory.items.iter().find(|it| it.inv_index == key).is_none_or(|it| it.cur_hp != hp);
+    if let Some((key, hp, _, _)) = local(|l| l.repair_out)
+        && changed(key, hp)
+    {
         local(|l| l.repair_out = None);
+    }
+    if let Some((key, hp)) = local(|l| l.repair_uncertain)
+        && changed(key, hp)
+    {
+        local(|l| l.repair_uncertain = None);
     }
 }
 
@@ -1064,7 +1262,15 @@ fn dispatch_inner(play: &mut Play, action: &A9Action) -> DispatchOutcome {
             end_smith("closed");
             sent()
         }
-        _ => exchange(play, action),
+        _ => {
+            let out = exchange(play, action);
+            if matches!(out, DispatchOutcome::Completed { .. })
+                && matches!(action, A9Action::TradeAdd { .. } | A9Action::TradeRemove { .. } | A9Action::TradeMoney { .. })
+            {
+                sent_own();
+            }
+            out
+        }
     }
 }
 
@@ -1079,6 +1285,21 @@ fn trade_answer(play: &mut Play, accept: bool) -> DispatchOutcome {
         // `TradeOut::Agree`: the trade set up from the bags, then sub 2 to the partner
         trade_pass::trade_agree(play);
         end_ask(play, "accepted");
+        // what the game's own Yes leaves: the answerer's trade is open now (the window started, mode 16), whether or not
+        // the server also echoes sub 2 to the answerer. A mod that holds `trade` has it as its hidden session at once
+        // (the echo, if it comes, only puts the window away again); otherwise the game's own trade window opens.
+        let other = play.npcw.trade_state.with;
+        let hold = if holds(TakeoverKind::Trade) { hold_for(play, TakeoverKind::Trade, other, name_of(play, other)) } else { None };
+        if let Some(hold) = hold {
+            sync_session(TakeoverKind::Trade, Some(&hold), "ended");
+            local(|l| {
+                l.trade = Some(hold);
+                l.reason = None;
+            });
+        } else {
+            trade_pass::show_trade(play);
+            shown(play);
+        }
     } else {
         trade_pass::trade_cancel(play);
         end_ask(play, "declined");
@@ -1091,7 +1312,7 @@ fn duel_answer(play: &mut Play, accept: bool) -> DispatchOutcome {
     let Some(h) = local(|l| l.invite.clone()).filter(|h| Some(h.hold.vm) == caller() && holds(TakeoverKind::DuelInvite)) else {
         return refuse("not_ready", "no duel invitation is held: hold 'duel_invite' (eqoa.windows.takeover) and wait for one");
     };
-    if h.hold.since.elapsed() >= invite_life() {
+    if h.hold.since.elapsed() >= h.life {
         return refuse("not_ready", "the invitation has run out");
     }
     let name = play.dump.player.name.clone();
@@ -1231,6 +1452,9 @@ fn exchange(play: &mut Play, action: &A9Action) -> DispatchOutcome {
             sent()
         }
         A9Action::TradeAccept => {
+            if own_pending() {
+                return refuse("busy", "your last change has not come back from the server yet: the question would name an offer the server may not hold");
+            }
             if mine_acc {
                 return refuse("busy", "you have accepted already");
             }
@@ -1344,6 +1568,9 @@ pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
     if play.is_dead() {
         return Err("you are dead".into());
     }
+    if own_pending() {
+        return Err("your last change has not come back from the server yet".into());
+    }
     let (_, _, _, _, now) = describe_offers(play, &w);
     if now != *digest {
         return Err("what is on offer changed since the question was asked".into());
@@ -1361,6 +1588,7 @@ pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
             apply_do(play, d);
         }
     }
+    local(|l| l.accepted = Some((*duel, *digest, false)));
     a9::emit_event("trade.accepted", json!({"kind": if *duel { "duel" } else { "trade" }, "side": "mine"}));
     refresh(play);
     Ok(())
@@ -1391,8 +1619,11 @@ fn repair(play: &mut Play, slot: usize, id: i64, key: Option<u32>) -> DispatchOu
     let Some(it) = found else {
         return refuse("stale_handle", "that item is not in the smith's list now");
     };
-    if key.is_none() && it.item.id != id {
+    if (key.is_none() || id != 0) && it.item.id != id {
         return refuse("stale_handle", "that row holds a different item now");
+    }
+    if local(|l| l.repair_uncertain.is_some_and(|(k, _)| k == it.inv_index)) {
+        return refuse("busy", "the last repair of this item was never answered: wait until its condition changes");
     }
     let cost = crate::blacksmith::repair_cost(&it);
     if cost <= 0 {
@@ -1408,6 +1639,26 @@ fn repair(play: &mut Play, slot: usize, id: i64, key: Option<u32>) -> DispatchOu
     play.session.send(&w.data);
     local(|l| l.repair_out = Some((it.inv_index, it.cur_hp, coin, Instant::now())));
     DispatchOutcome::Completed { detail: Some(json!({"sent": true, "confirmed": false, "cost": cost})) }
+}
+
+/// The player's own changes were sent `by` ago (tests).
+#[cfg(test)]
+pub(crate) fn age_pending_for_test(by: Duration) {
+    local(|l| {
+        if let Some(p) = l.pending_own.as_mut() {
+            p.1 -= by;
+        }
+    });
+}
+
+/// The repair out was sent `by` ago (tests).
+#[cfg(test)]
+pub(crate) fn age_repair_for_test(by: Duration) {
+    local(|l| {
+        if let Some(r) = l.repair_out.as_mut() {
+            r.3 -= by;
+        }
+    });
 }
 
 #[cfg(test)]

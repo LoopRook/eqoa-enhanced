@@ -4481,6 +4481,7 @@ pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) 
     #[cfg(not(target_arch = "wasm32"))]
     {
         a7_play::hide_taken_requests(play);
+        a9_play::hide_taken(play);
         let options_closed =
             if crate::fork_ext::addons::take_close_options_on_open() && play.mode == 34 {
                 play.mode = 0;

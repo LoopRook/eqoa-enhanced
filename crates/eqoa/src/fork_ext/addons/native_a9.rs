@@ -376,8 +376,10 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     ));
                 };
                 if let Some(v) = t.get::<Value>("inventory_key").ok().filter(|v| !matches!(v, Value::Nil)) {
+                    // an optional `id` is checked against the item that key names now
+                    let id = t.get::<Value>("id").ok().and_then(|v| int_arg(&v)).unwrap_or(0);
                     return match int_arg(&v).and_then(|n| u32::try_from(n).ok()) {
-                        Some(key) => Ok(ActionKind::A9(A9Action::BlacksmithRepair { slot: 0, id: 0, key: Some(key) })),
+                        Some(key) => Ok(ActionKind::A9(A9Action::BlacksmithRepair { slot: 0, id, key: Some(key) })),
                         None => Err(("invalid_argument", "inventory_key must be an item's inventory_key".into())),
                     };
                 }

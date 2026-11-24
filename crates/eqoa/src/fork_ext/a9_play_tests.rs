@@ -531,7 +531,7 @@ fn a9_trade_offers_follow_the_game_and_accepting_asks_the_player_first() {
     step(&mut p, &host);
     assert_eq!(recorded(&p), native_accept, "Yes is the window's accept");
     assert!(trade_pass::trade_marks(&p).0, "the window knows the player accepted");
-    lua_ok(&host, "assert(eqoa.trade.get().mine.accepted == true and tev[#tev]:find('accepted:mine') or true)");
+    lua_ok(&host, "assert(eqoa.trade.get().mine.accepted == true and table.concat(tev, '|'):find('accepted:mine', 1, true), table.concat(tev, '|'))");
     // an accepted offer is not changed behind the accept
     clear_recorded(&mut p);
     ask(&mut p, &host, "return eqoa.actions.trade_money(5)");
@@ -622,7 +622,7 @@ fn a9_duel_invitation_wager_and_the_queue_behind_it() {
     deliver(&mut p, crate::duel::OP_IN, duel_invitation(6, "Second"));
     assert_eq!(p.mode, 0);
     assert_eq!(recorded(&p).len(), 1, "the newcomer is declined with the game's own decline");
-    lua_ok(&host, "assert(eqoa.duel.get().invite.id == 9 or eqoa.duel.get().invite.id == 5)");
+    lua_ok(&host, "assert(eqoa.duel.get().invite.id == 5, 'the first invitation is still the held one')");
 
     // Yes: the window's accept
     clear_recorded(&mut p);
@@ -662,7 +662,12 @@ fn a9_duel_invitation_wager_and_the_queue_behind_it() {
     clear_recorded(&mut p);
     ask(&mut p, &host, "return eqoa.actions.trade_money(100)");
     assert_eq!(recorded(&p).len(), 1);
-    // accepting the wager asks first, and what each side stakes is in the question
+    // accepting the wager asks first, and what each side stakes is in the question (the server's answers to the two
+    // changes above have come: the accept is refused `busy` until they do)
+    clear_recorded(&mut p);
+    ask(&mut p, &host, "return eqoa.actions.trade_accept()");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'busy')");
+    a9_play::age_pending_for_test(Duration::from_secs(6));
     clear_recorded(&mut p);
     ask(&mut p, &host, "return eqoa.actions.trade_accept()");
     assert!(recorded(&p).is_empty());
@@ -883,4 +888,345 @@ fn a9_the_labels_name_what_the_manifest_declares() {
     let auto = crate::fork_ext::addons::runtime::autonomous_action_label(&caps(&["eqoa.actions.trade_accept", "eqoa.actions.trade_add"]));
     assert!(auto.is_none(), "{auto:?}");
     assert!(crate::fork_ext::addons::runtime::autonomous_action_label(&caps(&["eqoa.actions.chat"])).is_some(), "the control: another action still is");
+}
+
+// ---- the fix round (review 2026-11-24) ----
+
+fn frame(p: &mut Play, host: &Host) {
+    step(p, host);
+    p.duel_tick();
+    super::health_redraw(p, false, false);
+}
+
+fn sub_msgs(p: &Play, sub: u8) -> usize {
+    recorded(p).iter().filter(|m| m.len() >= 3 && m[0] == 0x56 && m[1] == 0 && m[2] == sub).count()
+}
+
+#[test]
+fn a9_h1_the_answering_player_ends_up_in_a_usable_trade() {
+    let _baseline = Baseline;
+    // control: with no holder the game's own Yes leaves the answerer's window started in mode 16, and it reads as open
+    let mut p = ready();
+    bags(&mut p);
+    let host = host_all();
+    step(&mut p, &host);
+    deliver(&mut p, 0x0057, trade_request(77, 77));
+    lua_ok(&host, "assert(eqoa.trade.get().phase == 'request')");
+    {
+        use crate::pointer::testing::{NullRaster, vui};
+        let (v, mut r) = (vui(), NullRaster);
+        p.run_npcw(&v, &mut r);
+        p.npcw_key(17, true);
+        p.run_npcw(&v, &mut r);
+        p.npcw_key(13, true);
+        p.run_npcw(&v, &mut r);
+    }
+    assert_eq!(p.mode, 16, "the game's own Yes leaves the answerer in mode 16");
+    step(&mut p, &host);
+    lua_ok(&host, "local t = eqoa.trade.get(); assert(t.phase == 'open' and t.held == false and #t.bags == 7, t.phase)");
+
+    // the mod holds trade_ask and trade: its Yes is a usable trade at once, and the server's echo does not disturb it
+    let mut p = ready();
+    bags(&mut p);
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('trade_ask', {scope='all'}) and eqoa.windows.takeover('trade', {scope='all'}))");
+    step(&mut p, &host);
+    deliver(&mut p, 0x0057, trade_request(77, 77));
+    step(&mut p, &host);
+    clear_recorded(&mut p);
+    ask(&mut p, &host, "return eqoa.actions.trade_answer(true)");
+    assert_eq!(recorded(&p), vec![vec![0x56, 0x00, 2, 77, 0, 0, 0]], "the game's own Yes bytes");
+    assert_eq!(p.mode, 0);
+    step(&mut p, &host);
+    lua_ok(
+        &host,
+        r#"
+        local t = assert(eqoa.trade.get())
+        assert(t.phase == 'open' and t.held == true and t.initiated == false and #t.bags == 7)
+        assert(eqoa.windows.session('trade') ~= nil and eqoa.windows.session('trade_ask') == nil)
+        "#,
+    );
+    clear_recorded(&mut p);
+    let want = p.npcw.trade_state.send_add(1, 1).unwrap();
+    ask(&mut p, &host, "return eqoa.actions.trade_add({slot = 2, id = 11})");
+    lua_ok(&host, "assert(results[1].ok == true, tostring(results[1].code))");
+    assert_eq!(recorded(&p), vec![want], "an answerer's offer works");
+    // the other order: the server also echoes sub 2 to the answerer
+    deliver(&mut p, 0x0056, trade_msg(2, 77, &[]));
+    step(&mut p, &host);
+    assert_eq!(p.mode, 0, "the echo's window is put away again");
+    lua_ok(&host, "assert(eqoa.trade.get().held == true and eqoa.windows.session('trade') ~= nil)");
+
+    // only trade_ask held: the game's own trade window opens for the answerer
+    let mut p = ready();
+    bags(&mut p);
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('trade_ask', {scope='all'}))");
+    step(&mut p, &host);
+    deliver(&mut p, 0x0057, trade_request(77, 77));
+    step(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.trade_answer(true)");
+    assert!(matches!(p.mode, 15 | 16), "the game's window is up, mode {}", p.mode);
+    step(&mut p, &host);
+    assert!(matches!(p.mode, 15 | 16), "and stays up (not taken again)");
+    lua_ok(&host, "assert(eqoa.trade.get().held == false and eqoa.trade.get().phase == 'open')");
+}
+
+#[test]
+fn a9_h2_a_queued_invitation_is_held_once_and_declined_for_real() {
+    let _baseline = Baseline;
+    let mut p = ready();
+    p.duel.part.features = crate::duel::FEATURE_DUELS;
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('duel_invite', {scope='all'}) == true)");
+    step(&mut p, &host);
+    deliver(&mut p, crate::duel::OP_IN, duel_down(1, 5, &[]));
+    // it arrives while another window is up: the game queues it
+    p.mode = 5;
+    deliver(&mut p, crate::duel::OP_IN, duel_invitation(7, "Lanerender"));
+    assert_eq!(p.duel.part.queue.len(), 1, "queued by the game");
+    p.mode = 0;
+    clear_recorded(&mut p);
+    for i in 0..4 {
+        frame(&mut p, &host);
+        assert_eq!(p.mode, 0, "frame {i}: the game's re-show step never leaves the window up");
+        assert!(!p.duel.wnd.visible, "frame {i}: nothing drawn");
+        assert!(p.duel.part.queue.is_empty(), "frame {i}: the hold took it out of the queue");
+        a9_play::age_for_test(Duration::from_secs(5));
+    }
+    lua_ok(&host, "assert(eqoa.duel.get().state == 'invited' and eqoa.duel.get().invite.id == 7)");
+    // 20 s later the clock kept running (it was not restarted by a re-show): past its own 20.35 s it is declined, really
+    a9_play::age_for_test(Duration::from_secs(1));
+    frame(&mut p, &host);
+    let expected: Vec<Vec<u8>> = {
+        let mut part = crate::duel::Part::default();
+        part.duel_id = 5;
+        part.decline(7, "Hero").into_iter().filter_map(|d| if let crate::duel::Do::Send(m) = d { Some(m) } else { None }).collect()
+    };
+    assert_eq!(recorded(&p), expected, "declined once, after its own time");
+    assert!(p.duel.part.queue.is_empty(), "a declined invitation is not in the game's queue any more");
+    for _ in 0..3 {
+        frame(&mut p, &host);
+    }
+    assert_eq!((p.mode, recorded(&p).len()), (0, 1), "it does not come back, and is not answered twice");
+    ask(&mut p, &host, "return eqoa.actions.duel_answer(true)");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready')");
+    // control: with no holder the game shows the queued invitation (the step the review named)
+    let mut q = ready();
+    let host_q = host_all();
+    step(&mut q, &host_q);
+    q.mode = 5;
+    deliver(&mut q, crate::duel::OP_IN, duel_invitation(7, "Lanerender"));
+    q.mode = 0;
+    frame(&mut q, &host_q);
+    assert_eq!(q.mode, 43, "control: nobody holds the kind, the game's own window");
+
+    // behind a hidden wager: what the game queued waits, nothing is shown over the wager
+    let mut p = ready();
+    p.duel.part.features = crate::duel::FEATURE_DUELS;
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('duel', {scope='all'}) == true)");
+    lua_ok(&host, "assert(eqoa.windows.takeover('duel_invite', {scope='all'}) == true)");
+    step(&mut p, &host);
+    deliver(&mut p, crate::duel::OP_IN, duel_down(1, 5, &[]));
+    p.mode = 5;
+    deliver(&mut p, crate::duel::OP_IN, duel_invitation(7, "Early"));
+    p.mode = 0;
+    deliver(&mut p, crate::duel::OP_IN, duel_down(13, 5, &[]));
+    assert_eq!(p.mode, 0, "the wager is held hidden");
+    for _ in 0..3 {
+        frame(&mut p, &host);
+        assert_eq!(p.mode, 0, "no invitation over the hidden wager");
+    }
+    lua_ok(&host, "assert(eqoa.duel.get().queued == 1 and eqoa.duel.get().state == 'wager')");
+    // the wager ends: the invitation is the game's queue again and is held, once
+    deliver(&mut p, crate::duel::OP_IN, duel_down(14, 5, &[]));
+    frame(&mut p, &host);
+    frame(&mut p, &host);
+    lua_ok(&host, "assert(eqoa.duel.get().state == 'invited' and eqoa.duel.get().queued == 0)");
+    assert_eq!(p.mode, 0);
+}
+
+#[test]
+fn a9_m1_the_question_waits_for_the_servers_echo_of_our_own_change() {
+    let _baseline = Baseline;
+    let mut p = ready();
+    bags(&mut p);
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('trade', {scope='all'}) == true)");
+    step(&mut p, &host);
+    open_trade(&mut p, 77);
+    step(&mut p, &host);
+    clear_recorded(&mut p);
+    ask(&mut p, &host, "eqoa.actions.trade_add({slot = 1, id = 10, count = 2}); return eqoa.actions.trade_accept()");
+    lua_ok(&host, "assert(results[1].ok == true and results[2].ok == false and results[2].code == 'busy', tostring(results[2].code))");
+    assert!(confirm::current_for_test().is_none(), "no question about an offer the server has not confirmed");
+    // the echo of our own add (sub 3 as the initiator reads it): now the question may be asked
+    let mut w = Writer::default();
+    w.u32(1).signed(2);
+    deliver(&mut p, 0x0056, trade_msg(3, 77, &w.data));
+    clear_recorded(&mut p);
+    ask(&mut p, &host, "return eqoa.actions.trade_accept()");
+    lua_ok(&host, "assert(results[1].ok == true and results[1].detail.asked == true)");
+    let q = confirm::current_for_test().expect("asked");
+    assert!(q.text.contains("2 x Snake Scale"), "the question names the confirmed offer: {}", q.text);
+    // the control: the partner's change is not our echo and does not release a pending one of ours
+    key(NamedKey::Escape);
+    step(&mut p, &host);
+    ask(&mut p, &host, "eqoa.actions.trade_money(100); return eqoa.actions.trade_accept()");
+    lua_ok(&host, "assert(results[2].code == 'busy')");
+    let mut w = Writer::default();
+    w.signed(5);
+    deliver(&mut p, 0x0056, trade_msg(10, 77, &w.data));
+    ask(&mut p, &host, "return eqoa.actions.trade_accept()");
+    lua_ok(&host, "assert(results[1].code == 'busy', 'the partner changing is not our echo: ' .. tostring(results[1].code))");
+}
+
+#[test]
+fn a9_m2_a_standing_accept_is_taken_back_when_the_offer_changes() {
+    let _baseline = Baseline;
+    let mut p = ready();
+    bags(&mut p);
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('trade', {scope='all'}) == true)");
+    step(&mut p, &host);
+    open_trade(&mut p, 77);
+    step(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.trade_accept()");
+    key(NamedKey::ArrowRight);
+    key(NamedKey::Enter);
+    step(&mut p, &host);
+    assert!(trade_pass::trade_marks(&p).0, "the accept stands");
+    assert_eq!(sub_msgs(&p, 6), 1);
+    // control: nothing changed, nothing is taken back
+    step(&mut p, &host);
+    assert_eq!(sub_msgs(&p, 7), 0, "an unchanged offer keeps its accept");
+    // the partner changes the offer: the client takes the accept back at once, whatever the server does
+    let mut w = Writer::default();
+    w.signed(40);
+    deliver(&mut p, 0x0056, trade_msg(10, 77, &w.data));
+    assert_eq!(sub_msgs(&p, 7), 1, "the window's own unaccept is sent");
+    assert!(!trade_pass::trade_marks(&p).0);
+    step(&mut p, &host);
+    lua_ok(&host, "assert(table.concat(tev, '|'):find('accepted:changed', 1, true), table.concat(tev, '|'))");
+    assert_eq!(sub_msgs(&p, 7), 1, "once");
+}
+
+#[test]
+fn a9_the_repair_is_one_at_a_time_and_names_its_item() {
+    let _baseline = Baseline;
+    let mut p = ready();
+    smith_bags(&mut p);
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('blacksmith', {scope='all'}) == true)");
+    step(&mut p, &host);
+    deliver(&mut p, 0x0061, 4242u32.to_le_bytes().to_vec());
+    step(&mut p, &host);
+    clear_recorded(&mut p);
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = 99})");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'stale_handle')");
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = 20})");
+    lua_ok(&host, "assert(results[1].ok == true)");
+    assert_eq!(recorded(&p).len(), 1);
+    // the purse moves for another reason: that is not the answer
+    p.dump.player.p34 = 900;
+    step(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = 20})");
+    lua_ok(&host, "assert(results[1].code == 'busy', tostring(results[1].code))");
+    // 3 s without an answer: other items may go, this one waits for a fresh read of its condition
+    a9_play::age_repair_for_test(Duration::from_secs(4));
+    step(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = 20})");
+    lua_ok(&host, "assert(results[1].code == 'busy', 'uncertain: ' .. tostring(results[1].code))");
+    assert_eq!(recorded(&p).len(), 1, "never sent twice");
+    p.dump.inventory.items[0].cur_hp = 30;
+    step(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = 20})");
+    lua_ok(&host, "assert(results[1].ok == true, tostring(results[1].code))");
+    assert_eq!(recorded(&p).len(), 2, "the condition changed, so a fresh read allows the next");
+}
+
+#[test]
+fn a9_requests_behind_a_hidden_window_are_kept_or_answered_busy_as_the_game_does() {
+    let _baseline = Baseline;
+    // a trade request while a wager is held: busy
+    let mut p = ready();
+    p.duel.part.features = crate::duel::FEATURE_DUELS;
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('duel', {scope='all'}) == true)");
+    step(&mut p, &host);
+    deliver(&mut p, crate::duel::OP_IN, duel_down(1, 5, &[]));
+    deliver(&mut p, crate::duel::OP_IN, duel_down(13, 5, &[]));
+    step(&mut p, &host);
+    clear_recorded(&mut p);
+    deliver(&mut p, 0x0057, trade_request(88, 88));
+    assert_eq!(p.mode, 0, "no request window beside the hidden wager");
+    assert_eq!(sub_msgs(&p, 20), 1, "answered busy");
+    // a duel invitation while a trade is held: kept waiting, not shown
+    let mut q = ready();
+    bags(&mut q);
+    let host_q = host_all();
+    lua_ok(&host_q, "assert(eqoa.windows.takeover('trade', {scope='all'}) == true)");
+    step(&mut q, &host_q);
+    open_trade(&mut q, 77);
+    step(&mut q, &host_q);
+    deliver(&mut q, crate::duel::OP_IN, duel_invitation(9, "Late"));
+    assert_eq!(q.mode, 0);
+    lua_ok(&host_q, "assert(eqoa.duel.get().queued == 1)");
+}
+
+#[test]
+fn a9_a_world_reset_ends_the_hold_at_once_and_the_refusal_is_sent_once() {
+    let _baseline = Baseline;
+    let mut p = ready();
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('trade_ask', {scope='all'}) == true)");
+    step(&mut p, &host);
+    deliver(&mut p, 0x0057, trade_request(77, 77));
+    step(&mut p, &host);
+    lua_ok(&host, "assert(eqoa.windows.session('trade_ask') ~= nil)");
+    let ev = Event::Teleport { world: 1, pos: [0.0; 3], hpr: [0.0; 3], token: 1 };
+    let note = super::begin_game_event(&p, &ev);
+    super::divert_event(&mut p);
+    super::end_game_event(&p, note);
+    lua_ok(&host, "assert(eqoa.windows.session('trade_ask') == nil, 'the hold ended with the world')");
+    clear_recorded(&mut p);
+    step(&mut p, &host);
+    step(&mut p, &host);
+    assert_eq!(sub_msgs(&p, 1), 1, "the server hears one refusal, however many steps follow");
+}
+
+#[test]
+fn a9_the_wagers_partner_accept_is_told_and_a_held_trade_handed_back_takes_the_accept_back() {
+    let _baseline = Baseline;
+    let mut p = ready();
+    p.duel.part.features = crate::duel::FEATURE_DUELS;
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('duel', {scope='all'}) == true)");
+    step(&mut p, &host);
+    deliver(&mut p, crate::duel::OP_IN, duel_down(1, 5, &[]));
+    deliver(&mut p, crate::duel::OP_IN, duel_down(13, 5, &[]));
+    step(&mut p, &host);
+    deliver(&mut p, crate::duel::OP_IN, duel_down(12, 5, &[0, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
+    step(&mut p, &host);
+    lua_ok(&host, "assert(table.concat(tev, '|'):find('accepted:theirs', 1, true), table.concat(tev, '|'))");
+
+    // an open trade the player accepted, handed back to the game: the accept is taken back with the server first
+    let mut p = ready();
+    bags(&mut p);
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('trade', {scope='all'}) == true)");
+    step(&mut p, &host);
+    open_trade(&mut p, 77);
+    step(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.trade_accept()");
+    key(NamedKey::ArrowRight);
+    key(NamedKey::Enter);
+    step(&mut p, &host);
+    clear_recorded(&mut p);
+    lua_ok(&host, "assert(eqoa.windows.release('trade') == true)");
+    step(&mut p, &host);
+    assert_eq!(sub_msgs(&p, 7), 1, "the accept is taken back");
+    assert_eq!(p.mode, 15, "the game's own trade window opens");
+    assert_eq!(sub_msgs(&p, 1), 0, "the trade itself is not cancelled");
 }

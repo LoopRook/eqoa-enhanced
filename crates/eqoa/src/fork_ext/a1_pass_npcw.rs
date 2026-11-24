@@ -94,6 +94,12 @@ pub(in crate::play) fn trade_agree(play: &mut Play) {
     play.trade_send(2);
 }
 
+/// The answerer's own trade window is running (mode 16 after the game's Yes: the window started, no question up).
+#[cfg(not(target_arch = "wasm32"))]
+pub(in crate::play) fn window_started(play: &Play) -> bool {
+    play.npcw.trade.visible && play.npcw.trade.focus >= 0
+}
+
 /// The player's accept taken back, as the window's cancel key does before it sends sub 7.
 #[cfg(not(target_arch = "wasm32"))]
 pub(in crate::play) fn unmark_my_accept(play: &mut Play) {
