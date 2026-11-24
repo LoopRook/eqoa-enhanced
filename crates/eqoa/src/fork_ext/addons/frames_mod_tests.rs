@@ -395,3 +395,43 @@ fn a3_frames_mod_shows_each_pet_effect_once() {
     assert!(section > none + 4.0, "control: a pet strip with no pet line in the list still gets its section ({section} vs {none})");
     assert!(host.drain_logs().unwrap().is_empty());
 }
+
+/// Owner test 2026-11-23 (evening): "It was nice having that dimmer pet section instead of the Pet: buttons." The
+/// player's own effects are buttons; the pet's effects are never buttons: they are the dimmer lines of the Pet section,
+/// once each, whether they came in the buff list (`whose` 1) or from the pet strip. Negative control: the old window drew
+/// a pet line of the list as a "Pet:" button and no section, which is a different height from the section's lines.
+#[test]
+fn a3_frames_mod_shows_the_pets_effects_as_the_dimmer_pet_section_never_as_buttons() {
+    let name = c"Effects";
+    let own = || vec![BuffLine { whose: 0, id: 9304, icon: 11, removable: true, name: "Dark Ward".into(), ends_tick: Some(1800), description: None }];
+    let plague = || BuffLine { whose: 1, id: 77, icon: 12, removable: false, name: "Plague".into(), ends_tick: None, description: None };
+    fixture();
+    let mut context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon()).unwrap();
+    // the pet's Plague comes in the buff list, and the pet strip is empty
+    native_a3::sync_buffs(true, 10, || {
+        let mut v = own();
+        v.push(plague());
+        v
+    });
+    native_a3::sync_pet(true, 10, Vec::new);
+    frames(&host, &bridge, &mut context, 4);
+    let from_list = content_height(name);
+    // the same pet effect from the pet strip, the list holding only the player's own
+    native_a3::sync_buffs(true, 11, own);
+    native_a3::sync_pet(true, 11, || vec![PetLine { icon: 12, name: "Plague".into(), ends_tick: 900 }]);
+    frames(&host, &bridge, &mut context, 4);
+    let from_strip = content_height(name);
+    assert!((from_list - from_strip).abs() < 0.5, "a pet effect of the list is drawn as the Pet section, as the strip's is: {from_list} vs {from_strip}");
+    // a pet effect in the list never makes a second one from the strip (each once)
+    native_a3::sync_buffs(true, 12, || {
+        let mut v = own();
+        v.push(plague());
+        v
+    });
+    frames(&host, &bridge, &mut context, 4);
+    assert!((content_height(name) - from_list).abs() < 0.5, "list and strip together still show the effect once");
+    assert!(host.drain_logs().unwrap().is_empty());
+}

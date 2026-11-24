@@ -52,6 +52,8 @@ mod autoloot_logic_tests;
 #[cfg(test)]
 mod bag_helpers_tests;
 #[cfg(test)]
+mod bag_multi_tests;
+#[cfg(test)]
 mod chat_history_tests;
 #[cfg(test)]
 mod docs_tests;
@@ -129,6 +131,8 @@ mod a1_tests;
 mod a1_mod_tests;
 #[cfg(test)]
 mod click_through_tests;
+#[cfg(test)]
+mod menu_routes_tests;
 #[cfg(test)]
 mod a7_mod_tests;
 #[cfg(test)]

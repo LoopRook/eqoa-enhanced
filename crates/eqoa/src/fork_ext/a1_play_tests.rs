@@ -207,6 +207,154 @@ fn a1_destroy_refuses_what_cannot_be_asked_and_a_yes_for_a_changed_slot() {
     key(NamedKey::Escape);
 }
 
+/// Three stacks for the group destroy: a worn sword, the iron ore and some rat pelts.
+fn rig3() -> (Play, Host) {
+    let (mut p, host) = rig();
+    p.dump.inventory.items.push(item(900_003, "Rat Pelt", 13, 3, -1, -1));
+    p.forge_snapshot(None);
+    r6a::refresh(&p, None);
+    (p, host)
+}
+
+const BOTH: &str = "local inv = eqoa.inventory.get(); return eqoa.actions.destroy_many({inv.items[2].ref, inv.items[3].ref})";
+
+/// The server's answer to a destroy: the stack leaves the pack and the game stops waiting.
+fn server_answers(p: &mut Play, name: &str) {
+    p.dump.inventory.items.retain(|it| it.item.name != name);
+    p.waiting = false;
+}
+
+#[test]
+fn a1_destroy_many_asks_once_with_the_list_and_only_the_players_yes_sends_each_stack_in_turn() {
+    let (mut p, host) = rig3();
+    let sent = p.session.sends_lost;
+    ask(&mut p, &host, BOTH);
+    host.execute("assert(results[1].ok == true and results[1].detail.asked == true, tostring(last_err and last_err.message))").unwrap();
+    // negative control: a client that acted on the call (or asked once per stack) fails here
+    assert_eq!(p.session.sends_lost, sent, "asking destroys nothing");
+    let q = confirm::current_for_test().expect("one question is up");
+    assert!(!q.yes, "starts on No");
+    assert!(q.text.starts_with("Destroy these 2 items?"), "{}", q.text);
+    assert!(q.text.contains("5 x \"Iron Ore\"") && q.text.contains("3 x \"Rat Pelt\""), "names every stack: {}", q.text);
+    assert!(!q.text.contains("Rusty Sword"), "only the stacks named: {}", q.text);
+    host.execute("local c = eqoa.windows.confirm(); assert(c.kind == 'destroy_many' and c.text:find('Rat Pelt'))").unwrap();
+    // No: nothing is sent, the mod hears no, and it hears it once
+    key(NamedKey::Escape);
+    step(&mut p, &host);
+    assert_eq!((p.session.sends_lost, p.waiting), (sent, false), "no Yes, nothing sent");
+    host.execute("assert(#closed == 1 and closed[1].kind == 'destroy_many' and closed[1].answer == 'no')").unwrap();
+    assert!(!confirm::has_work());
+    // Yes: the first stack goes out and the game waits for the server before the second
+    ask(&mut p, &host, BOTH);
+    key(NamedKey::ArrowRight);
+    key(NamedKey::Enter);
+    assert_eq!(p.session.sends_lost, sent, "not before the next step");
+    step(&mut p, &host);
+    assert_eq!(p.session.sends_lost, sent + 1, "only the first stack goes out");
+    assert!(p.waiting);
+    step(&mut p, &host);
+    step(&mut p, &host);
+    // negative control: a run that sent everything at once would be at sent + 2 here
+    assert_eq!(p.session.sends_lost, sent + 1, "the second waits for the server's answer to the first");
+    host.execute("assert(#closed == 0, 'the mod hears nothing until the run is over')").unwrap();
+    server_answers(&mut p, "Iron Ore");
+    step(&mut p, &host);
+    assert_eq!(p.session.sends_lost, sent + 2, "the second stack goes out in its turn");
+    server_answers(&mut p, "Rat Pelt");
+    step(&mut p, &host);
+    host.execute(
+        "assert(closed[1].answer == 'yes' and closed[1].kind == 'destroy_many' and closed[1].detail.sent == true \
+         and closed[1].detail.sent_count == 2 and closed[1].detail.total == 2 and #closed[1].detail.skipped == 0)",
+    )
+    .unwrap();
+    assert!(!confirm::has_work(), "the run is over");
+}
+
+#[test]
+fn a1_destroy_many_skips_a_stack_that_changed_and_stops_with_the_world() {
+    let (mut p, host) = rig3();
+    let sent = p.session.sends_lost;
+    // the second stack is something else by its turn: skipped and counted, never destroyed
+    ask(&mut p, &host, BOTH);
+    key(NamedKey::ArrowRight);
+    key(NamedKey::Enter);
+    step(&mut p, &host);
+    assert_eq!(p.session.sends_lost, sent + 1);
+    server_answers(&mut p, "Iron Ore");
+    let rat = p.dump.inventory.items.iter().position(|it| it.item.name == "Rat Pelt").unwrap();
+    p.dump.inventory.items[rat] = item(900_009, "Something Else", 13, 3, -1, -1);
+    step(&mut p, &host);
+    assert_eq!(p.session.sends_lost, sent + 1, "never destroys what the player was not asked about");
+    host.execute("assert(closed[1].detail.sent_count == 1 and closed[1].detail.total == 2 and closed[1].detail.skipped[1] == 'Rat Pelt')").unwrap();
+    // zoning in the middle ends the run: what is left is not destroyed, and the mod is told how far it got
+    let (mut p, host) = rig3();
+    let sent = p.session.sends_lost;
+    ask(&mut p, &host, BOTH);
+    key(NamedKey::ArrowRight);
+    key(NamedKey::Enter);
+    step(&mut p, &host);
+    assert_eq!(p.session.sends_lost, sent + 1);
+    confirm::cancel_all("zoning");
+    server_answers(&mut p, "Iron Ore");
+    step(&mut p, &host);
+    assert_eq!(p.session.sends_lost, sent + 1, "the rest is not carried into the next world");
+    host.execute("assert(closed[1].answer == 'zoning' and closed[1].detail.sent_count == 1 and closed[1].detail.total == 2)").unwrap();
+    assert!(!confirm::has_work());
+}
+
+#[test]
+fn a1_destroy_many_refuses_what_cannot_be_asked() {
+    let (mut p, host) = rig3();
+    ask(&mut p, &host, "return eqoa.actions.destroy_many({})");
+    host.execute("assert(last_err ~= nil and last_err.code == 'invalid_argument')").unwrap();
+    ask(&mut p, &host, "return eqoa.actions.destroy_many('x')");
+    host.execute("assert(last_err ~= nil and last_err.code == 'invalid_argument')").unwrap();
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.destroy_many({inv.items[2].ref, inv.items[2].ref})");
+    host.execute("assert(last_err ~= nil and last_err.code == 'invalid_argument', 'the same item twice')").unwrap();
+    // a gone item never gets as far as the question
+    r6a::refresh(&p, None);
+    host.execute("old = eqoa.inventory.get().items[3].ref").unwrap();
+    p.dump.inventory.items.retain(|it| it.item.name != "Rat Pelt");
+    p.forge_snapshot(None);
+    r6a::refresh(&p, None);
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.destroy_many({inv.items[2].ref, old})");
+    host.execute("assert((last_err and last_err.code) == 'stale_handle' or (results[1] and results[1].code == 'stale_handle'))").unwrap();
+    assert!(!confirm::is_open());
+    // one question at a time, as destroy's
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.destroy_many({inv.items[2].ref})");
+    assert!(confirm::is_open());
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.destroy_many({inv.items[2].ref})");
+    host.execute("assert(results[1].ok == false and results[1].code == 'busy', tostring(last_err and last_err.code))").unwrap();
+    key(NamedKey::Escape);
+}
+
+/// Bag Viewer multi-select: a click says which of Ctrl, Shift and Alt were held. Negative control: before the change the
+/// fields are not there (`ctrl` is nil) and every assertion on them fails.
+#[test]
+fn pointer_pressed_and_wheel_carry_the_modifiers_held() {
+    use crate::fork_ext::addons::{input, pointer_api};
+    use winit::event::{DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+    let (_p, host) = rig();
+    host.execute(
+        "pev, wev = {}, {}; eqoa.events.on('pointer.pressed', function(e) pev[#pev + 1] = e.data end);          eqoa.events.on('pointer.wheel', function(e) wev[#wev + 1] = e.data end)",
+    )
+    .unwrap();
+    let press = || WindowEvent::MouseInput { device_id: DeviceId::dummy(), state: ElementState::Pressed, button: MouseButton::Left };
+    input::set_modifiers((true, false, false));
+    pointer_api::observe(&press(), (1024, 768));
+    input::set_modifiers((false, false, true));
+    pointer_api::observe(&press(), (1024, 768));
+    input::set_modifiers((false, true, false));
+    pointer_api::observe(&WindowEvent::MouseWheel { device_id: DeviceId::dummy(), delta: MouseScrollDelta::LineDelta(0.0, 1.0), phase: winit::event::TouchPhase::Moved }, (1024, 768));
+    input::set_modifiers((false, false, false));
+    pointer_api::observe(&press(), (1024, 768));
+    native_events::dispatch(&host).unwrap();
+    host.execute(
+        "assert(#pev == 3 and #wev == 1, #pev .. ',' .. #wev);          assert(pev[1].ctrl == true and pev[1].shift == false and pev[1].alt == false, 'ctrl');          assert(pev[2].ctrl == false and pev[2].shift == true and pev[2].alt == false, 'shift');          assert(pev[3].ctrl == false and pev[3].shift == false and pev[3].alt == false, 'plain');          assert(pev[1].button == 'left');          assert(wev[1].alt == true and wev[1].ctrl == false and wev[1].shift == false, 'wheel')",
+    )
+    .unwrap();
+}
+
 #[test]
 fn a1_a_worn_item_says_so_in_the_question() {
     let (mut p, host) = rig();

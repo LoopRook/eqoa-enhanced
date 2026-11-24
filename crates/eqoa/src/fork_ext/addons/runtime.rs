@@ -961,7 +961,7 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
                 // its own line (`TEXT_BOXES_LABEL`)
                 "input_text" => continue,
                 // round A1 / A7: these never act on their own: the player's Yes is asked first (`asks_first_label`)
-                "destroy" | "drop_quest" | "guild_kick" | "friend_accept" | "guild_accept" => continue,
+                "destroy" | "destroy_many" | "drop_quest" | "guild_kick" | "friend_accept" | "guild_accept" => continue,
                 // round A8: their own line (`native_a8::crafting_label`)
                 k if k.starts_with("craft_") => continue,
                 // round A5: the same for spending training points and the two Class Mastery steps
@@ -1063,6 +1063,7 @@ pub(crate) fn asks_first_label(caps: &[String]) -> Option<String> {
     let mut steps = Vec::new();
     for (name, words) in [
         ("destroy", "destroy an item"),
+        ("destroy_many", "destroy several items"),
         ("drop_quest", "drop a quest"),
         ("guild_kick", "kick a guild member"),
         ("friend_accept", "accept a friend request"),

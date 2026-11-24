@@ -5,6 +5,27 @@
 local ui = eqoa.imgui
 
 local W, PAD, ROW, ROWS = 220, 8, 15, 12
+
+-- Entries that an EQOA mod does the job of. Choosing one asks that mod to open its window (`eqoa.mods.send`,
+-- the command "open"); with the mod off, missing or refusing, the game's own entry runs as before. The label is
+-- the game's own entry text, compared in lower case with only letters and digits.
+local ROUTES = {
+    { mod = "eqoa_character", labels = { "summary", "character summary", "class mastery", "class masteries", "factions", "combat record" } },
+    { mod = "eqoa_quest_journal", labels = { "quest journal", "quests", "journal" } },
+    { mod = "eqoa_crafting", labels = { "tradeskills", "tradeskill", "recipe book", "recipe books" } },
+    { mod = "eqoa_spellbook", labels = { "spell book", "spellbook", "spells" } },
+    { mod = "eqoa_bag_viewer", labels = { "bags", "bag", "inventory" } },
+    { mod = "eqoa_social", page = "friends", labels = { "friends", "friend list", "buddy list", "buddies" } },
+    { mod = "eqoa_social", page = "ignore", labels = { "ignore", "ignore list" } },
+    { mod = "eqoa_social", page = "guild", labels = { "guild", "guild roster", "guild list" } },
+    { mod = "eqoa_social", page = "who", labels = { "who", "who list" } },
+    { mod = "eqoa_social", page = "lfg", labels = { "group search", "search for group", "looking for group", "find group", "lfg" } },
+}
+local BY_LABEL = {}
+local function norm(s) return (tostring(s or ""):lower():gsub("[^%w]+", "")) end
+for _, r in ipairs(ROUTES) do
+    for _, label in ipairs(r.labels) do BY_LABEL[norm(label)] = r end
+end
 local state = {
     session = nil, path = {}, selected = 1, scroll = 0, tokens = {}, escape = nil,
     hits = {}, rect = nil, note = nil,
@@ -46,9 +67,21 @@ local function close()
     finish()
 end
 
+-- Asks the EQOA mod that does this entry's job to open its window. True when it took the request (the menu is
+-- then closed so the mod's window can open); false leaves the game's entry to run.
+local function open_in_mod(e)
+    local r = BY_LABEL[norm(e.text)]
+    if not r or not state.session then return false end
+    local ok = eqoa.mods.send(r.mod, "open", r.page and { page = r.page } or nil)
+    if not ok then return false end
+    close()
+    return true
+end
+
 local function choose(index)
     local e = entries()[index]
     if not e or not e.enabled then return end
+    if open_in_mod(e) then return end
     if e.entries then
         state.path[#state.path + 1] = index
         state.selected, state.scroll = 1, 0

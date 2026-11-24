@@ -3,6 +3,7 @@
 local ui = eqoa.imgui
 local B = require("bags")
 local HP = require("helpers")
+local X = require("multi") -- multi-select (Ctrl+click, Shift+click): one menu for several items
 
 -- Sizes are in HUD frame pixels (640x448), scaled as the HUD is.
 local W, PAD, SLOT, GAP, LINE = 318, 8, 36, 2, 12
@@ -45,6 +46,7 @@ local function close(from_client)
     end
     B.clear_corpse_hold()
     B.open, B.hover, B.menu, B.menu_rect, B.grid_scroll = false, nil, nil, nil, 0
+    X.clear()
     tab_hits, slot_hits, menu_hits, action_hits, log_rect, grid_rect = {}, {}, {}, {}, nil, nil
     B.tab_hits, B.slot_hits, B.menu_hits, B.action_hits = tab_hits, slot_hits, menu_hits, action_hits
 end
@@ -145,10 +147,24 @@ local function open()
                 B.menu, B.menu_rect = nil, nil
             end
         end
+        if d.button == "right" then
+            -- right-click on a selected item: one menu for every selected item
+            for _, h in ipairs(slot_hits) do
+                if inside(d.x, d.y, h) then
+                    if X.open_menu(h) then pad.msel = 1 end
+                    return
+                end
+            end
+            return
+        end
         if d.button ~= "left" then return end
         for _, h in ipairs(tab_hits) do if inside(d.x, d.y, h) then B.select(h.tab); return end end
         for _, h in ipairs(slot_hits) do
-            if inside(d.x, d.y, h) then B.build_menu(h.item, h.fx, h.fy); return end
+            if inside(d.x, d.y, h) then
+                -- Ctrl+click and Shift+click select; a plain click clears the selection and opens the item's own menu
+                if not X.click(h, d) then B.build_menu(h.item, h.fx, h.fy) end
+                return
+            end
         end
         for _, h in ipairs(action_hits) do
             if inside(d.x, d.y, h) and h.run then h.run(); return end
@@ -171,6 +187,10 @@ end
 
 eqoa.input.bind({id = "open", label = "Bag viewer", default_key = "shift+b"}, function()
     if B.open then close() else open() end
+end)
+-- the Start menu (or another mod) asks for the window
+eqoa.events.on("mod.command", function(e)
+    if e.data.command == "open" then open() end
 end)
 -- The loot log is the one thing kept while the window is closed, from events only.
 B.load_junk()
@@ -232,7 +252,7 @@ end)
 eqoa.events.on("world.leaving", function(e)
     if e.data and e.data.reason == "disconnect" then B.on_disconnect() end
 end)
-eqoa.events.on("state.reset", function() B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); HP.reset(); B.char_dirty = true; B.dirty() end)
+eqoa.events.on("state.reset", function() X.clear(); B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); HP.reset(); B.char_dirty = true; B.dirty() end)
 -- the character is read once the world is up (and again after a new world or login): the Auto-loot choice is per character
 eqoa.events.on("player.changed", function(e)
     -- asked on a new world or login, when the update names another character, and once a second besides
@@ -402,6 +422,11 @@ function draw()
             if not B.menu and p and p.inside_window and inside(p.x, p.y, {x = x0 + sx * k, y = y0 + sy * k, w = SLOT * k, h = SLOT * k}) then
                 over, border = entry, c.white
             end
+            -- a selected slot (Ctrl+click, Shift+click) has a blue outline, kept over the hover and worn colours
+            if X.is_selected(it) then
+                border = c.mark
+                dl:AddRect(at(sx + 1, sy + 1), at(sx + SLOT - 1, sy + SLOT - 1), c.mark)
+            end
         end
         dl:AddRect(p0, p1, border)
     end
@@ -431,7 +456,7 @@ function draw()
         local rcol = B.result.ok == true and c.worn or (B.result.ok == false and c.warn or c.text)
         text(PAD, res_y, B.result.text, rcol, W - 2 * PAD)
     else
-        text(PAD, res_y, "Click an item for actions", c.muted, W - 2 * PAD)
+        text(PAD, res_y, X.hint() or "Click an item for actions", X.n > 0 and c.mark or c.muted, W - 2 * PAD)
     end
 
     fill(PAD, div_y, W - 2 * PAD, 1, c.border)

@@ -44,6 +44,12 @@ thread_local! {
     static OFFER_SEQ: Cell<u64> = const { Cell::new(0) };
 }
 
+/// A mod holds the chat line open (its `chat_entry` session): the character keeps running while it types, as it does in
+/// the game's own chat box.
+pub(crate) fn chat_line_open() -> bool {
+    window_sessions::of_kind("chat_entry").is_some()
+}
+
 fn refuse(code: &'static str, reason: impl Into<String>) -> DispatchOutcome {
     DispatchOutcome::Refused { code, reason: reason.into() }
 }

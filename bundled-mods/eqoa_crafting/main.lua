@@ -168,6 +168,9 @@ end
 eqoa.input.bind({ id = "open", label = "Crafting", default_key = "shift+r" }, function()
     if state.open then close() else open() end
 end)
+eqoa.events.on("mod.command", function(e)
+    if e.data.command == "open" then open() end
+end)
 eqoa.events.on("disabling", function() close() end)
 eqoa.events.on("world.leaving", function() close() end)
 

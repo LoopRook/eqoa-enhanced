@@ -9,5 +9,8 @@ local C = require("character")
 eqoa.input.bind({ id = "open", label = "Character", default_key = "shift+c" }, function()
     if C.is_open() then C.close() else C.open("key") end
 end)
+eqoa.events.on("mod.command", function(e)
+    if e.data.command == "open" then C.open("mod") end
+end)
 eqoa.events.on("disabling", function() C.close() end)
 eqoa.events.on("world.leaving", function() C.close() end)

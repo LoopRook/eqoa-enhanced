@@ -5,7 +5,7 @@
 //! the shipped source with one line of the feature changed (`mutated`), which must give the other answer.
 use mlua::{Lua, Table};
 
-fn source(path: &str) -> String {
+pub(super) fn source(path: &str) -> String {
     let file = crate::fork_ext::bundled::EMBEDDED_FILES
         .iter()
         .find(|f| f.path == path)
@@ -13,7 +13,7 @@ fn source(path: &str) -> String {
     std::str::from_utf8(file.data).unwrap().to_string()
 }
 
-const FIXTURE: &str = r##"
+pub(super) const FIXTURE: &str = r##"
 NOW = 100.0
 os.clock = function() return NOW end
 TALKS, BATCHES, SELLS, TAKEOVERS, RELEASED, LOG, CHAT, FILES, SENT_CHAT = {}, {}, {}, {}, {}, {}, {}, {}, {}

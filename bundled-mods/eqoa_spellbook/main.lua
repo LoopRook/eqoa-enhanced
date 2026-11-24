@@ -333,6 +333,9 @@ end
 eqoa.input.bind({ id = "open", label = "Spellbook", default_key = "shift+k" }, function()
     if state.open then close() else open("key") end
 end)
+eqoa.events.on("mod.command", function(e)
+    if e.data.command == "open" then open("mod") end
+end)
 eqoa.events.on("disabling", function() close() end)
 eqoa.events.on("world.leaving", function() close() end)
 

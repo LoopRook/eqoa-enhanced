@@ -199,6 +199,7 @@ pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
             }
         }
         Act::Destroy { .. }
+        | Act::DestroyMany { .. }
         | Act::DropQuest { .. }
         | Act::AcceptOffer { .. }
         | Act::GuildKick { .. }

@@ -187,8 +187,8 @@ fn install_event_fields(lua: &mlua::Lua) {
         ),
         ("input.key", "key down repeat synthetic text"),
         ("input.pad", "before after"),
-        ("pointer.pressed", "x y inside_window button"),
-        ("pointer.wheel", "x y inside_window steps"),
+        ("pointer.pressed", "x y inside_window button ctrl shift alt"),
+        ("pointer.wheel", "x y inside_window steps ctrl shift alt"),
         ("resource.ready", "kind handle request value path"),
         ("resource.failed", "kind handle error request"),
         (
