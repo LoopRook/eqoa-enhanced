@@ -233,6 +233,17 @@ fn may_divert() -> bool {
     !window_takeover::use_game_windows() && !env.away && !env.dead
 }
 
+/// The menu was undone just above, after `a1_play::tick` had judged this step with the game's own menu up (mode 13): play
+/// was not plain for the rest of the step, and the pad focus the mod asks for as its session opens (`windows.focus`,
+/// `window_sessions::focus`: "a window or box of the game is up") was refused, so a controller's d-pad never reached
+/// the mod's menu. Judged again, as `a1_play::tick` does.
+fn refresh_plain(play: &mut Play) {
+    let mut env = window_sessions::env();
+    env.plain = !env.away && play.addon_input_available() && !play.map.open;
+    env.passable = env.plain && play.mode == 0;
+    window_sessions::set_env(env);
+}
+
 fn start_menu(play: &mut Play) {
     drop_if_not_held(TakeoverKind::StartMenu);
     let Some((vm, addon)) = holder(TakeoverKind::StartMenu) else {
@@ -269,6 +280,7 @@ fn start_menu(play: &mut Play) {
         }
         (None, Some(data)) => {
             window_sessions::open_client(vm, &addon, "start_menu", "key", data);
+            refresh_plain(play);
         }
         (None, None) => {}
     }

@@ -7,27 +7,30 @@ local ui = eqoa.imgui
 local W, PAD, ROW, ROWS = 220, 8, 15, 12
 
 -- Entries that an EQOA mod does the job of. Choosing one asks that mod to open its window (`eqoa.mods.send`,
--- the command "open"); with the mod off, missing or refusing, the game's own entry runs as before. The label is
--- the game's own entry text, compared in lower case with only letters and digits.
+-- the command "open"); with the mod off, missing or refusing, the game's own entry runs as before. An entry is
+-- known by the game's command (its message, the part of "0x3020000:0" before the colon), not by its label: labels are
+-- the server's to word, and the same word is on different entries ("Guild" is a sub-menu of Community and a chat
+-- mode). Only entries that run a command are routed, never a sub-menu, so every sub-menu stays open to browse. The
+-- game's labels on the disc's tables, for the record: Community (Who, Guild, Group, Buddy List, Chat Modes, Message,
+-- Mail, Trade, Ignore, Show Shouts, Hide Shouts), Character (Summary, Tradeskills, Class Mastery and Factions with
+-- the expansion), Inventory, Ability, Pet, Quest, Support, Options, Quit.
 local ROUTES = {
-    { mod = "eqoa_character", labels = { "summary", "character summary", "class mastery", "class masteries", "factions", "combat record" } },
-    { mod = "eqoa_quest_journal", labels = { "quest journal", "quests", "journal" } },
-    { mod = "eqoa_crafting", labels = { "tradeskills", "tradeskill", "recipe book", "recipe books" } },
-    { mod = "eqoa_spellbook", labels = { "spell book", "spellbook", "spells" } },
-    { mod = "eqoa_bag_viewer", labels = { "bags", "bag", "inventory" } },
-    { mod = "eqoa_social", page = "friends", labels = { "friends", "friend list", "buddy list", "buddies" } },
-    { mod = "eqoa_social", page = "ignore", labels = { "ignore", "ignore list" } },
-    { mod = "eqoa_social", page = "guild", labels = { "guild", "guild roster", "guild list" } },
-    { mod = "eqoa_social", page = "who", labels = { "who", "who list" } },
-    { mod = "eqoa_social", page = "lfg", labels = { "group search", "search for group", "looking for group", "find group", "lfg" } },
+    ["0x3020000"] = { mod = "eqoa_character" },                   -- Character > Summary
+    ["0x2080000"] = { mod = "eqoa_character" },                   -- Character > Class Mastery
+    ["0xaa000001"] = { mod = "eqoa_character" },                  -- Character > Factions
+    ["0x7e20001"] = { mod = "eqoa_character" },                   -- Character > Combat Record (servers that offer it)
+    ["0xb0a0000"] = { mod = "eqoa_quest_journal" },               -- Quest
+    ["0xa7010000"] = { mod = "eqoa_crafting" },                   -- Tradeskills > Recipe Book > a skill's book
+    ["0x2000000"] = { mod = "eqoa_bag_viewer" },                  -- Inventory
+    ["0x8010000"] = { mod = "eqoa_spellbook" },                   -- Ability (the game's own page with the mod off)
+    ["0xb030004"] = { mod = "eqoa_social", page = "who" },        -- Community > Who
+    ["0xb050000"] = { mod = "eqoa_social", page = "friends" },    -- Community > Buddy List > View List
+    ["0xb053000"] = { mod = "eqoa_social", page = "ignore" },     -- Community > Ignore > View List
+    ["0xb051001"] = { mod = "eqoa_social", page = "guild" },      -- Community > Guild > Guild List
+    ["0x2090000"] = { mod = "eqoa_social", page = "lfg" },        -- Community > Group > Group Search (live servers)
 }
-local BY_LABEL = {}
-local function norm(s) return (tostring(s or ""):lower():gsub("[^%w]+", "")) end
-for _, r in ipairs(ROUTES) do
-    for _, label in ipairs(r.labels) do BY_LABEL[norm(label)] = r end
-end
 local state = {
-    session = nil, path = {}, selected = 1, scroll = 0, tokens = {}, escape = nil,
+    session = nil, path = {}, selected = 1, scroll = 0, tokens = {}, escape = nil, enter = nil,
     hits = {}, rect = nil, note = nil,
 }
 
@@ -70,12 +73,29 @@ end
 -- Asks the EQOA mod that does this entry's job to open its window. True when it took the request (the menu is
 -- then closed so the mod's window can open); false leaves the game's entry to run.
 local function open_in_mod(e)
-    local r = BY_LABEL[norm(e.text)]
+    local msg = e.command and e.command:match("^(0x%x+):")
+    local r = msg and ROUTES[msg]
     if not r or not state.session then return false end
     local ok = eqoa.mods.send(r.mod, "open", r.page and { page = r.page } or nil)
     if not ok then return false end
     close()
     return true
+end
+
+-- The game's own Support entries (Request Help, Help Status, Send Report) are the player's to press in the game's own
+-- menu: the client never runs a report route for a mod, so this menu would do nothing. They hand the player over to the
+-- game's own Start menu the way Items does (the one entry the client marks `native`), and the session ends.
+local function is_report_route(e)
+    return e.command ~= nil and e.command:match("^0xb0b1%x%x%x:") ~= nil
+end
+
+local function native_command(list)
+    for _, e in ipairs(list or {}) do
+        if e.native and e.command then return e.command end
+        local found = e.entries and native_command(e.entries)
+        if found then return found end
+    end
+    return nil
 end
 
 local function choose(index)
@@ -85,6 +105,14 @@ local function choose(index)
     if e.entries then
         state.path[#state.path + 1] = index
         state.selected, state.scroll = 1, 0
+    elseif is_report_route(e) and state.session then
+        local command = native_command(state.session.data and state.session.data.entries)
+        if not command then
+            state.note = "Support is in the game's own Start menu"
+            return
+        end
+        local _, err = eqoa.actions.menu_command(state.session.ref, command)
+        if err then state.note = err.message or err.code end
     elseif e.command and state.session then
         -- the client ends this session when the game's entry runs
         local _, err = eqoa.actions.menu_command(state.session.ref, e.command)
@@ -154,12 +182,17 @@ local function show(session)
         end
     end)
     state.escape = eqoa.input.claim("Escape", true)
+    -- Enter chooses here. Left to the game it would also open the game's chat line in the same press, and the chat
+    -- mod takes that line: its box then held the keyboard under the page the entry opened (owner test 2026-11-24:
+    -- Ability, then nothing answered).
+    state.enter = eqoa.input.claim("Enter", true)
 end
 
 function finish()
     for _, token in ipairs(state.tokens) do eqoa.events.off(token) end
     state.tokens = {}
     if state.escape then eqoa.input.release(state.escape); state.escape = nil end
+    if state.enter then eqoa.input.release(state.enter); state.enter = nil end
     state.session, state.hits, state.rect, state.path = nil, {}, nil, {}
 end
 
