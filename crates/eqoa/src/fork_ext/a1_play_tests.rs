@@ -326,6 +326,28 @@ fn a1_destroy_many_never_takes_a_worn_stack_asked_for_or_put_on_during_the_run()
 }
 
 #[test]
+fn a1_destroy_many_with_a_full_pack_names_twelve_stacks_and_counts_the_rest_so_yes_and_no_stay_on_screen() {
+    let (mut p, host) = rig();
+    // 40 stacks (the pack's size): the worn sword is dropped from the list, 39 plain ones are asked about
+    p.dump.inventory.items.retain(|it| it.equip_slot == -1);
+    for n in 0..39 {
+        p.dump.inventory.items.push(item(901_000 + n, &format!("Pebble {n:02}"), 100 + n as u32, 1, -1, -1));
+    }
+    p.forge_snapshot(None);
+    r6a::refresh(&p, None);
+    ask(&mut p, &host, "local t = {} for _, it in ipairs(eqoa.inventory.get().items) do t[#t + 1] = it.ref end return eqoa.actions.destroy_many(t)");
+    host.execute("assert(results[1].ok == true and results[1].detail.asked == true, tostring(last_err and last_err.message))").unwrap();
+    let q = confirm::current_for_test().expect("the question is up");
+    assert!(q.text.starts_with("Destroy these 40 items?"), "{}", q.text);
+    let lines: Vec<&str> = q.text.lines().collect();
+    // negative control: one line per stack (the old text) is 41 lines and has no "...and N more"
+    assert_eq!(lines.len(), 1 + confirm::MAX_LISTED + 1, "heading, {} stacks, the count of the rest: {}", confirm::MAX_LISTED, q.text);
+    assert_eq!(*lines.last().unwrap(), "...and 28 more");
+    assert!(lines[1].contains("Iron Ore") && !q.text.contains("Pebble 20"), "{}", q.text);
+    key(NamedKey::Escape);
+}
+
+#[test]
 fn a1_destroy_many_refuses_what_cannot_be_asked() {
     let (mut p, host) = rig3();
     ask(&mut p, &host, "return eqoa.actions.destroy_many({})");

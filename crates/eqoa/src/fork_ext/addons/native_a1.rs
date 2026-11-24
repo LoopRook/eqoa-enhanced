@@ -286,6 +286,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     }
     // Bag Viewer multi-select: one question for a list of whole stacks (never more than the pack holds at once)
     const MAX_DESTROY_MANY: usize = 64;
+    describe(lua, "eqoa.actions.destroy_many", "supported", Some(ROUND), "");
     bind(
         lua,
         "actions",

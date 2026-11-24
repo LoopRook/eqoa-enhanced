@@ -187,8 +187,8 @@ fn install_event_fields(lua: &mlua::Lua) {
         ),
         ("input.key", "key down repeat synthetic text"),
         ("input.pad", "before after"),
-        ("pointer.pressed", "x y inside_window button ctrl shift alt"),
-        ("pointer.wheel", "x y inside_window steps ctrl shift alt"),
+        ("pointer.pressed", "x y inside_window button"),
+        ("pointer.wheel", "x y inside_window steps"),
         ("resource.ready", "kind handle request value path"),
         ("resource.failed", "kind handle error request"),
         (
@@ -229,6 +229,12 @@ fn install_event_fields(lua: &mlua::Lua) {
     // The press as the game names it, the modifiers held written before the key
     // ("ctrl+u"): what a key binding is matched by (round 7).
     super::native::describe(lua, "eqoa.events.input.key.data.combo", "supported", Some(7), "");
+    // Which modifiers were held at a press or a wheel step (added with the Bag Viewer's multi-select, round 8)
+    for event in ["pointer.pressed", "pointer.wheel"] {
+        for field in ["ctrl", "shift", "alt"] {
+            super::native::describe(lua, &format!("eqoa.events.{event}.data.{field}"), "supported", Some(8), "");
+        }
+    }
     // Who closed a corpse window: only on `loot.changed` with cause `close` (after the 0.7.0 release)
     super::native::describe(lua, "eqoa.events.loot.changed.data.closed_by", "supported", Some(7), "");
 }

@@ -355,7 +355,8 @@ pub(crate) fn draw(ui: &Ui) {
     ui.window(WINDOW)
         // in front of every mod window, every frame it is shown (an earlier-drawn window never covers it)
         .focused(true)
-        .position([(w - width) * 0.5, h * 0.35], Condition::Always)
+        // a long list starts near the top so the buttons below it stay on the screen
+        .position([(w - width) * 0.5, if p.text.lines().count() > 6 { h * 0.08 } else { h * 0.35 }], Condition::Always)
         .size([width, 0.0], Condition::Always)
         .flags(WindowFlags::NO_COLLAPSE | WindowFlags::NO_MOVE | WindowFlags::NO_SAVED_SETTINGS | WindowFlags::ALWAYS_AUTO_RESIZE)
         .build(|| {
@@ -397,9 +398,9 @@ pub(crate) fn destroy_text(name: &str, count: i64, worn: bool, quick_slot: bool,
 pub(crate) fn destroy_many_text(items: &[(String, i64, bool, bool, bool)]) -> String {
     let noun = if items.len() == 1 { "item" } else { "items" };
     let mut text = format!("Destroy these {} {noun}? It cannot be undone.", items.len());
-    for (name, count, worn, quick_slot, no_trade) in items {
-        text.push_str(&format!("
-- {}", if *count > 1 { format!("{count} x \"{name}\"") } else { format!("\"{name}\"") }));
+    // the window must keep Yes and No on the screen: past this many lines the rest is only counted
+    for (name, count, worn, quick_slot, no_trade) in items.iter().take(MAX_LISTED) {
+        text.push_str(&format!("\n- {}", if *count > 1 { format!("{count} x \"{name}\"") } else { format!("\"{name}\"") }));
         if *worn {
             text.push_str(" (worn)");
         }
@@ -410,8 +411,15 @@ pub(crate) fn destroy_many_text(items: &[(String, i64, bool, bool, bool)]) -> St
             text.push_str(" (NO TRADE)");
         }
     }
+    if items.len() > MAX_LISTED {
+        text.push_str(&format!("\n...and {} more", items.len() - MAX_LISTED));
+    }
     text
 }
+
+/// How many stacks a group question names one by one (the rest are counted): 12 lines with the heading and the buttons
+/// fit a 720p window from the top of the screen.
+pub(crate) const MAX_LISTED: usize = 12;
 
 pub(crate) fn drop_quest_text(title: &str) -> String {
     format!("Drop the quest \"{title}\"? Its progress is lost.")
