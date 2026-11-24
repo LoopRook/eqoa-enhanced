@@ -1136,6 +1136,8 @@ mod mods {
         }
 
         fn settle(&mut self) {
+            // the game's own snapshot of the pack, the bank and the world, as the client takes it
+            self.p.forge_snapshot(None);
             step(&mut self.p, &self.host);
             self.frames(2);
         }
