@@ -44,6 +44,9 @@ mod visibility_stub {
         pub breath: bool,
         pub spell_bars: bool,
         pub utility_bars: bool,
+        pub name_plates: bool,
+        pub damage_numbers: bool,
+        pub target_rings: bool,
     }
     impl PublishedVisibility {
         pub fn player_hidden(&self) -> bool {
@@ -55,6 +58,19 @@ mod visibility_stub {
 #[cfg(target_arch = "wasm32")]
 fn published<F: FnOnce(&visibility_stub::PublishedVisibility) -> bool>(_: F) -> bool {
     true
+}
+
+/// Round A12: a mod holds the game's name plates, floating damage numbers or target rings (it draws its own).
+pub(crate) fn plates_hidden() -> bool {
+    !published(|v| !v.name_plates)
+}
+
+pub(crate) fn damage_hidden() -> bool {
+    !published(|v| !v.damage_numbers)
+}
+
+pub(crate) fn rings_hidden() -> bool {
+    !published(|v| !v.target_rings)
 }
 
 pub(crate) fn compass_visible(_s: &HudState) -> bool {

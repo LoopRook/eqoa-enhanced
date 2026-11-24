@@ -629,6 +629,30 @@
       "count": 1
     },
     {
+      "path": "crates/eqoa/src/play.rs",
+      "name": "A12 name plates hidden",
+      "pattern": "fork_hud::plates_hidden\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/play.rs",
+      "name": "A12 damage numbers hidden",
+      "pattern": "fork_hud::damage_hidden\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/play.rs",
+      "name": "A12 target rings hidden",
+      "pattern": "fork_hud::rings_hidden\\(",
+      "count": 1
+    },
+    {
+      "path": "crates/eqoa/src/viewer.rs",
+      "name": "A12 frame view for camera.project",
+      "pattern": "fork_report::view\\(",
+      "count": 1
+    },
+    {
       "path": "crates/eqoa/src/raidplay.rs",
       "name": "raid strip takeover hooks",
       "pattern": "fork_win::(run_strips|roll_key|roll_point|rolls_up)\\(",

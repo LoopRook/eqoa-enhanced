@@ -209,6 +209,11 @@ mod tests {
     }
 }
 
+/// Round A12: this frame's view for `eqoa.camera.project`, before the mods' Lua runs over the frame.
+pub(super) fn view(view_proj: glam::Mat4, size: (u32, u32)) {
+    crate::fork_ext::addons::native_a12::set_view(view_proj, size);
+}
+
 /// Run Lua before the native HUD consumes its drawing, but record the ImGui
 /// overlay separately: submission stays after the scene's final scale resolve.
 pub(super) fn prepare_addons(

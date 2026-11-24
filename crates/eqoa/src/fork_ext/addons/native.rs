@@ -997,6 +997,8 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ("factions", "list", 8),
         ("combat", "record", 8),
         ("actions", "train_stats request_factions request_combat_record", 8),
+        // round A12: world overlays
+        ("camera", "project", 8),
     ] {
         let module_path = format!("eqoa.{module}");
         let backing = match modules.get::<Value>(module)? {
@@ -1141,6 +1143,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_a1::install(host)?;
     super::native_a6::install(host)?;
     super::native_a8::install(host)?;
+    super::native_a12::install(host)?;
     super::native_a7::install(host)?;
     super::native_a5::install(host)?;
     super::frame_actions::install(host)?;
