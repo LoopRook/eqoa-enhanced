@@ -497,7 +497,7 @@ fn a9_trade_offers_follow_the_game_and_accepting_asks_the_player_first() {
     let q = confirm::current_for_test().expect("the question is up");
     assert!(!q.yes, "it starts on No");
     assert!(q.text.contains("Rusty Sword") && q.text.contains("250 tunar") && q.text.contains("Hero") == false, "{}", q.text);
-    assert!(q.text.contains("You give") && q.text.contains("You get: nothing"), "{}", q.text);
+    assert!(q.text.starts_with("You give") && q.text.contains("you get nothing. Trade?"), "{}", q.text);
     // Enter on No sends nothing
     key(NamedKey::Enter);
     step(&mut p, &host);

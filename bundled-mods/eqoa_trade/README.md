@@ -1,0 +1,10 @@
+# EQOA Trade
+
+Off by default. Enable it in Mods & Addons (F10); before you enable it, the list shows **Provides: Trade and duel windows**, **Replaces game windows: Trade, Duel** and what it can do, including **Asks you first: accept a trade or a duel wager**. With the mod off, the game's own trade and duel windows are unchanged.
+
+- **A request prompt.** When another player asks to trade, a small **Request** box shows their name with **Accept** and **Decline**. If you do not answer, it is refused for you after 45 seconds (the countdown is shown). A duel invitation uses the same box (name, level and class, about 20 seconds). **Show in game** hands that request back to the game's own window.
+- **The trade window.** Shows what you offer and what they offer, with the coins on each side; hover an item for its name and quantity. **Right-click** an item in "Your items" to offer one (**Shift+right-click** offers the whole stack); **Take back** takes an item out of your offer. Type a number in the coin box and press **Enter** (or **Set**) to offer coins.
+- **Accept.** **Accept** asks the game's own question, "You give X, you get Y. Trade?", starting on **No**; only your own Yes accepts, and nothing changes hands without it. If either side changes the offer, the accept is taken back for you and the window says so. **Take back accept** and **Cancel** are always there.
+- **Duels.** Accepting a duel invitation opens the same window as a wager (items and coins staked by both sides); **Accept** there asks the same question before the duel is set.
+
+Mods & Addons shows what it can do before you enable it. The mod uses `eqoa.trade.get`, `eqoa.duel.get`, the actions `trade_answer`, `trade_add`, `trade_remove`, `trade_money`, `trade_accept`, `trade_unaccept`, `trade_cancel` and `duel_answer`, and holds the window kinds `trade_ask`, `trade`, `duel_invite` and `duel` (round A9).

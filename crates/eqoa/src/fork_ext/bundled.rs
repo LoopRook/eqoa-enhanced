@@ -45,6 +45,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_social",
     "eqoa_start_menu",
     "eqoa_chat",
+    "eqoa_trade",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -207,6 +208,31 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_bag_viewer/modules/multi.lua",
         package: "eqoa_bag_viewer",
         data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/modules/multi.lua"),
+    },
+    BundledFile {
+        path: "eqoa_bag_viewer/modules/repair.lua",
+        package: "eqoa_bag_viewer",
+        data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/modules/repair.lua"),
+    },
+    BundledFile {
+        path: "eqoa_trade/mod.json",
+        package: "eqoa_trade",
+        data: include_bytes!("../../../../bundled-mods/eqoa_trade/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_trade/main.lua",
+        package: "eqoa_trade",
+        data: include_bytes!("../../../../bundled-mods/eqoa_trade/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_trade/README.md",
+        package: "eqoa_trade",
+        data: include_bytes!("../../../../bundled-mods/eqoa_trade/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_trade/modules/tradeui.lua",
+        package: "eqoa_trade",
+        data: include_bytes!("../../../../bundled-mods/eqoa_trade/modules/tradeui.lua"),
     },
     BundledFile {
         path: "eqoa_bag_viewer/README.md",

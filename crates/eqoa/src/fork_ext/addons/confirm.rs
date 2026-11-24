@@ -439,16 +439,11 @@ pub(crate) fn friend_accept_text(name: &str) -> String {
 }
 
 /// The question for accepting a trade or a duel's wager: what each side gives, as the window shows it now.
-pub(crate) fn trade_accept_text(duel: bool, partner: &str, gives: &[String], gets: &[String]) -> String {
+pub(crate) fn trade_accept_text(duel: bool, _partner: &str, gives: &[String], gets: &[String]) -> String {
     let list = |lines: &[String]| {
         if lines.is_empty() { "nothing".to_string() } else { lines.join(", ") }
     };
-    let what = if duel { "the duel's wager" } else { "the trade" };
-    format!(
-        "Accept {what} with \"{partner}\"? You give: {}. You get: {}. It cannot be undone once both accept.",
-        list(gives),
-        list(gets)
-    )
+    format!("You give {}, you get {}. {}", list(gives), list(gets), if duel { "Start the duel?" } else { "Trade?" })
 }
 
 pub(crate) fn guild_accept_text(inviter: &str, guild: &str) -> String {
