@@ -154,9 +154,19 @@ fn holder(kind: TakeoverKind) -> Option<(u64, String)> {
 
 /// Something of round A9 is held or wanted: the per-step work has something to do.
 fn engaged() -> bool {
-    local(|l| l.ask.is_some() || l.trade.is_some() || l.invite.is_some() || l.wager.is_some() || l.smith.is_some() || !l.parked.is_empty() || !l.owed.is_empty())
+    hidden_active()
+        || local(|l| !l.parked.is_empty() || !l.owed.is_empty())
         || TakeoverKind::A9.iter().any(|k| window_takeover::is_taken(*k))
         || native_core::capture_requested()
+}
+
+/// Whether a mod currently holds a hidden trade request, trade window, duel invitation, duel wager, or blacksmith
+/// window (leaving `play.mode == 0`). Checked by `a11_play::hidden_held()` so server windows do not open over them.
+pub(crate) fn hidden_active() -> bool {
+    LOCAL.with(|l| {
+        let l = l.borrow();
+        l.ask.is_some() || l.trade.is_some() || l.invite.is_some() || l.wager.is_some() || l.smith.is_some()
+    })
 }
 
 fn class_name(id: i32) -> Option<String> {

@@ -25,6 +25,7 @@ fn ready() -> Play {
     ws::reset_for_test();
     window_takeover::reset_all_for_test();
     confirm::reset_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
     super::dropped();
     SENT.with(|s| s.borrow_mut().clear());
     let mut p = super::super::tests::play();

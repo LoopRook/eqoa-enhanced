@@ -995,6 +995,15 @@ pub(crate) fn install(host: &Host) -> Result<()> {
             "trade_answer trade_add trade_remove trade_money trade_accept trade_unaccept trade_cancel duel_answer blacksmith_repair blacksmith_close",
             8,
         ),
+        // round A11: the mercenary windows, the dye picker and fishing
+        ("merc", "get", 8),
+        ("dye", "get", 8),
+        ("fishing", "get", 8),
+        (
+            "actions",
+            "merc_give merc_equip merc_unequip merc_take merc_stock merc_spell_set merc_spells_clear merc_dismiss dye_pick dye_no_dye dye_cancel fishing_cast fishing_release fishing_reel fishing_keep fishing_pull fishing_cancel",
+            8,
+        ),
         // round A10: mail and the auction
         ("mail", "get", 8),
         ("auction", "get", 8),
@@ -1164,6 +1173,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_a6::install(host)?;
     super::native_a8::install(host)?;
     super::native_a9::install(host)?;
+    super::native_a11::install(host)?;
     super::native_a12::install(host)?;
     super::native_a10::install(host)?;
     super::native_a7::install(host)?;
@@ -1354,7 +1364,7 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.guild.Guild", "members") => Some("eqoa.guild.GuildMember"),
         ("eqoa.who.WhoState", "entries") => Some("eqoa.who.WhoEntry"),
         ("eqoa.lfg.LfgState", "entries") => Some("eqoa.lfg.LfgEntry"),
-        _ => None,
+        _ => super::native_a11::nested_type(path, key),
     }
 }
 fn install_fields(lua: &Lua) {

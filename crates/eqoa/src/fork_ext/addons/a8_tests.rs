@@ -203,7 +203,7 @@ fn a8_arguments_are_checked_before_anything_is_queued() {
 }
 
 #[test]
-fn a8_a_mod_may_open_the_two_crafting_windows_and_the_fishing_window_is_still_not_one() {
+fn a8_a_mod_may_open_the_two_crafting_windows_and_support_inbox_is_still_not_one() {
     fresh();
     let h = host(&["eqoa.windows.session", "eqoa.events.on"]);
     h.execute(
@@ -212,10 +212,10 @@ fn a8_a_mod_may_open_the_two_crafting_windows_and_the_fishing_window_is_still_no
         local b = assert(eqoa.windows.open_session('experiment'))
         assert(a.kind == 'recipe_book' and a.title == 'Recipe Book' and b.kind == 'experiment' and b.title == 'Experiment')
         assert(eqoa.windows.session('recipe_book').ref == a.ref)
-        local t, e = eqoa.windows.open_session('fishing')
+        local t, e = eqoa.windows.open_session('support_inbox')
         assert(t == nil and e.code == 'unsupported', e and e.code)
-        -- round A9: the trade, duel and blacksmith windows are the server's: held with takeover, never opened by a mod
-        for _, kind in ipairs({'blacksmith', 'trade', 'trade_ask', 'duel', 'duel_invite'}) do
+        -- rounds A9 and A11: the trade, duel, blacksmith, mercenary, dye and fishing windows are the server's: held with takeover, never opened by a mod
+        for _, kind in ipairs({'blacksmith', 'trade', 'trade_ask', 'duel', 'duel_invite', 'mercenary_items', 'mercenary_spells', 'dye_picker', 'fishing'}) do
             local t2, e2 = eqoa.windows.open_session(kind)
             assert(t2 == nil and e2.code == 'invalid_argument', kind .. ': ' .. tostring(e2 and e2.code))
         end

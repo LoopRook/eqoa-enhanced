@@ -76,8 +76,17 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.dialog_answer` | supported | 6 |  |
 | `eqoa.actions.drop_quest` | supported | 6 |  |
 | `eqoa.actions.duel_answer` | supported | 8 |  |
+| `eqoa.actions.dye_cancel` | supported | 8 |  |
+| `eqoa.actions.dye_no_dye` | supported | 8 |  |
+| `eqoa.actions.dye_pick` | supported | 8 |  |
 | `eqoa.actions.emote` | supported | 8 |  |
 | `eqoa.actions.equip` | supported | 6 |  |
+| `eqoa.actions.fishing_cancel` | supported | 8 |  |
+| `eqoa.actions.fishing_cast` | supported | 8 |  |
+| `eqoa.actions.fishing_keep` | supported | 8 |  |
+| `eqoa.actions.fishing_pull` | supported | 8 |  |
+| `eqoa.actions.fishing_reel` | supported | 8 |  |
+| `eqoa.actions.fishing_release` | supported | 8 |  |
 | `eqoa.actions.follow` | supported | 6 |  |
 | `eqoa.actions.friend_accept` | supported | 8 |  |
 | `eqoa.actions.friend_add` | supported | 8 |  |
@@ -114,6 +123,14 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.mastery_refund` | supported | 6 |  |
 | `eqoa.actions.mastery_share` | supported | 6 |  |
 | `eqoa.actions.menu_command` | supported | 6 |  |
+| `eqoa.actions.merc_dismiss` | supported | 8 |  |
+| `eqoa.actions.merc_equip` | supported | 8 |  |
+| `eqoa.actions.merc_give` | supported | 8 |  |
+| `eqoa.actions.merc_spell_set` | supported | 8 |  |
+| `eqoa.actions.merc_spells_clear` | supported | 8 |  |
+| `eqoa.actions.merc_stock` | supported | 8 |  |
+| `eqoa.actions.merc_take` | supported | 8 |  |
+| `eqoa.actions.merc_unequip` | supported | 8 |  |
 | `eqoa.actions.move` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 8) |
 | `eqoa.actions.open_link` | supported | 2 |  |
 | `eqoa.actions.open_loot` | supported | 6 |  |
@@ -261,6 +278,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.duel` | supported | 8 |  |
 | `eqoa.duel.get` | supported | 8 |  |
 
+## eqoa.dye
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.dye` | supported | 8 |  |
+| `eqoa.dye.get` | supported | 8 |  |
+
 ## eqoa.effects
 
 | Path | Status | Since round | Reason |
@@ -318,6 +342,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.files.remove` | supported | 2 |  |
 | `eqoa.files.save_json_async` | supported | 4 |  |
 | `eqoa.files.write` | supported | 2 |  |
+
+## eqoa.fishing
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.fishing` | supported | 8 |  |
+| `eqoa.fishing.get` | supported | 8 |  |
 
 ## eqoa.fonts
 
@@ -554,6 +585,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.math.radians` | supported | 2 |  |
 | `eqoa.math.signed_angle` | supported | 2 |  |
 
+## eqoa.merc
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.merc` | supported | 8 |  |
+| `eqoa.merc.get` | supported | 8 |  |
+
 ## eqoa.merchant
 
 | Path | Status | Since round | Reason |
@@ -732,12 +770,14 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.cooldown.updated` | supported | 2 |  |
 | `eqoa.events.disabling` | supported | 2 |  |
 | `eqoa.events.duel.changed` | supported | 8 |  |
+| `eqoa.events.dye.changed` | supported | 8 |  |
 | `eqoa.events.effects.changed` | supported | 2 |  |
 | `eqoa.events.enabled` | supported | 2 |  |
 | `eqoa.events.entity.added` | supported | 2 |  |
 | `eqoa.events.entity.changed` | supported | 2 |  |
 | `eqoa.events.entity.removed` | supported | 2 |  |
 | `eqoa.events.events.dropped` | supported | 2 |  |
+| `eqoa.events.fishing.changed` | supported | 8 |  |
 | `eqoa.events.friends.changed` | supported | 8 |  |
 | `eqoa.events.group.changed` | supported | 2 |  |
 | `eqoa.events.guide.lost` | supported | 4 |  |
@@ -752,6 +792,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.loot.changed` | supported | 5 |  |
 | `eqoa.events.map.changed` | supported | 4 |  |
 | `eqoa.events.mastery.changed` | supported | 6 |  |
+| `eqoa.events.merc.changed` | supported | 8 |  |
 | `eqoa.events.merchant.changed` | supported | 5 |  |
 | `eqoa.events.mod.command` | supported | 4 |  |
 | `eqoa.events.player.changed` | supported | 2 |  |
@@ -1082,6 +1123,16 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.duel.State.revision` | supported | 8 |  |
 | `eqoa.duel.State.seconds_remaining` | supported | 8 |  |
 | `eqoa.duel.State.state` | supported | 8 |  |
+| `eqoa.dye.State` | supported | 8 |  |
+| `eqoa.dye.State.alpha` | supported | 8 |  |
+| `eqoa.dye.State.current` | supported | 8 |  |
+| `eqoa.dye.State.no_dye` | supported | 8 |  |
+| `eqoa.dye.State.open` | supported | 8 |  |
+| `eqoa.dye.State.revision` | supported | 8 |  |
+| `eqoa.dye.State.slots` | supported | 8 |  |
+| `eqoa.dye.State.target` | supported | 8 |  |
+| `eqoa.dye.State.title` | supported | 8 |  |
+| `eqoa.dye.State.token` | supported | 8 |  |
 | `eqoa.effects.Buff` | supported | 8 |  |
 | `eqoa.effects.Buff.description` | supported | 8 |  |
 | `eqoa.effects.Buff.icon` | supported | 8 |  |
@@ -1241,6 +1292,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.duel.changed.data.after` | supported | 8 |  |
 | `eqoa.events.duel.changed.data.before` | supported | 8 |  |
 | `eqoa.events.duel.changed.data.changed` | supported | 8 |  |
+| `eqoa.events.dye.changed.data.open` | supported | 8 |  |
+| `eqoa.events.dye.changed.data.revision` | supported | 8 |  |
 | `eqoa.events.effects.changed.data.after` | supported | 2 |  |
 | `eqoa.events.effects.changed.data.before` | supported | 2 |  |
 | `eqoa.events.effects.changed.data.changed` | supported | 2 |  |
@@ -1258,6 +1311,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.events.dropped.data.first_seq` | supported | 2 |  |
 | `eqoa.events.events.dropped.data.last_seq` | supported | 2 |  |
 | `eqoa.events.events.dropped.data.streams` | supported | 2 |  |
+| `eqoa.events.fishing.changed.data.open` | supported | 8 |  |
+| `eqoa.events.fishing.changed.data.revision` | supported | 8 |  |
 | `eqoa.events.friends.changed.data.after` | supported | 8 |  |
 | `eqoa.events.friends.changed.data.before` | supported | 8 |  |
 | `eqoa.events.friends.changed.data.changed` | supported | 8 |  |
@@ -1306,6 +1361,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.mastery.changed.data.after` | supported | 6 |  |
 | `eqoa.events.mastery.changed.data.before` | supported | 6 |  |
 | `eqoa.events.mastery.changed.data.changed` | supported | 6 |  |
+| `eqoa.events.merc.changed.data.open` | supported | 8 |  |
+| `eqoa.events.merc.changed.data.revision` | supported | 8 |  |
 | `eqoa.events.merchant.changed.data.after` | supported | 5 |  |
 | `eqoa.events.merchant.changed.data.before` | supported | 5 |  |
 | `eqoa.events.merchant.changed.data.cause` | supported | 5 |  |
@@ -1398,6 +1455,24 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.files.FileEntry.kind` | supported | 7 |  |
 | `eqoa.files.FileEntry.path` | supported | 7 |  |
 | `eqoa.files.FileEntry.size` | supported | 7 |  |
+| `eqoa.fishing.Catch` | supported | 8 |  |
+| `eqoa.fishing.Catch.name` | supported | 8 |  |
+| `eqoa.fishing.Catch.quantity` | supported | 8 |  |
+| `eqoa.fishing.Catch.slot` | supported | 8 |  |
+| `eqoa.fishing.State` | supported | 8 |  |
+| `eqoa.fishing.State.casting` | supported | 8 |  |
+| `eqoa.fishing.State.catch` | supported | 8 |  |
+| `eqoa.fishing.State.fair_from` | supported | 8 |  |
+| `eqoa.fishing.State.fair_to` | supported | 8 |  |
+| `eqoa.fishing.State.list` | supported | 8 |  |
+| `eqoa.fishing.State.message` | supported | 8 |  |
+| `eqoa.fishing.State.open` | supported | 8 |  |
+| `eqoa.fishing.State.perfect_from` | supported | 8 |  |
+| `eqoa.fishing.State.perfect_to` | supported | 8 |  |
+| `eqoa.fishing.State.power` | supported | 8 |  |
+| `eqoa.fishing.State.ready` | supported | 8 |  |
+| `eqoa.fishing.State.revision` | supported | 8 |  |
+| `eqoa.fishing.State.state` | supported | 8 |  |
 | `eqoa.fonts.FontInfo` | supported | 2 |  |
 | `eqoa.fonts.FontInfo.font` | supported | 2 |  |
 | `eqoa.fonts.FontInfo.reason` | supported | 2 |  |
@@ -1764,6 +1839,48 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.mastery.MasterySkill.owned` | supported | 6 |  |
 | `eqoa.mastery.MasterySkill.parent_key` | supported | 6 |  |
 | `eqoa.mastery.MasterySkill.rank_key` | supported | 6 |  |
+| `eqoa.merc.Inventory` | supported | 8 |  |
+| `eqoa.merc.Inventory.ac` | supported | 8 |  |
+| `eqoa.merc.Inventory.class` | supported | 8 |  |
+| `eqoa.merc.Inventory.hp` | supported | 8 |  |
+| `eqoa.merc.Inventory.level` | supported | 8 |  |
+| `eqoa.merc.Inventory.max_hp` | supported | 8 |  |
+| `eqoa.merc.Inventory.max_power` | supported | 8 |  |
+| `eqoa.merc.Inventory.most` | supported | 8 |  |
+| `eqoa.merc.Inventory.name` | supported | 8 |  |
+| `eqoa.merc.Inventory.open` | supported | 8 |  |
+| `eqoa.merc.Inventory.power` | supported | 8 |  |
+| `eqoa.merc.Inventory.race` | supported | 8 |  |
+| `eqoa.merc.Inventory.records` | supported | 8 |  |
+| `eqoa.merc.Inventory.slot` | supported | 8 |  |
+| `eqoa.merc.Inventory.stats` | supported | 8 |  |
+| `eqoa.merc.Record` | supported | 8 |  |
+| `eqoa.merc.Record.equip_slot` | supported | 8 |  |
+| `eqoa.merc.Record.id` | supported | 8 |  |
+| `eqoa.merc.Record.item_id` | supported | 8 |  |
+| `eqoa.merc.Record.kind` | supported | 8 |  |
+| `eqoa.merc.Record.name` | supported | 8 |  |
+| `eqoa.merc.Record.quantity` | supported | 8 |  |
+| `eqoa.merc.Spell` | supported | 8 |  |
+| `eqoa.merc.Spell.id` | supported | 8 |  |
+| `eqoa.merc.Spell.name` | supported | 8 |  |
+| `eqoa.merc.Spell.slot` | supported | 8 |  |
+| `eqoa.merc.Spells` | supported | 8 |  |
+| `eqoa.merc.Spells.class` | supported | 8 |  |
+| `eqoa.merc.Spells.level` | supported | 8 |  |
+| `eqoa.merc.Spells.name` | supported | 8 |  |
+| `eqoa.merc.Spells.open` | supported | 8 |  |
+| `eqoa.merc.Spells.set` | supported | 8 |  |
+| `eqoa.merc.Spells.slot` | supported | 8 |  |
+| `eqoa.merc.Spells.slots` | supported | 8 |  |
+| `eqoa.merc.Spells.spells` | supported | 8 |  |
+| `eqoa.merc.State` | supported | 8 |  |
+| `eqoa.merc.State.available` | supported | 8 |  |
+| `eqoa.merc.State.inventory` | supported | 8 |  |
+| `eqoa.merc.State.own_out` | supported | 8 |  |
+| `eqoa.merc.State.revision` | supported | 8 |  |
+| `eqoa.merc.State.spells` | supported | 8 |  |
+| `eqoa.merc.State.waiting` | supported | 8 |  |
 | `eqoa.options.Button` | supported | 4 |  |
 | `eqoa.options.Button.id` | supported | 4 |  |
 | `eqoa.options.Button.item_id` | supported | 4 |  |

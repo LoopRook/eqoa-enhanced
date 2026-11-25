@@ -63,13 +63,23 @@ pub(crate) enum TakeoverKind {
     DuelInvite = 17,
     Duel = 18,
     Blacksmith = 19,
+    /// Round A11: the server's mercenary inventory and spell windows (modes 61, 62), the dye picker (63) and the
+    /// fishing window (36), held whole (`all`) as server-opened sessions (`dialog_sessions`, `a11_play`).
+    MercItems = 20,
+    MercSpells = 21,
+    DyePicker = 22,
+    Fishing = 23,
 }
 
 impl TakeoverKind {
     /// The three server-window kinds (loot, merchant, bank) that carry hidden server sessions and batch hooks.
     pub(crate) const ALL: [Self; 3] = [Self::Loot, Self::Merchant, Self::Bank];
     /// Every takeover kind, including server-pushed raid strips (`raid_ready`, `raid_roll`).
-    pub(crate) const ALL_KINDS: [Self; 20] = [
+    pub(crate) const ALL_KINDS: [Self; 24] = [
+        Self::MercItems,
+        Self::MercSpells,
+        Self::DyePicker,
+        Self::Fishing,
         Self::Loot,
         Self::Merchant,
         Self::Bank,
@@ -94,7 +104,11 @@ impl TakeoverKind {
     /// Round A9: the trade, duel and blacksmith windows, held as `a9_play` sessions.
     pub(crate) const A9: [Self; 5] = [Self::TradeAsk, Self::Trade, Self::DuelInvite, Self::Duel, Self::Blacksmith];
     /// The NPC dialogs and offers of round A2: scope `all` only, held as `dialog_sessions`.
-    pub(crate) const DIALOGS: [Self; 5] = [
+    pub(crate) const DIALOGS: [Self; 9] = [
+        Self::MercItems,
+        Self::MercSpells,
+        Self::DyePicker,
+        Self::Fishing,
         Self::TextDialog,
         Self::ResponseDialog,
         Self::GroupInvite,
@@ -124,6 +138,10 @@ impl TakeoverKind {
             Self::DuelInvite => "duel_invite",
             Self::Duel => "duel",
             Self::Blacksmith => "blacksmith",
+            Self::MercItems => "mercenary_items",
+            Self::MercSpells => "mercenary_spells",
+            Self::DyePicker => "dye_picker",
+            Self::Fishing => "fishing",
         }
     }
 
@@ -149,17 +167,28 @@ impl TakeoverKind {
             "duel_invite" => Ok(Self::DuelInvite),
             "duel" => Ok(Self::Duel),
             "blacksmith" => Ok(Self::Blacksmith),
+            "mercenary_items" => Ok(Self::MercItems),
+            "mercenary_spells" => Ok(Self::MercSpells),
+            "dye_picker" => Ok(Self::DyePicker),
+            "fishing" => Ok(Self::Fishing),
             _ if super::window_kinds::is_window(s) => Err((
                 "unsupported",
                 format!(
                     "the game's '{s}' window cannot be taken over in this version (only 'loot', 'merchant', \
-                     'bank', 'raid_ready', 'raid_roll', 'text_dialog', 'response_dialog', 'group_invite',                      'revive_offer', 'summon_offer', 'friend_request', 'guild_invite', 'trade_ask', 'trade', 'duel_invite', 'duel', 'blacksmith', 'start_menu', 'chat_entry' and 'map'); more windows follow the window-replacement roadmap"
+                     'bank', 'raid_ready', 'raid_roll', 'text_dialog', 'response_dialog', 'group_invite', \
+                     'revive_offer', 'summon_offer', 'friend_request', 'guild_invite', 'trade_ask', 'trade', \
+                     'duel_invite', 'duel', 'blacksmith', 'start_menu', 'chat_entry', 'map', 'mercenary_items', \
+                     'mercenary_spells', 'dye_picker' and 'fishing'); more windows follow the window-replacement roadmap"
                 ),
             )),
             _ => Err((
                 "invalid_argument",
                 format!(
-                    "window takeover kind must be 'loot', 'merchant', 'bank', 'raid_ready', 'raid_roll', 'text_dialog', 'response_dialog', 'group_invite', 'revive_offer', 'summon_offer', 'friend_request', 'guild_invite', 'trade_ask', 'trade', 'duel_invite', 'duel', 'blacksmith', 'start_menu', 'chat_entry' or 'map', got '{s}'"
+                    "window takeover kind must be 'loot', 'merchant', 'bank', 'raid_ready', 'raid_roll', \
+                     'text_dialog', 'response_dialog', 'group_invite', 'revive_offer', 'summon_offer', \
+                     'friend_request', 'guild_invite', 'trade_ask', 'trade', 'duel_invite', 'duel', 'blacksmith', \
+                     'start_menu', 'chat_entry', 'map', 'mercenary_items', 'mercenary_spells', 'dye_picker' \
+                     or 'fishing', got '{s}'"
                 ),
             )),
         }
@@ -283,7 +312,7 @@ struct TakeoverState {
     /// The merchant's list still owed for the mod's last sale or buy when its hidden session ended (the
     /// sale's answer can follow the action's end): held hidden for `LIST_GRACE`, then closed again quietly.
     grace_merchant: Option<ListGrace>,
-    holders: [Option<Holder>; 20],
+    holders: [Option<Holder>; 24],
     pending_opens: [Option<PendingOpen>; 3],
     /// Why a kind's hidden session is to end (set by release, the mod finishing, the holder going).
     pending_close: [Option<&'static str>; 3],
@@ -495,6 +524,9 @@ pub(crate) fn release_all() {
     // round A1: the mod windows, held sessions, controller focus and any question end with the world
     super::window_sessions::world_changed();
     let _ = release_claims_where("zoning", |_| true);
+    // round A11: clear published reads and signal `a11_play` to drop its local state, AFTER `dialog_sessions` and
+    // `window_sessions` have ended held sessions with reason `"zoning"` (which never refills `give_back`)
+    super::native_a11::world_changed();
     // a by-id open of the world left that still waits for its answer decides nothing in the next one
     crate::fork_ext::loot_by_id::clear();
     // a list after the mod's last take or sale belongs to the zone left: a new zone may reuse its entity id

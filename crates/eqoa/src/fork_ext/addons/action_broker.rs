@@ -174,6 +174,8 @@ pub(crate) enum ActionKind {
     A8(super::native_a8::A8Action),
     /// Round A9: trade, duel and blacksmith (answers, offers, the accept behind the player's own question, repairs).
     A9(super::native_a9::A9Action),
+    /// Round A11: the mercenary windows, the dye picker and fishing.
+    A11(super::native_a11::A11Action),
     /// Round A10: mail (inbox, read, delete, send) and the auction (search, pages, bid, buyout, sell).
     A10(super::native_a10::A10Action),
     /// Round A7: friends, ignore, guild, who, group search.
@@ -243,6 +245,7 @@ impl ActionKind {
             Self::A6(action) => action.name(),
             Self::A8(action) => action.name(),
             Self::A9(action) => action.name(),
+            Self::A11(action) => action.name(),
             Self::A10(action) => action.name(),
             Self::A7(action) => action.name(),
             Self::A5(action) => action.name(),
@@ -305,6 +308,7 @@ impl ActionKind {
             | Self::A6(_)
             | Self::A8(_)
             | Self::A9(_)
+            | Self::A11(_)
             | Self::A10(_)
             | Self::A7(_)
             | Self::A5(_)

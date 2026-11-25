@@ -967,6 +967,8 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
                 // round A9: their own lines (`native_a9::trading_label`, `asks_first_label`)
                 "blacksmith_repair" => "repair items (spends your coin)",
                 k if super::native_a9::NAMES.contains(&k) => continue,
+                // round A11: their own line (`native_a11::a11_label`)
+                k if super::native_a11::NAMES.contains(&k) => continue,
                 // round A10: their own line (`native_a10::mail_label`) or asked first (`asks_first_label`)
                 k if super::native_a10::is_a10_action(k) => continue,
                 // round A5: the same for spending training points and the two Class Mastery steps
@@ -1063,6 +1065,7 @@ pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec
     lines.extend(asks_first_label(caps));
     lines.extend(super::native_a8::crafting_label(caps));
     lines.extend(super::native_a9::trading_label(caps));
+    lines.extend(super::native_a11::a11_label(caps));
     lines.extend(super::native_a10::mail_label(caps));
     lines
 }

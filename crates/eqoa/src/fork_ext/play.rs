@@ -53,6 +53,10 @@ mod a8_play;
 #[path = "a10_play.rs"]
 mod a10_play;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "a11_play.rs"]
+mod a11_play;
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "map_mod_tests.rs"]
 mod map_mod_tests;
@@ -155,7 +159,19 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
     a2_play::pre_event(play, event);
     // round A9: what a held trade, duel or blacksmith looks like before the packet
     a9_play::pre_event(play, event);
+    a11_play::pre_event(play, event);
     let api = api_capture::begin_game_event(play, event);
+    if matches!(
+        event,
+        net::session::Event::WorldEntry { .. }
+            | net::session::Event::Teleport { .. }
+            | net::session::Event::Disconnected(_)
+    ) {
+        // round A11: clear `a11_play::LOCAL` right after `api_capture` / `window_takeover::release_all` has ended any
+        // held sessions (same-world teleports and respawns never set `play.world_change`); on world entry / teleport,
+        // queue Cancel for any held dye picker just as the native picker cancels when mode becomes 0
+        a11_play::world_changed(!matches!(event, net::session::Event::Disconnected(_)));
+    }
     let a7 = a7_play::begin_event(play, event);
     if let net::session::Event::MasterLoot(m) = event {
         crate::fork_ext::addons::action_broker::set_master_loot(m.is_some());
@@ -304,6 +320,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
 pub(crate) fn divert_event(play: &mut Play) {
     a2_play::post_event(play);
     a9_play::post_event(play);
+    a11_play::post_event(play);
 }
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn divert_event(_: &mut Play) {}
@@ -863,6 +880,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         a9_play::tick(_play);
         a2_play::tick(_play);
         a8_play::tick(_play, _game_step);
+        a11_play::tick(_play, _game_step);
         a10_play::tick(_play, _game_step);
         api_capture::a5::tick(_play);
         if crate::fork_ext::addons::native_core::capture_requested()
@@ -1104,6 +1122,55 @@ pub(super) fn dropped(_play: &mut Play) {
     // round A10: nothing of a mod's mail or auction window is left to read
     #[cfg(not(target_arch = "wasm32"))]
     a10_play::dropped();
+    // round A11: nor of a mercenary, dye or fishing window
+    #[cfg(not(target_arch = "wasm32"))]
+    a11_play::dropped();
+}
+
+/// Round A11: whether a window the server opens (a mercenary's, the dye picker, a fishing session) must act as the game
+/// acts with a window up, because a hidden session of a mod holds the game while its mode reads 0 (`a11_play::blocked`).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn server_window_blocked(what: &'static str) -> bool {
+    a11_play::blocked(what)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn server_window_blocked(_: &'static str) -> bool {
+    false
+}
+
+/// Round A11: the server asked to open a mercenary window (`mode` 61 inventory, 62 spells) while a hidden session holds
+/// the game: true means "do not open it now"; it opens when the hidden session ends (`a11_play::tick`).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn merc_open_waits(_play: &mut Play, mode: i32) -> bool {
+    a11_play::merc_waits(mode)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn merc_open_waits(_: &mut Play, _: i32) -> bool {
+    false
+}
+
+/// Round A11: a fishing window a mod holds has no drawing; its cast logic runs here, once a frame (the one upstream
+/// line in `fishing_frame`).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn fishing_hidden_frame(play: &mut Play, walker: &crate::walker::Walker) {
+    a11_play::hidden_fishing_frame(play, walker);
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn fishing_hidden_frame(_: &mut Play, _: &crate::walker::Walker) {}
+
+/// Round A11: a fishing session starting while a hidden session holds the game is cancelled as under any window, and
+/// the player is told why in one chat line.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn fishing_start_blocked(play: &mut Play) -> bool {
+    a11_play::fishing_blocked(play)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn fishing_start_blocked(_: &mut Play) -> bool {
+    false
 }
 
 /// Round A10: a mod holds its own auction window, so the auction's search pages are kept (the one line in
@@ -3323,6 +3390,7 @@ fn dispatch_broker_action(
         ActionKind::A1(action) => a1_play::dispatch(play, action),
         ActionKind::A6(action) => a6_play::dispatch(play, action),
         ActionKind::A8(action) => a8_play::dispatch(play, action),
+        ActionKind::A11(action) => a11_play::dispatch(play, action),
         ActionKind::A10(action) => a10_play::dispatch(play, action),
         ActionKind::A7(action) => a7_play::dispatch(play, action),
         ActionKind::A9(action) => a9_play::dispatch(play, action),

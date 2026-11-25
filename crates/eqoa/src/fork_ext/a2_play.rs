@@ -227,6 +227,7 @@ fn give(play: &mut Play, item: Item) {
             }
         }
         Item::Offer { summons, name, .. } => play.summon_prompt(&name, if summons { 0 } else { 1 }),
+        Item::Window { kind, .. } => super::a11_play::give_window(play, kind),
     }
 }
 
@@ -409,6 +410,16 @@ fn press(play: &mut Play, item: &Item, option: usize) -> Result<bool, DispatchOu
                 play.dialog_key(Key::Escape);
             }
             play.mode = 0;
+            Ok(true)
+        }
+        Item::Window { kind, .. } => {
+            if option != 0 {
+                return Err(refuse("unsupported", "this window has no numbered answers: use its own actions, or close_window"));
+            }
+            if !super::a11_play::close_window(play, *kind) {
+                // a fishing catch let go: the window stays until the server's Stop, as the game's Escape leaves it
+                return Err(DispatchOutcome::Completed { detail: Some(json!({"sent": true, "ended": false})) });
+            }
             Ok(true)
         }
         Item::Offer { text, .. } => {

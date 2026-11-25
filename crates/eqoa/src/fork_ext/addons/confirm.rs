@@ -53,6 +53,10 @@ pub(crate) enum Act {
     /// Round A5: buy (`refund` false) or switch off (`refund` true) a Class Mastery skill. `class` and `parent` are
     /// the inspected skill's category and rank below, which the Master Class rule is judged by again at the Yes.
     Mastery { skill_id: i32, name: String, refund: bool, class: u8, parent: i32 },
+    /// Round A11: send the player's mercenary away (the game's Dismiss Mercenary, 0x7E5C).
+    DismissMerc,
+    /// Round A11: answer the dye picker of `token` with a colour (`Some`) or with "No dye" (`None`).
+    DyeAnswer { token: u32, rgba: Option<u32> },
     /// Round A10: delete a mail (`subject` is what the question named, checked again at the Yes).
     MailDelete { id: u32, subject: String },
     /// Round A10: send a mail that carries tunar or an item: (the game's pack key, the item's id, how many, its name).
@@ -80,6 +84,8 @@ impl Act {
             Self::TrainStats { .. } => "train_stats",
             Self::Mastery { refund: false, .. } => "mastery_buy",
             Self::Mastery { refund: true, .. } => "mastery_refund",
+            Self::DismissMerc => "merc_dismiss",
+            Self::DyeAnswer { .. } => "dye_pick",
             Self::MailDelete { .. } => "mail_delete",
             Self::MailSend { .. } => "mail_send",
             Self::AuctionBid { buyout: false, .. } => "auction_bid",

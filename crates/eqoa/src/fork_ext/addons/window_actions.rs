@@ -115,8 +115,9 @@ fn session_ref(v: &Value) -> Option<String> {
     }
 }
 
-/// The action for a dialog or offer session of this mod: how many answers it has, or why it cannot be answered.
-fn session_answers(lua: &Lua, id: &str) -> std::result::Result<usize, Fail> {
+/// The action for a dialog or offer session of this mod: how many answers it has (`None` for an A11 server window,
+/// which closes with `close_window` and rejects `dialog_answer` as `unsupported`), or why it cannot be answered.
+fn session_answers(lua: &Lua, id: &str) -> std::result::Result<Option<usize>, Fail> {
     let vm = super::native_events::bus(lua).borrow().vm;
     let found = super::window_sessions::find(vm, id);
     let Some(s) = found else {
@@ -313,7 +314,12 @@ pub(crate) fn install(lua: &Lua) -> Result<()> {
         lua.create_function(|lua, (r, option): (Value, Value)| {
             enqueue_lua_with(lua, "eqoa.actions.dialog_answer", || {
                 if let Some(id) = session_ref(&r) {
-                    let n = session_answers(lua, &id)?;
+                    let Some(n) = session_answers(lua, &id)? else {
+                        return Err((
+                            "unsupported",
+                            "this window has no numbered answers: use its own actions, or close_window".into(),
+                        ));
+                    };
                     let option = whole(&option, "option", 1, n as i64)? as usize;
                     return Ok(ActionKind::A1(super::native_a1::A1Action::SessionAnswer { session: id, option: Some(option) }));
                 }
