@@ -331,9 +331,18 @@ mod tests {
         // Wake on New Chat) are listed only by the PC interface's `category(i)`; every registered row is
         // on some page in one interface or the other
         crate::settings::testing::reset(false);
-        crate::settings::set_ui_mode(true).unwrap();
-        listed.extend((0..pages().len()).flat_map(|i| super::super::category(i).items.iter().copied()));
-        crate::settings::set_ui_mode(false).unwrap();
+        for pc in [true, false] {
+            crate::settings::set_ui_mode(pc).unwrap();
+            let mut page: Vec<_> = (0..pages().len()).flat_map(|i| super::super::category(i).items.iter().copied()).collect();
+            if pc {
+                listed.extend(page.iter().copied());
+            }
+            // each interface lists a row once (a duplicate in the PC pages would not show in the union)
+            page.sort_unstable();
+            let n = page.len();
+            page.dedup();
+            assert_eq!(page.len(), n, "a row is listed twice in the interface with pc={pc}");
+        }
         listed.sort_unstable();
         listed.dedup();
         assert_eq!(listed, registered);
