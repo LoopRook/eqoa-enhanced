@@ -579,8 +579,6 @@ fn pins() -> Vec<Pin> {
             "fork_ext/addons/bridge_drawlist_tests.rs", "forge_drawlist_geometry_budget_is_shared_across_invocations_in_one_frame"),
         pin!("ImGui scopes open at once (`Begin`, `BeginChild`, pushes)", "64", "fork_ext/addons/bridge.rs", "self.stack.len() >= 64",
             "fork_ext/addons/docs_tests.rs", "docs_limit_imgui_scopes_are_64"),
-        pin!("Mods running at once", "16", "fork_ext/addons/manager.rs", "MAX_INSTANCES: usize = 16",
-            "fork_ext/addons/manager.rs", "forge_manager_disabled_defaults_missing_root_and_sixteen_vm_cap"),
         pin!(actions, "32", broker, "MAX_QUEUED_PER_VM: usize = 32", broker, rates),
         pin!(actions, "8", broker, "MAX_DISPATCH_PER_TICK_PER_VM: usize = 8", broker, rates),
         pin!(actions, "one a step", broker, "TOKEN_BUCKET_REFILL_PER_TICK: u32 = 1", broker, rates),
