@@ -244,8 +244,9 @@ end
 -- The NPC's dialog: its words wrapped to fit, the answers as buttons (page of PAGE), More and Back.
 local function draw_dialog(s, f, k, dw, dh)
     local data = s.data or {}
-    local options = data.options or {}
     local response = s.kind == "response_dialog"
+    -- only a response dialog's data has `options`; a text dialog's has none (reading it is an unknown-field diagnostic)
+    local options = response and data.options or {}
     if state.page_ref ~= s.ref then state.page_ref, state.page = s.ref, 0 end
     local pages = math.max(1, math.ceil(#options / PAGE))
     state.page = math.max(0, math.min(state.page, pages - 1))

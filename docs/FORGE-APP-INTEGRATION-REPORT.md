@@ -17,7 +17,7 @@ source integration, not a packaged preview or full Forge compatibility acceptanc
 - The native-only fork options action uses checked ID1053 and a request consumed on
   the app thread. Controls collect commands; Manager executes once per frame.
   Settings callbacks run in an intentional settings window, including collapse/close
-  handling. Disabled instances still count toward the 16-VM cap; the backend's
+  handling. Disabled instances still count toward the 256-VM cap; the backend's
   instruction to remove an addon first is preserved.
 - `fork_ext/mods.rs` now selects `mods` beside the native executable even before that
   folder exists. The exceptional current-executable lookup failure logs a diagnostic

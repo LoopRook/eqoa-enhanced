@@ -355,3 +355,26 @@ fn a2_dialog_window_keeps_enter_from_the_game_while_up_and_gives_it_back_after()
     assert!(!suppressed(), "disabled: Enter is the game's");
     assert!(r.host.drain_logs().unwrap().iter().all(|l| !l.contains("could not hold")));
 }
+
+/// Owner 2026-11-25: drawing a plain text dialog read `data.options`, a field only a response dialog has, and the
+/// Addons window showed `eqoa.windows.SessionData.options [unknown_symbol]`. Each kind the mod holds draws silently.
+#[test]
+fn a2_dialogs_draw_every_kind_they_hold_without_an_unknown_field_diagnostic() {
+    let noise = |r: &mut Rig| -> Vec<String> {
+        r.host.drain_logs().unwrap().into_iter().filter(|l| l.contains("unknown_symbol") || l.contains("SessionData")).collect()
+    };
+    let mut r = rig("eqoa_dialogs");
+    r.frames(3);
+    dialog_sessions::hold(Item::Text { text: wide("Hail, traveller."), talked_to: None }, None);
+    assert!(dialog_sessions::start_next(true, None).is_some());
+    assert!(r.frames(3) > 0, "the text dialog is drawn");
+    let seen = noise(&mut r);
+    assert!(seen.is_empty(), "a text dialog drew with diagnostics: {seen:?}");
+    drop(r);
+    let mut r = rig("eqoa_dialogs");
+    r.frames(3);
+    r.dialog(1, "Well?", &["One", "Two"]);
+    assert!(r.frames(3) > 0, "the response dialog is drawn");
+    let seen = noise(&mut r);
+    assert!(seen.is_empty(), "a response dialog drew with diagnostics: {seen:?}");
+}

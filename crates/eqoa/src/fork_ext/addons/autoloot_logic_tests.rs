@@ -637,3 +637,38 @@ fn autoloot_fix2_a_disconnect_forgets_which_way_corpses_were_opened() {
     run(&lua, "B.loot_method = 'retarget'; B.keep_req = 'open9'; B.on_disconnect()");
     assert!(boolean(&lua, "B.loot_method == nil and B.keep_req == nil"));
 }
+
+/// Owner 2026-11-25: seeing a finished corpse again said "skipped, already looted" whatever had happened to it (a
+/// refusal, a give-up, an empty corpse). Now the line says what became of it, once.
+#[test]
+fn a_corpse_seen_again_says_what_became_of_it_once_and_never_claims_a_loot_that_did_not_happen() {
+    // taken: the line names the take
+    let lua = world();
+    run(&lua, "kill(9300); poll()");
+    take_all_ends(&lua, 0);
+    run(&lua, "later(60); kill(9300); poll(); later(61); poll(); later(62); poll()");
+    assert!(boolean(&lua, "logged('Auto-loot has finished with it (done: Take all ok')"), "said what it did");
+    assert_eq!(int(&lua, "count_logged('Auto-loot has finished with it')"), 1, "once, not on every poll");
+    assert!(!boolean(&lua, "logged('already looted')"));
+
+    // the server refused for good (not ours): the line carries the server's words, not a loot
+    let lua = world();
+    run(&lua, "kill(9300); poll(); corpse_list(2); LOOTALL_ERR = {code = 'permission_denied', message = 'That corpse is not yours.'}; open_answered('keep_target')");
+    run(&lua, "later(60); kill(9300); poll(); later(61); poll()");
+    assert!(boolean(&lua, "logged('Auto-loot has finished with it (Take all refused: That corpse is not yours.)')"), "the server's words");
+    assert!(!boolean(&lua, "logged('already looted')"), "a refused corpse was not looted");
+    assert!(int(&lua, "count_logged('Auto-loot has finished with it')") <= 1);
+
+    // gave up with items left: says items are still on it
+    let lua = world();
+    run(&lua, "kill(9300); poll()");
+    take_all_ends(&lua, 2);
+    run(&lua, "later(7); poll()");
+    take_all_ends(&lua, 2);
+    run(&lua, "later(11); poll()");
+    take_all_ends(&lua, 2);
+    run(&lua, "later(60); kill(9300); poll(); later(61); poll()");
+    assert!(boolean(&lua, "logged('items are still on it')"));
+    assert!(!boolean(&lua, "logged('already looted')"));
+    assert_eq!(int(&lua, "count_logged('Auto-loot has finished with it')"), 1);
+}

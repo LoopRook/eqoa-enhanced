@@ -1424,7 +1424,7 @@ The files in the `mods` folder itself are never changed by a mod: its private da
 | ImGui calls in one run of a mod's handlers | 131,072 | tested |
 | Drawn ImGui geometry per mod per frame | 524,288 index units (an outlined shape costs up to 24 a point, so about 21,000 points) | tested |
 | ImGui scopes open at once (`Begin`, `BeginChild`, pushes) | 64 | tested |
-| Mods running at once | 16 | tested |
+| Mods running at once | 256 | tested |
 | Actions waiting per mod; dispatched per mod per game step; for all mods per step | 32; 8, refilled one a step; 64 | tested |
 | An action waiting for its turn; an action waiting for the server's answer | `rate_limited` after 1 second; `unknown` after 10 seconds | tested |
 | Action results kept per mod | 256 | tested |
@@ -1437,7 +1437,7 @@ The files in the `mods` folder itself are never changed by a mod: its private da
 | Fonts and sounds held | 16 each | tested |
 | Imported copies kept | 3 | tested |
 
-The ImGui call count starts afresh for each run of a mod's handlers: once for the entry and the frame's events, once for `render`, once for `settings.render`. Two of these rows rest on tests that show the limit is enforced without hitting the number exactly: geometry (a batch of 312,000 units is accepted and a second one refused) and JSON save (a value just under 14 MiB is saved); the numbers are the code's constants. The test of the 16-mod limit needs a graphics adapter.
+The ImGui call count starts afresh for each run of a mod's handlers: once for the entry and the frame's events, once for `render`, once for `settings.render`. Two of these rows rest on tests that show the limit is enforced without hitting the number exactly: geometry (a batch of 312,000 units is accepted and a second one refused) and JSON save (a value just under 14 MiB is saved); the numbers are the code's constants. The test of the 256-mod limit needs a graphics adapter.
 
 Design intent, not part of the promise (the client is tuned this way today and no test pins the number): textures up to 2,048 pixels a side, 128 per mod, 64 MiB decoded; media files up to 16 MiB; fonts and sounds up to 64 MiB together; a font size up to 256; `require` nested 32 deep and 1 MiB a source file; settings 32 deep and 1 MiB; 1,024 entries per listing; the last 1,000 chat lines kept and asked for at once; 64 log lines between frames; 128 subscriptions; 32 option buttons; 32 pointer areas per frame; 20 wheel steps a call; four map views of 16 to 1,024 pixels; 32 entries in a manifest list; batches of 1 to 64 steps; 512 characters typed into a text box; a command's `args` 8 levels deep and 256 values; the timing of diagnostics (§2); and for hidden window sessions (§7) the 25-unit walk-away, the 15-second idle time, the 10-second wait and the 3-second re-list hold.
 
