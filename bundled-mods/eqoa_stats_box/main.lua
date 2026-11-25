@@ -24,10 +24,24 @@ for _, event in ipairs({ "player.stats_changed", "state.reset", "enabled", "even
     eqoa.events.on(event, invalidate)
 end
 
+-- The game's own Stat Window (F4, /stats) shows the same figures: while this mod's box is on, it is held back. It
+-- comes back the moment the box is turned off, the mod is disabled, fails or the world is left (a claim ends then).
+local claim
+local function hold_stat_window(on)
+    if on and not claim then
+        claim = eqoa.hud.hide("stat_window")
+    elseif not on and claim then
+        eqoa.hud.show(claim)
+        claim = nil
+    end
+end
+eqoa.events.on("state.reset", function() hold_stat_window(false) end)
+
 -- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
 local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
 
 eqoa.events.on("render", function()
+    hold_stat_window(eqoa.options.get("stats_box") == true)
     if map_up() then return end
     if not eqoa.options.get("stats_box") then return end
     if not eqoa.hud.visible("stats_box") then return end
