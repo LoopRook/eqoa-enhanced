@@ -161,7 +161,7 @@ pub(crate) enum ActionKind {
     OpenLoot { entity_id: Option<u32>, keep_target: bool },
     Talk { entity_id: Option<u32>, kind: TalkKind },
     /// `eqoa.map.set_waypoint`: the player's own waypoint of `world` moved to (`x`, `z`) by mod `addon`.
-    SetWaypoint { vm: u64, addon: String, world: i32, x: f32, z: f32, label: Option<String> },
+    SetWaypoint { vm: u64, addon: String, world: i32, x: f32, z: f32, label: Option<String>, keep: bool },
     /// `eqoa.map.clear_waypoint`: VM `vm`'s own waypoint taken away.
     ClearWaypoint { vm: u64 },
     /// Round A3 (`frame_actions`): invite the target, the pet's commands, an emote, a jump, a buff taken off.
@@ -172,6 +172,8 @@ pub(crate) enum ActionKind {
     A6(super::native_a6::A6Action),
     /// Round A8: crafting (the tray, a combine, the recipe list and detail, the keep-this-recipe answer).
     A8(super::native_a8::A8Action),
+    /// Round A9: trade, duel and blacksmith (answers, offers, the accept behind the player's own question, repairs).
+    A9(super::native_a9::A9Action),
     /// Round A11: the mercenary windows, the dye picker and fishing.
     A11(super::native_a11::A11Action),
     /// Round A10: mail (inbox, read, delete, send) and the auction (search, pages, bid, buyout, sell).
@@ -242,6 +244,7 @@ impl ActionKind {
             Self::A1(action) => action.name(),
             Self::A6(action) => action.name(),
             Self::A8(action) => action.name(),
+            Self::A9(action) => action.name(),
             Self::A11(action) => action.name(),
             Self::A10(action) => action.name(),
             Self::A7(action) => action.name(),
@@ -304,6 +307,7 @@ impl ActionKind {
             | Self::A1(_)
             | Self::A6(_)
             | Self::A8(_)
+            | Self::A9(_)
             | Self::A11(_)
             | Self::A10(_)
             | Self::A7(_)

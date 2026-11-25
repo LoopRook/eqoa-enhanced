@@ -9,6 +9,7 @@
 use super::Play;
 use crate::blacksmith::{Blacksmith, SmithOut};
 use crate::cs::{CsClient, Inbox, InboxUp, Request, RequestUp};
+#[path = "fork_ext/a9_pass_support.rs"] pub(in crate::play) mod fork_a9;
 
 pub struct SupportWindows {
     /// `VIClient::m_p33950`

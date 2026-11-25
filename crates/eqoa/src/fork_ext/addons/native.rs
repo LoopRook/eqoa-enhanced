@@ -797,6 +797,7 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
     table.set(
         name,
         lua.create_function(move |lua, args: MultiValue| {
+            let _probe = super::stall_probe::scope_of("eqoa call", &symbol);
             if matches!(
                 symbol.as_str(),
                 "eqoa.client.get"
@@ -852,6 +853,7 @@ where
     table.set(
         name,
         lua.create_function(move |lua, args: A| {
+            let _probe = super::stall_probe::scope_of("eqoa call", &symbol);
             let _timed = super::addon_perf::api(&symbol);
             super::native_core::flush_deferred();
             match f(lua, args) {
@@ -982,6 +984,15 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         (
             "actions",
             "craft_list craft_inspect craft_tray_add craft_tray_remove craft_tray_clear craft_fill craft_combine craft_keep",
+            8,
+        ),
+        // round A9: trade, duels and the blacksmith
+        ("trade", "get", 8),
+        ("duel", "get", 8),
+        ("blacksmith", "get", 8),
+        (
+            "actions",
+            "trade_answer trade_add trade_remove trade_money trade_accept trade_unaccept trade_cancel duel_answer blacksmith_repair blacksmith_close",
             8,
         ),
         // round A11: the mercenary windows, the dye picker and fishing
@@ -1161,6 +1172,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     super::native_a1::install(host)?;
     super::native_a6::install(host)?;
     super::native_a8::install(host)?;
+    super::native_a9::install(host)?;
     super::native_a11::install(host)?;
     super::native_a12::install(host)?;
     super::native_a10::install(host)?;
@@ -1334,6 +1346,12 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.craft.State", "question") => Some("eqoa.craft.Question"),
         ("eqoa.craft.State", "notice") => Some("eqoa.craft.Notice"),
         ("eqoa.craft.Detail", "ingredients") => Some("eqoa.craft.Ingredient"),
+        ("eqoa.trade.State", "partner") => Some("eqoa.trade.Partner"),
+        ("eqoa.trade.State", "mine" | "theirs") => Some("eqoa.trade.Side"),
+        ("eqoa.trade.State", "bags") => Some("eqoa.trade.Bag"),
+        ("eqoa.trade.Side", "items") => Some("eqoa.trade.Item"),
+        ("eqoa.duel.State", "invite") => Some("eqoa.duel.Invite"),
+        ("eqoa.blacksmith.State", "items") => Some("eqoa.blacksmith.Item"),
         ("eqoa.craft.Detail", "tools") => Some("eqoa.craft.Tool"),
         ("eqoa.mail.State", "entries") => Some("eqoa.mail.Entry"),
         ("eqoa.mail.State", "message") => Some("eqoa.mail.Message"),

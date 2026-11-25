@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_trade",
+  "name": "EQOA Trade",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "provides": [
+    "Trade and duel windows"
+  ],
+  "replaces": [
+    "trade_ask",
+    "trade",
+    "duel_invite",
+    "duel"
+  ],
+  "capabilities": [
+    "eqoa.windows.takeover",
+    "eqoa.windows.session",
+    "eqoa.trade.get",
+    "eqoa.duel.get",
+    "eqoa.actions.trade_answer",
+    "eqoa.actions.trade_add",
+    "eqoa.actions.trade_remove",
+    "eqoa.actions.trade_money",
+    "eqoa.actions.trade_accept",
+    "eqoa.actions.trade_unaccept",
+    "eqoa.actions.trade_cancel",
+    "eqoa.actions.duel_answer",
+    "eqoa.log.write",
+    "eqoa.input.claim",
+    "eqoa.input.capture_text",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ]
+}

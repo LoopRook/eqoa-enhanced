@@ -677,3 +677,25 @@ fn nameplates_control_a_window_without_the_layers_flags_would_be_in_front() {
     }
     assert!(pointer_order::front_real_window_z(900.0, 700.0).is_some(), "an ordinary full-screen window counts as in front");
 }
+
+/// 2026-11-24: with the game's full map up (M) the plates and numbers drawn on the background list are not drawn; the
+/// map closed, they are back. Control: the same frame with the map closed draws the plate.
+#[test]
+fn hide_under_map_nameplates_draws_nothing_while_the_game_map_is_up() {
+    world(vec![entity(7001, "Gnoll Pup", "npc", [1.0, 0.0, -10.0])]);
+    let map = |open: bool| CORE.with(|c| c.borrow_mut().view.map = json!({"enabled": true, "open": open, "minimap": !open, "markers_on": true, "world_id": 1, "revision": 2}));
+    let mut context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon()).unwrap();
+    map(false);
+    frame(&host, &bridge, &mut context);
+    assert!(!frame(&host, &bridge, &mut context).is_empty(), "control: the plate is drawn with the map closed");
+    map(true);
+    frame(&host, &bridge, &mut context);
+    assert!(frame(&host, &bridge, &mut context).is_empty(), "map up: no plate, no number");
+    map(false);
+    frame(&host, &bridge, &mut context);
+    assert!(!frame(&host, &bridge, &mut context).is_empty(), "map closed: the plate is back");
+    assert!(host.drain_logs().unwrap().is_empty());
+}

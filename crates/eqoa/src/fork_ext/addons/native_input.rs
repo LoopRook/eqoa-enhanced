@@ -13,6 +13,12 @@ pub(super) fn pad_value(r: crate::input::Report) -> serde_json::Value {
     ];
     serde_json::json!({"buttons":names.iter().enumerate().filter_map(|(i,n)|(r.buttons&(1<<i)!=0).then_some(n)).collect::<Vec<_>>(),"left":{"x":r.sticks[2],"y":r.sticks[3]},"right":{"x":r.sticks[0],"y":r.sticks[1]},"raw_left":{"x":d[6],"y":d[7]},"raw_right":{"x":d[4],"y":d[5]}})
 }
+/// When a mod's text capture was last asked for (a test's look: the client lets it lapse unless it is renewed).
+#[cfg(test)]
+pub(crate) fn text_capture_stamp() -> Option<Instant> {
+    INPUT_STATE.with(|s| s.borrow().text_capture_owners.values().max().copied())
+}
+
 pub(crate) fn release_vm(lua: &mlua::Lua) {
     let prefix = format!("\u{1f}{}:", bus(lua).borrow().vm);
     INPUT_STATE.with(|s| {

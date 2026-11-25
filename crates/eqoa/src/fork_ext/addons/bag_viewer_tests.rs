@@ -2620,7 +2620,7 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     assert_eq!(
         super::super::runtime::autonomous_action_label(&entry.metadata.requested_capabilities)
             .as_deref(),
-        Some("Actions: can act on its own (open_loot, talk, loot, loot_all, sell, buy, bank_move, use_item, equip, quick_slot, batch, link_item, hide_look)"),
+        Some("Actions: can act on its own (open_loot, talk, loot, loot_all, sell, buy, bank_move, use_item, equip, quick_slot, batch, link_item, hide_look, repair items (spends your coin))"),
         "L7: the label names exactly the actions the mod uses, not all of them"
     );
 
@@ -3002,7 +3002,7 @@ fn round65_fix_bag_viewer_manifest_declares_exactly_the_actions_it_uses() {
 fn round65_fix_bag_viewer_manifest_declares_exactly_the_actions_it_uses_body() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods/eqoa_bag_viewer");
     let mut used = std::collections::BTreeSet::new();
-    for file in ["main.lua", "modules/bags.lua", "modules/helpers.lua", "modules/multi.lua"] {
+    for file in ["main.lua", "modules/bags.lua", "modules/helpers.lua", "modules/multi.lua", "modules/repair.lua"] {
         let src = std::fs::read_to_string(root.join(file)).unwrap();
         let mut rest = src.as_str();
         while let Some(i) = rest.find("eqoa.actions.") {
@@ -5210,4 +5210,200 @@ fn a0_bag_viewer_helper_switches_marks_and_buttons_are_drawn_and_clickable_body(
     bv.clean();
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
+}
+
+/// 2026-11-24, owner's screenshot: with the game's full map up (M) the Bags window stayed on top of it. Under the map the
+/// window draws nothing and takes no click; when the map closes it is drawn again, on the same tab. Auto-loot's poll is not
+/// this window and keeps running (it is not drawing). Control: the same click, map closed, does select the tab.
+#[test]
+fn hide_under_map_bag_viewer_draws_nothing_and_takes_no_click_under_the_game_map() {
+    big_stack(hide_under_map_bag_viewer_body)
+}
+fn hide_under_map_bag_viewer_body() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_full_pack(20));
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    let draws = |bv: &Bv| bv.eval::<i64>("require('bags').draws");
+    let tab = |bv: &Bv| bv.eval::<i64>("require('bags').tab");
+    let start = draws(&bv);
+    bv.frames(3);
+    assert!(draws(&bv) > start, "control: the open window is drawn every frame");
+    let tab_start = tab(&bv);
+    let second = bv.tab(2);
+    // the map comes up
+    bv.play.map.open = true;
+    bv.frames(2);
+    let hidden_at = draws(&bv);
+    bv.frames(5);
+    assert_eq!(draws(&bv), hidden_at, "under the map the window draws nothing");
+    bv.click(second);
+    bv.frames(1);
+    assert_eq!(tab(&bv), tab_start, "and a click where its tab was selects nothing");
+    // the map closes: drawn again, the click now works (control)
+    bv.play.map.open = false;
+    bv.frames(3);
+    assert!(draws(&bv) > hidden_at, "the window comes back");
+    assert!(bv.is_open(), "still open, as it was");
+    bv.click(second);
+    bv.frames(1);
+    assert_ne!(tab(&bv), tab_start, "control: the same click with the map closed picks the tab");
+    bv.clean();
+}
+
+/// What the owner's log 2026-11-24 showed (corpse 0x187fc): Auto-loot opens a corpse, the server lists it, the mod asks
+/// for Take all, and the server closes and lists the corpse again (it does so after the coin it hands over). Replayed
+/// at 60 drawn frames a second with the game stepping on every other frame. `gap` frames pass between the open's list
+/// and the close, `relist_after` frames between the close and the second list. Returns (did the Take all go out, the
+/// auto-loot lines).
+fn autoloot_replay(gap: usize, relist_after: usize, every_frame_steps: bool) -> (bool, Vec<String>, bool) {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    super::super::native_core::reset_game_step_for_test();
+    super::super::native_core::set_every_call_steps_for_test(every_frame_steps);
+    let Some(mut bv) = Bv::new() else { return (true, vec![], true) };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_self_id(77);
+    bv.enable();
+    bv_auto(&bv, "all");
+    let items = serde_json::json!([
+        {"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100},
+        {"name":"Sapphire","id":2009,"key":1,"qty":1,"max_stack":100}
+    ]);
+    let mut frame_no = 0usize;
+    let mut drawn = |bv: &mut Bv| {
+        bv.play.bags_drawn_frame(frame_no % 2 == 0);
+        bv.frame();
+        frame_no += 1;
+    };
+    bv.play.bags_spawn_npc(9011, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_target_sync(9011);
+    bv.play.bags_combat_hit(77, 9011, -12);
+    for _ in 0..3 {
+        drawn(&mut bv);
+    }
+    let sends_before = bv.play.bags_sends_lost();
+    bv.play.bags_entity_die(9011);
+    // the open goes out
+    let mut waited = 0;
+    while bv.play.bags_sends_lost() == sends_before && waited < 40 {
+        drawn(&mut bv);
+        waited += 1;
+    }
+    assert!(bv.play.bags_sends_lost() > sends_before, "Auto-loot asked for the corpse");
+    let after_open = bv.play.bags_sends_lost();
+    // the server lists the corpse
+    bv.play.bags_corpse(&items);
+    // the mod's Take all is up: wait for it to be asked (the request is the mod's; it goes out on a game step)
+    for _ in 0..gap {
+        drawn(&mut bv);
+    }
+    // the server closes the corpse and lists it again
+    bv.play.bags_loot_close();
+    for _ in 0..relist_after {
+        drawn(&mut bv);
+    }
+    bv.play.bags_corpse(&items);
+    for _ in 0..12 {
+        drawn(&mut bv);
+    }
+    let sent = bv.play.bags_sends_lost() > after_open;
+    let lines: Vec<String> = bv.eval("(function() local t = {} for _, l in ipairs(require('bags').auto_log) do t[#t + 1] = l end return t end)()");
+    let marked_done: bool = bv.eval("(function() local d = require('bags').auto_done return d ~= nil and next(d) ~= nil end)()");
+    let last_close: String = bv.eval("(function() local c = require('bags').last_close return c and (c.by .. ' at ' .. tostring(c.id)) or 'none' end)()");
+    eprintln!("replay lines gap={gap} relist_after={relist_after} every_frame={every_frame_steps}: last_close={last_close} auto_log={lines:?}");
+    bv.clean();
+    super::super::native_core::set_every_call_steps_for_test(false);
+    super::super::native_core::reset_game_step_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    (sent, lines, marked_done)
+}
+
+#[test]
+fn auto_loot_replay_of_the_owners_log_old_gate_against_30hz_gate() {
+    big_stack(auto_loot_replay_body)
+}
+fn auto_loot_replay_body() {
+    let mut differences = Vec::new();
+    for gap in 0..4 {
+        for relist_after in 0..3 {
+            let old = autoloot_replay(gap, relist_after, true);
+            let new = autoloot_replay(gap, relist_after, false);
+            eprintln!("replay gap={gap} relist_after={relist_after}: every-frame sent={} done={} | 30Hz sent={} done={}", old.0, old.2, new.0, new.2);
+            if old.0 != new.0 || old.2 != new.2 {
+                differences.push((gap, relist_after, old, new));
+            }
+        }
+    }
+    assert!(differences.is_empty(), "the 30 Hz gate changed what Auto-loot did: {differences:#?}");
+}
+
+/// A hidden loot session that ends with no packet of its own (the mod's `eqoa.windows.release`) is gone from
+/// `eqoa.loot.get()` on the very next drawn frame, between the game's steps too: the item lists are read every frame.
+/// (Control, the gate before this fix, which read them on steps only: the list was still there a frame later.)
+fn loot_list_after_release(items_every_frame: bool) -> bool {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    super::super::native_core::reset_game_step_for_test();
+    crate::play::Play::bags_items_only_on_steps(!items_every_frame);
+    let Some(mut bv) = Bv::new() else { return false };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_self_id(77);
+    bv.enable();
+    bv.play.bags_spawn_npc(9011, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_entity_die(9011);
+    let n = std::cell::Cell::new(0usize);
+    let drawn = |bv: &mut Bv| {
+        bv.play.bags_drawn_frame(n.get() % 2 == 0);
+        bv.frame();
+        n.set(n.get() + 1);
+    };
+    for _ in 0..3 {
+        drawn(&mut bv);
+    }
+    bv.lua().load("assert(eqoa.windows.takeover('loot')); assert(eqoa.actions.open_loot(9011))").exec().unwrap();
+    for _ in 0..4 {
+        drawn(&mut bv);
+    }
+    bv.play.bags_corpse(&serde_json::json!([{"name":"Rat Pelt","id":2001,"key":0,"qty":1,"max_stack":100}]));
+    for _ in 0..4 {
+        drawn(&mut bv);
+    }
+    assert!(bv.eval::<bool>("eqoa.loot.get() ~= nil"), "the hidden list is the mod's");
+    bv.lua().load("eqoa.windows.release('loot')").exec().unwrap();
+    // one non-step frame after the release (frames alternate: make the next one a non-step)
+    if n.get() % 2 == 0 {
+        drawn(&mut bv);
+    }
+    drawn(&mut bv);
+    let gone = bv.eval::<bool>("eqoa.loot.get() == nil");
+    crate::play::Play::bags_items_only_on_steps(false);
+    bv.clean();
+    super::super::native_core::reset_game_step_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+    crate::fork_ext::loot_source::clear();
+    gone
+}
+
+#[test]
+fn a_hidden_loot_session_that_ends_without_a_packet_is_gone_on_the_next_drawn_frame() {
+    big_stack(a_hidden_loot_session_that_ends_without_a_packet_is_gone_on_the_next_drawn_frame_body)
+}
+fn a_hidden_loot_session_that_ends_without_a_packet_is_gone_on_the_next_drawn_frame_body() {
+    // (No negative control: with the item lists read on steps only the list was gone as well, so this scenario does not
+    // tell the two apart; the lists are still read every drawn frame, as before the 30 Hz gate.)
+    assert!(loot_list_after_release(true), "the list must be gone on the next drawn frame");
 }

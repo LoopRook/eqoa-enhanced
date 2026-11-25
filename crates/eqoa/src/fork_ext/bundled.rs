@@ -45,7 +45,11 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_social",
     "eqoa_start_menu",
     "eqoa_chat",
+    "eqoa_mail",
+    "eqoa_auction",
     "eqoa_nameplates",
+    "eqoa_world_map",
+    "eqoa_trade",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -94,6 +98,36 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_chat/README.md",
         package: "eqoa_chat",
         data: include_bytes!("../../../../bundled-mods/eqoa_chat/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_mail/mod.json",
+        package: "eqoa_mail",
+        data: include_bytes!("../../../../bundled-mods/eqoa_mail/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_mail/main.lua",
+        package: "eqoa_mail",
+        data: include_bytes!("../../../../bundled-mods/eqoa_mail/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_mail/README.md",
+        package: "eqoa_mail",
+        data: include_bytes!("../../../../bundled-mods/eqoa_mail/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_auction/mod.json",
+        package: "eqoa_auction",
+        data: include_bytes!("../../../../bundled-mods/eqoa_auction/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_auction/main.lua",
+        package: "eqoa_auction",
+        data: include_bytes!("../../../../bundled-mods/eqoa_auction/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_auction/README.md",
+        package: "eqoa_auction",
+        data: include_bytes!("../../../../bundled-mods/eqoa_auction/README.md"),
     },
     BundledFile {
         path: "eqoa_round_minimap/main.lua",
@@ -208,6 +242,36 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_bag_viewer/modules/multi.lua",
         package: "eqoa_bag_viewer",
         data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/modules/multi.lua"),
+    },
+    BundledFile {
+        path: "eqoa_bag_viewer/modules/repair.lua",
+        package: "eqoa_bag_viewer",
+        data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/modules/repair.lua"),
+    },
+    BundledFile {
+        path: "eqoa_trade/mod.json",
+        package: "eqoa_trade",
+        data: include_bytes!("../../../../bundled-mods/eqoa_trade/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_trade/main.lua",
+        package: "eqoa_trade",
+        data: include_bytes!("../../../../bundled-mods/eqoa_trade/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_trade/README.md",
+        package: "eqoa_trade",
+        data: include_bytes!("../../../../bundled-mods/eqoa_trade/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_trade/modules/tradeui.lua",
+        package: "eqoa_trade",
+        data: include_bytes!("../../../../bundled-mods/eqoa_trade/modules/tradeui.lua"),
+    },
+    BundledFile {
+        path: "eqoa_bag_viewer/modules/auction_list.lua",
+        package: "eqoa_bag_viewer",
+        data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/modules/auction_list.lua"),
     },
     BundledFile {
         path: "eqoa_bag_viewer/README.md",
@@ -747,6 +811,31 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_nameplates/README.md",
         package: "eqoa_nameplates",
         data: include_bytes!("../../../../bundled-mods/eqoa_nameplates/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_world_map/mod.json",
+        package: "eqoa_world_map",
+        data: include_bytes!("../../../../bundled-mods/eqoa_world_map/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_world_map/main.lua",
+        package: "eqoa_world_map",
+        data: include_bytes!("../../../../bundled-mods/eqoa_world_map/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_world_map/README.md",
+        package: "eqoa_world_map",
+        data: include_bytes!("../../../../bundled-mods/eqoa_world_map/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_world_map/resources/OFL.txt",
+        package: "eqoa_world_map",
+        data: include_bytes!("../../../../bundled-mods/eqoa_world_map/resources/OFL.txt"),
+    },
+    BundledFile {
+        path: "eqoa_world_map/resources/SpaceMono-Regular.ttf",
+        package: "eqoa_world_map",
+        data: include_bytes!("../../../../bundled-mods/eqoa_world_map/resources/SpaceMono-Regular.ttf"),
     },
 ];
 
@@ -1337,7 +1426,11 @@ mod tests {
                 "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat",
-                "eqoa_nameplates"
+                "eqoa_mail",
+                "eqoa_auction",
+                "eqoa_nameplates",
+                "eqoa_world_map",
+                "eqoa_trade"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1641,7 +1734,11 @@ mod tests {
                 "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat",
-                "eqoa_nameplates"
+                "eqoa_mail",
+                "eqoa_auction",
+                "eqoa_nameplates",
+                "eqoa_world_map",
+                "eqoa_trade"
             ]
         );
 
@@ -1698,7 +1795,11 @@ mod tests {
                 "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat",
-                "eqoa_nameplates"
+                "eqoa_mail",
+                "eqoa_auction",
+                "eqoa_nameplates",
+                "eqoa_world_map",
+                "eqoa_trade"
             ]
         );
 
@@ -1729,7 +1830,11 @@ mod tests {
                 "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat",
-                "eqoa_nameplates"
+                "eqoa_mail",
+                "eqoa_auction",
+                "eqoa_nameplates",
+                "eqoa_world_map",
+                "eqoa_trade"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1826,7 +1931,11 @@ mod tests {
                 "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat",
-                "eqoa_nameplates"
+                "eqoa_mail",
+                "eqoa_auction",
+                "eqoa_nameplates",
+                "eqoa_world_map",
+                "eqoa_trade"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );

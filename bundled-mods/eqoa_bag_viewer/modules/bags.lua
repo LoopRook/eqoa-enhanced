@@ -242,6 +242,8 @@ function M.learn_native_open(kind)
 end
 
 local function release_takeover(kind)
+    -- a listing's form, question or run holds the bank until it is done
+    if kind == "bank" and M.auction_list and M.auction_list.busy() then return end
     if kind and eqoa.windows and eqoa.windows.release then
         eqoa.windows.release(kind)
     end
@@ -281,6 +283,7 @@ function M.clear_corpse_hold()
     M.last_close, M.auto_player_open, M.keep_req = nil, nil, nil
     M.auto_take = nil
     M.auto_done = {}
+    M.auto_left = {}
     M.auto_said = {}
     M.engaged_pos = {}
     M.corpses_seen, M.corpses_seen_in = nil, nil
@@ -506,7 +509,7 @@ function M.select(tab)
         M.tab = 7; M.scroll = 0; M.grid_scroll = 0; M.grid = nil; M.menu = nil
     elseif tab ~= M.tab and M.TABS[tab] then
         if M.tab == 7 then
-            M.note_player_closed()
+            M.note_player_closed("the Loot tab was left")
             release_takeover("loot")
         end
         if M.tab == 6 then release_takeover("bank") end
@@ -1009,7 +1012,7 @@ function M.start_loot_non_junk()
 end
 
 function M.stop_batch()
-    M.note_player_closed() -- Stop is the player's: a corpse they stopped is not asked for again
+    M.note_player_closed("the Stop button") -- Stop is the player's: a corpse they stopped is not asked for again
     if M.pending_open then
         local req = M.pending_open.req
         local kind = M.pending_open.kind
@@ -1106,6 +1109,10 @@ function M.build_menu(it, fx, fy)
             return M.open_talk_npc("bank", "Withdraw", function()
                 M.run_single("Withdraw", function() return eqoa.actions.bank_move("bank", it.ref, qty) end)
             end)
+        end
+        if M.auction_list then
+            -- the bank is opened as Withdraw opens it (a banker near), and kept while the form or a question is up
+            add("List on auction...", can_bank, not can_bank and no_bank or nil, function() M.auction_list.begin(it) end, true)
         end
         if it.quantity > 1 then
             add("Withdraw 1", can_bank, not can_bank and no_bank or nil,
@@ -1236,6 +1243,7 @@ function M.run_asking(label, fn)
         M.ask_req = nil
     else
         M.ask_req = req
+        M.ask_label = label
         M.result = {text = label .. ": answer the question on the screen", ok = nil}
     end
     M.dirty()
@@ -1243,6 +1251,7 @@ function M.run_asking(label, fn)
 end
 
 function M.on_confirm_closed(d)
+    if M.auction_list and M.auction_list.on_confirm_closed(d) then return end
     if d and d.kind == "destroy_many" and M.multi then M.multi.on_destroy_closed(d); return end
     if not d or d.kind ~= "destroy" then return end
     if d.answer == "yes" then
@@ -1334,6 +1343,7 @@ local function finish_pending_open(expected_kind)
     if p.kind == "loot" then
         if p.auto then
             M.auto_take = p.auto
+            M.auto_take_at = os.clock()
             if M.auto_retry then M.auto_retry[p.auto] = nil end
             M.count_more_attempt(p.auto) -- the corpse really opened: that is one of the extra tries
             if p.auto_d2 then M.note_loot_reach(math.sqrt(p.auto_d2), true) end
@@ -1540,20 +1550,22 @@ function M.note_loot_closed(d)
     if not (d and d.before and not d.after) then return end
     local id = d.before.source and d.before.source.entity_id
     if d.closed_by ~= "player" and M.player_closed_recently(id) then return end -- keep the player's mark
-    M.last_close = {by = d.closed_by or "other", at = os.clock(), id = id}
+    M.last_close = {by = d.closed_by or "other", at = os.clock(), id = id, src = "the game's loot window (client mark)"}
 end
 
 -- The player closed or stopped the corpse in hand: the one being taken, else the one the window shows (nil when neither
 -- is known: then it counts for any corpse).
-function M.note_player_closed()
+function M.note_player_closed(src)
     local l = eqoa.loot and eqoa.loot.get and eqoa.loot.get()
-    M.last_close = {by = "player", at = os.clock(), id = M.auto_take or (l and l.source and l.source.entity_id) or nil}
+    M.last_close = {by = "player", at = os.clock(), src = src or "the viewer", id = M.auto_take or (l and l.source and l.source.entity_id) or nil}
 end
 
--- Did the player close or stop corpse `id` (nil: any) in the last PLAYER_CLOSE_SECS?
-function M.player_closed_recently(id)
+-- Did the player close or stop corpse `id` (nil: any) in the last PLAYER_CLOSE_SECS? `since` (a clock time): only a
+-- close made after that counts (a take is judged by what happened during it, not by an older mark)
+function M.player_closed_recently(id, since)
     local c = M.last_close
     if not (c ~= nil and c.by == "player" and os.clock() - c.at <= M.PLAYER_CLOSE_SECS) then return false end
+    if since ~= nil and c.at < since then return false end
     return c.id == nil or id == nil or c.id == id
 end
 
@@ -1624,13 +1636,20 @@ function M.auto_done_line(text, unfinished, bags_full)
     M.auto_take = nil
     -- the game's own window was the player's for this corpse only until the take ended
     if M.auto_player_open == id then M.auto_player_open = nil end
-    if unfinished and not M.player_closed_recently(id) then
+    if unfinished and not M.player_closed_recently(id, M.auto_take_at) then
         M.auto_unfinished(id, text, unfinished, bags_full)
+        return
+    end
+    if unfinished then
+        -- the player's close: theirs, not asked for again, but its items were NOT taken: never "already looted"
+        M.auto_left = M.auto_left or {}
+        M.auto_left[id] = true
+        local c = M.last_close
+        M.alog(id, "done", text .. " (you closed it" .. (c and c.src and (" via " .. c.src) or "") .. ": left alone)")
         return
     end
     M.auto_done = M.auto_done or {}
     M.auto_done[id] = true
-    if unfinished then text = text .. " (you closed it: left alone)" end
     M.alog(id, "done", text)
 end
 
@@ -1673,7 +1692,9 @@ local function consider_corpse(e, new)
         yours = d2 ~= nil and d2 <= 36.0
     end
     if yours then
-        if M.auto_done and M.auto_done[e.id] then
+        if M.auto_left and M.auto_left[e.id] then
+            M.alog(e.id, "left", "skipped, left alone (you closed it before its items were taken)")
+        elseif M.auto_done and M.auto_done[e.id] then
             M.alog(e.id, "already", "skipped, already looted")
         else
             make_eligible(e)
@@ -1850,6 +1871,7 @@ function M.tick_auto_loot(pl)
             M.auto_looted = M.auto_looted or {}
             M.auto_looted[src] = true
             M.auto_take = src
+            M.auto_take_at = os.clock()
             M.auto_player_open = src
             M.count_more_attempt(src)
             local take = M.auto_mode == "all" and "Take all" or "Take all but junk"
@@ -1964,7 +1986,7 @@ function M.on_action_result(d)
     -- the destroy call's own result: the question is up, or the call was refused (the answer is `confirm.closed`)
     if M.ask_req and d.request_id == M.ask_req and d.ok ~= nil then
         M.ask_req = nil
-        if d.ok == false then M.result = {text = "Destroy: " .. (d.reason or d.code or "refused"), ok = false} end
+        if d.ok == false then M.result = {text = (M.ask_label or "Destroy") .. ": " .. (d.reason or d.code or "refused"), ok = false} end
         M.dirty()
         return
     end

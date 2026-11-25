@@ -323,6 +323,8 @@ impl Store {
         Ok(())
     }
     fn prepare(&self, path: &Path, doc: &Document) -> Result<Vec<u8>, String> {
+        // reads every profile once for each mod's quota: said if it is slow
+        let _probe = super::stall_probe::scope("profile checks (quota of every mod)");
         Document::parse(doc.json())?;
         let addons = self.root()?.parent().ok_or("missing addon storage root")?;
         for (key, value) in &doc.addons {

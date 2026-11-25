@@ -40,6 +40,19 @@ pub(crate) mod session_replay;
 pub mod telemetry;
 pub mod version;
 
+/// The frame's HUD phase in stages, for the stall probe (`addons::stall_probe`): ends the stage before and starts
+/// `label`'s; a stage that takes long is said in the log. Nothing on a page.
+pub(crate) fn hud_stage(_label: &'static str) {
+    #[cfg(not(target_arch = "wasm32"))]
+    addons::stall_probe::stage(_label);
+}
+
+/// The last HUD stage of the frame ends.
+pub(crate) fn hud_stage_end() {
+    #[cfg(not(target_arch = "wasm32"))]
+    addons::stall_probe::stage_end();
+}
+
 /// The client asked to loot corpse `id` (0x0015): the loot window's source, when its list arrives.
 pub(crate) fn loot_requested(_id: u32) {
     #[cfg(not(target_arch = "wasm32"))]

@@ -7086,6 +7086,7 @@ impl App {
                 if let (Some(p), Some(w)) = (self.play.as_mut(), self.walker.as_mut()) {
                     p.indoor_probe(w, self.frame_s);
                 }
+                crate::fork_ext::hud_stage("hud: mods");
                 #[cfg(not(target_arch = "wasm32"))]
                 let addon_overlay = fork_report::prepare_addons(g, frame.as_ref(), self.play.as_ref(), self.walker.as_ref(), self.booted.as_ref().and_then(|s| s.server.as_deref()));
                 if let (Some(p), Some(w)) = (&mut self.play, &self.walker) {
@@ -7093,6 +7094,7 @@ impl App {
                     // shows it all again; the loading screen is never hidden
                     let boxed = crate::update::offer_shown() || crate::report::is_open_local();
                     let hide = crate::hideui::frame(p.wants_ui() || boxed) && !p.loading_up();
+                    crate::fork_ext::hud_stage("hud: Play::hud");
                     if let Some(u) = g.renderer.ui.as_mut() {
                         p.hud(u, w, self.clock.elapsed().as_millis() as i64, view.view_proj, (g.config.width, g.config.height), game_frame);
                         // the HUD's quads (the damage numbers under them) made,
@@ -7124,8 +7126,10 @@ impl App {
                             crate::report::draw(vui, &mut r);
                         }
                     }
+                    crate::fork_ext::hud_stage("hud: rings");
                     p.draw_rings(&mut g.renderer, &g.device, &g.queue, w, view.view_proj, &self.lib, game_frame);
                     // the map (`map.rs`): its build behind the game, and its view while up
+                    crate::fork_ext::hud_stage("hud: map");
                     p.map_frame(w, &self.lib, &g.device, &g.queue, g.config.format, (g.config.width, g.config.height), self.frame_s, self.console.sticks());
                     // and the minimap's picture inside, when it is due: the
                     // zones in the game's renderer, before the frame's draw
@@ -7133,6 +7137,7 @@ impl App {
                         let zones: Vec<render::Draw> = self.streamer.iter().flat_map(|s| s.draws()).collect();
                         p.indoor_draw(w, &g.renderer, &g.device, &g.queue, g.config.format, &zones);
                     }
+                    crate::fork_ext::hud_stage("hud: plates and chat labels");
                     let plates = p.plates();
                     if let Some(t) = g.renderer.text.as_mut() {
                         let mut pv = crate::play::PlateView::of(&w.cam, &w.eye.position, (g.config.width, g.config.height));
@@ -7147,8 +7152,10 @@ impl App {
                         }
                     }
                     // the frame's sends leave at its end (`Play::flush`)
+                    crate::fork_ext::hud_stage("hud: sends");
                     p.flush();
                 }
+                crate::fork_ext::hud_stage_end();
                 mark(&mut self.perf, 10);
                 let target = match (&frame, &g.offscreen) {
                     (Some(f), _) => f.texture.create_view(&Default::default()),

@@ -715,19 +715,31 @@ fn bundled_edited(id: &str, edit: Edit) -> crate::fork_ext::addons::discovery::D
         std::fs::create_dir_all(&to).unwrap();
         let to = to.canonicalize().unwrap();
         let from = a.entry.parent().unwrap().to_path_buf();
-        for f in std::fs::read_dir(&from).unwrap().flatten().filter(|f| f.path().is_file()) {
-            std::fs::copy(f.path(), to.join(f.file_name())).unwrap();
+        fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+            std::fs::create_dir_all(to).unwrap();
+            for f in std::fs::read_dir(from).unwrap().flatten() {
+                if f.path().is_dir() {
+                    copy_dir(&f.path(), &to.join(f.file_name()));
+                } else {
+                    std::fs::copy(f.path(), to.join(f.file_name())).unwrap();
+                }
+            }
         }
+        copy_dir(&from, &to);
         let main = to.join("main.lua");
         let text = std::fs::read_to_string(&main).unwrap();
         let edited = edit(text.clone());
         assert_ne!(text, edited, "the edit changed the Lua");
         std::fs::write(&main, edited).unwrap();
+        // the folders the mod names (its modules, its resources) are the same ones inside the copy
+        let moved = |dirs: &[std::path::PathBuf]| -> Vec<std::path::PathBuf> {
+            dirs.iter().map(|d| d.strip_prefix(&from).map_or_else(|_| to.clone(), |rest| to.join(rest))).collect()
+        };
+        a.module_dirs = moved(&a.module_dirs);
+        a.resource_dirs = moved(&a.resource_dirs);
         a.entry = main;
         a.script_root = to.clone();
-        a.package_root = to.clone();
-        a.module_dirs = vec![to.clone()];
-        a.resource_dirs = vec![to];
+        a.package_root = to;
     }
     a
 }
@@ -754,6 +766,10 @@ struct Rig {
     menu: Running,
     chat: Running,
     hot: Running,
+    /// more mods (a test adds them: Dialogs, Bag Viewer)
+    more: Vec<Running>,
+    /// the game's HUD as the manager keeps it for the Chat mod (its lease, what the mods hide, and the snapshot it is updated with)
+    hud: Option<(crate::fork_ext::addons::visibility::VisibilityLease, std::rc::Rc<std::cell::RefCell<crate::fork_ext::addons::visibility::HudClaimsRegistry>>, crate::fork_ext::addons::health::HealthSnapshot)>,
     /// the hotkey's key, its combo, its code and the kind of window it opens
     hotkey: (&'static str, &'static str, u8, &'static str),
 }
@@ -772,14 +788,15 @@ impl Rig {
         let hot = start_mod(&bundled_edited(id, None));
         assert!(window_takeover::is_taken(TakeoverKind::StartMenu), "the Start Menu mod holds the Start key");
         assert!(window_takeover::is_taken(TakeoverKind::ChatEntry), "the Chat mod holds the chat line");
-        Rig { p, menu, chat, hot, hotkey }
+        Rig { p, menu, chat, hot, more: Vec::new(), hud: None, hotkey }
     }
 
     /// One game step, and what each mod is told after it.
     fn step(&mut self) {
         super::super::begin_iteration(&mut self.p, true);
         native_core::flush_deferred();
-        for m in [&self.menu, &self.chat, &self.hot] {
+        self.hud_frame();
+        for m in [&self.menu, &self.chat, &self.hot].into_iter().chain(self.more.iter()) {
             native_events::dispatch(&m.host).unwrap();
         }
     }
@@ -795,7 +812,7 @@ impl Rig {
             native_core::CORE.with(|c| {
                 c.borrow_mut().emit("input.key", json!({"key": name, "combo": combo, "down": true, "repeat": false, "synthetic": false, "text": ""}))
             });
-            for m in [&self.menu, &self.chat, &self.hot] {
+            for m in [&self.menu, &self.chat, &self.hot].into_iter().chain(self.more.iter()) {
                 native_events::dispatch(&m.host).unwrap();
             }
         }
@@ -1023,6 +1040,21 @@ fn a6_every_entry_of_the_discs_menu_leaves_the_player_able_to_go_on() {
 }
 
 impl Rig {
+    /// `Manager::frame`: the lease is brought up to date at the start of a frame, and what is hidden is published to the game's
+    /// HUD (`visibility::publish_claims`); the mods hear their events after it.
+    fn hud_frame(&self) {
+        if let Some((lease, claims, health)) = &self.hud {
+            lease.update(*health, true);
+            crate::fork_ext::addons::visibility::publish_claims(&claims.borrow());
+        }
+    }
+
+    /// The game's own chat box is hidden now (what the HUD draws from).
+    fn stock_chat_hidden(&self) -> bool {
+        self.hud_frame();
+        crate::fork_ext::addons::visibility::effective_visibility().chat
+    }
+
     /// A pad button pressed and let go, as the viewer hands the report to the fork (`apply_pad`): the button must be
     /// taken out of what the game sees. Returns the report the game would have seen at the press.
     fn pad(&mut self, bit: u16) -> crate::input::Report {
@@ -1125,5 +1157,259 @@ fn a6_start_key_and_enter_still_go_to_the_mods_after_each_kind_of_world_change()
         // another mod's hotkey
         assert!(r.key("k", "shift+k", b'K'));
         assert!(ws::get(r.hot.vm, "spellbook").is_some(), "{reason}: Shift+K opens the Spellbook in the new world");
+    }
+}
+
+// ---- "The server is updating. You stay in the world": the game's own `Msg000D` into the same world, no pregame
+// (owner log 2026-11-24, build 4b4626ac: "I have to log out back to server select then back in for the UI to work").
+
+impl Rig {
+    /// The event the server sends, handled as `Play::frame` handles it: the hooks before and after, the closing of every
+    /// window and the loading screen that `WorldEntry` brings (`play.rs`, the `Event::WorldEntry` arm), then the frames
+    /// the viewer runs: the snapshot refresh publishes the world's state each frame, so `world.entered` follows the
+    /// loading screen (`api_updates::refresh`).
+    fn server_restarts_and_the_player_stays(&mut self) {
+        let mut walker = Play::bundled_ui_walker();
+        let player = self.p.player.clone();
+        let event = net::session::Event::WorldEntry { self_id: 0x100, player: player.clone(), dump: Default::default() };
+        let capture = super::super::begin_game_event(&self.p, &event);
+        self.p.loading.begin(player.pos, player.hpr[0], false, false, 0);
+        self.p.set_mode_0(&mut walker);
+        self.p.windows_closed_by_dump();
+        super::super::divert_event(&mut self.p);
+        super::super::end_game_event(&self.p, capture);
+        // frames under the loading screen: the mods hear the world go
+        for _ in 0..3 {
+            let _ = self.p.forge_snapshot(None);
+            self.step();
+        }
+        // the loading screen comes down
+        let _ = self.p.loading.wait.take();
+        for _ in 0..3 {
+            let _ = self.p.forge_snapshot(None);
+            self.step();
+        }
+    }
+}
+
+/// Before the restart the player has the Start menu up and the chat mod holds a line; after it every claim and window is
+/// as after a new login, with no log out: the Start key and Enter are the mods', the hotkeys and the other mods work.
+fn restart_walk(edit: Edit) -> Option<Rig> {
+    let Some((img, words)) = disc_menu() else {
+        eprintln!("SKIP a6 server restart: no disc");
+        return None;
+    };
+    let mut r = Rig::new(&img, &words, edit, true);
+    for id in ["eqoa_dialogs", "eqoa_bag_viewer", "eqoa_social"] {
+        r.more.push(start_mod(&bundled_edited(id, None)));
+    }
+    // a probe that records what the lifecycle tells a mod
+    let probe = Host::with_test_capabilities(&["eqoa.events.on"]).unwrap();
+    probe
+        .execute(
+            r#"seen = {}
+            for _, name in ipairs({'world.leaving', 'world.entered', 'state.reset'}) do
+                eqoa.events.on(name, function(e)
+                    seen[#seen + 1] = name .. ((e.data and e.data.in_world ~= nil) and (':' .. tostring(e.data.in_world)) or '')
+                end)
+            end"#,
+        )
+        .unwrap();
+    let vm = native_events::bus(&probe.lua).borrow().vm;
+    let bridge = crate::fork_ext::addons::bridge::Bridge::install(&probe).unwrap();
+    r.more.push(Running { host: probe, _bridge: bridge, vm });
+    let _ = r.p.forge_snapshot(None);
+    r.step();
+    // the menu is up when the server restarts
+    r.escape();
+    r.step();
+    assert!(r.menu_session().is_some(), "the mod's menu is up before the restart");
+    r.server_restarts_and_the_player_stays();
+    Some(r)
+}
+
+#[test]
+fn a6_after_the_server_restarts_and_the_player_stays_every_mod_works_without_a_relogin() {
+    let Some(mut r) = restart_walk(None) else { return };
+    assert_eq!(r.p.mode, 0);
+    // the lifecycle reached the mods, in order: the world left, the state reset empty, the world entered, the state reset
+    let seen: String = r.more[3].host.lua.load("return table.concat(seen, ' ')").eval().unwrap();
+    assert!(
+        seen.contains("world.leaving") && seen.contains("state.reset:false") && seen.contains("world.entered") && seen.contains("state.reset:true"),
+        "events a mod was told: {seen}"
+    );
+    assert!(seen.find("world.leaving").unwrap() < seen.find("world.entered").unwrap(), "in order: {seen}");
+    // what was open is closed, and the mod knows it (a new menu is not a toggle of a stale one)
+    assert!(r.menu_session().is_none(), "the menu that was up ended with the world");
+    assert!(window_takeover::is_taken(TakeoverKind::StartMenu) && window_takeover::is_taken(TakeoverKind::ChatEntry));
+    assert!(TakeoverKind::DIALOGS.iter().all(|k| window_takeover::is_taken(*k)), "Dialogs holds its kinds again");
+    assert!(window_takeover::is_taken(TakeoverKind::FriendRequest) && window_takeover::is_taken(TakeoverKind::GuildInvite), "Social holds its kinds again");
+    // the Start key is the mod's
+    r.escape();
+    r.step();
+    assert!(r.menu_session().is_some(), "Escape opens the mod's menu (mode {})", r.p.mode);
+    assert_eq!(r.p.mode, 0);
+    r.escape();
+    r.step();
+    // Enter is the Chat mod's
+    r.enter();
+    r.step();
+    assert!(r.chat_line().is_some(), "Enter opens the Chat mod's line (mode {})", r.p.mode);
+    assert_eq!(r.p.mode, 0);
+    let line = r.chat_line().unwrap();
+    ws::close(r.chat.vm, &line.id, "test").unwrap();
+    r.step();
+    // hotkeys: the Spellbook and the Bag Viewer
+    assert!(r.key("k", "shift+k", b'K'));
+    assert!(ws::get(r.hot.vm, "spellbook").is_some(), "Shift+K opens the Spellbook");
+    let id = ws::get(r.hot.vm, "spellbook").unwrap().id;
+    ws::close(r.hot.vm, &id, "test").unwrap();
+    r.step();
+    assert!(r.key("b", "shift+b", b'B'));
+    assert!(ws::get(r.more[1].vm, "inventory").is_some(), "Shift+B opens the Bag Viewer");
+}
+
+/// The windows the mods had open when the server restarted end with it and open again on their own keys (a mod that kept
+/// "I am open" over the restart would close on the key instead), and the chat line that was up is gone.
+#[test]
+fn a6_windows_open_at_a_server_restart_are_gone_and_open_again_on_their_keys() {
+    let Some((img, words)) = disc_menu() else {
+        eprintln!("SKIP a6 server restart windows: no disc");
+        return;
+    };
+    let mut r = Rig::new(&img, &words, None, true);
+    for id in ["eqoa_bag_viewer", "eqoa_social"] {
+        r.more.push(start_mod(&bundled_edited(id, None)));
+    }
+    let _ = r.p.forge_snapshot(None);
+    r.step();
+    assert!(r.key("k", "shift+k", b'K'));
+    assert!(r.key("b", "shift+b", b'B'));
+    r.enter();
+    r.step();
+    assert!(ws::get(r.hot.vm, "spellbook").is_some() && ws::get(r.more[0].vm, "inventory").is_some() && r.chat_line().is_some(), "all three up before the restart");
+    r.server_restarts_and_the_player_stays();
+    assert!(ws::get(r.hot.vm, "spellbook").is_none(), "the Spellbook window ended");
+    assert!(ws::get(r.more[0].vm, "inventory").is_none(), "the Bag Viewer window ended");
+    assert!(r.chat_line().is_none(), "the chat line ended");
+    assert!(!crate::fork_ext::addons::input::is_key_claimed(0x1b), "no Escape claim of a window that is gone is left");
+    assert!(!crate::fork_ext::addons::input::is_text_capture_active(), "no text capture of a line that is gone is left");
+    // the keys open them again (and do not close what is not there)
+    assert!(r.key("k", "shift+k", b'K'));
+    assert!(ws::get(r.hot.vm, "spellbook").is_some(), "Shift+K opens the Spellbook again");
+    assert!(r.key("b", "shift+b", b'B'));
+    assert!(ws::get(r.more[0].vm, "inventory").is_some(), "Shift+B opens the Bag Viewer again");
+    let id = ws::get(r.hot.vm, "spellbook").unwrap().id;
+    ws::close(r.hot.vm, &id, "test").unwrap();
+    r.step();
+    r.enter();
+    r.step();
+    assert!(r.chat_line().is_some(), "Enter opens the chat line again");
+}
+
+impl Rig {
+    /// The Chat mod run as the manager runs it: with a lease on the game's HUD, so what it hides is what the game's own chat
+    /// box draws from (`effective_visibility().chat`). It replaces the plain one, and is told it is in a world.
+    fn chat_with_the_games_hud(&mut self) {
+        use crate::fork_ext::addons::{health::HealthBarClaimsRegistry, visibility::{self, HudClaimsRegistry, VisibilityLease}};
+        window_takeover::release_vm(self.chat.vm);
+        let a = bundled_edited("eqoa_chat", None);
+        let host = Host::for_addon(&a).unwrap();
+        host.snapshot.set(Play::bundled_ui_fixture().forge_snapshot(None));
+        let claims = std::rc::Rc::new(std::cell::RefCell::new(HudClaimsRegistry::new()));
+        let lease = VisibilityLease::with_hud_claims(std::rc::Rc::new(std::cell::RefCell::new(HealthBarClaimsRegistry::new())), claims.clone()).unwrap();
+        let health = host.snapshot.get().health;
+        lease.update(health, true);
+        visibility::install_managed_health_adapter(&host, &lease).unwrap();
+        let bridge = crate::fork_ext::addons::bridge::Bridge::install(&host).unwrap();
+        native_core::CORE.with(|c| c.borrow_mut().view.in_world = true); // (the fixture above may have changed it)
+        host.run_addon(&a).unwrap();
+        native_events::initial(&host).unwrap();
+        let vm = native_events::bus(&host.lua).borrow().vm;
+        self.chat = Running { host, _bridge: bridge, vm };
+        self.hud = Some((lease, claims, health));
+        self.step();
+    }
+
+    /// The server's NPC says something (`Msg` for a text dialog), as `Play::frame` handles it.
+    fn npc_says(&mut self, words: &str) {
+        let event = net::session::Event::Dialog { id: 0, text: crate::ui::wide(words) };
+        let capture = super::super::begin_game_event(&self.p, &event);
+        self.p.show_dialog(&crate::ui::wide(words));
+        super::super::divert_event(&mut self.p);
+        super::super::end_game_event(&self.p, capture);
+        self.step();
+    }
+}
+
+/// The four things the owner saw broken after "The server is updating. You stay in the world" (build 4b4626ac):
+/// dialogue, the game's own chat showing next to the Chat mod, the Start menu, and Enter. Each through the real path.
+#[test]
+fn a6_the_four_owner_symptoms_after_a_server_restart() {
+    let Some((img, words)) = disc_menu() else {
+        eprintln!("SKIP a6 server restart symptoms: no disc");
+        return;
+    };
+    let mut r = Rig::new(&img, &words, None, true);
+    r.more.push(start_mod(&bundled_edited("eqoa_dialogs", None)));
+    r.chat_with_the_games_hud();
+    let _ = r.p.forge_snapshot(None);
+    r.step();
+    // before: the game's chat is hidden, an NPC's words are the Dialogs mod's
+    assert!(r.stock_chat_hidden(), "before the restart the game's own chat box is hidden by the Chat mod");
+    r.npc_says("Hail, traveller");
+    assert!(ws::get(r.more[0].vm, "text_dialog").is_some() && r.p.mode == 0, "before: the NPC's words are the Dialogs mod's (mode {})", r.p.mode);
+    // (the dialog is still up when the server restarts)
+    r.server_restarts_and_the_player_stays();
+    assert!(ws::get(r.more[0].vm, "text_dialog").is_none(), "the old world's dialog ended with it");
+    // 1. dialogue
+    r.npc_says("Welcome back");
+    let dialog = ws::get(r.more[0].vm, "text_dialog");
+    assert!(dialog.is_some() && r.p.mode == 0, "dialogue: the NPC's words are the Dialogs mod's after the restart (mode {})", r.p.mode);
+    // 2. the stock chat
+    assert!(r.stock_chat_hidden(), "chat: the game's own chat box stays hidden after the restart");
+    // 3. the Start menu
+    r.escape();
+    r.step();
+    assert!(r.menu_session().is_some() && r.p.mode == 0, "start menu: Escape opens the mod's menu (mode {})", r.p.mode);
+    r.escape();
+    r.step();
+    // 4. Enter
+    r.enter();
+    r.step();
+    assert!(r.chat_line().is_some() && r.p.mode == 0, "Enter: the Chat mod's line opens, not the game's box (mode {})", r.p.mode);
+}
+
+/// Which events carry the Dialogs mod's claim back after the restart? The mod claims at load, on `world.entered`, on
+/// `state.reset` and (in a frame, which this rig does not run) every 120 frames. With either one event line cut the NPC's words
+/// are still the mod's after the restart: both events are delivered on the "world entry again" path. With both cut they are
+/// not: the restart does drop the claim, and the game's own window shows (the control).
+#[test]
+fn a6_dialogs_get_their_claim_back_from_each_of_the_two_events_and_not_without_them() {
+    let Some((img, words)) = disc_menu() else {
+        eprintln!("SKIP a6 dialogs restart: no disc");
+        return;
+    };
+    let cut_entered: &dyn Fn(String) -> String = &|s| s.replace("eqoa.events.on(\"world.entered\", function() claim() end)\n", "");
+    let cut_reset: &dyn Fn(String) -> String = &|s| s.replace("eqoa.events.on(\"state.reset\", function() claim() end)\n", "");
+    let cut_both: &dyn Fn(String) -> String = &|s| cut_reset(cut_entered(s));
+    for (name, edit, works) in [("entered only", cut_reset, true), ("state.reset only", cut_entered, true), ("neither", cut_both, false)] {
+        let mut r = Rig::new(&img, &words, None, true);
+        r.more.push(start_mod(&bundled_edited("eqoa_dialogs", Some(edit))));
+        // what the mod's first frame does (this rig runs no render frames): it holds its kinds
+        for kind in TakeoverKind::DIALOGS {
+            window_takeover::takeover(r.more[0].vm, "eqoa_dialogs", kind, window_takeover::TakeoverScope::All).unwrap();
+        }
+        let _ = r.p.forge_snapshot(None);
+        r.step();
+        r.npc_says("Hail, traveller");
+        assert!(ws::get(r.more[0].vm, "text_dialog").is_some(), "{name}: before the restart the Dialogs mod holds it");
+        r.server_restarts_and_the_player_stays();
+        r.npc_says("Welcome back");
+        let mine = ws::get(r.more[0].vm, "text_dialog").is_some();
+        assert_eq!(mine, works, "{name}: after the restart the NPC's words are the Dialogs mod's: {mine} (mode {})", r.p.mode);
+        if !works {
+            assert_eq!(r.p.mode, 9, "{name}: the game's own dialog window showed instead");
+        }
     }
 }

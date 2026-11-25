@@ -61,6 +61,7 @@ class Scene:
     options: dict = field(default_factory=dict)       # mod id -> {option id: value} saved in the scratch profile
     seed: object = None                              # callable(sqlite3 connection): edits the fresh database copy
     fresh_db: bool = False                           # restart the server on a fresh copy of the seed database first
+    patch: dict = field(default_factory=dict)         # mod id -> [(old, new)] edits to a COPY of its main.lua, every run (diagnostics)
     control_patch: dict = field(default_factory=dict)  # negative control: mod id -> [(old, new)] edits to its main.lua
 
 
@@ -259,6 +260,17 @@ class Suite:
             return db.execute("SELECT COALESCE(SUM(1), 0) FROM charinventory JOIN characters USING (serverid) "
                               "WHERE charName = ? AND patternid = ?", (ls.CHARACTER, pattern_id)).fetchone()[0]
 
+    def char_quest(self, questid):
+        """(step, done, picks) of the character's row for a quest in the live database copy, or None."""
+        with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True)) as db:
+            return db.execute("SELECT step, done, picks FROM charquests JOIN characters USING (serverid) "
+                              "WHERE charName = ? AND questid = ?", (ls.CHARACTER, questid)).fetchone()
+
+    def has_spell(self, spellid):
+        with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True)) as db:
+            return db.execute("SELECT COUNT(*) FROM spells JOIN characters USING (serverid) WHERE charName = ? AND spellid = ?",
+                              (ls.CHARACTER, spellid)).fetchone()[0] > 0
+
     def inventory(self):
         """(rows, stack sum, tunar) of the character in the live database copy."""
         with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True)) as db:
@@ -389,7 +401,10 @@ class Suite:
         self.log_mark = self.server_log.stat().st_size      # what the server says from here on is this scene's
         for attempt in range(4):
             shutil.rmtree(self.dir / folder, ignore_errors=True)
-            run_dir, log, error = self.run_client(scene, folder, scene.control_patch if control else None, control)
+            patch = {m: list(e) for m, e in scene.patch.items()}
+            for m, e in (scene.control_patch.items() if control else ()):
+                patch.setdefault(m, []).extend(e)
+            run_dir, log, error = self.run_client(scene, folder, patch, control)
             if "You are already logged in" not in log:
                 break
             time.sleep(20)      # the server still holds the last scene's session (30 s): ask again

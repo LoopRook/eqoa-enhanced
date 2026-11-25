@@ -8,7 +8,11 @@ local hud_gauge = eqoa.hud.gauge
 
 eqoa.options.toggle({ id = "mana_bars", label = "Mana Bars", default = true })
 
+-- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
+local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
+
 eqoa.events.on("render", function()
+    if map_up() then return end
     if not eqoa.options.get("mana_bars") then return end
 
     local layout = eqoa.hud.layout()

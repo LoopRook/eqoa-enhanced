@@ -101,3 +101,78 @@ fn bag_multi_select_with_real_clicks_body() {
     bv.clean();
     super::super::action_broker::reset_all_for_test();
 }
+
+impl Bv {
+    /// The corner letter the window draws for the stack with this name ("B" marked to bank), from the mod's own function.
+    fn corner(&self, name: &str) -> Option<String> {
+        self.eval(&format!(
+            "(function() local B = require('bags') for _, e in ipairs(B.grid.items) do if e.item.name == {name:?} then return B.mark_letter(e.item) end end end)()"
+        ))
+    }
+    fn saved_bank_marks(&self) -> bool {
+        self.eval("((eqoa.files.read('helpers.cfg') or ''):find('bank:', 1, true)) ~= nil")
+    }
+}
+
+/// The owner's bug (build 4b4626ac): a bank mark could be put on but not taken off. With the real window and real clicks:
+/// the single menu and the group menu both offer "Unmark bank", the mark is saved, and its corner letter goes at once.
+#[test]
+fn bag_a_bank_mark_can_be_taken_off_from_the_item_menu_and_the_group_menu_with_real_clicks() {
+    big_stack(bag_a_bank_mark_can_be_taken_off_body)
+}
+fn bag_a_bank_mark_can_be_taken_off_body() {
+    super::super::action_broker::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.enable();
+    bv.open();
+    // slots: 6 Hero Helm, 7 Rat Pelt, 8 Odd Thing. Mark the pelt to bank from its own menu.
+    let p = bv.slot(7);
+    bv.click(p);
+    bv.frames(2);
+    assert!(bv.menu_row("Unmark bank").is_none(), "nothing to unmark yet");
+    let (x, y, on, _, _) = bv.menu_row("Bank this").expect("Bank this is offered");
+    assert!(on);
+    bv.click((x, y));
+    bv.frames(2);
+    assert_eq!(bv.corner("Rat Pelt").as_deref(), Some("B"));
+    assert!(bv.saved_bank_marks());
+    // its menu now offers Unmark bank (and no longer Bank this); the click takes the mark off at once and saves that
+    let p = bv.slot(7);
+    bv.click(p);
+    bv.frames(2);
+    assert!(bv.menu_row("Bank this").is_none(), "{:?}", bv.menu_labels());
+    let (x, y, on, _, _) = bv.menu_row("Unmark bank").expect("Unmark bank is offered for a marked item");
+    assert!(on);
+    bv.click((x, y));
+    bv.frames(2);
+    assert_eq!(bv.corner("Rat Pelt"), None, "the corner letter is gone at once");
+    assert!(!bv.saved_bank_marks(), "and the file no longer holds the mark");
+    // the group menu: mark two from their own menus, then select three (one unmarked) and unmark the marked ones together
+    for n in [7usize, 8] {
+        let p = bv.slot(n);
+        bv.click(p);
+        bv.frames(2);
+        let (x, y, _, _, _) = bv.menu_row("Bank this").unwrap();
+        bv.click((x, y));
+        bv.frames(2);
+    }
+    assert_eq!((bv.corner("Rat Pelt").as_deref(), bv.corner("Odd Thing").as_deref()), (Some("B"), Some("B")));
+    bv.ctrl_click(6);
+    bv.ctrl_click(7);
+    bv.ctrl_click(8);
+    bv.right_click(8);
+    assert_eq!(bv.menu_title().as_deref(), Some("3 items selected"));
+    let labels = bv.menu_labels();
+    assert!(labels.iter().any(|l| l == "Mark to bank") && labels.iter().any(|l| l == "Unmark bank (2)"), "{labels:?}");
+    let (x, y, on, _, _) = bv.menu_row("Unmark bank").unwrap();
+    assert!(on);
+    bv.click((x, y));
+    bv.frames(2);
+    assert_eq!((bv.corner("Rat Pelt"), bv.corner("Odd Thing")), (None, None), "both letters are gone at once");
+    assert!(!bv.saved_bank_marks());
+    assert_eq!(bv.result_text().map(|r| r.0).as_deref(), Some("Unmarked 2 items for the bank"));
+    assert!(bv.selected().is_empty());
+    bv.clean();
+    super::super::action_broker::reset_all_for_test();
+}

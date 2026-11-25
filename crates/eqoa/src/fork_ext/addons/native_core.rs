@@ -300,6 +300,10 @@ thread_local! {static GAME_STEP:std::cell::Cell<(bool,bool)>=const{std::cell::Ce
 /// Whether the game stepped since the last call (the fork's per-frame hook `iteration` says so). Where no
 /// iteration was ever run (headless tests) every call is a step, as it was before the gate.
 pub(crate) fn take_game_step() -> bool {
+    #[cfg(test)]
+    if EVERY_CALL_STEPS.with(|e| e.get()) {
+        return true;
+    }
     GAME_STEP.with(|g| {
         let (seen, pending) = g.get();
         g.set((seen, false));
@@ -317,6 +321,13 @@ pub(crate) fn state_event_since(seq: u64) -> bool {
             .take_while(|e| e.seq > seq)
             .any(|e| !matches!(e.name.as_str(), "camera.changed" | "player.changed"))
     })
+}
+#[cfg(test)]
+thread_local! {static EVERY_CALL_STEPS:std::cell::Cell<bool>=const{std::cell::Cell::new(false)};}
+/// Test seam: every rebuild is a step (the build before the 30 Hz gate), to compare a scripted session with it.
+#[cfg(test)]
+pub(crate) fn set_every_call_steps_for_test(on: bool) {
+    EVERY_CALL_STEPS.with(|e| e.set(on));
 }
 #[cfg(test)]
 pub(crate) fn reset_game_step_for_test() {

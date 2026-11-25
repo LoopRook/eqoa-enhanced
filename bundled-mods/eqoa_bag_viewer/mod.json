@@ -56,7 +56,13 @@
     "eqoa.actions.destroy",
     "eqoa.actions.destroy_many",
     "eqoa.actions.link_item",
-    "eqoa.actions.hide_look"
+    "eqoa.actions.hide_look",
+    "eqoa.blacksmith.get",
+    "eqoa.actions.blacksmith_repair",
+    "eqoa.auction.get",
+    "eqoa.input.capture_text",
+    "eqoa.actions.auction_sell",
+    "eqoa.mods.send"
   ],
   "commands": [
     "open"

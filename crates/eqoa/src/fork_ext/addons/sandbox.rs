@@ -260,6 +260,7 @@ pub(crate) fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 pub(crate) fn check_quota(root: &Path, replaced: &Path, new_len: usize) -> Result<(), String> {
+    let _probe = super::stall_probe::scope("mod file quota scan");
     check_quota_inner(root, replaced, new_len, None)
 }
 pub(crate) fn check_settings_quota(

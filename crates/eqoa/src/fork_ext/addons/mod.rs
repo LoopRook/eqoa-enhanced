@@ -123,7 +123,10 @@ pub(crate) mod native_a6;
 mod a6_tests;
 #[cfg(test)]
 mod a13_tests;
+#[cfg(test)]
+mod a13_mod_tests;
 pub(crate) mod native_a8;
+pub(crate) mod native_a9;
 pub(crate) mod native_a11;
 pub(crate) mod native_a10;
 #[cfg(test)]
@@ -137,6 +140,8 @@ mod a12_tests;
 mod nameplates_mod_tests;
 pub(crate) mod native_a7;
 pub(crate) mod native_a5;
+#[cfg(test)]
+mod a9_mod_tests;
 #[cfg(test)]
 mod a1_tests;
 #[cfg(test)]
@@ -183,6 +188,7 @@ mod sandbox;
 mod spike;
 pub(crate) mod storage;
 pub(crate) mod write_queue;
+pub(crate) mod stall_probe;
 pub(crate) mod deferred_sync;
 #[cfg(test)]
 mod perf_core_events_tests;

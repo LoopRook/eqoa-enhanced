@@ -51,6 +51,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.bank_move` | supported | 6 |  |
 | `eqoa.actions.batch` | supported | 6 |  |
 | `eqoa.actions.batch_status` | supported | 6 |  |
+| `eqoa.actions.blacksmith_close` | supported | 8 |  |
+| `eqoa.actions.blacksmith_repair` | supported | 8 |  |
 | `eqoa.actions.buttons` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 8) |
 | `eqoa.actions.buy` | supported | 6 |  |
 | `eqoa.actions.camera` | supported | 6 |  |
@@ -73,17 +75,9 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.destroy_many` | supported | 8 |  |
 | `eqoa.actions.dialog_answer` | supported | 6 |  |
 | `eqoa.actions.drop_quest` | supported | 6 |  |
-| `eqoa.actions.dye_cancel` | supported | 8 |  |
-| `eqoa.actions.dye_no_dye` | supported | 8 |  |
-| `eqoa.actions.dye_pick` | supported | 8 |  |
+| `eqoa.actions.duel_answer` | supported | 8 |  |
 | `eqoa.actions.emote` | supported | 8 |  |
 | `eqoa.actions.equip` | supported | 6 |  |
-| `eqoa.actions.fishing_cancel` | supported | 8 |  |
-| `eqoa.actions.fishing_cast` | supported | 8 |  |
-| `eqoa.actions.fishing_keep` | supported | 8 |  |
-| `eqoa.actions.fishing_pull` | supported | 8 |  |
-| `eqoa.actions.fishing_reel` | supported | 8 |  |
-| `eqoa.actions.fishing_release` | supported | 8 |  |
 | `eqoa.actions.follow` | supported | 6 |  |
 | `eqoa.actions.friend_accept` | supported | 8 |  |
 | `eqoa.actions.friend_add` | supported | 8 |  |
@@ -120,14 +114,6 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.mastery_refund` | supported | 6 |  |
 | `eqoa.actions.mastery_share` | supported | 6 |  |
 | `eqoa.actions.menu_command` | supported | 6 |  |
-| `eqoa.actions.merc_dismiss` | supported | 8 |  |
-| `eqoa.actions.merc_equip` | supported | 8 |  |
-| `eqoa.actions.merc_give` | supported | 8 |  |
-| `eqoa.actions.merc_spell_set` | supported | 8 |  |
-| `eqoa.actions.merc_spells_clear` | supported | 8 |  |
-| `eqoa.actions.merc_stock` | supported | 8 |  |
-| `eqoa.actions.merc_take` | supported | 8 |  |
-| `eqoa.actions.merc_unequip` | supported | 8 |  |
 | `eqoa.actions.move` | not_yet | 6 | continuous controls come after the upstream PR (mod API plan, round 8) |
 | `eqoa.actions.open_link` | supported | 2 |  |
 | `eqoa.actions.open_loot` | supported | 6 |  |
@@ -151,6 +137,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.target` | supported | 6 |  |
 | `eqoa.actions.target_target` | supported | 3 |  |
 | `eqoa.actions.toggle_stats_box` | supported | 3 |  |
+| `eqoa.actions.trade_accept` | supported | 8 |  |
+| `eqoa.actions.trade_add` | supported | 8 |  |
+| `eqoa.actions.trade_answer` | supported | 8 |  |
+| `eqoa.actions.trade_cancel` | supported | 8 |  |
+| `eqoa.actions.trade_money` | supported | 8 |  |
+| `eqoa.actions.trade_remove` | supported | 8 |  |
+| `eqoa.actions.trade_unaccept` | supported | 8 |  |
 | `eqoa.actions.train_stats` | supported | 8 |  |
 | `eqoa.actions.unmemorize_ability` | supported | 6 |  |
 | `eqoa.actions.unmemorize_all` | supported | 6 |  |
@@ -185,6 +178,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.binds` | supported | 3 |  |
 | `eqoa.binds.get` | supported | 3 |  |
 | `eqoa.binds.register` | supported | 3 |  |
+
+## eqoa.blacksmith
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.blacksmith` | supported | 8 |  |
+| `eqoa.blacksmith.get` | supported | 8 |  |
 
 ## eqoa.camera
 
@@ -254,12 +254,12 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.craft` | supported | 8 |  |
 | `eqoa.craft.get` | supported | 8 |  |
 
-## eqoa.dye
+## eqoa.duel
 
 | Path | Status | Since round | Reason |
 |---|---|---|---|
-| `eqoa.dye` | supported | 8 |  |
-| `eqoa.dye.get` | supported | 8 |  |
+| `eqoa.duel` | supported | 8 |  |
+| `eqoa.duel.get` | supported | 8 |  |
 
 ## eqoa.effects
 
@@ -318,13 +318,6 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.files.remove` | supported | 2 |  |
 | `eqoa.files.save_json_async` | supported | 4 |  |
 | `eqoa.files.write` | supported | 2 |  |
-
-## eqoa.fishing
-
-| Path | Status | Since round | Reason |
-|---|---|---|---|
-| `eqoa.fishing` | supported | 8 |  |
-| `eqoa.fishing.get` | supported | 8 |  |
 
 ## eqoa.fonts
 
@@ -561,13 +554,6 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.math.radians` | supported | 2 |  |
 | `eqoa.math.signed_angle` | supported | 2 |  |
 
-## eqoa.merc
-
-| Path | Status | Since round | Reason |
-|---|---|---|---|
-| `eqoa.merc` | supported | 8 |  |
-| `eqoa.merc.get` | supported | 8 |  |
-
 ## eqoa.merchant
 
 | Path | Status | Since round | Reason |
@@ -686,6 +672,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.textures.release` | supported | 2 |  |
 | `eqoa.textures.rgba` | supported | 2 |  |
 
+## eqoa.trade
+
+| Path | Status | Since round | Reason |
+|---|---|---|---|
+| `eqoa.trade` | supported | 8 |  |
+| `eqoa.trade.get` | supported | 8 |  |
+
 ## eqoa.who
 
 | Path | Status | Since round | Reason |
@@ -725,6 +718,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.bank.changed` | supported | 5 |  |
 | `eqoa.events.batch.progress` | supported | 6 |  |
 | `eqoa.events.batch.result` | supported | 6 |  |
+| `eqoa.events.blacksmith.changed` | supported | 8 |  |
 | `eqoa.events.buffs.changed` | supported | 8 |  |
 | `eqoa.events.camera.changed` | supported | 6 |  |
 | `eqoa.events.cast.ended` | supported | 8 |  |
@@ -737,14 +731,13 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.cooldown.started` | supported | 2 |  |
 | `eqoa.events.cooldown.updated` | supported | 2 |  |
 | `eqoa.events.disabling` | supported | 2 |  |
-| `eqoa.events.dye.changed` | supported | 8 |  |
+| `eqoa.events.duel.changed` | supported | 8 |  |
 | `eqoa.events.effects.changed` | supported | 2 |  |
 | `eqoa.events.enabled` | supported | 2 |  |
 | `eqoa.events.entity.added` | supported | 2 |  |
 | `eqoa.events.entity.changed` | supported | 2 |  |
 | `eqoa.events.entity.removed` | supported | 2 |  |
 | `eqoa.events.events.dropped` | supported | 2 |  |
-| `eqoa.events.fishing.changed` | supported | 8 |  |
 | `eqoa.events.friends.changed` | supported | 8 |  |
 | `eqoa.events.group.changed` | supported | 2 |  |
 | `eqoa.events.guide.lost` | supported | 4 |  |
@@ -759,7 +752,6 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.loot.changed` | supported | 5 |  |
 | `eqoa.events.map.changed` | supported | 4 |  |
 | `eqoa.events.mastery.changed` | supported | 6 |  |
-| `eqoa.events.merc.changed` | supported | 8 |  |
 | `eqoa.events.merchant.changed` | supported | 5 |  |
 | `eqoa.events.mod.command` | supported | 4 |  |
 | `eqoa.events.player.changed` | supported | 2 |  |
@@ -776,6 +768,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.state.reset` | supported | 2 |  |
 | `eqoa.events.target.changed` | supported | 2 |  |
 | `eqoa.events.timer` | supported | 2 |  |
+| `eqoa.events.trade.accepted` | supported | 8 |  |
+| `eqoa.events.trade.changed` | supported | 8 |  |
+| `eqoa.events.trade.closed` | supported | 8 |  |
+| `eqoa.events.trade.request` | supported | 8 |  |
 | `eqoa.events.who.result` | supported | 8 |  |
 | `eqoa.events.windows.changed` | supported | 6 |  |
 | `eqoa.events.windows.key` | supported | 8 |  |
@@ -885,6 +881,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.auction.Sellable.name` | supported | 8 |  |
 | `eqoa.auction.Sellable.quantity` | supported | 8 |  |
 | `eqoa.auction.Sellable.slot` | supported | 8 |  |
+| `eqoa.auction.Sellable.value` | supported | 8 |  |
 | `eqoa.auction.State` | supported | 8 |  |
 | `eqoa.auction.State.banked` | supported | 8 |  |
 | `eqoa.auction.State.bidders` | supported | 8 |  |
@@ -899,8 +896,26 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.auction.State.results` | supported | 8 |  |
 | `eqoa.auction.State.revision` | supported | 8 |  |
 | `eqoa.auction.State.sellable` | supported | 8 |  |
+| `eqoa.auction.State.stacks` | supported | 8 |  |
 | `eqoa.auction.State.tunar` | supported | 8 |  |
 | `eqoa.auction.State.uncertain` | supported | 8 |  |
+| `eqoa.blacksmith.Item` | supported | 8 |  |
+| `eqoa.blacksmith.Item.can_repair` | supported | 8 |  |
+| `eqoa.blacksmith.Item.condition` | supported | 8 |  |
+| `eqoa.blacksmith.Item.cost` | supported | 8 |  |
+| `eqoa.blacksmith.Item.id` | supported | 8 |  |
+| `eqoa.blacksmith.Item.inventory_key` | supported | 8 |  |
+| `eqoa.blacksmith.Item.name` | supported | 8 |  |
+| `eqoa.blacksmith.Item.quantity` | supported | 8 |  |
+| `eqoa.blacksmith.Item.slot` | supported | 8 |  |
+| `eqoa.blacksmith.Item.worn` | supported | 8 |  |
+| `eqoa.blacksmith.State` | supported | 8 |  |
+| `eqoa.blacksmith.State.coin` | supported | 8 |  |
+| `eqoa.blacksmith.State.held` | supported | 8 |  |
+| `eqoa.blacksmith.State.items` | supported | 8 |  |
+| `eqoa.blacksmith.State.repair_pending` | supported | 8 |  |
+| `eqoa.blacksmith.State.revision` | supported | 8 |  |
+| `eqoa.blacksmith.State.total` | supported | 8 |  |
 | `eqoa.camera.Camera` | supported | 6 |  |
 | `eqoa.camera.Camera.distance` | supported | 6 |  |
 | `eqoa.camera.Camera.heading` | supported | 6 |  |
@@ -1048,16 +1063,25 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.craft.TrayItem.id` | supported | 8 |  |
 | `eqoa.craft.TrayItem.name` | supported | 8 |  |
 | `eqoa.craft.TrayItem.slot` | supported | 8 |  |
-| `eqoa.dye.State` | supported | 8 |  |
-| `eqoa.dye.State.alpha` | supported | 8 |  |
-| `eqoa.dye.State.current` | supported | 8 |  |
-| `eqoa.dye.State.no_dye` | supported | 8 |  |
-| `eqoa.dye.State.open` | supported | 8 |  |
-| `eqoa.dye.State.revision` | supported | 8 |  |
-| `eqoa.dye.State.slots` | supported | 8 |  |
-| `eqoa.dye.State.target` | supported | 8 |  |
-| `eqoa.dye.State.title` | supported | 8 |  |
-| `eqoa.dye.State.token` | supported | 8 |  |
+| `eqoa.duel.Invite` | supported | 8 |  |
+| `eqoa.duel.Invite.class_id` | supported | 8 |  |
+| `eqoa.duel.Invite.class_name` | supported | 8 |  |
+| `eqoa.duel.Invite.guild` | supported | 8 |  |
+| `eqoa.duel.Invite.id` | supported | 8 |  |
+| `eqoa.duel.Invite.level` | supported | 8 |  |
+| `eqoa.duel.Invite.name` | supported | 8 |  |
+| `eqoa.duel.Invite.race_id` | supported | 8 |  |
+| `eqoa.duel.Invite.race_name` | supported | 8 |  |
+| `eqoa.duel.Invite.title` | supported | 8 |  |
+| `eqoa.duel.State` | supported | 8 |  |
+| `eqoa.duel.State.duration` | supported | 8 |  |
+| `eqoa.duel.State.enabled` | supported | 8 |  |
+| `eqoa.duel.State.invite` | supported | 8 |  |
+| `eqoa.duel.State.opponent_id` | supported | 8 |  |
+| `eqoa.duel.State.queued` | supported | 8 |  |
+| `eqoa.duel.State.revision` | supported | 8 |  |
+| `eqoa.duel.State.seconds_remaining` | supported | 8 |  |
+| `eqoa.duel.State.state` | supported | 8 |  |
 | `eqoa.effects.Buff` | supported | 8 |  |
 | `eqoa.effects.Buff.description` | supported | 8 |  |
 | `eqoa.effects.Buff.icon` | supported | 8 |  |
@@ -1152,6 +1176,9 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.batch.result.data.reason` | supported | 6 |  |
 | `eqoa.events.batch.result.data.state` | supported | 6 |  |
 | `eqoa.events.batch.result.data.total` | supported | 6 |  |
+| `eqoa.events.blacksmith.changed.data.after` | supported | 8 |  |
+| `eqoa.events.blacksmith.changed.data.before` | supported | 8 |  |
+| `eqoa.events.blacksmith.changed.data.changed` | supported | 8 |  |
 | `eqoa.events.buffs.changed.data.after` | supported | 8 |  |
 | `eqoa.events.buffs.changed.data.before` | supported | 8 |  |
 | `eqoa.events.buffs.changed.data.changed` | supported | 8 |  |
@@ -1211,8 +1238,9 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.cooldown.updated.data.ability_id` | supported | 2 |  |
 | `eqoa.events.cooldown.updated.data.display_key` | supported | 2 |  |
 | `eqoa.events.cooldown.updated.data.lockout` | supported | 2 |  |
-| `eqoa.events.dye.changed.data.open` | supported | 8 |  |
-| `eqoa.events.dye.changed.data.revision` | supported | 8 |  |
+| `eqoa.events.duel.changed.data.after` | supported | 8 |  |
+| `eqoa.events.duel.changed.data.before` | supported | 8 |  |
+| `eqoa.events.duel.changed.data.changed` | supported | 8 |  |
 | `eqoa.events.effects.changed.data.after` | supported | 2 |  |
 | `eqoa.events.effects.changed.data.before` | supported | 2 |  |
 | `eqoa.events.effects.changed.data.changed` | supported | 2 |  |
@@ -1230,8 +1258,6 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.events.dropped.data.first_seq` | supported | 2 |  |
 | `eqoa.events.events.dropped.data.last_seq` | supported | 2 |  |
 | `eqoa.events.events.dropped.data.streams` | supported | 2 |  |
-| `eqoa.events.fishing.changed.data.open` | supported | 8 |  |
-| `eqoa.events.fishing.changed.data.revision` | supported | 8 |  |
 | `eqoa.events.friends.changed.data.after` | supported | 8 |  |
 | `eqoa.events.friends.changed.data.before` | supported | 8 |  |
 | `eqoa.events.friends.changed.data.changed` | supported | 8 |  |
@@ -1280,8 +1306,6 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.mastery.changed.data.after` | supported | 6 |  |
 | `eqoa.events.mastery.changed.data.before` | supported | 6 |  |
 | `eqoa.events.mastery.changed.data.changed` | supported | 6 |  |
-| `eqoa.events.merc.changed.data.open` | supported | 8 |  |
-| `eqoa.events.merc.changed.data.revision` | supported | 8 |  |
 | `eqoa.events.merchant.changed.data.after` | supported | 5 |  |
 | `eqoa.events.merchant.changed.data.before` | supported | 5 |  |
 | `eqoa.events.merchant.changed.data.cause` | supported | 5 |  |
@@ -1330,6 +1354,16 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.target.changed.data.after` | supported | 2 |  |
 | `eqoa.events.target.changed.data.before` | supported | 2 |  |
 | `eqoa.events.timer.data.token` | supported | 2 |  |
+| `eqoa.events.trade.accepted.data.kind` | supported | 8 |  |
+| `eqoa.events.trade.accepted.data.side` | supported | 8 |  |
+| `eqoa.events.trade.changed.data.after` | supported | 8 |  |
+| `eqoa.events.trade.changed.data.before` | supported | 8 |  |
+| `eqoa.events.trade.changed.data.changed` | supported | 8 |  |
+| `eqoa.events.trade.closed.data.kind` | supported | 8 |  |
+| `eqoa.events.trade.closed.data.reason` | supported | 8 |  |
+| `eqoa.events.trade.request.data.id` | supported | 8 |  |
+| `eqoa.events.trade.request.data.kind` | supported | 8 |  |
+| `eqoa.events.trade.request.data.name` | supported | 8 |  |
 | `eqoa.events.who.result.data.count` | supported | 8 |  |
 | `eqoa.events.who.result.data.entries` | supported | 8 |  |
 | `eqoa.events.who.result.data.received` | supported | 8 |  |
@@ -1364,24 +1398,6 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.files.FileEntry.kind` | supported | 7 |  |
 | `eqoa.files.FileEntry.path` | supported | 7 |  |
 | `eqoa.files.FileEntry.size` | supported | 7 |  |
-| `eqoa.fishing.Catch` | supported | 8 |  |
-| `eqoa.fishing.Catch.name` | supported | 8 |  |
-| `eqoa.fishing.Catch.quantity` | supported | 8 |  |
-| `eqoa.fishing.Catch.slot` | supported | 8 |  |
-| `eqoa.fishing.State` | supported | 8 |  |
-| `eqoa.fishing.State.casting` | supported | 8 |  |
-| `eqoa.fishing.State.catch` | supported | 8 |  |
-| `eqoa.fishing.State.fair_from` | supported | 8 |  |
-| `eqoa.fishing.State.fair_to` | supported | 8 |  |
-| `eqoa.fishing.State.list` | supported | 8 |  |
-| `eqoa.fishing.State.message` | supported | 8 |  |
-| `eqoa.fishing.State.open` | supported | 8 |  |
-| `eqoa.fishing.State.perfect_from` | supported | 8 |  |
-| `eqoa.fishing.State.perfect_to` | supported | 8 |  |
-| `eqoa.fishing.State.power` | supported | 8 |  |
-| `eqoa.fishing.State.ready` | supported | 8 |  |
-| `eqoa.fishing.State.revision` | supported | 8 |  |
-| `eqoa.fishing.State.state` | supported | 8 |  |
 | `eqoa.fonts.FontInfo` | supported | 2 |  |
 | `eqoa.fonts.FontInfo.font` | supported | 2 |  |
 | `eqoa.fonts.FontInfo.reason` | supported | 2 |  |
@@ -1748,48 +1764,6 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.mastery.MasterySkill.owned` | supported | 6 |  |
 | `eqoa.mastery.MasterySkill.parent_key` | supported | 6 |  |
 | `eqoa.mastery.MasterySkill.rank_key` | supported | 6 |  |
-| `eqoa.merc.Inventory` | supported | 8 |  |
-| `eqoa.merc.Inventory.ac` | supported | 8 |  |
-| `eqoa.merc.Inventory.class` | supported | 8 |  |
-| `eqoa.merc.Inventory.hp` | supported | 8 |  |
-| `eqoa.merc.Inventory.level` | supported | 8 |  |
-| `eqoa.merc.Inventory.max_hp` | supported | 8 |  |
-| `eqoa.merc.Inventory.max_power` | supported | 8 |  |
-| `eqoa.merc.Inventory.most` | supported | 8 |  |
-| `eqoa.merc.Inventory.name` | supported | 8 |  |
-| `eqoa.merc.Inventory.open` | supported | 8 |  |
-| `eqoa.merc.Inventory.power` | supported | 8 |  |
-| `eqoa.merc.Inventory.race` | supported | 8 |  |
-| `eqoa.merc.Inventory.records` | supported | 8 |  |
-| `eqoa.merc.Inventory.slot` | supported | 8 |  |
-| `eqoa.merc.Inventory.stats` | supported | 8 |  |
-| `eqoa.merc.Record` | supported | 8 |  |
-| `eqoa.merc.Record.equip_slot` | supported | 8 |  |
-| `eqoa.merc.Record.id` | supported | 8 |  |
-| `eqoa.merc.Record.item_id` | supported | 8 |  |
-| `eqoa.merc.Record.kind` | supported | 8 |  |
-| `eqoa.merc.Record.name` | supported | 8 |  |
-| `eqoa.merc.Record.quantity` | supported | 8 |  |
-| `eqoa.merc.Spell` | supported | 8 |  |
-| `eqoa.merc.Spell.id` | supported | 8 |  |
-| `eqoa.merc.Spell.name` | supported | 8 |  |
-| `eqoa.merc.Spell.slot` | supported | 8 |  |
-| `eqoa.merc.Spells` | supported | 8 |  |
-| `eqoa.merc.Spells.class` | supported | 8 |  |
-| `eqoa.merc.Spells.level` | supported | 8 |  |
-| `eqoa.merc.Spells.name` | supported | 8 |  |
-| `eqoa.merc.Spells.open` | supported | 8 |  |
-| `eqoa.merc.Spells.set` | supported | 8 |  |
-| `eqoa.merc.Spells.slot` | supported | 8 |  |
-| `eqoa.merc.Spells.slots` | supported | 8 |  |
-| `eqoa.merc.Spells.spells` | supported | 8 |  |
-| `eqoa.merc.State` | supported | 8 |  |
-| `eqoa.merc.State.available` | supported | 8 |  |
-| `eqoa.merc.State.inventory` | supported | 8 |  |
-| `eqoa.merc.State.own_out` | supported | 8 |  |
-| `eqoa.merc.State.revision` | supported | 8 |  |
-| `eqoa.merc.State.spells` | supported | 8 |  |
-| `eqoa.merc.State.waiting` | supported | 8 |  |
 | `eqoa.options.Button` | supported | 4 |  |
 | `eqoa.options.Button.id` | supported | 4 |  |
 | `eqoa.options.Button.item_id` | supported | 4 |  |
@@ -1999,6 +1973,44 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.textures.TextureInfo.height` | supported | 2 |  |
 | `eqoa.textures.TextureInfo.texture` | supported | 2 |  |
 | `eqoa.textures.TextureInfo.width` | supported | 2 |  |
+| `eqoa.trade.Bag` | supported | 8 |  |
+| `eqoa.trade.Bag.can_offer` | supported | 8 |  |
+| `eqoa.trade.Bag.id` | supported | 8 |  |
+| `eqoa.trade.Bag.name` | supported | 8 |  |
+| `eqoa.trade.Bag.no_trade` | supported | 8 |  |
+| `eqoa.trade.Bag.quantity` | supported | 8 |  |
+| `eqoa.trade.Bag.slot` | supported | 8 |  |
+| `eqoa.trade.Bag.text` | supported | 8 |  |
+| `eqoa.trade.Bag.worn` | supported | 8 |  |
+| `eqoa.trade.Item` | supported | 8 |  |
+| `eqoa.trade.Item.id` | supported | 8 |  |
+| `eqoa.trade.Item.name` | supported | 8 |  |
+| `eqoa.trade.Item.quantity` | supported | 8 |  |
+| `eqoa.trade.Item.slot` | supported | 8 |  |
+| `eqoa.trade.Item.text` | supported | 8 |  |
+| `eqoa.trade.Partner` | supported | 8 |  |
+| `eqoa.trade.Partner.id` | supported | 8 |  |
+| `eqoa.trade.Partner.name` | supported | 8 |  |
+| `eqoa.trade.Side` | supported | 8 |  |
+| `eqoa.trade.Side.accepted` | supported | 8 |  |
+| `eqoa.trade.Side.items` | supported | 8 |  |
+| `eqoa.trade.Side.money` | supported | 8 |  |
+| `eqoa.trade.State` | supported | 8 |  |
+| `eqoa.trade.State.accept_asked` | supported | 8 |  |
+| `eqoa.trade.State.bags` | supported | 8 |  |
+| `eqoa.trade.State.can_accept` | supported | 8 |  |
+| `eqoa.trade.State.carried` | supported | 8 |  |
+| `eqoa.trade.State.duration` | supported | 8 |  |
+| `eqoa.trade.State.held` | supported | 8 |  |
+| `eqoa.trade.State.initiated` | supported | 8 |  |
+| `eqoa.trade.State.kind` | supported | 8 |  |
+| `eqoa.trade.State.max_items` | supported | 8 |  |
+| `eqoa.trade.State.mine` | supported | 8 |  |
+| `eqoa.trade.State.partner` | supported | 8 |  |
+| `eqoa.trade.State.phase` | supported | 8 |  |
+| `eqoa.trade.State.revision` | supported | 8 |  |
+| `eqoa.trade.State.seconds_remaining` | supported | 8 |  |
+| `eqoa.trade.State.theirs` | supported | 8 |  |
 | `eqoa.who.WhoEntry` | supported | 8 |  |
 | `eqoa.who.WhoEntry.class_id` | supported | 8 |  |
 | `eqoa.who.WhoEntry.class_name` | supported | 8 |  |

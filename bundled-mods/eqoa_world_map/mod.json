@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_world_map",
+  "name": "EQOA World Map",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "provides": [
+    "World map window with pins (the map key)"
+  ],
+  "replaces": [
+    "map"
+  ],
+  "capabilities": [
+    "eqoa.windows.takeover",
+    "eqoa.windows.session",
+    "eqoa.map.get",
+    "eqoa.map.markers",
+    "eqoa.map.terrain",
+    "eqoa.map.waypoint",
+    "eqoa.player.get",
+    "eqoa.entities.dots",
+    "eqoa.entities.find",
+    "eqoa.group.get",
+    "eqoa.target.get",
+    "eqoa.input.get",
+    "eqoa.fonts.load",
+    "eqoa.input.claim",
+    "eqoa.input.pointer",
+    "eqoa.input.claim_pointer",
+    "eqoa.input.capture_text",
+    "eqoa.log.write",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ]
+}

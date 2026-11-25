@@ -4,6 +4,9 @@ local ui = eqoa.imgui
 local B = require("bags")
 local HP = require("helpers")
 local X = require("multi") -- multi-select (Ctrl+click, Shift+click): one menu for several items
+local AL = require("auction_list") -- listing a bank item at the auction (the bank item menu, the group menu)
+B.auction_list = AL
+AL.sell_action = function(args) return eqoa.actions.auction_sell(args) end
 
 -- Sizes are in HUD frame pixels (640x448), scaled as the HUD is.
 local W, PAD, SLOT, GAP, LINE = 318, 8, 36, 2, 12
@@ -21,8 +24,21 @@ local tokens, escape, tab_hits, slot_hits, menu_hits, action_hits, log_rect, gri
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
 -- The window stops listening to everything but loot while it is closed.
+-- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
+local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
+local GATED = { render = true, ["input.key"] = true, ["pointer.pressed"] = true, ["pointer.wheel"] = true, ["windows.key"] = true, ["input.pad"] = true }
 local function listen(name, fn)
-    local token = eqoa.events.on(name, fn)
+    local inner = fn
+    if GATED[name] then
+        inner = function(e)
+            if map_up() then
+                if name == "render" and (AL.enter or (AL.form and AL.form.field)) then AL.stop_typing() end -- a price being typed lets go of the keyboard at once
+                return
+            end
+            return fn(e)
+        end
+    end
+    local token = eqoa.events.on(name, inner)
     if token then tokens[#tokens + 1] = token end
 end
 
@@ -33,6 +49,7 @@ local function close(from_client)
     tokens = {}
     if session and not from_client then eqoa.windows.close_session(session.ref) end
     session, pad.on = nil, false
+    AL.close()
     if escape then eqoa.input.release(escape); escape = nil end
     B.drop_pending_npc_open()
     if eqoa.windows and eqoa.windows.release then
@@ -108,13 +125,14 @@ local function open()
     listen("loot.changed", function(e) B.on_loot_changed(e.data) end)
     listen("merchant.changed", function(e) B.on_merchant_changed(e.data) end)
     listen("state.reset", B.dirty)
-    listen("action.result", function(e) B.on_action_result(e.data) end)
+    listen("action.result", function(e) if not AL.on_action_result(e.data) then B.on_action_result(e.data) end end)
     listen("batch.progress", function(e) B.on_batch_progress(e.data) end)
     listen("batch.result", function(e) B.on_batch_result(e.data) end)
     -- what the player answered to the destroy question the client put to them
     listen("confirm.closed", function(e) B.on_confirm_closed(e.data) end)
     listen("windows.session", function(e)
         local d = e.data
+        AL.on_session(d)
         if session and d.ref == session.ref then
             if d.phase == "closed" then close(true)
             elseif d.phase == "changed" then pad.on = false end -- the system took the focus: the pad is the game's
@@ -125,12 +143,14 @@ local function open()
         if session and d.ref == session.ref and d.down then pad_key(d.key) end
     end)
     listen("input.key", function(e)
+        if AL.on_key(e.data) then return end
         if e.data.down and not e.data["repeat"] and e.data.key:lower() == "escape" then
             if B.menu then B.menu, B.menu_rect = nil, nil else close() end
         end
     end)
     listen("pointer.pressed", function(e)
         local d = e.data
+        if AL.on_pointer(d) then return end
         if B.menu then
             if d.button == "right" then B.menu, B.menu_rect = nil, nil; return end
             if d.button == "left" then
@@ -195,6 +215,7 @@ end)
 -- The loot log is the one thing kept while the window is closed, from events only.
 B.load_junk()
 HP.load()
+require("repair") -- the blacksmith's repair panel (modules/repair.lua)
 eqoa.events.on("loot.changed", function(e)
     B.log_loot(e.data)
     B.note_loot_closed(e.data)
@@ -252,7 +273,7 @@ end)
 eqoa.events.on("world.leaving", function(e)
     if e.data and e.data.reason == "disconnect" then B.on_disconnect() end
 end)
-eqoa.events.on("state.reset", function() X.clear(); B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); HP.reset(); B.char_dirty = true; B.dirty() end)
+eqoa.events.on("state.reset", function() AL.on_session({phase = "closed", ref = AL.session}); X.clear(); B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); HP.reset(); B.char_dirty = true; B.dirty() end)
 -- the character is read once the world is up (and again after a new world or login): the Auto-loot choice is per character
 eqoa.events.on("player.changed", function(e)
     -- asked on a new world or login, when the update names another character, and once a second besides
@@ -271,6 +292,7 @@ eqoa.events.on("disabling", function()
 end)
 
 function draw()
+    AL.tick()
     local grid = B.grid
     if grid == nil or B.is_grid_stale() then
         grid = B.rebuild()
@@ -361,6 +383,11 @@ function draw()
     fill(0, 0, W, H, c.surface)
     frame(0, 0, W, H, c.border)
     text(PAD, 7, "Bags", c.white)
+    -- the Auction window (the EQOA Auction mod, when it is on): its own button, drawn with the other actions below
+    local auction_btn = {x = W - PAD - 46, y = 3, w = 46, h = 15}
+    fill(auction_btn.x, auction_btn.y, auction_btn.w, auction_btn.h, c.raised)
+    frame(auction_btn.x, auction_btn.y, auction_btn.w, auction_btn.h, c.border)
+    text(auction_btn.x + 5, auction_btn.y + 2, "Auction", c.text, auction_btn.w - 6)
 
     tab_hits = {}
     B.tab_hits = tab_hits
@@ -470,6 +497,14 @@ function draw()
 
     action_hits = {}
     B.action_hits = action_hits
+    action_hits[1] = {
+        label = "Auction", x = x0 + auction_btn.x * k, y = y0 + auction_btn.y * k, w = auction_btn.w * k, h = auction_btn.h * k,
+        run = function()
+            if not eqoa.mods.send("eqoa_auction", "open") then
+                B.result = {text = "The Auction window is a mod: turn on EQOA Auction in Mods & Addons", ok = false}
+            end
+        end,
+    }
     -- Row 1: the Auto-loot choice (Off / Everything / Everything but junk), and Stop when a batch is running
     -- (right); the line under it says what the chosen one does.
     local seg_x = PAD
@@ -661,6 +696,8 @@ function draw()
             dl:AddText(ImVec2.new(cx + 6 * k, cy + 4 * k + (i - 1) * LINE * k), kinds[l[2]], value)
         end
     end
+    -- the listing form, over the window, when one is up
+    AL.draw({ui = ui, k = k, c = c, x0 = x0, y0 = y0, W = W, fill = fill, frame = frame, text = text})
     ui.SetWindowFontScale(1)
     ui.End()
 end

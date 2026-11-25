@@ -20,6 +20,8 @@ struct Owned {
     at: [f32; 2],
     label: Option<String>,
     released: bool,
+    /// The pin stays when the mod ends (the player's own act, made through the mod: `set_waypoint({keep = true})`).
+    keep: bool,
 }
 
 thread_local! {
@@ -28,7 +30,7 @@ thread_local! {
 }
 
 /// A mod's `set_waypoint` was applied: `world`'s pin is now `vm`'s, replacing any earlier owner there.
-pub(crate) fn placed(vm: u64, addon: &str, world: i32, at: [f32; 2], label: Option<String>) {
+pub(crate) fn placed(vm: u64, addon: &str, world: i32, at: [f32; 2], label: Option<String>, keep: bool) {
     OWNED.with(|pins| {
         let mut pins = pins.borrow_mut();
         pins.retain(|pin| pin.world != world);
@@ -39,6 +41,7 @@ pub(crate) fn placed(vm: u64, addon: &str, world: i32, at: [f32; 2], label: Opti
             at,
             label,
             released: false,
+            keep,
         });
     });
 }
@@ -85,7 +88,10 @@ pub(crate) fn cleared(world: i32) {
 /// A mod's VM ended: the pins it still owns go away after the next step's dispatch (the player's stay).
 pub(crate) fn release_vm(vm: u64) {
     OWNED.with(|pins| {
-        for pin in pins.borrow_mut().iter_mut().filter(|pin| pin.vm == vm) {
+        let mut pins = pins.borrow_mut();
+        // a pin made with `keep` stays where it is, as the player's; the mod's record of it goes
+        pins.retain(|pin| !(pin.vm == vm && pin.keep));
+        for pin in pins.iter_mut().filter(|pin| pin.vm == vm) {
             pin.released = true;
         }
     });

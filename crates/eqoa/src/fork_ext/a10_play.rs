@@ -303,7 +303,7 @@ fn auction_snapshot(play: &Play) -> Json {
             .iter()
             .enumerate()
             .filter(|(_, it)| crate::auction::can_sell(it))
-            .map(|(i, it)| json!({"slot": i + 1, "id": it.item.id, "name": it.item.name, "quantity": it.quantity.max(1)}))
+            .map(|(i, it)| json!({"slot": i + 1, "id": it.item.id, "name": it.item.name, "quantity": it.quantity.max(1), "value": it.item.value}))
             .collect()
     } else {
         Vec::new()
@@ -323,6 +323,7 @@ fn auction_snapshot(play: &Play) -> Json {
         "sellable": sellable,
         "tunar": play.dump.player.p34,
         "banked": play.dump.player.p38,
+        "stacks": live && crate::live::features().has(crate::live::Features::STACKS),
         "uncertain": uncertain,
     })
 }
@@ -922,6 +923,18 @@ fn auction_sell(play: &mut Play, action: &A10Action) -> DispatchOutcome {
 
 /// What a Yes does, after checking again that the mail, lot or item is what the question named.
 pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
+    let out = carry_out_inner(play, act);
+    // what the Yes did is what a mod reads next: published now, not at the next game step
+    if mail_window_open() && !game_mail_up(play) {
+        native_a10::publish_mail(mail_snapshot(play));
+    }
+    if auction_reading() && !game_auction_up(play) {
+        native_a10::publish_auction(auction_snapshot(play));
+    }
+    out
+}
+
+fn carry_out_inner(play: &mut Play, act: &Act) -> Result<(), String> {
     match act {
         Act::MailDelete { id, subject } => {
             if game_mail_up(play) || play.mail.grams.state > 0 {

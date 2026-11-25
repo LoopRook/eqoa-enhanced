@@ -53,6 +53,16 @@ pub(crate) const A7_EVENTS: &[&str] = &[
     "lfg.changed",
 ];
 
+/// Round A9's events (trade, duel, blacksmith), driven in `a9_play_tests`.
+pub(crate) const A9_EVENTS: &[&str] = &[
+    "trade.request",
+    "trade.changed",
+    "trade.accepted",
+    "trade.closed",
+    "duel.changed",
+    "blacksmith.changed",
+];
+
 /// Events the host's own services emit, driven in `round7c_host_service_events_reach_lua_from_their_producers`.
 const SERVICE_EVENTS: &[&str] = &[
     "timer",
@@ -232,6 +242,7 @@ fn round7c_supported_event_inventory_has_fixture_coverage() {
         .chain(FRAME_EVENTS)
         .chain(A1_EVENTS)
         .chain(A7_EVENTS)
+        .chain(A9_EVENTS)
         .chain(A11_EVENTS)
         .copied()
         .chain(["loot.changed", "merchant.changed"])

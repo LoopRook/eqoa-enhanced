@@ -34,6 +34,14 @@ mod a7_play;
 mod a7_play_tests;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "a9_play.rs"]
+mod a9_play;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "a9_play_tests.rs"]
+mod a9_play_tests;
+
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "a2_play.rs"]
 mod a2_play;
 
@@ -149,6 +157,8 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
     }
     // round A2: what a dialog or offer this packet brings looks like before the game handles it
     a2_play::pre_event(play, event);
+    // round A9: what a held trade, duel or blacksmith looks like before the packet
+    a9_play::pre_event(play, event);
     a11_play::pre_event(play, event);
     let api = api_capture::begin_game_event(play, event);
     if matches!(
@@ -308,6 +318,7 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn divert_event(play: &mut Play) {
     a2_play::post_event(play);
+    a9_play::post_event(play);
     a11_play::post_event(play);
 }
 #[cfg(target_arch = "wasm32")]
@@ -865,6 +876,7 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         a6_play::tick(_play);
         a13_play::tick(_play);
         a7_play::tick(_play);
+        a9_play::tick(_play);
         a2_play::tick(_play);
         a8_play::tick(_play, _game_step);
         a11_play::tick(_play, _game_step);
@@ -1100,6 +1112,7 @@ pub(super) fn dropped(_play: &mut Play) {
     {
         let leaving = _play.quit || _play.disconnected.is_some();
         a7_play::play_dropped(_play, leaving);
+        a9_play::play_dropped(_play, leaving);
         a1_play::play_dropped(leaving);
     }
     // round A8: nothing of a mod's crafting window is left to read
@@ -2334,7 +2347,7 @@ fn dispatch_broker_action(
             // nothing followed: `follow(nil)` does nothing (never the toggle, which would follow the target)
             DispatchOutcome::Completed { detail: None }
         }
-        ActionKind::SetWaypoint { vm, addon, world, x, z, label } => {
+        ActionKind::SetWaypoint { vm, addon, world, x, z, label, keep } => {
             if !crate::settings::map() {
                 return DispatchOutcome::Refused {
                     code: "unavailable",
@@ -2345,7 +2358,7 @@ fn dispatch_broker_action(
                 return DispatchOutcome::Refused { code, reason: reason.into() };
             }
             play.map.api_set_waypoint(*world, Some([*x, *z]));
-            crate::fork_ext::addons::map_waypoint::placed(*vm, addon, *world, [*x, *z], label.clone());
+            crate::fork_ext::addons::map_waypoint::placed(*vm, addon, *world, [*x, *z], label.clone(), *keep);
             DispatchOutcome::Completed {
                 detail: Some(serde_json::json!({"world_id": world, "x": x, "z": z})),
             }
@@ -3379,6 +3392,7 @@ fn dispatch_broker_action(
         ActionKind::A11(action) => a11_play::dispatch(play, action),
         ActionKind::A10(action) => a10_play::dispatch(play, action),
         ActionKind::A7(action) => a7_play::dispatch(play, action),
+        ActionKind::A9(action) => a9_play::dispatch(play, action),
         ActionKind::A5(action) => api_capture::a5::dispatch(play, action),
         ActionKind::DropQuest { .. }
         | ActionKind::MasteryShare { .. }
@@ -4579,6 +4593,7 @@ pub(super) fn health_redraw(play: &mut Play, step: bool, loading_changed: bool) 
     #[cfg(not(target_arch = "wasm32"))]
     {
         a7_play::hide_taken_requests(play);
+        a9_play::hide_taken(play);
         let options_closed =
             if crate::fork_ext::addons::take_close_options_on_open() && play.mode == 34 {
                 play.mode = 0;

@@ -56,6 +56,13 @@ pub(crate) enum TakeoverKind {
     ChatEntry = 13,
     /// Round A13: the full world map the map key opens. Client-side, no server session: a mod holds it whole (`all`).
     Map = 14,
+    // round A9: the trade request (the game's mode 16), the trade window (15), the duel invitation (43), the duel's
+    // wager (44) and the blacksmith (19). Server-pushed, so a mod holds them whole (`all`).
+    TradeAsk = 15,
+    Trade = 16,
+    DuelInvite = 17,
+    Duel = 18,
+    Blacksmith = 19,
     /// Round A11: the server's mercenary inventory and spell windows (modes 61, 62), the dye picker (63) and the
     /// fishing window (36), held whole (`all`) as server-opened sessions (`dialog_sessions`, `a11_play`).
     MercItems = 20,
@@ -68,7 +75,7 @@ impl TakeoverKind {
     /// The three server-window kinds (loot, merchant, bank) that carry hidden server sessions and batch hooks.
     pub(crate) const ALL: [Self; 3] = [Self::Loot, Self::Merchant, Self::Bank];
     /// Every takeover kind, including server-pushed raid strips (`raid_ready`, `raid_roll`).
-    pub(crate) const ALL_KINDS: [Self; 19] = [
+    pub(crate) const ALL_KINDS: [Self; 24] = [
         Self::MercItems,
         Self::MercSpells,
         Self::DyePicker,
@@ -88,7 +95,14 @@ impl TakeoverKind {
         Self::SummonOffer,
         Self::FriendRequest,
         Self::GuildInvite,
+        Self::TradeAsk,
+        Self::Trade,
+        Self::DuelInvite,
+        Self::Duel,
+        Self::Blacksmith,
     ];
+    /// Round A9: the trade, duel and blacksmith windows, held as `a9_play` sessions.
+    pub(crate) const A9: [Self; 5] = [Self::TradeAsk, Self::Trade, Self::DuelInvite, Self::Duel, Self::Blacksmith];
     /// The NPC dialogs and offers of round A2: scope `all` only, held as `dialog_sessions`.
     pub(crate) const DIALOGS: [Self; 9] = [
         Self::MercItems,
@@ -119,6 +133,11 @@ impl TakeoverKind {
             Self::SummonOffer => "summon_offer",
             Self::FriendRequest => "friend_request",
             Self::GuildInvite => "guild_invite",
+            Self::TradeAsk => "trade_ask",
+            Self::Trade => "trade",
+            Self::DuelInvite => "duel_invite",
+            Self::Duel => "duel",
+            Self::Blacksmith => "blacksmith",
             Self::MercItems => "mercenary_items",
             Self::MercSpells => "mercenary_spells",
             Self::DyePicker => "dye_picker",
@@ -143,6 +162,11 @@ impl TakeoverKind {
             "summon_offer" => Ok(Self::SummonOffer),
             "friend_request" => Ok(Self::FriendRequest),
             "guild_invite" => Ok(Self::GuildInvite),
+            "trade_ask" => Ok(Self::TradeAsk),
+            "trade" => Ok(Self::Trade),
+            "duel_invite" => Ok(Self::DuelInvite),
+            "duel" => Ok(Self::Duel),
+            "blacksmith" => Ok(Self::Blacksmith),
             "mercenary_items" => Ok(Self::MercItems),
             "mercenary_spells" => Ok(Self::MercSpells),
             "dye_picker" => Ok(Self::DyePicker),
@@ -152,9 +176,9 @@ impl TakeoverKind {
                 format!(
                     "the game's '{s}' window cannot be taken over in this version (only 'loot', 'merchant', \
                      'bank', 'raid_ready', 'raid_roll', 'text_dialog', 'response_dialog', 'group_invite', \
-                     'revive_offer', 'summon_offer', 'friend_request', 'guild_invite', 'start_menu', \
-                     'chat_entry', 'map', 'mercenary_items', 'mercenary_spells', 'dye_picker' and 'fishing'); \
-                     more windows follow the window-replacement roadmap"
+                     'revive_offer', 'summon_offer', 'friend_request', 'guild_invite', 'trade_ask', 'trade', \
+                     'duel_invite', 'duel', 'blacksmith', 'start_menu', 'chat_entry', 'map', 'mercenary_items', \
+                     'mercenary_spells', 'dye_picker' and 'fishing'); more windows follow the window-replacement roadmap"
                 ),
             )),
             _ => Err((
@@ -162,8 +186,9 @@ impl TakeoverKind {
                 format!(
                     "window takeover kind must be 'loot', 'merchant', 'bank', 'raid_ready', 'raid_roll', \
                      'text_dialog', 'response_dialog', 'group_invite', 'revive_offer', 'summon_offer', \
-                     'friend_request', 'guild_invite', 'start_menu', 'chat_entry', 'map', 'mercenary_items', \
-                     'mercenary_spells', 'dye_picker' or 'fishing', got '{s}'"
+                     'friend_request', 'guild_invite', 'trade_ask', 'trade', 'duel_invite', 'duel', 'blacksmith', \
+                     'start_menu', 'chat_entry', 'map', 'mercenary_items', 'mercenary_spells', 'dye_picker' \
+                     or 'fishing', got '{s}'"
                 ),
             )),
         }

@@ -479,8 +479,13 @@ local function on_wheel(d)
     end
 end
 
+-- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
+local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
+local GATED = { ["input.key"] = true, ["pointer.pressed"] = true, ["pointer.wheel"] = true }
 local function listen(name, fn)
-    local token = eqoa.events.on(name, fn)
+    local inner = fn
+    if GATED[name] then inner = function(e) if map_up() then return end return fn(e) end end
+    local token = eqoa.events.on(name, inner)
     if token then state.tokens[#state.tokens + 1] = token end
 end
 
@@ -564,6 +569,18 @@ local RECLAIM_FRAMES, frames = 120, 0
 eqoa.events.on("render", function()
     frames = frames + 1
     if frames % RECLAIM_FRAMES == 0 then claim() end
+    if map_up() then
+        -- the game's map has the screen and the keyboard: a line being typed ends as the game's would, a menu or a
+        -- rename is dropped, nothing is drawn or claimed; the window, its tabs and lines are as they were when it closes
+        local s = state.session
+        if s then state.session = nil; eqoa.windows.close_session(s.ref) end
+        if state.rename then finish_rename(false) end
+        close_menu()
+        state.drag = nil
+        if state.capturing or s then eqoa.input.capture_text(false); state.capturing = false end
+        state.hits, state.rect = {}, nil
+        return
+    end
     local f = eqoa.hud.frame()
     local k = math.min(f.scale_x, f.scale_y)
     local dw, dh = ui.GetDisplaySize()
