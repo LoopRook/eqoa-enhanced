@@ -3,18 +3,17 @@
 //! the Play adapter, so it reads `Play`'s private state (`merc`, `dyepick`, `fish`); upstream's three files carry one
 //! hook each (`mercplay.rs`, `dyeplay.rs`, `fishplay.rs`), all asking [`blocked`], and `dyeplay.rs` one visibility.
 //!
-//! **What this round does and does not do.** The three windows stay the game's: the server opens them, the game draws
-//! them and the player sees them. A mod reads what they hold (`eqoa.merc.get`, `eqoa.dye.get`, `eqoa.fishing.get`)
+//! **What this round does.** A mod reads what the windows hold (`eqoa.merc.get`, `eqoa.dye.get`, `eqoa.fishing.get`)
 //! and does what their buttons do, through the game's own request builders and keys, with the game's own rules
-//! enforced here in the client, not in a mod's Lua. A mod cannot hide them or take them over in this version (the
-//! kinds stay `unsupported` for `eqoa.windows.takeover`): the fishing window's meter runs inside its drawing, and the
-//! merc and dye windows follow the same rule for the sake of one story.
+//! enforced here in the client, not in a mod's Lua. A mod may also hold them (`eqoa.windows.takeover`, scope `all`):
+//! the window the server opens is then the mod's session (`dialog_sessions`), and a held fishing window's cast meter
+//! runs in [`hidden_fishing_frame`]. With no mod holding one, the windows are the game's, as before.
 //!
-//! **Windows the server opens over a hidden session.** A hidden bank, corpse or merchant session of a mod leaves the
+//! **Windows the server opens over a hidden session.** A hidden bank, corpse, merchant, trade, duel or blacksmith leaves the
 //! game in mode 0, so a window the server opens (a mercenary's inventory or spells, the dye picker, a fishing
 //! session) saw "plain play" and opened over a session that, in the game, holds the player in a window of its own.
 //! [`blocked`] says what the game does when any window is up, and the three hooks make them do exactly that: the
-//! merc's windows are not opened (their state is kept; the server's Items > Inventory menu asks again), the dye
+//! merc's windows wait and open when the hidden session ends, the dye
 //! picker waits where the game keeps it waiting (it opens when the hidden session ends), and a fishing session is
 //! cancelled to the server as the game cancels one that starts under another window.
 use super::Play;
@@ -154,7 +153,7 @@ pub(crate) fn fishing_blocked(play: &mut Play) -> bool {
     wait
 }
 
-/// A hidden session of a mod (a corpse, merchant or bank) holds the game in a window of its own while the game's mode
+/// A hidden session of a mod (a corpse, merchant, bank, trade, duel or blacksmith) holds the game in a window of its own while the game's mode
 /// reads 0. True means "act as the game does with a window up". `what` names the window for the log.
 pub(crate) fn blocked(what: &'static str) -> bool {
     let held = hidden_held();
