@@ -205,6 +205,7 @@ pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
         | Act::GuildKick { .. }
         | Act::FriendAccept { .. }
         | Act::GuildAccept { .. }
+        | Act::TradeAccept { .. }
         | Act::MailDelete { .. }
         | Act::MailSend { .. }
         | Act::AuctionBid { .. }

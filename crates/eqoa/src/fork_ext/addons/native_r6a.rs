@@ -565,6 +565,9 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 for k in TakeoverKind::DIALOGS {
                     tbl.set(k.name(), window_takeover::is_taken(k))?;
                 }
+                for k in TakeoverKind::A9 {
+                    tbl.set(k.name(), window_takeover::is_taken(k))?;
+                }
                 tbl.set("holders", holders)?;
                 lua.pack_multi((tbl, Value::Nil))
             }

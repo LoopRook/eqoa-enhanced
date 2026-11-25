@@ -964,6 +964,9 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
                 "destroy" | "destroy_many" | "drop_quest" | "guild_kick" | "friend_accept" | "guild_accept" => continue,
                 // round A8: their own line (`native_a8::crafting_label`)
                 k if k.starts_with("craft_") => continue,
+                // round A9: their own lines (`native_a9::trading_label`, `asks_first_label`)
+                "blacksmith_repair" => "repair items (spends your coin)",
+                k if super::native_a9::NAMES.contains(&k) => continue,
                 // round A10: their own line (`native_a10::mail_label`) or asked first (`asks_first_label`)
                 k if super::native_a10::is_a10_action(k) => continue,
                 // round A5: the same for spending training points and the two Class Mastery steps
@@ -1059,6 +1062,7 @@ pub(crate) fn disclosure_lines(addon: &super::discovery::DiscoveredAddon) -> Vec
     }
     lines.extend(asks_first_label(caps));
     lines.extend(super::native_a8::crafting_label(caps));
+    lines.extend(super::native_a9::trading_label(caps));
     lines.extend(super::native_a10::mail_label(caps));
     lines
 }
@@ -1074,6 +1078,7 @@ pub(crate) fn asks_first_label(caps: &[String]) -> Option<String> {
         ("guild_kick", "kick a guild member"),
         ("friend_accept", "accept a friend request"),
         ("guild_accept", "accept a guild invitation"),
+        ("trade_accept", "accept a trade or a duel wager"),
         ("train_stats", "spend training points"),
         ("mastery_buy", "buy a Class Mastery skill"),
         ("mastery_refund", "refund a Class Mastery skill"),

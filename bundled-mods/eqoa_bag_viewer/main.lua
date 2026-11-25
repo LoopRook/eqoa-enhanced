@@ -200,6 +200,7 @@ end)
 -- The loot log is the one thing kept while the window is closed, from events only.
 B.load_junk()
 HP.load()
+require("repair") -- the blacksmith's repair panel (modules/repair.lua)
 eqoa.events.on("loot.changed", function(e)
     B.log_loot(e.data)
     B.note_loot_closed(e.data)

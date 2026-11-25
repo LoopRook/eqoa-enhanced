@@ -126,6 +126,7 @@ mod a13_tests;
 #[cfg(test)]
 mod a13_mod_tests;
 pub(crate) mod native_a8;
+pub(crate) mod native_a9;
 pub(crate) mod native_a10;
 #[cfg(test)]
 mod a10_tests;
@@ -138,6 +139,8 @@ mod a12_tests;
 mod nameplates_mod_tests;
 pub(crate) mod native_a7;
 pub(crate) mod native_a5;
+#[cfg(test)]
+mod a9_mod_tests;
 #[cfg(test)]
 mod a1_tests;
 #[cfg(test)]

@@ -1871,6 +1871,8 @@
         "eqoa.actions.bank_move",
         "eqoa.actions.batch",
         "eqoa.actions.batch_status",
+        "eqoa.actions.blacksmith_close",
+        "eqoa.actions.blacksmith_repair",
         "eqoa.actions.buttons",
         "eqoa.actions.buy",
         "eqoa.actions.camera",
@@ -1893,6 +1895,7 @@
         "eqoa.actions.destroy_many",
         "eqoa.actions.dialog_answer",
         "eqoa.actions.drop_quest",
+        "eqoa.actions.duel_answer",
         "eqoa.actions.emote",
         "eqoa.actions.equip",
         "eqoa.actions.follow",
@@ -1954,6 +1957,13 @@
         "eqoa.actions.target",
         "eqoa.actions.target_target",
         "eqoa.actions.toggle_stats_box",
+        "eqoa.actions.trade_accept",
+        "eqoa.actions.trade_add",
+        "eqoa.actions.trade_answer",
+        "eqoa.actions.trade_cancel",
+        "eqoa.actions.trade_money",
+        "eqoa.actions.trade_remove",
+        "eqoa.actions.trade_unaccept",
         "eqoa.actions.train_stats",
         "eqoa.actions.unmemorize_ability",
         "eqoa.actions.unmemorize_all",
@@ -2354,6 +2364,22 @@
     },
     {
       "children": [],
+      "path": "eqoa.actions.blacksmith_close",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.blacksmith_repair",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.actions.buttons",
       "reason": "continuous controls come after the upstream PR (mod API plan, round 8)",
       "revision": 0,
@@ -2526,6 +2552,14 @@
       "reason": null,
       "revision": 1,
       "round": 6,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.duel_answer",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -3014,6 +3048,62 @@
       "reason": null,
       "revision": 1,
       "round": 3,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.trade_accept",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.trade_add",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.trade_answer",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.trade_cancel",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.trade_money",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.trade_remove",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.trade_unaccept",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -3571,6 +3661,179 @@
       "reason": null,
       "revision": 1,
       "round": 3,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.blacksmith.Item",
+        "eqoa.blacksmith.State",
+        "eqoa.blacksmith.get"
+      ],
+      "path": "eqoa.blacksmith",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.blacksmith.Item.can_repair",
+        "eqoa.blacksmith.Item.condition",
+        "eqoa.blacksmith.Item.cost",
+        "eqoa.blacksmith.Item.id",
+        "eqoa.blacksmith.Item.inventory_key",
+        "eqoa.blacksmith.Item.name",
+        "eqoa.blacksmith.Item.quantity",
+        "eqoa.blacksmith.Item.slot",
+        "eqoa.blacksmith.Item.worn"
+      ],
+      "path": "eqoa.blacksmith.Item",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.Item.can_repair",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.Item.condition",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.Item.cost",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.Item.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.Item.inventory_key",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.Item.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.Item.quantity",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.Item.slot",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.Item.worn",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.blacksmith.State.coin",
+        "eqoa.blacksmith.State.held",
+        "eqoa.blacksmith.State.items",
+        "eqoa.blacksmith.State.repair_pending",
+        "eqoa.blacksmith.State.revision",
+        "eqoa.blacksmith.State.total"
+      ],
+      "path": "eqoa.blacksmith.State",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.State.coin",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.State.held",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.State.items",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.State.repair_pending",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.State.revision",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.State.total",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.blacksmith.get",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -5175,6 +5438,197 @@
     },
     {
       "children": [
+        "eqoa.duel.Invite",
+        "eqoa.duel.State",
+        "eqoa.duel.get"
+      ],
+      "path": "eqoa.duel",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.duel.Invite.class_id",
+        "eqoa.duel.Invite.class_name",
+        "eqoa.duel.Invite.guild",
+        "eqoa.duel.Invite.id",
+        "eqoa.duel.Invite.level",
+        "eqoa.duel.Invite.name",
+        "eqoa.duel.Invite.race_id",
+        "eqoa.duel.Invite.race_name",
+        "eqoa.duel.Invite.title"
+      ],
+      "path": "eqoa.duel.Invite",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.Invite.class_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.Invite.class_name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.Invite.guild",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.Invite.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.Invite.level",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.Invite.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.Invite.race_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.Invite.race_name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.Invite.title",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.duel.State.duration",
+        "eqoa.duel.State.enabled",
+        "eqoa.duel.State.invite",
+        "eqoa.duel.State.opponent_id",
+        "eqoa.duel.State.queued",
+        "eqoa.duel.State.revision",
+        "eqoa.duel.State.seconds_remaining",
+        "eqoa.duel.State.state"
+      ],
+      "path": "eqoa.duel.State",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.State.duration",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.State.enabled",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.State.invite",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.State.opponent_id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.State.queued",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.State.revision",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.State.seconds_remaining",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.State.state",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.duel.get",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
         "eqoa.effects.Buff",
         "eqoa.effects.Effect",
         "eqoa.effects.PetEffect",
@@ -6194,6 +6648,38 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.blacksmith.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.blacksmith.changed.data.after",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.blacksmith.changed.data.before",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.blacksmith.changed.data.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.buffs.changed",
       "reason": null,
       "revision": 1,
@@ -6758,6 +7244,38 @@
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.duel.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.duel.changed.data.after",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.duel.changed.data.before",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.duel.changed.data.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -7974,6 +8492,118 @@
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.trade.accepted",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.trade.accepted.data.kind",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.trade.accepted.data.side",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.trade.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.trade.changed.data.after",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.trade.changed.data.before",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.trade.changed.data.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.trade.closed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.trade.closed.data.kind",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.trade.closed.data.reason",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.trade.request",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.trade.request.data.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.trade.request.data.kind",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.trade.request.data.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -16555,6 +17185,371 @@
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.trade.Bag",
+        "eqoa.trade.Item",
+        "eqoa.trade.Partner",
+        "eqoa.trade.Side",
+        "eqoa.trade.State",
+        "eqoa.trade.get"
+      ],
+      "path": "eqoa.trade",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.trade.Bag.can_offer",
+        "eqoa.trade.Bag.id",
+        "eqoa.trade.Bag.name",
+        "eqoa.trade.Bag.no_trade",
+        "eqoa.trade.Bag.quantity",
+        "eqoa.trade.Bag.slot",
+        "eqoa.trade.Bag.text",
+        "eqoa.trade.Bag.worn"
+      ],
+      "path": "eqoa.trade.Bag",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Bag.can_offer",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Bag.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Bag.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Bag.no_trade",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Bag.quantity",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Bag.slot",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Bag.text",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Bag.worn",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.trade.Item.id",
+        "eqoa.trade.Item.name",
+        "eqoa.trade.Item.quantity",
+        "eqoa.trade.Item.slot",
+        "eqoa.trade.Item.text"
+      ],
+      "path": "eqoa.trade.Item",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Item.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Item.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Item.quantity",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Item.slot",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Item.text",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.trade.Partner.id",
+        "eqoa.trade.Partner.name"
+      ],
+      "path": "eqoa.trade.Partner",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Partner.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Partner.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.trade.Side.accepted",
+        "eqoa.trade.Side.items",
+        "eqoa.trade.Side.money"
+      ],
+      "path": "eqoa.trade.Side",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Side.accepted",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Side.items",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.Side.money",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.trade.State.accept_asked",
+        "eqoa.trade.State.bags",
+        "eqoa.trade.State.can_accept",
+        "eqoa.trade.State.carried",
+        "eqoa.trade.State.duration",
+        "eqoa.trade.State.held",
+        "eqoa.trade.State.initiated",
+        "eqoa.trade.State.kind",
+        "eqoa.trade.State.max_items",
+        "eqoa.trade.State.mine",
+        "eqoa.trade.State.partner",
+        "eqoa.trade.State.phase",
+        "eqoa.trade.State.revision",
+        "eqoa.trade.State.seconds_remaining",
+        "eqoa.trade.State.theirs"
+      ],
+      "path": "eqoa.trade.State",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.accept_asked",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.bags",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.can_accept",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.carried",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.duration",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.held",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.initiated",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.kind",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.max_items",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.mine",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.partner",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.phase",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.revision",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.seconds_remaining",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.State.theirs",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.trade.get",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {

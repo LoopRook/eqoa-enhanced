@@ -2620,7 +2620,7 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     assert_eq!(
         super::super::runtime::autonomous_action_label(&entry.metadata.requested_capabilities)
             .as_deref(),
-        Some("Actions: can act on its own (open_loot, talk, loot, loot_all, sell, buy, bank_move, use_item, equip, quick_slot, batch, link_item, hide_look)"),
+        Some("Actions: can act on its own (open_loot, talk, loot, loot_all, sell, buy, bank_move, use_item, equip, quick_slot, batch, link_item, hide_look, repair items (spends your coin))"),
         "L7: the label names exactly the actions the mod uses, not all of them"
     );
 
@@ -3002,7 +3002,7 @@ fn round65_fix_bag_viewer_manifest_declares_exactly_the_actions_it_uses() {
 fn round65_fix_bag_viewer_manifest_declares_exactly_the_actions_it_uses_body() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods/eqoa_bag_viewer");
     let mut used = std::collections::BTreeSet::new();
-    for file in ["main.lua", "modules/bags.lua", "modules/helpers.lua", "modules/multi.lua"] {
+    for file in ["main.lua", "modules/bags.lua", "modules/helpers.lua", "modules/multi.lua", "modules/repair.lua"] {
         let src = std::fs::read_to_string(root.join(file)).unwrap();
         let mut rest = src.as_str();
         while let Some(i) = rest.find("eqoa.actions.") {

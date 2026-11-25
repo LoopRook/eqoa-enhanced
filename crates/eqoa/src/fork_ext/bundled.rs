@@ -47,6 +47,7 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_chat",
     "eqoa_nameplates",
     "eqoa_world_map",
+    "eqoa_trade",
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -209,6 +210,31 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_bag_viewer/modules/multi.lua",
         package: "eqoa_bag_viewer",
         data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/modules/multi.lua"),
+    },
+    BundledFile {
+        path: "eqoa_bag_viewer/modules/repair.lua",
+        package: "eqoa_bag_viewer",
+        data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/modules/repair.lua"),
+    },
+    BundledFile {
+        path: "eqoa_trade/mod.json",
+        package: "eqoa_trade",
+        data: include_bytes!("../../../../bundled-mods/eqoa_trade/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_trade/main.lua",
+        package: "eqoa_trade",
+        data: include_bytes!("../../../../bundled-mods/eqoa_trade/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_trade/README.md",
+        package: "eqoa_trade",
+        data: include_bytes!("../../../../bundled-mods/eqoa_trade/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_trade/modules/tradeui.lua",
+        package: "eqoa_trade",
+        data: include_bytes!("../../../../bundled-mods/eqoa_trade/modules/tradeui.lua"),
     },
     BundledFile {
         path: "eqoa_bag_viewer/README.md",
@@ -1364,7 +1390,8 @@ mod tests {
                 "eqoa_start_menu",
                 "eqoa_chat",
                 "eqoa_nameplates",
-                "eqoa_world_map"
+                "eqoa_world_map",
+                "eqoa_trade"
             ]
         );
         assert!(res.files_extracted >= 50);
@@ -1669,7 +1696,8 @@ mod tests {
                 "eqoa_start_menu",
                 "eqoa_chat",
                 "eqoa_nameplates",
-                "eqoa_world_map"
+                "eqoa_world_map",
+                "eqoa_trade"
             ]
         );
 
@@ -1727,7 +1755,8 @@ mod tests {
                 "eqoa_start_menu",
                 "eqoa_chat",
                 "eqoa_nameplates",
-                "eqoa_world_map"
+                "eqoa_world_map",
+                "eqoa_trade"
             ]
         );
 
@@ -1759,7 +1788,8 @@ mod tests {
                 "eqoa_start_menu",
                 "eqoa_chat",
                 "eqoa_nameplates",
-                "eqoa_world_map"
+                "eqoa_world_map",
+                "eqoa_trade"
             ],
             "second mods folder must get all packages even when first folder has records"
         );
@@ -1857,7 +1887,8 @@ mod tests {
                 "eqoa_start_menu",
                 "eqoa_chat",
                 "eqoa_nameplates",
-                "eqoa_world_map"
+                "eqoa_world_map",
+                "eqoa_trade"
             ],
             "flat registry must be ignored so fresh mods folder gets all packages"
         );
