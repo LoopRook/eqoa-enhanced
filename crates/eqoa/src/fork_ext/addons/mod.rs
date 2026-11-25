@@ -143,6 +143,8 @@ pub(crate) mod native_a5;
 #[cfg(test)]
 mod a9_mod_tests;
 #[cfg(test)]
+mod session_contract_tests;
+#[cfg(test)]
 mod a1_tests;
 #[cfg(test)]
 mod a1_mod_tests;

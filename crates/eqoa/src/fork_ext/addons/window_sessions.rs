@@ -164,6 +164,22 @@ pub(crate) fn queue_event(name: &'static str, data: serde_json::Value) {
     OUTBOX.with(|o| o.borrow_mut().push((name, data)));
 }
 
+/// The queued events, taken out of the outbox so the core can emit them in place (`Core::reset`).
+pub(crate) fn take_outbox() -> Vec<(&'static str, serde_json::Value)> {
+    OUTBOX.with(|o| std::mem::take(&mut *o.borrow_mut()))
+}
+
+/// A mod holds the Start menu, the chat line or the full map: client-side windows the game's mode does not show
+/// (`a11_play::mod_window_up`).
+pub(crate) fn client_window_up() -> bool {
+    is_active()
+        && with(|s| {
+            s.sessions
+                .iter()
+                .any(|x| matches!(x.held, Some(TakeoverKind::StartMenu | TakeoverKind::ChatEntry | TakeoverKind::Map)))
+        })
+}
+
 /// Hands the queued events to the core (`native_core::flush_deferred` calls it first).
 pub(crate) fn flush_outbox() {
     let items = OUTBOX.with(|o| std::mem::take(&mut *o.borrow_mut()));

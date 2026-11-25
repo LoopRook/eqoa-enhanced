@@ -407,7 +407,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     lua,
                     "eqoa.windows.takeover",
                     "invalid_argument",
-                    "kind must be 'loot', 'merchant', or 'bank'",
+                    "kind must be the name of a window (a string; the spec lists them)",
                 );
             };
             if !super::window_kinds::is_window(&kind_str) {
@@ -534,7 +534,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     lua,
                     "eqoa.windows.release",
                     "invalid_argument",
-                    "kind must be 'loot', 'merchant', 'bank', or nil",
+                    "kind must be the name of a window (a string; the spec lists them), or nil",
                 ),
             }
         })?,
@@ -590,7 +590,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 lua,
                 "eqoa.windows.taken",
                 "invalid_argument",
-                "kind must be 'loot', 'merchant', 'bank', or nil",
+                "kind must be the name of a window (a string; the spec lists them), or nil",
             ),
         })?,
     )?;
