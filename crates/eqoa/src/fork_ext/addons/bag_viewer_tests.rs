@@ -2708,6 +2708,8 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     assert!(bv.play.bags_shop_pending(), "sell step sent silently");
     bv.play.bags_sell_confirm(7, 1);
     bv.frames(2);
+    bv.play.bags_broker_tick(); // the run sees the answer and ends
+    bv.frames(2);
     assert_eq!(bv.result_text(), Some(("Sold 1 junk item for 9 tunar".into(), Some(true)))); // fix round 2: the window says the tunar total
     assert!(bv.eval::<bool>("not eqoa.windows.taken('merchant')"), "Bag Viewer must release merchant takeover when batch ends");
 
@@ -4903,7 +4905,7 @@ fn round7c_bag_viewer_sells_single_items_near_a_merchant_body() {
             bv.frames(2);
             bv.play.bags_broker_tick();
         }
-        assert!(bv.play.bags_shop_pending(), "{row}: the sale went out");
+        assert!(bv.play.bags_shop_pending(), "{row}: the sale went out ({:?})", bv.result_text());
         bv.play.bags_sell_confirm(inv_slot, n);
         bv.play.bags_merchant_packet(9002);
         assert_eq!(bv.play.mode, 0, "the list the server answers the sale with stays hidden");
@@ -5007,7 +5009,7 @@ fn round7c_bag_viewer_second_sell_before_the_merchant_answers_is_refused_body() 
     bv_say_yes(&mut bv);
     bv.frames(2);
     bv.play.bags_broker_tick();
-    assert!(bv.play.bags_shop_pending(), "the first item's sale went out");
+    assert!(bv.play.bags_shop_pending(), "the first item's sale went out ({:?})", bv.result_text());
     bv.play.bags_sell_confirm(1, 1);
     bv.play.bags_merchant_packet(9002);
     bv.frames(2);
