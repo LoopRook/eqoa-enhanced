@@ -324,10 +324,19 @@ mod tests {
             .collect();
         listed.sort_unstable();
         registered.sort_unstable();
-        assert_eq!(listed, registered);
         let count = listed.len();
         listed.dedup();
         assert_eq!(listed.len(), count);
+        // upstream's per-interface pages (sync 2026-11-25): a few rows (Spell Bar Size, Chat Fade Delay,
+        // Wake on New Chat) are listed only by the PC interface's `category(i)`; every registered row is
+        // on some page in one interface or the other
+        crate::settings::testing::reset(false);
+        crate::settings::set_ui_mode(true).unwrap();
+        listed.extend((0..pages().len()).flat_map(|i| super::super::category(i).items.iter().copied()));
+        crate::settings::set_ui_mode(false).unwrap();
+        listed.sort_unstable();
+        listed.dedup();
+        assert_eq!(listed, registered);
         // every page fits (upstream's `pages_fit` since sync 2026-11-25); the fork's one page is longer
         // than a standard page (HUD rows, then Mods & Addons rows), so it opens in the menu's place
         let (fork, upstream_pages) = pages().split_last().unwrap();

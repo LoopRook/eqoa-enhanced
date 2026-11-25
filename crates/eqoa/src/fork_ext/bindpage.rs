@@ -1311,19 +1311,19 @@ mod tests {
         reset_in_memory();
         crate::settings::testing::put("keys.opt", b"key.attack=q\nkey.hide_ui=z\n");
         register("eqoa_stats_box", "toggle", "b", "Stats");
-        assert!(set_key("eqoa_stats_box", "toggle", "f10"));
+        assert!(set_key("eqoa_stats_box", "toggle", "f2"));
         reset_in_memory();
         register("eqoa_stats_box", "toggle", "b", "Stats");
-        assert_eq!(get_key("eqoa_stats_box", "toggle"), Some("f10".into()));
+        assert_eq!(get_key("eqoa_stats_box", "toggle"), Some("f2".into()));
         let text = String::from_utf8(crate::settings::testing::kept("keys.opt").unwrap()).unwrap();
         assert!(text.contains("key.attack=q") && text.contains("key.hide_ui=z"));
         assert!(!text.contains("mod."));
         let mod_text =
             String::from_utf8(crate::settings::testing::kept(KEYS_FILE).unwrap()).unwrap();
-        assert!(mod_text.contains("mod.eqoa_stats_box.toggle=f10"));
+        assert!(mod_text.contains("mod.eqoa_stats_box.toggle=f2"));
         assert_eq!(dispatch_keypress("b"), None);
         assert_eq!(
-            dispatch_keypress("f10"),
+            dispatch_keypress("f2"),
             Some(("eqoa_stats_box".into(), "toggle".into()))
         );
         crate::settings::testing::reset(false);

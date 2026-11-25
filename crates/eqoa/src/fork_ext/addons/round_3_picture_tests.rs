@@ -1028,14 +1028,14 @@ fn fresh_hud_mod_load_defaults_and_live_stats_key_and_menu_wiring() {
     assert!(crate::fork_ext::bindpage::set_key(
         "eqoa_stats_box",
         "toggle",
-        "f10"
+        "f2"
     ));
     input::route_mod_key(&b, true, false, false, true, false);
     native_events::dispatch(&stats).unwrap();
     stats
         .execute("assert(eqoa.options.get('stats_box') == true)")
         .unwrap();
-    let f8 = Key::Named(NamedKey::F10);
+    let f8 = Key::Named(NamedKey::F2);
     input::route_mod_key(&f8, true, false, false, true, false);
     native_events::dispatch(&stats).unwrap();
     stats
