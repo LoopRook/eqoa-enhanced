@@ -924,6 +924,8 @@ fn a3_jump_asks_the_walk_where_the_server_offers_it_and_is_unsupported_elsewhere
     p.session.jumps = true;
     act(&mut p, &h, "eqoa.actions.jump()");
     h.execute("local r = results[#results]; assert(r.kind == 'jump' and r.state == 'completed' and r.detail.confirmed == false)").unwrap();
+    // P3: `requested`, never `asked` (a mod that waits for `confirm.closed` on `asked` would wait forever on a jump)
+    h.execute("local r = results[#results]; assert(r.detail.requested == true and r.detail.asked == nil and r.detail.confirm == nil)").unwrap();
     assert!(a3::jump_pending(), "the walk is asked at the next frame that has it");
     let mut w = Play::bundled_ui_walker();
     a3::apply_jump(&mut p, &mut w);
