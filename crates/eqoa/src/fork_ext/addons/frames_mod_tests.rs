@@ -454,6 +454,7 @@ fn perf_frames_mod_asks_each_capability_once_and_draws_the_same() {
             imgui = ImGuiStandIn,
             capabilities = { has = function() ASKED = ASKED + 1; return true end },
             events = { on = function(name, fn) HANDLERS[name] = fn end },
+            map = { get = function() return { open = false } end },
             player = { get = function() return { id = 1, has_pet = false } end },
             target = { get = function() return nil end, info = function() return nil end },
             effects = { buffs = function() return {} end, pet = function() return {} end, list = function() return {} end },
