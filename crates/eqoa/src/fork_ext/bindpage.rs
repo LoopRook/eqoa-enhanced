@@ -43,7 +43,16 @@ static MOD_BINDS: Mutex<Vec<ModBind>> = Mutex::new(Vec::new());
 pub(crate) const MANAGER_ADDON: &str = "enhanced";
 pub(crate) const MANAGER_ID: &str = "mods_addons";
 pub(crate) const MANAGER_LABEL: &str = "Mods & Addons";
-pub(crate) const MANAGER_DEFAULT_KEY: &str = "f10";
+pub(crate) const MANAGER_DEFAULT_KEY: &str = "shift+f10";
+
+/// Saved keys that were the default of a bundled binding until upstream's sync of 2026-11-25 gave the key to the
+/// game (F10 is Settings, F4 the Stat Window): (mod, binding, key). The save is dropped, once, while the game
+/// still has the key, and the binding is on its default again (the manager's is Shift+F10, Map Search's
+/// "Clear map guide" has none). A key the player chose himself, or one the game gave up, is kept.
+const KEYS_TAKEN_BY_THE_GAME: &[(&str, &str, &str)] = &[
+    (MANAGER_ADDON, MANAGER_ID, "f10"),
+    ("eqoa_map_search", "clear", "f4"),
+];
 
 /// Whether the client is somewhere the Mods & Addons window would not be shown or usable (the
 /// loading screen, the full map, a world change; at character select and with a game window up
@@ -133,7 +142,13 @@ pub fn register(addon: &str, id: &str, default_key: &str, description: &str) -> 
     // The game's keys first: the lock below must not be held while they load.
     let game = crate::settings::with_binds(Clone::clone);
     let mut binds = MOD_BINDS.lock().unwrap();
-    let stored = load_saved_key(addon, id);
+    let mut stored = load_saved_key(addon, id);
+    if let Some(&(_, _, old)) = KEYS_TAKEN_BY_THE_GAME.iter().find(|(a, i, k)| (*a, *i) == (addon, id) && stored.as_deref() == Some(*k)) {
+        if game_owner(&game, old).is_some() && forget_mod_bind(addon, id).is_ok() {
+            crate::say(&format!("controls: {addon}.{id} was on {old}, which the game has now: back on its default"));
+            stored = None;
+        }
+    }
     if let Some(existing) = binds.iter_mut().find(|b| b.addon_id == addon && b.id == id) {
         existing.default_key = normalize_key(&default_key.to_ascii_lowercase());
         existing.description = description.to_string();
@@ -367,11 +382,19 @@ pub fn reset_defaults() {
     // those that are off too, goes back to having only its default: nothing
     // is kept for it, so a refused default is refused again after a restart
     // and says why.
-    let game = crate::settings::with_binds(Binds::controls_defaults);
+    //
+    // In the PC interface Defaults resets only the PC keyboard overrides, and what is shared (the
+    // controller's bindings, the macros) is kept (upstream's page says so): the mods' keys are the
+    // keyboard's, shared by both, so they stay as the player has them and are judged again against
+    // the PC profile's defaults.
+    let pc = crate::binds::pc_shortcuts();
+    let game = crate::settings::with_binds(|b| b.controls_defaults_profile(pc));
     let mut binds = MOD_BINDS.lock().unwrap();
-    for b in binds.iter_mut() {
-        let _ = forget_mod_bind(&b.addon_id, &b.id);
-        b.stored = None;
+    if !pc {
+        for b in binds.iter_mut() {
+            let _ = forget_mod_bind(&b.addon_id, &b.id);
+            b.stored = None;
+        }
     }
     resolve(&game, &mut binds);
 }
@@ -473,11 +496,19 @@ fn game_row(game: &Binds, key: &str) -> Option<usize> {
     if key.is_empty() {
         return None;
     }
-    game.row_on(key).or_else(|| {
+    // the interface in use: the PC keyboard has its own profile (1..0 on the bars, its own overrides)
+    let pc = crate::binds::pc_shortcuts();
+    let on = if pc { (0..ROWS.len()).find(|&r| game.profile_key(r, true) == Some(key)) } else { game.row_on(key) };
+    on.or_else(|| {
         ROWS.iter()
             .position(|r| r.keys.contains(&key))
-            .filter(|&r| !game.moved(r))
+            .filter(|&r| !game.moved(r) && (!pc || game.profile_key(r, true) == r_default(r)))
     })
+}
+
+/// A row's first default key (what its profile key is while it is on its default).
+fn r_default(row: usize) -> Option<&'static str> {
+    ROWS[row].keys.first().copied()
 }
 
 fn owner_of(game: &Binds, key: &str) -> Option<Owner> {
@@ -798,6 +829,15 @@ fn apply_mod_keys(binds: &mut [ModBind], changes: &[(usize, String)]) -> Result<
 /// as a saved layout says it. A row with default keys says it with an empty
 /// line; a row with none (a bar's slot) by having no line.
 fn without_key(game: &Binds, row: usize) -> Binds {
+    if crate::binds::pc_shortcuts() {
+        // the PC profile's own line: an empty one is no key (the controller's key is not touched)
+        let line = format!("pc_key.{}=", ROWS[row].id);
+        let mut text: String = game.to_text().lines().filter(|l| !l.starts_with(&line)).map(|l| format!("{l}
+")).collect();
+        text.push_str(&format!("{line}
+"));
+        return Binds::from_text(&text);
+    }
     let line = format!("key.{}=", ROWS[row].id);
     let mut text: String = game
         .to_text()
@@ -823,7 +863,7 @@ fn can_take(game: &Binds, binds: &[ModBind], key: &str, leaving: &[usize]) -> bo
 }
 
 fn kept_text(game: &Binds, row: usize) -> String {
-    match game.key(row) {
+    match game.profile_key(row, crate::binds::pc_shortcuts()) {
         Some(k) if !k.is_empty() => format!("{}: {}.", row_label(row), binds::display(k)),
         _ => format!("{} has no key now.", row_label(row)),
     }
@@ -851,8 +891,9 @@ fn game_row_capture(
     let mut game = crate::settings::binds();
     let mut binds = MOD_BINDS.lock().unwrap();
     let had = game.macros_with(&Input::Key(name.to_string()));
-    let old = game.key(row).map(str::to_string).filter(|k| !k.is_empty());
-    let moved = game.bind_key(row, name);
+    let pc = crate::binds::pc_shortcuts();
+    let old = game.profile_key(row, pc).map(str::to_string).filter(|k| !k.is_empty());
+    let moved = game.bind_key_profile(row, name, pc);
     // the mods on that exact name (a mod on Shift+Space is not on Space): `game` is only a
     // copy until `set_binds`, so with none the client does it all
     let exact = holders(&binds, key, None);
@@ -967,7 +1008,7 @@ fn mod_row_capture(
                 game = match &give_back {
                     Some(back) => {
                         let mut moved = game.clone();
-                        moved.bind_key(g, back);
+                        moved.bind_key_profile(g, back, crate::binds::pc_shortcuts());
                         moved
                     }
                     None => without_key(&game, g),
@@ -1362,6 +1403,133 @@ mod tests {
         register("key_refusal", "toggle", "b", "Stats");
         assert!(!set_key("key_refusal", "toggle", "f8"));
         assert_eq!(get_key("key_refusal", "toggle"), Some("b".into()));
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+    }
+
+    // ---- sync 2026-11-25 (H3): the PC interface has its own keyboard profile ----------------------------------
+
+    fn interface(pc: bool) {
+        crate::settings::testing::reset(false);
+        crate::settings::set_ui_mode(pc).unwrap();
+        assert_eq!(crate::binds::pc_shortcuts(), pc, "the interface under test");
+        reset_in_memory();
+    }
+
+    fn with_pc_key(id: &str, key: &str) {
+        let mut text = crate::settings::binds().to_text();
+        text.push_str(&format!("pc_key.{id}={key}
+"));
+        crate::settings::set_binds(Binds::from_text(&text));
+    }
+
+    /// The game's rows as a mod's key is judged against them: in the PC interface 7..0 are Bars 1-2's slots and a
+    /// PC override (`pc_key.<row>=`) is a key the game has; in the Controller interface neither is.
+    #[test]
+    fn sync_h3_a_mod_key_is_judged_against_the_interfaces_own_keys() {
+        let slot = row_named("bar2_slot2").unwrap();
+        let three = row_named("pcbar3_slot1").unwrap();
+        for pc in [true, false] {
+            interface(pc);
+            with_pc_key("pcbar3_slot1", "shift+1");
+            let game = crate::settings::binds();
+            assert_eq!(game_row(&game, "7"), pc.then_some(slot), "7 is Bar 2's second slot in the PC interface only");
+            assert_eq!(game_row(&game, "shift+1"), pc.then_some(three), "a PC override is the PC interface's key only");
+            // a mod's default on them: refused where the game has the key, kept where it does not
+            register("alpha", "seven", "7", "Seven");
+            register("alpha", "over", "shift+1", "Over");
+            assert_eq!(get_key("alpha", "seven").as_deref(), Some(if pc { "" } else { "7" }), "pc={pc}");
+            assert_eq!(get_key("alpha", "over").as_deref(), Some(if pc { "" } else { "shift+1" }), "pc={pc}");
+            assert_eq!(dispatch_keypress("7").is_some(), !pc, "and at the press");
+            assert_eq!(dispatch_keypress("shift+1").is_some(), !pc, "and at the press");
+        }
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+    }
+
+    /// Giving a game row the key a mod has changes the interface's own profile: the PC's overrides in the PC
+    /// interface, the Controller's keys in the other (the other profile is left as it was).
+    #[test]
+    fn sync_h3_a_capture_on_a_game_row_changes_only_the_interfaces_own_profile() {
+        let art = row_named("art").unwrap();
+        for pc in [true, false] {
+            interface(pc);
+            register("alpha", "act", "", "Act");
+            assert!(set_key("alpha", "act", "b"));
+            let (mut capture, mut note, mut cues) = (Some(crate::bindpage::Column::Keyboard), None, Vec::new());
+            assert!(capture_key(&mut capture, &mut note, art, "b", &mut cues), "a mod has the key: the fork's page does it");
+            let text = crate::settings::binds().to_text();
+            assert_eq!(text.contains("pc_key.art=b"), pc, "pc={pc}: {text}");
+            assert_eq!(text.contains("key.art=b
+") && !text.contains("pc_key.art=b"), !pc, "pc={pc}: {text}");
+            assert_eq!(get_key("alpha", "act").as_deref(), Some("f9"), "the mod took the key Art left (f9 in both profiles)");
+        }
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+    }
+
+    /// A mod given a key a game row has takes it from that row in the interface's own profile only.
+    #[test]
+    fn sync_h3_a_capture_on_a_mod_row_takes_the_key_from_the_interfaces_own_profile() {
+        let three = row_named("pcbar3_slot1").unwrap();
+        interface(true);
+        with_pc_key("pcbar3_slot1", "shift+1");
+        register("alpha", "act", "", "Act");
+        let controller_before: Vec<String> = crate::settings::binds().to_text().lines().filter(|l| l.starts_with("key.")).map(str::to_string).collect();
+        let (mut capture, mut note, mut cues) = (Some(crate::bindpage::Column::Keyboard), None, Vec::new());
+        assert!(capture_key(&mut capture, &mut note, ROWS.len(), "shift+1", &mut cues));
+        assert_eq!(get_key("alpha", "act").as_deref(), Some("shift+1"));
+        let game = crate::settings::binds();
+        assert_eq!(game.profile_key(three, true).unwrap_or(""), "", "the PC row has no key now");
+        let after: Vec<String> = game.to_text().lines().filter(|l| l.starts_with("key.")).map(str::to_string).collect();
+        assert_eq!(after, controller_before, "the Controller's keys are not touched by a PC capture");
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+    }
+
+    /// Defaults on the Controls page: in the PC interface the mods' keys (shared with the Controller's) stay; in the
+    /// Controller interface they go back to their defaults, as before.
+    #[test]
+    fn sync_h3_defaults_in_the_pc_interface_keep_the_mods_keys() {
+        for pc in [true, false] {
+            interface(pc);
+            register("alpha", "act", "y", "Act");
+            assert!(set_key("alpha", "act", "f2"));
+            reset_defaults();
+            assert_eq!(get_key("alpha", "act").as_deref(), Some(if pc { "f2" } else { "y" }), "pc={pc}");
+        }
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+    }
+
+    /// Owner decisions 2026-11-25: F10 and F4 belong to the game now. A saved F10 for the Mods & Addons row and a saved
+    /// F4 for Map Search's "Clear map guide" (the old defaults) go back to their defaults while the game has the key; a key
+    /// the player chose, or one the game gave up, stays.
+    #[test]
+    fn sync_old_default_keys_the_game_has_now_go_back_to_their_defaults() {
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+        crate::settings::testing::put(KEYS_FILE, b"mod.enhanced.mods_addons=f10
+mod.eqoa_map_search.clear=f4
+mod.eqoa_map_search.open=f4
+");
+        register_manager_row();
+        register("eqoa_map_search", "clear", "", "Clear map guide");
+        register("eqoa_map_search", "open", "f2", "Open");
+        assert_eq!(get_key(MANAGER_ADDON, MANAGER_ID).as_deref(), Some("shift+f10"));
+        assert_eq!(get_key("eqoa_map_search", "clear").as_deref(), Some(""), "unbound by default");
+        assert_eq!(get_key("eqoa_map_search", "open").as_deref(), Some("f4"), "control: another binding's saved key is the player's, kept");
+        let kept = String::from_utf8(crate::settings::testing::kept(KEYS_FILE).unwrap()).unwrap();
+        assert!(!kept.contains("mods_addons=f10") && !kept.contains("clear=f4"), "{kept}");
+        // control: a key the player chose stays
+        reset_in_memory();
+        crate::settings::testing::put(KEYS_FILE, b"mod.enhanced.mods_addons=f8
+mod.eqoa_map_search.clear=f6
+");
+        register_manager_row();
+        register("eqoa_map_search", "clear", "", "Clear map guide");
+        assert_eq!(get_key(MANAGER_ADDON, MANAGER_ID).as_deref(), Some("f8"));
+        assert_eq!(get_key("eqoa_map_search", "clear").as_deref(), Some("f6"));
         crate::settings::testing::reset(false);
         reset_in_memory();
     }
