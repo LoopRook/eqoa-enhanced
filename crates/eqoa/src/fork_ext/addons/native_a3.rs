@@ -184,7 +184,7 @@ fn buff_json(line: &BuffLine, index: usize, now: u64, generation: u64, revision:
         "whose": if line.whose == 1 { "pet" } else { "player" },
         "name": line.name,
         "icon": line.icon,
-        "spell_id": (line.id != 0).then_some(line.id),
+        "spell_id": (line.id != 0).then(|| line.id.to_string()),
         "description": line.description,
         "time_left": line.ends_tick.map(|t| seconds_of(t.saturating_sub(now))),
         "removable": line.removable,

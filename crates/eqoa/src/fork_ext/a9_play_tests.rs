@@ -310,7 +310,7 @@ fn a9_trade_request_is_held_hidden_answered_like_the_window_and_times_out() {
     lua_ok(&host, "assert(results[1].ok == true and results[1].detail.sent == true and eqoa.windows.session('trade_ask') == nil)");
     clear_recorded(&mut p);
     ask(&mut p, &host, "return eqoa.actions.trade_answer(true)");
-    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready')");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'window_closed')");
     assert!(recorded(&p).is_empty(), "nothing is sent twice");
 
     // No, on a new request
@@ -435,6 +435,7 @@ fn a9_trade_offers_follow_the_game_and_accepting_asks_the_player_first() {
         local t = assert(eqoa.trade.get())
         assert(t.kind == "trade" and t.phase == "open" and t.held == true and t.partner.id == 77)
         assert(#t.bags == 7 and t.bags[1].name == "Snake Scale" and t.bags[1].can_offer == true)
+        assert(type(t.bags[1].id) == "string", "a row's id is the spec's Id, a decimal string")
         assert(t.bags[3].worn == true and t.bags[3].can_offer == false)
         assert(t.bags[4].no_trade == true and t.bags[4].can_offer == false)
         assert(#t.mine.items == 0 and t.mine.accepted == false and t.max_items == 4 and t.carried == 1000)
@@ -445,14 +446,14 @@ fn a9_trade_offers_follow_the_game_and_accepting_asks_the_player_first() {
     // the contract: refused in the core, nothing sent
     clear_recorded(&mut p);
     for (code, want) in [
-        ("return eqoa.actions.trade_add({slot = 3, id = 12})", "not_ready"),         // worn
-        ("return eqoa.actions.trade_add({slot = 4, id = 13})", "not_ready"),         // NO TRADE
-        ("return eqoa.actions.trade_add({slot = 1, id = 10, count = 6})", "out_of_range"), // more than held
-        ("return eqoa.actions.trade_add({slot = 2, id = 11, count = 2})", "out_of_range"), // a single item twice
-        ("return eqoa.actions.trade_add({slot = 1, id = 99})", "stale_handle"),
-        ("return eqoa.actions.trade_add({slot = 99, id = 10})", "stale_handle"),
+        ("return eqoa.actions.trade_add({slot = 3, id = '12'})", "not_ready"),         // worn
+        ("return eqoa.actions.trade_add({slot = 4, id = '13'})", "not_ready"),         // NO TRADE
+        ("return eqoa.actions.trade_add({slot = 1, id = '10', count = 6})", "out_of_range"), // more than held
+        ("return eqoa.actions.trade_add({slot = 2, id = '11', count = 2})", "out_of_range"), // a single item twice
+        ("return eqoa.actions.trade_add({slot = 1, id = '99'})", "stale_handle"),
+        ("return eqoa.actions.trade_add({slot = 99, id = '10'})", "stale_handle"),
         ("return eqoa.actions.trade_money(1001)", "out_of_range"),
-        ("return eqoa.actions.trade_remove({slot = 1, id = 10})", "stale_handle"),
+        ("return eqoa.actions.trade_remove({slot = 1, id = '10'})", "stale_handle"),
         ("return eqoa.actions.trade_unaccept()", "not_ready"),
     ] {
         ask(&mut p, &host, code);
@@ -462,7 +463,7 @@ fn a9_trade_offers_follow_the_game_and_accepting_asks_the_player_first() {
 
     // adds: the game's own builder's bytes
     let want_add = p.npcw.trade_state.send_add(0, 2).unwrap();
-    ask(&mut p, &host, "return eqoa.actions.trade_add({slot = 1, id = 10, count = 2})");
+    ask(&mut p, &host, "return eqoa.actions.trade_add({slot = 1, id = '10', count = 2})");
     lua_ok(&host, "assert(results[1].ok == true and results[1].detail.sent == true and results[1].detail.confirmed == false)");
     assert_eq!(recorded(&p), vec![want_add]);
     // the server answers with its sub 3 (our add, as the initiator reads it): key 1, two
@@ -475,7 +476,7 @@ fn a9_trade_offers_follow_the_game_and_accepting_asks_the_player_first() {
     assert_eq!(recorded(&p), vec![want_money]);
     clear_recorded(&mut p);
     let want_remove = p.npcw.trade_state.send_remove(0).unwrap();
-    ask(&mut p, &host, "return eqoa.actions.trade_remove({slot = 1, id = 10})");
+    ask(&mut p, &host, "return eqoa.actions.trade_remove({slot = 1, id = '10'})");
     assert_eq!(recorded(&p), vec![want_remove]);
     // the removal lands, and the offer is empty again
     deliver(&mut p, 0x0056, trade_msg(4, 77, &0u32.to_le_bytes()));
@@ -657,7 +658,7 @@ fn a9_duel_invitation_wager_and_the_queue_behind_it() {
     // offers: the duel part's own bytes
     clear_recorded(&mut p);
     let want_add = p.duel.part.add_item(1, 2);
-    ask(&mut p, &host, "return eqoa.actions.trade_add({slot = 1, id = 10, count = 2})");
+    ask(&mut p, &host, "return eqoa.actions.trade_add({slot = 1, id = '10', count = 2})");
     assert_eq!(recorded(&p), vec![if let crate::duel::Do::Send(m) = want_add { m } else { unreachable!() }]);
     clear_recorded(&mut p);
     ask(&mut p, &host, "return eqoa.actions.trade_money(100)");
@@ -718,11 +719,11 @@ fn a9_a_duel_invitation_nobody_answers_is_declined_and_acting_needs_the_hold() {
     assert_eq!(p.mode, 43, "control: nobody holds duel_invite, so the game's own invitation is up");
     clear_recorded(&mut p);
     ask(&mut p, &host, "return eqoa.actions.duel_answer(true)");
-    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready')");
-    ask(&mut p, &host, "return eqoa.actions.trade_add({slot = 1, id = 1})");
-    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready')");
-    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({slot = 1, id = 1})");
-    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready')");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'window_closed')");
+    ask(&mut p, &host, "return eqoa.actions.trade_add({slot = 1, id = '1'})");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'window_closed')");
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({slot = 1, id = '1'})");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'window_closed')");
     assert!(recorded(&p).is_empty(), "nothing was sent for the game's own window");
 }
 
@@ -779,30 +780,30 @@ fn a9_blacksmith_lists_repairs_like_the_window_and_refuses_what_the_game_does() 
         local s = assert(eqoa.blacksmith.get())
         assert(s.coin == 1000 and #s.items == 2 and s.repair_pending == false and s.total == 50 and s.held == true)
         assert(s.items[1].inventory_key == 1 and s.items[2].inventory_key == 2)
-        assert(s.items[1].id == 20 and s.items[1].cost == 50 and s.items[1].can_repair == true and s.items[1].condition == 0.5)
-        assert(s.items[2].id == 21 and s.items[2].cost == 0 and s.items[2].can_repair == false)
+        assert(s.items[1].id == '20' and s.items[1].cost == 50 and s.items[1].can_repair == true and s.items[1].condition == 0.5)
+        assert(s.items[2].id == '21' and s.items[2].cost == 0 and s.items[2].can_repair == false)
         assert(eqoa.windows.session("blacksmith") ~= nil)
         "#,
     );
     // refused as the game's window does: an item that needs nothing
     clear_recorded(&mut p);
-    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({slot = 2, id = 21})");
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({slot = 2, id = '21'})");
     lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready')");
-    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({slot = 1, id = 99})");
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({slot = 1, id = '99'})");
     lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'stale_handle')");
     // money short
     p.dump.player.p34 = 10;
     step(&mut p, &host);
-    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({slot = 1, id = 20})");
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({slot = 1, id = '20'})");
     lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready', results[1].reason)");
     assert!(recorded(&p).is_empty(), "no refused repair sent anything");
     p.dump.player.p34 = 1000;
     step(&mut p, &host);
     // the repair: the window's bytes; one at a time
-    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({slot = 1, id = 20})");
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({slot = 1, id = '20'})");
     lua_ok(&host, "assert(results[1].ok == true and results[1].detail.sent == true and results[1].detail.confirmed == false and results[1].detail.cost == 50)");
     assert_eq!(recorded(&p), native_repair, "the repair is the window's repair");
-    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({slot = 1, id = 20})");
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({slot = 1, id = '20'})");
     lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'busy')");
     assert_eq!(recorded(&p).len(), 1, "never replayed");
     // the server answers: the item is whole and the purse is lighter, the next repair may go
@@ -846,7 +847,7 @@ fn a9_blacksmith_lists_repairs_like_the_window_and_refuses_what_the_game_does() 
     step(&mut p, &host);
     lua_ok(&host, "assert(eqoa.blacksmith.get() == nil)");
     ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1})");
-    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready', 'control: no smith open')");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'window_closed', 'control: no smith open')");
     deliver(&mut p, 0x0061, 4242u32.to_le_bytes().to_vec());
     assert_eq!(p.mode, 19, "the game's own window");
     step(&mut p, &host);
@@ -948,7 +949,7 @@ fn a9_h1_the_answering_player_ends_up_in_a_usable_trade() {
     );
     clear_recorded(&mut p);
     let want = p.npcw.trade_state.send_add(1, 1).unwrap();
-    ask(&mut p, &host, "return eqoa.actions.trade_add({slot = 2, id = 11})");
+    ask(&mut p, &host, "return eqoa.actions.trade_add({slot = 2, id = '11'})");
     lua_ok(&host, "assert(results[1].ok == true, tostring(results[1].code))");
     assert_eq!(recorded(&p), vec![want], "an answerer's offer works");
     // the other order: the server also echoes sub 2 to the answerer
@@ -1010,7 +1011,7 @@ fn a9_h2_a_queued_invitation_is_held_once_and_declined_for_real() {
     }
     assert_eq!((p.mode, recorded(&p).len()), (0, 1), "it does not come back, and is not answered twice");
     ask(&mut p, &host, "return eqoa.actions.duel_answer(true)");
-    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready')");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'window_closed')");
     // control: with no holder the game shows the queued invitation (the step the review named)
     let mut q = ready();
     let host_q = host_all();
@@ -1058,7 +1059,7 @@ fn a9_m1_the_question_waits_for_the_servers_echo_of_our_own_change() {
     open_trade(&mut p, 77);
     step(&mut p, &host);
     clear_recorded(&mut p);
-    ask(&mut p, &host, "eqoa.actions.trade_add({slot = 1, id = 10, count = 2}); return eqoa.actions.trade_accept()");
+    ask(&mut p, &host, "eqoa.actions.trade_add({slot = 1, id = '10', count = 2}); return eqoa.actions.trade_accept()");
     lua_ok(&host, "assert(results[1].ok == true and results[2].ok == false and results[2].code == 'busy', tostring(results[2].code))");
     assert!(confirm::current_for_test().is_none(), "no question about an offer the server has not confirmed");
     // the echo of our own add (sub 3 as the initiator reads it): now the question may be asked
@@ -1123,25 +1124,25 @@ fn a9_the_repair_is_one_at_a_time_and_names_its_item() {
     deliver(&mut p, 0x0061, 4242u32.to_le_bytes().to_vec());
     step(&mut p, &host);
     clear_recorded(&mut p);
-    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = 99})");
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = '99'})");
     lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'stale_handle')");
-    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = 20})");
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = '20'})");
     lua_ok(&host, "assert(results[1].ok == true)");
     assert_eq!(recorded(&p).len(), 1);
     // the purse moves for another reason: that is not the answer
     p.dump.player.p34 = 900;
     step(&mut p, &host);
-    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = 20})");
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = '20'})");
     lua_ok(&host, "assert(results[1].code == 'busy', tostring(results[1].code))");
     // 3 s without an answer: other items may go, this one waits for a fresh read of its condition
     a9_play::age_repair_for_test(Duration::from_secs(4));
     step(&mut p, &host);
-    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = 20})");
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = '20'})");
     lua_ok(&host, "assert(results[1].code == 'busy', 'uncertain: ' .. tostring(results[1].code))");
     assert_eq!(recorded(&p).len(), 1, "never sent twice");
     p.dump.inventory.items[0].cur_hp = 30;
     step(&mut p, &host);
-    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = 20})");
+    ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1, id = '20'})");
     lua_ok(&host, "assert(results[1].ok == true, tostring(results[1].code))");
     assert_eq!(recorded(&p).len(), 2, "the condition changed, so a fresh read allows the next");
 }
@@ -1258,7 +1259,7 @@ fn a9_n1_a_second_trade_starts_with_nothing_accepted_whatever_the_last_one_left(
     assert_eq!(trade_pass::trade_marks(&p), (false, false), "a new held trade starts clean");
     lua_ok(&host, "local t = eqoa.trade.get(); assert(t.mine.accepted == false and t.theirs.accepted == false and t.can_accept == true)");
     clear_recorded(&mut p);
-    ask(&mut p, &host, "return eqoa.actions.trade_add({slot = 1, id = 10})");
+    ask(&mut p, &host, "return eqoa.actions.trade_add({slot = 1, id = '10'})");
     lua_ok(&host, "assert(results[1].ok == true, tostring(results[1].reason))");
     // end it with both accepted again, then a third as the answerer
     deliver(&mut p, 0x0056, trade_msg(6, 88, &[]));

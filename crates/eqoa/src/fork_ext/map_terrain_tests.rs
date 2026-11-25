@@ -104,7 +104,7 @@ fn a13_terrain_draws_the_overview_and_a_known_point_lands_on_its_pixel() {
 
     let host = crate::fork_ext::addons::host::Host::with_test_capabilities(&[]).unwrap();
     crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow_mut().view.in_world = true);
-    host.execute("t, err = eqoa.map.terrain({size = 1024}); assert(t ~= nil, err and err.message); local px, py = t.project(1, 1); assert(px == nil, 'not ready before the first draw')").unwrap();
+    host.execute("t, err = eqoa.map.terrain({size = 1024}); assert(t ~= nil, err and err.message); local px, py = t.project(1, 1); assert(px == nil and py.code == 'unavailable', 'not loaded before the first draw: ' .. tostring(py and py.code))").unwrap();
     let mut enc = device.create_command_encoder(&Default::default());
     map_terrain::draw(&map, &device, &mut enc);
     queue.submit([enc.finish()]);

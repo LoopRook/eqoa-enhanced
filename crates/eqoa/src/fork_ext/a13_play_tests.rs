@@ -126,10 +126,10 @@ fn a13_pass_is_refused_while_a_game_window_is_up_and_a_map_open_before_the_claim
     p.map.show();
     step(&mut p, &h);
     assert!(ws::get(vm, "map").is_some());
-    // another window of the game is up: the pass is busy, nothing is queued
+    // another window of the game is up: the pass is not_ready (a game window is in the way), nothing is queued
     p.mode = 22;
     step(&mut p, &h);
-    h.execute("s = eqoa.windows.session('map'); ok, err = eqoa.windows.pass(s.ref); assert(ok == nil and err.code == 'busy', tostring(err and err.code))").unwrap();
+    h.execute("s = eqoa.windows.session('map'); ok, err = eqoa.windows.pass(s.ref); assert(ok == nil and err.code == 'not_ready', tostring(err and err.code))").unwrap();
     assert!(ws::take_passes().is_empty());
 }
 

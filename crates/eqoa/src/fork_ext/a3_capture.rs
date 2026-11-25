@@ -333,8 +333,10 @@ pub(crate) fn dispatch(play: &mut Play, action: &FrameAction) -> DispatchOutcome
                 return refuse("unsupported", "this server does not offer jumping");
             }
             PENDING_JUMP.with(|p| p.set(true));
+            // `requested`: handed to the walk. Not `asked`, which means a client question is up (wait for
+            // `confirm.closed`); no question is asked for a jump (integration review P3)
             DispatchOutcome::Completed {
-                detail: Some(json!({"asked": true, "confirmed": false})),
+                detail: Some(json!({"requested": true, "confirmed": false})),
             }
         }
         FrameAction::RemoveEffect { whose, id, icon, name } => {

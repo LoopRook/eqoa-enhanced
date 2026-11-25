@@ -135,7 +135,7 @@ fn a3_buffs_read_time_left_whose_spell_and_removable_and_count_down_on_the_game_
         local b, err = eqoa.effects.buffs()
         assert(err == nil and #b == 2, tostring(err and err.code))
         assert(b[1].index == 1 and b[1].whose == 'player' and b[1].name == 'Dark Ward')
-        assert(b[1].spell_id == 9304 and b[1].icon == 11 and b[1].removable == true)
+        assert(b[1].spell_id == '9304' and b[1].icon == 11 and b[1].removable == true)
         assert(math.abs(b[1].time_left - 60) < 0.1, b[1].time_left)
         assert(b[2].whose == 'pet' and b[2].removable == false and b[2].time_left == nil, 'no end kept is nil')
         "#,
@@ -924,6 +924,8 @@ fn a3_jump_asks_the_walk_where_the_server_offers_it_and_is_unsupported_elsewhere
     p.session.jumps = true;
     act(&mut p, &h, "eqoa.actions.jump()");
     h.execute("local r = results[#results]; assert(r.kind == 'jump' and r.state == 'completed' and r.detail.confirmed == false)").unwrap();
+    // P3: `requested`, never `asked` (a mod that waits for `confirm.closed` on `asked` would wait forever on a jump)
+    h.execute("local r = results[#results]; assert(r.detail.requested == true and r.detail.asked == nil and r.detail.confirm == nil)").unwrap();
     assert!(a3::jump_pending(), "the walk is asked at the next frame that has it");
     let mut w = Play::bundled_ui_walker();
     a3::apply_jump(&mut p, &mut w);

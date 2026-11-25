@@ -666,7 +666,7 @@ pub(crate) fn dispatch(play: &mut Play, action: &A7Action) -> DispatchOutcome {
                 })
             });
             let Some(req) = active else {
-                return refuse("not_ready", "no incoming friend request to accept");
+                return refuse("window_closed", "no incoming friend request to accept");
             };
             if play.buddies.count() >= 32 {
                 return refuse("not_ready", "your friend list is full (32)");
@@ -683,7 +683,7 @@ pub(crate) fn dispatch(play: &mut Play, action: &A7Action) -> DispatchOutcome {
                 .map(|r| r.id)
                 .or_else(|| (play.mode == 17 && play.buddies.request != u32::MAX).then_some(play.buddies.request));
             let Some(id) = id else {
-                return refuse("not_ready", "no incoming friend request to refuse");
+                return refuse("window_closed", "no incoming friend request to refuse");
             };
             refuse_held_friend(play, id, "refused");
             sent()
@@ -798,7 +798,7 @@ pub(crate) fn dispatch(play: &mut Play, action: &A7Action) -> DispatchOutcome {
                 })
             });
             let Some(inv) = active else {
-                return refuse("not_ready", "no incoming guild invitation to accept");
+                return refuse("window_closed", "no incoming guild invitation to accept");
             };
             let text = confirm::guild_accept_text(&inv.inviter, &inv.guild);
             ask_confirm(
@@ -812,7 +812,7 @@ pub(crate) fn dispatch(play: &mut Play, action: &A7Action) -> DispatchOutcome {
                 .map(|r| r.inviter_id)
                 .or_else(|| (play.mode == 20 && play.guild_cmds.inviter != u32::MAX).then_some(play.guild_cmds.inviter));
             let Some(id) = id else {
-                return refuse("not_ready", "no incoming guild invitation to refuse");
+                return refuse("window_closed", "no incoming guild invitation to refuse");
             };
             refuse_held_guild(play, id, "refused");
             sent()
@@ -825,7 +825,7 @@ pub(crate) fn dispatch(play: &mut Play, action: &A7Action) -> DispatchOutcome {
         }
         A7Action::LfgSearch { kind, races, classes, min_level, max_level } => {
             if !crate::live::features().live() {
-                return refuse("unavailable", "this server does not offer group search");
+                return refuse("unsupported", "this server does not offer group search");
             }
             if play.group.in_group && !play.group.leader && !play.members_invite() {
                 return refuse("not_ready", "only the group's leader can search for players");
@@ -853,7 +853,7 @@ pub(crate) fn dispatch(play: &mut Play, action: &A7Action) -> DispatchOutcome {
         }
         A7Action::LfgRegister => {
             if !crate::live::features().live() {
-                return refuse("unavailable", "this server does not offer group search");
+                return refuse("unsupported", "this server does not offer group search");
             }
             if play.group.in_group && !play.group.leader {
                 return refuse("not_ready", "only the group's leader can register for group search");
@@ -863,7 +863,7 @@ pub(crate) fn dispatch(play: &mut Play, action: &A7Action) -> DispatchOutcome {
         }
         A7Action::LfgUnregister => {
             if !crate::live::features().live() {
-                return refuse("unavailable", "this server does not offer group search");
+                return refuse("unsupported", "this server does not offer group search");
             }
             if play.group.in_group && !play.group.leader {
                 return refuse("not_ready", "only the group's leader can unregister from group search");

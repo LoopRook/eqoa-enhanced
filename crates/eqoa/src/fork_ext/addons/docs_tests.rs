@@ -695,6 +695,146 @@ fn docs_a_wrong_or_unbacked_tested_limit_is_caught() {
     assert!(limit_problems(&stray).iter().any(|p| p.contains("outside the limits table")));
 }
 
+/// Integration review P1 (2026-11-25): every item-definition and ability id is the spec's `Id`, a decimal string, in
+/// every round. Each field of the surface file named `id` or `*_id` is classified here, once: as an `Id` (with the
+/// words the spec must use for it) or as a whole number, with the kind of number it is. A new id field fails the
+/// check until someone decides which it is, so a round cannot hand an item or ability id over as a Lua number
+/// again without the spec and this list saying so. The values themselves are pinned by the rounds' own tests
+/// (`a8_the_tray_keeps_the_games_limits_and_a_fill_is_all_or_nothing`, the A9 trade and smith reads, the A11 merc
+/// read, `a3` buffs, `api_codes_tests::codes_bad_argument_*`).
+const ID_STRINGS: &[(&str, &str)] = &[
+    ("eqoa.abilities.Ability.id", "`Ability = {ref:AbilityRef, id:Id,"),
+    ("eqoa.events.cooldown.started.data.ability_id", "ability_id:Id?"),
+    ("eqoa.events.cooldown.updated.data.ability_id", "ability_id:Id?"),
+    ("eqoa.events.cooldown.ended.data.ability_id", "ability_id:Id?"),
+    ("eqoa.items.Item.id", "| `id:Id`, `name:string`"),
+    ("eqoa.raid.LootRollItem.item_id", "item_name:string, item_id:Id"),
+    ("eqoa.effects.Buff.spell_id", "spell_id:Id?, description"),
+    ("eqoa.craft.Item.id", "`eqoa.craft.Item = {slot:int, id:Id"),
+    ("eqoa.craft.TrayItem.id", "`eqoa.craft.TrayItem = {slot:int, id:Id"),
+    ("eqoa.trade.Item.id", "`eqoa.trade.Item = {slot:int, id:Id"),
+    ("eqoa.trade.Bag.id", "`eqoa.trade.Bag = {slot:int, id:Id"),
+    ("eqoa.blacksmith.Item.id", "eqoa.blacksmith.Item = {slot:int, id:Id"),
+    ("eqoa.mail.PackItem.id", "`eqoa.mail.PackItem = {slot:int, id:Id"),
+    ("eqoa.auction.Sellable.id", "`eqoa.auction.Sellable = {slot:int, id:Id"),
+    ("eqoa.merc.Record.item_id", "item_id:Id, name, quantity:int, equip_slot:int}"),
+    ("eqoa.merc.Spell.id", "`Spell = {id:Id, name"),
+];
+
+/// Ids that are rightly whole numbers, by what they number. None of them is an item definition or an ability.
+const ID_NUMBERS: &[(&str, &[&str])] = &[
+    (
+        "an entity, player or character id (the server's, as `Entity.id`)",
+        &[
+            "eqoa.entities.Entity.id", "eqoa.entities.Entity.target_id", "eqoa.player.Player.id",
+            "eqoa.player.Player.pet_id", "eqoa.player.Player.target_id", "eqoa.target.TargetInfo.id",
+            "eqoa.casts.Cast.caster_id", "eqoa.casts.Cast.target_id", "eqoa.events.cast.started.data.caster_id",
+            "eqoa.events.cast.started.data.target_id", "eqoa.events.cast.ended.data.caster_id",
+            "eqoa.events.cast.ended.data.target_id", "eqoa.combat.CombatHit.attacker_id",
+            "eqoa.combat.CombatHit.defender_id", "eqoa.events.combat.hit.data.attacker_id",
+            "eqoa.events.combat.hit.data.defender_id", "eqoa.events.guide.lost.data.entity_id",
+            "eqoa.items.LootSource.entity_id", "eqoa.items.MerchantState.entity_id", "eqoa.items.MasterLootMember.id",
+            "eqoa.group.Invite.id", "eqoa.group.Member.id", "eqoa.group.RaidMember.id", "eqoa.group.RaidRole.id",
+            "eqoa.raid.RaidMember.id", "eqoa.raid.RaidState.assist_id", "eqoa.raid.RaidState.helper_id",
+            "eqoa.raid.RaidState.leader_id", "eqoa.trade.Partner.id", "eqoa.events.trade.request.data.id",
+            "eqoa.duel.State.opponent_id", "eqoa.duel.Invite.id", "eqoa.guild.GuildMember.id",
+            "eqoa.guild.GuildInvite.inviter_id", "eqoa.social.Friend.id", "eqoa.social.FriendRequest.id",
+            "eqoa.social.Ignored.id", "eqoa.who.WhoEntry.id", "eqoa.lfg.LfgEntry.id",
+        ],
+    ),
+    (
+        "a world or place number",
+        &[
+            "eqoa.client.Client.world_id", "eqoa.entities.Entity.world_id", "eqoa.events.guide.lost.data.world_id",
+            "eqoa.events.world.entered.data.world_id", "eqoa.events.world.leaving.data.world_id",
+            "eqoa.group.Member.world_id", "eqoa.lfg.LfgEntry.world_id", "eqoa.map.MapState.world_id",
+            "eqoa.map.Waypoint.world_id", "eqoa.player.Location.world_id", "eqoa.player.Location.place_id",
+            "eqoa.player.Location.compass_id",
+        ],
+    ),
+    (
+        "one of the game's enum numbers (class, race, stat, slot, skill, recipe, box style)",
+        &[
+            "eqoa.player.Player.class_id", "eqoa.player.Player.race_id", "eqoa.duel.Invite.class_id",
+            "eqoa.duel.Invite.race_id", "eqoa.group.RaidRole.class_id", "eqoa.guild.GuildMember.class_id",
+            "eqoa.guild.GuildMember.race_id", "eqoa.lfg.LfgEntry.class_id", "eqoa.lfg.LfgEntry.race_id",
+            "eqoa.social.Friend.class_id", "eqoa.social.Friend.race_id", "eqoa.who.WhoEntry.class_id",
+            "eqoa.who.WhoEntry.race_id", "eqoa.items.ItemStat.id", "eqoa.items.SlotInfo.id",
+            "eqoa.player.StatItem.stat_id", "eqoa.mastery.MasteryNode.id", "eqoa.mastery.MasteryNode.skill_id",
+            "eqoa.mastery.MasterySkill.id", "eqoa.craft.Skill.id", "eqoa.craft.Recipe.id",
+            "eqoa.windows.Dialog.style_id",
+        ],
+    ),
+    (
+        "the key of an entry of a server's or the client's list (a mail, a mercenary's record, a roll, a ready check, a link, a question)",
+        &[
+            "eqoa.mail.Entry.id", "eqoa.mail.Message.id", "eqoa.merc.Record.id", "eqoa.raid.LootRollItem.id",
+            "eqoa.raid.ReadyCheckData.id", "eqoa.chat.ChatLink.id", "eqoa.windows.Confirm.id",
+        ],
+    ),
+    (
+        "a handle or name of the mod's own (a request, a batch, an option row)",
+        &[
+            "eqoa.actions.ActionResult.request_id", "eqoa.events.action.result.data.request_id",
+            "eqoa.actions.BatchResult.batch_id", "eqoa.events.batch.progress.data.batch_id",
+            "eqoa.events.batch.result.data.batch_id", "eqoa.options.Button.id", "eqoa.options.Button.item_id",
+            "eqoa.options.Toggle.id", "eqoa.options.Toggle.item_id",
+        ],
+    ),
+];
+
+/// What is wrong with the id fields of `paths` against `spec`: a field in neither list, a field in both, an `Id`
+/// field the spec does not type as `Id`.
+fn id_problems(paths: &BTreeSet<String>, spec: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+    let numbers: BTreeSet<&str> = ID_NUMBERS.iter().flat_map(|(_, list)| list.iter().copied()).collect();
+    let strings: BTreeMap<&str, &str> = ID_STRINGS.iter().copied().collect();
+    for path in paths.iter().filter(|p| p.starts_with("eqoa.")) {
+        let field = path.rsplit('.').next().unwrap_or("");
+        if field != "id" && !field.ends_with("_id") {
+            continue;
+        }
+        match (strings.get(path.as_str()), numbers.contains(path.as_str())) {
+            (Some(_), true) => problems.push(format!("{path} is listed both as an Id string and as a number")),
+            (None, false) => problems.push(format!(
+                "{path} is a new id field: if it holds an item-definition or ability id it is the spec's `Id` (a \
+                 decimal string; add it to ID_STRINGS), otherwise add it to ID_NUMBERS with what it numbers"
+            )),
+            (Some(needle), false) if !spec.contains(needle) => {
+                problems.push(format!("{path} is an Id, but the spec does not say so (expected the words {needle:?})"))
+            }
+            _ => {}
+        }
+    }
+    for (path, _) in ID_STRINGS {
+        if !paths.contains(*path) {
+            problems.push(format!("{path} is listed as an Id but is not in the surface file"));
+        }
+    }
+    problems
+}
+
+#[test]
+fn docs_every_item_and_ability_id_is_an_id_string() {
+    let paths: BTreeSet<String> = surface().into_keys().collect();
+    let problems = id_problems(&paths, &page("EQOA-API-SPEC.md"));
+    assert!(problems.is_empty(), "{} problem(s):\n{}", problems.len(), problems.join("\n"));
+}
+
+/// The negative controls of the check above: the spec typing a row's id `int` again (as A8 to A11 did before the
+/// integration fix), and a new `*_id` field nobody classified, are each caught.
+#[test]
+fn docs_a_numeric_item_id_or_an_unclassified_id_is_caught() {
+    let spec = page("EQOA-API-SPEC.md");
+    let paths: BTreeSet<String> = surface().into_keys().collect();
+    let numeric = spec.replacen("`eqoa.craft.Item = {slot:int, id:Id", "`eqoa.craft.Item = {slot:int, id:int", 1);
+    assert_ne!(numeric, spec, "the craft row is in the spec");
+    assert!(id_problems(&paths, &numeric).iter().any(|p| p.starts_with("eqoa.craft.Item.id is an Id")));
+    let mut grown = paths.clone();
+    grown.insert("eqoa.trade.Bag.item_id".into());
+    assert!(id_problems(&grown, &spec).iter().any(|p| p.starts_with("eqoa.trade.Bag.item_id is a new id field")));
+}
+
 /// Runs `source` in one bridge invocation inside an ImGui frame, as a handler runs.
 fn in_frame(source: &str) -> mlua::Result<()> {
     let mut context = imgui_context();

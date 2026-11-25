@@ -565,7 +565,7 @@ fn a2_a_dialog_session_that_the_player_cannot_answer_now_is_busy_not_lost() {
     let got = action_broker::with_dispatch_for_test(VM, "mod", || {
         super::super::a2_play::dispatch_answer(&mut p, &id, super::super::a2_play::Choice::Option(1))
     });
-    assert!(matches!(got, action_broker::DispatchOutcome::Refused { code: "busy", .. }), "{}", show(&got));
+    assert!(matches!(got, action_broker::DispatchOutcome::Refused { code: "not_ready", .. }), "{}", show(&got));
     assert!(session_of("text_dialog").is_some());
 }
 

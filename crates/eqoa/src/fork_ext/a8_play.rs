@@ -247,7 +247,7 @@ fn snapshot(play: &Play) -> Json {
     let tray: Vec<Json> = craft
         .combine
         .iter()
-        .map(|it| json!({"slot": row_of(it.item.id), "id": it.item.id, "name": it.item.name}))
+        .map(|it| json!({"slot": row_of(it.item.id), "id": it.item.id.to_string(), "name": it.item.name}))
         .collect();
     let items: Vec<Json> = craft
         .items
@@ -258,7 +258,7 @@ fn snapshot(play: &Play) -> Json {
         .map(|(i, it)| {
             json!({
                 "slot": i + 1,
-                "id": it.item.id,
+                "id": it.item.id.to_string(),
                 "name": it.item.name,
                 "quantity": it.quantity.max(1),
                 "in_tray": craft.combine.iter().filter(|c| c.item.id == it.item.id).count(),
@@ -344,12 +344,12 @@ fn dispatch_inner(play: &mut Play, action: &A8Action) -> DispatchOutcome {
     }
     if !caller_holds_window() {
         return refuse(
-            "not_ready",
+            "window_closed",
             "open a crafting window first (eqoa.windows.open_session 'recipe_book' or 'experiment'): the game's server replies are read only while one is open",
         );
     }
     if game_window_up(play) {
-        return refuse("busy", "the game's own crafting window is up");
+        return refuse("not_ready", "the game's own crafting window is up");
     }
     sync_open(play);
     refresh_items(play);

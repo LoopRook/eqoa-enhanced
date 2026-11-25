@@ -80,7 +80,7 @@ fn a10_arguments_are_checked_before_anything_is_queued() {
         ("eqoa.actions.mail_send({to = 'Bob', subject = string.rep('x', 40), body = 'b'})", "out_of_range"),
         ("eqoa.actions.mail_send({to = 'Bob', subject = 's', body = string.rep('x', 600)})", "out_of_range"),
         ("eqoa.actions.mail_send({to = 'Bob', subject = 's', body = 'b', tunar = -5})", "out_of_range"),
-        ("eqoa.actions.mail_send({to = 'Bob', subject = 's', body = 'b', item = {slot = 0, id = 1}})", "out_of_range"),
+        ("eqoa.actions.mail_send({to = 'Bob', subject = 's', body = 'b', item = {slot = 0, id = '1'}})", "out_of_range"),
         ("eqoa.actions.mail_send({to = 'Bob', subject = 's', body = 'b', item = {id = 1}})", "invalid_argument"),
         ("eqoa.actions.mail_send({to = 'Bob', subject = 's', body = 'b', item = 3})", "invalid_argument"),
         ("eqoa.actions.auction_search('Iron')", "invalid_argument"),
@@ -96,9 +96,9 @@ fn a10_arguments_are_checked_before_anything_is_queued() {
         ("eqoa.actions.auction_bid({lot = 5})", "invalid_argument"),
         ("eqoa.actions.auction_bid({lot = 5, price = 0})", "out_of_range"),
         ("eqoa.actions.auction_bid({lot = 5, price = 2^40})", "out_of_range"),
-        ("eqoa.actions.auction_sell({slot = 1, id = 1, price = 5, buyout = 9})", "invalid_argument"),
-        ("eqoa.actions.auction_sell({slot = 1, id = 1, price = 5, buyout = 9, hours = 0})", "out_of_range"),
-        ("eqoa.actions.auction_sell({slot = 1, id = 1, price = -5, buyout = 9, hours = 1})", "out_of_range"),
+        ("eqoa.actions.auction_sell({slot = 1, id = '1', price = 5, buyout = 9})", "invalid_argument"),
+        ("eqoa.actions.auction_sell({slot = 1, id = '1', price = 5, buyout = 9, hours = 0})", "out_of_range"),
+        ("eqoa.actions.auction_sell({slot = 1, id = '1', price = -5, buyout = 9, hours = 1})", "out_of_range"),
     ] {
         h.execute(&format!("local r, e = {call}; assert(r == nil and e ~= nil and e.code == '{code}', [=[{call}: ]=] .. tostring(e and e.code))")).unwrap();
     }
@@ -107,12 +107,12 @@ fn a10_arguments_are_checked_before_anything_is_queued() {
     h.execute(
         r#"
         assert(eqoa.actions.mail_refresh()); assert(eqoa.actions.mail_read(12)); assert(eqoa.actions.mail_read(4294967295)); assert(eqoa.actions.mail_delete(12)); assert(eqoa.actions.mail_take(12))
-        assert(eqoa.actions.mail_send({to = 'Bob', subject = 's', body = 'b', tunar = 5, item = {slot = 1, id = 2, count = 3}}))
+        assert(eqoa.actions.mail_send({to = 'Bob', subject = 's', body = 'b', tunar = 5, item = {slot = 1, id = '2', count = 3}}))
         assert(eqoa.actions.auction_search()); assert(eqoa.actions.auction_search({name = 'Iron', class = 3, wear = -1}))
         assert(eqoa.actions.auction_page(true)); assert(eqoa.actions.auction_my_lots()); assert(eqoa.actions.auction_my_bids())
         assert(eqoa.actions.auction_bidders(7)); assert(eqoa.actions.auction_bid({lot = 7, price = 100, count = 2}))
         assert(eqoa.actions.auction_buyout(7))
-        assert(eqoa.actions.auction_sell({slot = 1, id = 9, count = 1, price = 5, buyout = 9, hours = 12}))
+        assert(eqoa.actions.auction_sell({slot = 1, id = '9', count = 1, price = 5, buyout = 9, hours = 12}))
         "#,
     )
     .unwrap();
@@ -216,7 +216,7 @@ fn a10_the_reads_return_the_declared_fields_and_change_revision_only_when_the_st
         "revision": 0, "offered": true, "status": "idle", "count": 1, "truncated": false, "new": false,
         "entries": [{"id": 3, "from": "Ann", "subject": "Hi", "date": "2026-11-24 10:00 PST", "read": false, "carries": true}],
         "message": {"id": 3, "from": "Ann", "subject": "Hi", "date": "d", "text": "hello", "to": "", "tunar": 5, "items": ["Iron Ore"], "returned": false},
-        "pack": [{"slot": 1, "id": 9, "name": "Iron Ore", "quantity": 5}],
+        "pack": [{"slot": 1, "id": "9", "name": "Iron Ore", "quantity": 5}],
         "carries_offer": true, "postage": 15, "max_items": 1, "tunar": 700, "names": ["Zed"], "delivered": false, "refusal": null,
     });
     native_a10::publish_mail(mail.clone());
@@ -246,7 +246,7 @@ fn a10_the_reads_return_the_declared_fields_and_change_revision_only_when_the_st
         "lots": [{"lot": 31, "name": "Mine", "quantity": 1, "buyout": 5, "minutes_left": 9}],
         "bids": [{"lot": 41, "price": 100, "count": 2, "escrow": 200}],
         "bidders_lot": 501, "bidders": [{"name": "Ann", "bid": 20}],
-        "sellable": [{"slot": 1, "id": 700001, "name": "Gold Ring", "quantity": 1}],
+        "sellable": [{"slot": 1, "id": "700001", "name": "Gold Ring", "quantity": 1}],
         "tunar": 700, "banked": 5000, "timed_out": false,
     });
     native_a10::publish_auction(auction);
