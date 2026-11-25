@@ -611,3 +611,310 @@ fn a1_fix1_pass_is_refused_where_the_game_cannot_open_its_window() {
     step(&mut p, &host);
     assert_eq!(p.mode, 1);
 }
+
+// ---------------------------------------------------------------- sell and sell_many ask where the game's window asks
+
+/// Six stacks and an open merchant (the game's own window, mode 10, 100% rates, every unit worth 10): 1 a worn sword,
+/// 2 Iron Ore x5 (misc), 3 Rat Pelt x3 (quick-slotted), 4 Bound Ring (no-trade), 5 Healing Potion x2 (not a misc item),
+/// 6 Bone Chip x4 (misc).
+fn rig_sell() -> (Play, Host) {
+    let (mut p, host) = rig();
+    let mut ring = item(900_004, "Bound Ring", 14, 1, -1, -1);
+    ring.item.no_trade = 1;
+    let mut potion = item(900_005, "Healing Potion", 15, 2, -1, -1);
+    potion.item.p4c = 7;
+    p.dump.inventory = net::dump::ItemList {
+        p04: 0,
+        items: vec![
+            item(900_001, "Rusty Sword", 11, 1, 0, -1),
+            item(900_002, "Iron Ore", 12, 5, -1, -1),
+            item(900_003, "Rat Pelt", 13, 3, -1, 2),
+            ring,
+            potion,
+            item(900_006, "Bone Chip", 16, 4, -1, -1),
+        ],
+    };
+    p.npcw.shop = crate::merchant::Shop {
+        id: Some(77),
+        sell_rate: 100,
+        buy_rate: 100,
+        wares: Default::default(),
+        greeting: Vec::new(),
+        pending: false,
+    };
+    p.npcw.merchant.visible = true;
+    p.mode = 10;
+    p.forge_snapshot(None);
+    r6a::refresh(&p, None);
+    (p, host)
+}
+
+/// One game step, then the merchant window's own loop (what sends a staged sale).
+fn pump(p: &mut Play, host: &Host) {
+    step(p, host);
+    let (vui, mut r) = (crate::pointer::testing::vui(), crate::pointer::testing::NullRaster);
+    p.run_npcw(&vui, &mut r);
+    native_events::dispatch(host).unwrap();
+}
+
+/// The merchant's answer to a sale: the stack leaves the pack and the window stops waiting.
+fn merchant_answers(p: &mut Play, name: &str) {
+    p.dump.inventory.items.retain(|it| it.item.name != name);
+    p.npcw.shop.pending = false;
+}
+
+fn sell_one(n: usize, count: i64) -> String {
+    format!("local inv = eqoa.inventory.get(); return eqoa.actions.sell(inv.items[{n}].ref, {count})")
+}
+
+fn yes() {
+    key(NamedKey::ArrowRight);
+    key(NamedKey::Enter);
+}
+
+#[test]
+fn a1_sell_asks_in_the_three_cases_the_game_asks_and_only_the_players_yes_sells() {
+    // negative control: a client that sold at once (the old behaviour) has the sale pending after the first pump
+    for (n, name, count, total) in [(3usize, "Rat Pelt", 3i64, 30i64), (4, "Bound Ring", 1, 10), (5, "Healing Potion", 2, 20)] {
+        let (mut p, host) = rig_sell();
+        let sent = p.session.sends_lost;
+        ask(&mut p, &host, &sell_one(n, count));
+        host.execute("assert(results[1].ok == true and results[1].detail.asked == true and results[1].detail.confirm, tostring(last_err and last_err.message))").unwrap();
+        pump(&mut p, &host);
+        assert!(!p.npcw.shop.pending && p.session.sends_lost == sent, "{name}: asking sells nothing");
+        let q = confirm::current_for_test().unwrap_or_else(|| panic!("{name}: a question is up"));
+        assert!(!q.yes, "{name}: starts on No");
+        assert_eq!(q.act.kind(), "sell");
+        assert!(q.text.contains(&format!("{total} tunar")), "{name} names what the player gets: {}", q.text);
+        host.execute("assert(eqoa.windows.confirm().kind == 'sell')").unwrap();
+        // No: nothing is sold and the mod hears no
+        key(NamedKey::Escape);
+        pump(&mut p, &host);
+        assert!(!p.npcw.shop.pending && p.session.sends_lost == sent, "{name}: No sells nothing");
+        host.execute("assert(closed[1].kind == 'sell' and closed[1].answer == 'no')").unwrap();
+        // Yes: the sale goes out through the merchant window's own loop
+        ask(&mut p, &host, &sell_one(n, count));
+        yes();
+        pump(&mut p, &host);
+        assert!(p.npcw.shop.pending && p.session.sends_lost > sent, "{name}: the player's Yes sells");
+        host.execute("assert(closed[1].answer == 'yes' and closed[1].detail.sent == true and closed[1].kind == 'sell')").unwrap();
+    }
+}
+
+#[test]
+fn a1_sell_a_misc_item_sells_at_once_and_a_worn_one_is_still_refused() {
+    let (mut p, host) = rig_sell();
+    let sent = p.session.sends_lost;
+    ask(&mut p, &host, &sell_one(2, 5));
+    assert!(!confirm::is_open(), "a plain misc item is not asked about, as in the game");
+    pump(&mut p, &host);
+    assert!(p.npcw.shop.pending && p.session.sends_lost > sent, "it sells at once");
+    // the worn sword: refused as before, no question
+    let (mut p, host) = rig_sell();
+    ask(&mut p, &host, &sell_one(1, 1));
+    host.execute("assert(results[1].ok == false and results[1].code == 'not_ready', tostring(results[1] and results[1].code))").unwrap();
+    assert!(!confirm::is_open());
+}
+
+#[test]
+fn a1_sell_a_yes_sells_only_what_the_player_was_asked_about() {
+    // each change between the question and the Yes: nothing is sold, and the mod hears sent == false
+    let changes: [(&str, fn(&mut Play)); 5] = [
+        ("a different item in the slot", |p| p.dump.inventory.items[2] = item(900_009, "Something Else", 13, 3, -1, 2)),
+        ("a smaller stack", |p| p.dump.inventory.items[2].quantity = 1),
+        ("the stack gone", |p| p.dump.inventory.items.retain(|it| it.item.name != "Rat Pelt")),
+        ("put on meanwhile", |p| p.dump.inventory.items[2].equip_slot = 3),
+        ("the merchant gone", |p| {
+            p.mode = 0;
+            p.npcw.shop.id = None;
+        }),
+    ];
+    for (what, change) in changes {
+        let (mut p, host) = rig_sell();
+        let sent = p.session.sends_lost;
+        ask(&mut p, &host, &sell_one(3, 3));
+        change(&mut p);
+        yes();
+        pump(&mut p, &host);
+        assert!(!p.npcw.shop.pending && p.session.sends_lost == sent, "{what}: never sold");
+        host.execute("assert(closed[1].answer == 'yes' and closed[1].detail.sent == false and closed[1].detail.reason)").unwrap();
+    }
+    // control: unchanged, the same Yes sells
+    let (mut p, host) = rig_sell();
+    ask(&mut p, &host, &sell_one(3, 3));
+    yes();
+    pump(&mut p, &host);
+    assert!(p.npcw.shop.pending);
+}
+
+#[test]
+fn a1_sell_no_merchant_is_window_closed_and_a_batch_step_cannot_ask() {
+    let (mut p, host) = rig_sell();
+    p.mode = 0;
+    p.npcw.shop.id = None;
+    ask(&mut p, &host, &sell_one(3, 3));
+    host.execute("assert(results[1].ok == false and results[1].code == 'window_closed', tostring(results[1] and results[1].code))").unwrap();
+    assert!(!confirm::is_open());
+    // a batch step that the game would ask about is refused: a batch has nobody to ask
+    let (mut p, host) = rig_sell();
+    let sent = p.session.sends_lost;
+    ask(
+        &mut p,
+        &host,
+        "local inv = eqoa.inventory.get(); return eqoa.actions.batch({ steps = { { kind = 'sell', item = inv.items[3].ref, count = 1 } }, require_window = 'merchant' })",
+    );
+    pump(&mut p, &host);
+    pump(&mut p, &host);
+    assert!(!confirm::is_open() && !p.npcw.shop.pending && p.session.sends_lost == sent, "no sale, no question from a batch");
+    host.execute("local found = false; for _, r in ipairs(results) do if r.ok == false and r.code == 'not_ready' then found = true end end; assert(found, 'the step is refused not_ready')").unwrap();
+    // a batch step the game does not ask about still sells
+    let (mut p, host) = rig_sell();
+    ask(
+        &mut p,
+        &host,
+        "local inv = eqoa.inventory.get(); return eqoa.actions.batch({ steps = { { kind = 'sell', item = inv.items[2].ref, count = 1 } }, require_window = 'merchant' })",
+    );
+    pump(&mut p, &host);
+    pump(&mut p, &host);
+    assert!(p.npcw.shop.pending, "a misc item still sells from a batch");
+}
+
+#[test]
+fn a1_sell_a_mod_cannot_answer_its_own_question() {
+    let (mut p, host) = rig_sell();
+    let sent = p.session.sends_lost;
+    ask(&mut p, &host, &sell_one(3, 3));
+    assert!(confirm::is_open());
+    // everything a mod has that answers, closes or moves a window or a dialog, tried against the question
+    host.execute(
+        r#"
+        local inv = eqoa.inventory.get()
+        local c = assert(eqoa.windows.confirm())
+        for k, v in pairs(c) do assert(type(v) ~= 'function', 'the question carries no function: ' .. k) end
+        pcall(eqoa.actions.dialog_answer, c.id, 1)
+        pcall(eqoa.actions.dialog_answer, 'confirm', 1)
+        pcall(eqoa.actions.close_window, 'confirm')
+        pcall(eqoa.actions.menu_command, 'confirm', 'yes')
+        pcall(eqoa.actions.activate_row, 'confirm', 1)
+        pcall(eqoa.actions.sell, inv.items[3].ref, 3)
+        "#,
+    )
+    .unwrap();
+    pump(&mut p, &host);
+    pump(&mut p, &host);
+    let q = confirm::current_for_test().expect("still waiting for the player");
+    assert!(!q.yes && p.session.sends_lost == sent && !p.npcw.shop.pending, "nothing a mod calls answers it");
+    key(NamedKey::Escape);
+}
+
+#[test]
+fn a1_sell_many_asks_once_for_a_mixed_batch_and_a_yes_sells_in_order() {
+    let (mut p, host) = rig_sell();
+    let sent = p.session.sends_lost;
+    // Iron Ore (misc), Rat Pelt (quick slot), Healing Potion (not misc), Bone Chip (misc)
+    const MIXED: &str = "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[2].ref, inv.items[3].ref, inv.items[5].ref, inv.items[6].ref})";
+    ask(&mut p, &host, MIXED);
+    host.execute("assert(results[1].ok == true and results[1].detail.asked == true and results[1].detail.confirm, tostring(last_err and last_err.message))").unwrap();
+    pump(&mut p, &host);
+    assert!(!p.npcw.shop.pending && p.session.sends_lost == sent, "asking sells nothing");
+    let q = confirm::current_for_test().expect("one question is up");
+    assert!(!q.yes);
+    assert_eq!(q.act.kind(), "sell_many");
+    // 50 + 30 + 20 + 40 tunar
+    assert!(q.text.starts_with("Sell these 4 items for 140 tunar?"), "{}", q.text);
+    assert!(q.text.contains("Rat Pelt") && q.text.contains("quick slot"), "{}", q.text);
+    assert!(q.text.contains("Healing Potion") && q.text.contains("not a misc item"), "{}", q.text);
+    assert!(q.text.contains("and 2 other items"), "{}", q.text);
+    assert!(!q.text.contains("Iron Ore") && !q.text.contains("Bone Chip"), "the misc ones are only counted: {}", q.text);
+    // No: nothing is sold
+    key(NamedKey::Escape);
+    pump(&mut p, &host);
+    assert!(!p.npcw.shop.pending && p.session.sends_lost == sent);
+    host.execute("assert(#closed == 1 and closed[1].kind == 'sell_many' and closed[1].answer == 'no')").unwrap();
+    // Yes: the first stack goes out, the next waits for the merchant's answer
+    ask(&mut p, &host, MIXED);
+    yes();
+    pump(&mut p, &host);
+    assert!(p.npcw.shop.pending);
+    assert_eq!(p.session.sends_lost, sent + 1, "only the first stack goes out");
+    pump(&mut p, &host);
+    pump(&mut p, &host);
+    assert_eq!(p.session.sends_lost, sent + 1, "the second waits for the answer to the first");
+    host.execute("assert(#closed == 0)").unwrap();
+    for (i, name) in ["Iron Ore", "Rat Pelt", "Healing Potion", "Bone Chip"].into_iter().enumerate() {
+        merchant_answers(&mut p, name);
+        pump(&mut p, &host);
+        if i < 3 {
+            assert_eq!(p.session.sends_lost, sent + 2 + i as u64, "{name} answered: the next stack goes out");
+        }
+    }
+    host.execute(
+        "assert(closed[1].kind == 'sell_many' and closed[1].answer == 'yes' and closed[1].detail.sent == true \
+         and closed[1].detail.sent_count == 4 and closed[1].detail.total == 4 and #closed[1].detail.skipped == 0)",
+    )
+    .unwrap();
+    assert!(!confirm::has_work());
+}
+
+#[test]
+fn a1_sell_many_with_nothing_to_ask_sells_at_once_and_says_when_it_is_done() {
+    let (mut p, host) = rig_sell();
+    let sent = p.session.sends_lost;
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[2].ref, inv.items[6].ref})");
+    host.execute("assert(results[1].ok == true and results[1].detail.asked == false and results[1].detail.confirm == nil, tostring(last_err and last_err.message))").unwrap();
+    assert!(!confirm::is_open(), "two misc items are not asked about");
+    pump(&mut p, &host);
+    assert!(p.npcw.shop.pending && p.session.sends_lost == sent + 1, "the first goes out at once");
+    merchant_answers(&mut p, "Iron Ore");
+    pump(&mut p, &host);
+    assert_eq!(p.session.sends_lost, sent + 2);
+    host.execute("assert(#closed == 0)").unwrap();
+    merchant_answers(&mut p, "Bone Chip");
+    pump(&mut p, &host);
+    host.execute("assert(closed[1].kind == 'sell_many' and closed[1].answer == 'not_asked' and closed[1].confirm == 0 and closed[1].detail.sent_count == 2 and closed[1].detail.total == 2)").unwrap();
+}
+
+#[test]
+fn a1_sell_many_refuses_a_worn_stack_and_no_merchant_and_skips_what_changed() {
+    let (mut p, host) = rig_sell();
+    let sent = p.session.sends_lost;
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[2].ref, inv.items[1].ref})");
+    host.execute("assert(results[1].ok == false and results[1].code == 'not_ready' and results[1].reason:find('worn'), tostring(results[1] and results[1].reason))").unwrap();
+    assert!(!confirm::is_open());
+    pump(&mut p, &host);
+    assert_eq!(p.session.sends_lost, sent, "one worn stack refuses the whole call: nothing sold");
+    // no merchant open
+    let (mut p, host) = rig_sell();
+    p.mode = 0;
+    p.npcw.shop.id = None;
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[3].ref})");
+    host.execute("assert(results[1].ok == false and results[1].code == 'window_closed', tostring(results[1] and results[1].code))").unwrap();
+    // argument errors are destroy_many's
+    let (mut p, host) = rig_sell();
+    ask(&mut p, &host, "return eqoa.actions.sell_many({})");
+    host.execute("assert(last_err ~= nil and last_err.code == 'invalid_argument')").unwrap();
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[2].ref, inv.items[2].ref})");
+    host.execute("assert(last_err ~= nil and last_err.code == 'invalid_argument', 'the same item twice')").unwrap();
+    // an item that changed before its turn is skipped and counted
+    let (mut p, host) = rig_sell();
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[3].ref, inv.items[6].ref})");
+    yes();
+    pump(&mut p, &host);
+    let before = p.session.sends_lost;
+    merchant_answers(&mut p, "Rat Pelt");
+    let bone = p.dump.inventory.items.iter().position(|it| it.item.name == "Bone Chip").unwrap();
+    p.dump.inventory.items[bone] = item(900_099, "Something Else", 16, 4, -1, -1);
+    pump(&mut p, &host);
+    assert_eq!(p.session.sends_lost, before, "what changed is never sold");
+    host.execute("assert(closed[1].detail.sent_count == 1 and closed[1].detail.total == 2 and closed[1].detail.skipped[1] == 'Bone Chip')").unwrap();
+    // and the merchant leaving ends the run, counting what was not sold
+    let (mut p, host) = rig_sell();
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[3].ref, inv.items[6].ref})");
+    yes();
+    pump(&mut p, &host);
+    merchant_answers(&mut p, "Rat Pelt");
+    p.mode = 0;
+    p.npcw.shop.id = None;
+    pump(&mut p, &host);
+    host.execute("assert(closed[1].detail.sent_count == 1 and closed[1].detail.reason == 'the merchant window closed' and closed[1].detail.skipped[1] == 'Bone Chip')").unwrap();
+}

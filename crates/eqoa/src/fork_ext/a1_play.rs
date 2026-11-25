@@ -82,6 +82,7 @@ pub(crate) fn dispatch(play: &mut Play, action: &A1Action) -> DispatchOutcome {
             }
             ask(Act::DestroyMany { items: acts }, confirm::destroy_many_text(&lines), "inventory")
         }
+        A1Action::SellMany { items } => sell_many(play, items),
         A1Action::LinkItem { item } => {
             let idx = match item_index(play, item) {
                 Ok(i) => i,
@@ -120,6 +121,105 @@ pub(crate) fn dispatch(play: &mut Play, action: &A1Action) -> DispatchOutcome {
             DispatchOutcome::Completed { detail: Some(json!({"sent": true, "hide": hide})) }
         }
     }
+}
+
+/// What the game's own merchant window asks about before it sells a stack that is not worn (`merchant.rs` `sell`):
+/// quick-slotted (word 931), no-trade (932), or not a misc item (1842). `None`: it sells at once, as in the game.
+/// A worn stack (word 930) is not here: the API refuses it outright, which is stricter than the game.
+fn sell_ask(it: &net::dump::NetItem) -> Option<confirm::SellAsk> {
+    use confirm::SellAsk;
+    if it.quick_slot >= 0 {
+        Some(SellAsk::QuickSlot)
+    } else if it.item.no_trade > 0 {
+        Some(SellAsk::NoTrade)
+    } else if !crate::infotext::is_misc(it) {
+        Some(SellAsk::NotMisc)
+    } else {
+        None
+    }
+}
+
+/// The game's own words for that question (its string table: 931, 932, 1842), empty where the table has none.
+fn game_words(play: &Play, ask: confirm::SellAsk, name: &str) -> String {
+    let id = match ask {
+        confirm::SellAsk::QuickSlot => 931,
+        confirm::SellAsk::NoTrade => 932,
+        confirm::SellAsk::NotMisc => 1842,
+    };
+    let empty;
+    let words = match play.words.as_ref() {
+        Some(w) => w,
+        None => {
+            empty = Default::default();
+            &empty
+        }
+    };
+    crate::livewords::word(words, id, 0).replacen("%S", name, 1).replacen("%s", name, 1)
+}
+
+/// `eqoa.actions.sell` after the broker's checks (a merchant open, nothing pending, the handle fresh, not worn, the
+/// count within the stack): where the game's window would ask, the question and not the sale. `None`: sell at once.
+pub(super) fn sell_question(play: &Play, inv_index: u32, count: i64) -> Option<DispatchOutcome> {
+    let it = play.dump.inventory.items.iter().find(|it| it.inv_index == inv_index)?;
+    let why = sell_ask(it)?;
+    if crate::fork_ext::addons::action_broker::dispatching_batch_step() {
+        return Some(refuse(
+            "not_ready",
+            format!(
+                "the game asks before selling \"{}\" ({}), and a batch step cannot ask: use eqoa.actions.sell or sell_many",
+                it.item.name,
+                why.why()
+            ),
+        ));
+    }
+    let total = i64::from(crate::merchant::sell_price(it, play.npcw.shop.sell_rate)).saturating_mul(count);
+    let text = confirm::sell_text(&game_words(play, why, &it.item.name), why, &it.item.name, count, total);
+    let act = Act::Sell { inv_index, name: it.item.name.clone(), count };
+    Some(ask(act, text, "merchant"))
+}
+
+/// `eqoa.actions.sell_many`: whole stacks to the open merchant, in order. One question for the batch when any stack
+/// is one the game's window would ask about; none when none is (they sell at once, as a single sell does).
+fn sell_many(play: &Play, items: &[ResolvedItemSpec]) -> DispatchOutcome {
+    if !super::merchant_session_open(play) {
+        return refuse("window_closed", "merchant window is not open");
+    }
+    if play.npcw.shop.pending || super::PENDING_NPCW_TX.with(|p| p.borrow().is_some()) {
+        return refuse("busy", "merchant transaction already pending");
+    }
+    let rate = play.npcw.shop.sell_rate;
+    let mut acts = Vec::with_capacity(items.len());
+    let mut asked: Vec<confirm::SellLine> = Vec::new();
+    let mut plain = 0usize;
+    let mut total = 0i64;
+    for item in items {
+        let idx = match item_index(play, item) {
+            Ok(i) => i,
+            Err(e) => return e,
+        };
+        let it = &play.dump.inventory.items[idx];
+        if it.equip_slot != -1 {
+            return refuse("not_ready", "worn items cannot be sold in a group");
+        }
+        let count = it.quantity.max(1);
+        let price = i64::from(crate::merchant::sell_price(it, rate)).saturating_mul(count);
+        total = total.saturating_add(price);
+        match sell_ask(it) {
+            Some(why) => asked.push((it.item.name.clone(), count, price, why)),
+            None => plain += 1,
+        }
+        acts.push((it.inv_index, it.item.name.clone(), count));
+    }
+    let n = acts.len();
+    if asked.is_empty() {
+        let Some(vm) = crate::fork_ext::addons::action_broker::current_dispatch_vm() else {
+            return refuse("not_ready", "no mod is asking");
+        };
+        let addon = crate::fork_ext::addons::action_broker::dispatch_addon().unwrap_or_default();
+        confirm::begin_quiet_run(vm, &addon, acts);
+        return DispatchOutcome::Completed { detail: Some(json!({"asked": false, "count": n, "total_price": total})) };
+    }
+    ask(Act::SellMany { items: acts }, confirm::sell_many_text(n, total, &asked, plain), "merchant")
 }
 
 /// `drop_quest` after the broker's own checks: the question, never the drop.
@@ -169,6 +269,32 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
         }
         // a group destroy is carried out stack by stack (`step_runs`), never in one step
         Act::DestroyMany { .. } => Err("a group destroy runs stack by stack".into()),
+        Act::SellMany { .. } => Err("a group sale runs stack by stack".into()),
+        Act::Sell { inv_index, name, count } => {
+            if !super::merchant_session_open(play) {
+                return Err("the merchant window is closed".into());
+            }
+            if play.npcw.shop.pending || super::PENDING_NPCW_TX.with(|p| p.borrow().is_some()) {
+                return Err("the merchant has not answered the last request".into());
+            }
+            let Some(it) = play.dump.inventory.items.iter().find(|it| it.inv_index == *inv_index) else {
+                return Err("the item is no longer in the inventory".into());
+            };
+            if it.item.name != *name {
+                return Err("the slot holds a different item now".into());
+            }
+            if *count > it.quantity.max(1) {
+                return Err("the stack is smaller than when it was asked about".into());
+            }
+            if it.equip_slot != -1 {
+                return Err("the item is worn now".into());
+            }
+            // the sale goes out where every merchant request does (`play.rs`, with the merchant window's own output)
+            super::PENDING_NPCW_TX.with(|p| {
+                *p.borrow_mut() = Some(super::PendingNpcwTx::Sell { item_key: it.inv_index, count: *count as i32 })
+            });
+            Ok(())
+        }
         Act::DropQuest { index, title, stamp, revision } => {
             let current = crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow().quest_revision);
             let now_title = play
@@ -282,7 +408,7 @@ pub(crate) fn tick(play: &mut Play) {
             super::api_capture::a5::hold(p);
             continue;
         }
-        if matches!(p.act, Act::DestroyMany { .. }) {
+        if matches!(p.act, Act::DestroyMany { .. } | Act::SellMany { .. }) {
             confirm::begin_run(p);
             continue;
         }
@@ -304,26 +430,56 @@ fn step_runs(play: &mut Play) {
     confirm::put_runs(runs);
 }
 
-/// Returns whether the run goes on.
+/// Returns whether the run goes on. A group sale (`Act::SellMany`) is the same run as a group destroy, each stack
+/// waiting for the merchant's answer to the one before, and ends with `confirm.closed` too.
 fn advance_run(play: &mut Play, run: &mut confirm::Run) -> bool {
+    let selling = matches!(run.p.act, Act::SellMany { .. });
     if play.is_dead() || !play.in_world_now() {
-        confirm::report_done(&run.p, "yes", run.detail(Some("not in the world")));
+        confirm::report_run_done(run, "yes", Some("not in the world"));
         return false;
     }
     loop {
-        if play.waiting {
+        let busy = if selling {
+            play.npcw.shop.pending || super::PENDING_NPCW_TX.with(|p| p.borrow().is_some())
+        } else {
+            play.waiting
+        };
+        if busy {
             let since = *run.waiting_since.get_or_insert_with(std::time::Instant::now);
             if since.elapsed() >= RUN_WAIT {
-                confirm::report_done(&run.p, "yes", run.detail(Some("the server did not answer")));
+                confirm::report_run_done(run, "yes", Some("the server did not answer"));
                 return false;
             }
             return true;
         }
         run.waiting_since = None;
         let Some((inv_index, name, count)) = run.queue.pop_front() else {
-            confirm::report_done(&run.p, "yes", run.detail(None));
+            confirm::report_run_done(run, "yes", None);
             return false;
         };
+        if selling {
+            if !super::merchant_session_open(play) {
+                // the merchant is gone: this stack and every one after it are not sold
+                run.skipped.push(name);
+                let rest: Vec<String> = run.queue.drain(..).map(|(_, n, _)| n).collect();
+                run.skipped.extend(rest);
+                confirm::report_run_done(run, "yes", Some("the merchant window closed"));
+                return false;
+            }
+            let found = play.dump.inventory.items.iter().find(|it| it.inv_index == inv_index);
+            match found {
+                // worn by its turn, or no longer what was asked about: skipped, never sold
+                Some(it) if it.item.name == name && count <= it.quantity.max(1) && it.equip_slot == -1 => {
+                    super::PENDING_NPCW_TX.with(|p| {
+                        *p.borrow_mut() = Some(super::PendingNpcwTx::Sell { item_key: inv_index, count: count as i32 })
+                    });
+                    run.sent += 1;
+                    return true;
+                }
+                _ => run.skipped.push(name),
+            }
+            continue;
+        }
         let found = play.dump.inventory.items.iter().position(|it| it.inv_index == inv_index);
         match found {
             Some(idx) => {

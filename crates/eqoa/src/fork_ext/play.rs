@@ -3225,6 +3225,11 @@ fn dispatch_broker_action(
                     reason: format!("sell count {} exceeds stack size {}", count, it.quantity),
                 };
             }
+            // where the game's own window asks before it sells (quick slot, no-trade, not a misc item), so does the
+            // client: the question goes to the player and only their Yes sells (`a1_play::sell_question`)
+            if let Some(asked) = a1_play::sell_question(play, it.inv_index, *count) {
+                return asked;
+            }
             let unit_price = crate::merchant::sell_price(it, play.npcw.shop.sell_rate) as i64;
             let total_price = unit_price.saturating_mul(*count);
             PENDING_NPCW_TX.with(|p| {

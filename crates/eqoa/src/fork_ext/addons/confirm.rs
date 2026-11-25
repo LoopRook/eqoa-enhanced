@@ -38,6 +38,12 @@ pub(crate) enum Act {
     /// Bag Viewer multi-select: several whole stacks, asked about once. Each is (the game's slot, name, count). A Yes
     /// destroys them one at a time, each waiting for the server's answer to the last (`Run`), re-checking the slot.
     DestroyMany { items: Vec<(u32, String, i64)> },
+    /// `eqoa.actions.sell` where the game's merchant window asks first: one stack, `count` of it, to the open merchant.
+    /// `inv_index` is the game's slot key; the name is checked again at the Yes.
+    Sell { inv_index: u32, name: String, count: i64 },
+    /// `eqoa.actions.sell_many` where any of the stacks would be asked about: one question, then (on Yes) every stack
+    /// sold in order, each waiting for the server's answer to the one before (`Run`), re-checking its slot.
+    SellMany { items: Vec<(u32, String, i64)> },
     DropQuest { index: usize, title: String, stamp: u32, revision: u64 },
     /// Round A7: guild kick, accepting a friend request, accepting a guild invitation.
     GuildKick { member_id: i32, name: String },
@@ -73,6 +79,8 @@ impl Act {
         match self {
             Self::Destroy { .. } => "destroy",
             Self::DestroyMany { .. } => "destroy_many",
+            Self::Sell { .. } => "sell",
+            Self::SellMany { .. } => "sell_many",
             Self::DropQuest { .. } => "drop_quest",
             Self::GuildKick { .. } => "guild_kick",
             Self::FriendAccept { .. } => "friend_accept",
@@ -130,6 +138,9 @@ pub(crate) struct Run {
     pub skipped: Vec<String>,
     /// Since when the server has owed an answer to the last destroy.
     pub waiting_since: Option<Instant>,
+    /// A run nobody was asked about (`sell_many` where no stack needs the game's question): its `confirm.closed` has
+    /// `confirm = 0` and the answer `"not_asked"`, so a mod has one place to learn that the run is over.
+    pub quiet: bool,
 }
 
 impl Run {
@@ -298,11 +309,29 @@ pub(crate) fn take_answered() -> Vec<Pending> {
     STATE.with(|s| std::mem::take(&mut s.borrow_mut().answered))
 }
 
-/// A Yes to a group destroy starts its run (`Act::DestroyMany` only).
+/// A Yes to a group destroy or a group sale starts its run (`Act::DestroyMany` and `Act::SellMany` only).
 pub(crate) fn begin_run(p: Pending) {
-    let Act::DestroyMany { items } = &p.act else { return };
+    let (Act::DestroyMany { items } | Act::SellMany { items }) = &p.act else { return };
     let queue: std::collections::VecDeque<_> = items.iter().cloned().collect();
-    let run = Run { total: queue.len(), queue, sent: 0, skipped: Vec::new(), waiting_since: None, p };
+    let run = Run { total: queue.len(), queue, sent: 0, skipped: Vec::new(), waiting_since: None, p, quiet: false };
+    STATE.with(|s| s.borrow_mut().runs.push(run));
+}
+
+/// `sell_many` with no stack the game would ask about: the same run, with no question before it and none closed after.
+pub(crate) fn begin_quiet_run(vm: u64, addon: &str, items: Vec<(u32, String, i64)>) {
+    let queue: std::collections::VecDeque<_> = items.iter().cloned().collect();
+    let p = Pending {
+        id: 0,
+        vm,
+        addon: addon.into(),
+        session: None,
+        act: Act::SellMany { items },
+        text: String::new(),
+        opened: Instant::now(),
+        yes: false,
+        ask_tick: 0,
+    };
+    let run = Run { total: queue.len(), queue, sent: 0, skipped: Vec::new(), waiting_since: None, p, quiet: true };
     STATE.with(|s| s.borrow_mut().runs.push(run));
 }
 
@@ -320,6 +349,13 @@ pub(crate) fn report_done(p: &Pending, answer: &str, detail: serde_json::Value) 
     emit_closed(p, answer, detail);
 }
 
+/// A run ended: told to the mod unless it was a quiet one (no question was ever put).
+pub(crate) fn report_run_done(run: &Run, answer: &str, reason: Option<&str>) {
+    // a run nobody was asked about ends as "not_asked" where a question's would end "yes"
+    let answer = if run.quiet && answer == "yes" { "not_asked" } else { answer };
+    emit_closed(&run.p, answer, run.detail(reason));
+}
+
 pub(crate) fn cancel_for_session(session: &str, reason: &str) {
     let hit = STATE.with(|s| s.borrow().current.as_ref().is_some_and(|p| p.session.as_deref() == Some(session)));
     if hit {
@@ -331,7 +367,7 @@ pub(crate) fn cancel_for_session(session: &str, reason: &str) {
         take_runs().into_iter().partition(|r| r.p.session.as_deref() == Some(session));
     put_runs(kept);
     for r in stopped {
-        emit_closed(&r.p, reason, r.detail(Some(reason)));
+        report_run_done(&r, reason, Some(reason));
     }
 }
 
@@ -367,7 +403,7 @@ pub(crate) fn cancel_all(reason: &str) {
     }
     // a group destroy under way ends with the world: what is left is not destroyed, and the mod is told how far it got
     for r in take_runs() {
-        emit_closed(&r.p, reason, r.detail(Some(reason)));
+        report_run_done(&r, reason, Some(reason));
     }
 }
 
@@ -445,6 +481,69 @@ pub(crate) fn destroy_many_text(items: &[(String, i64, bool, bool, bool)]) -> St
 /// How many stacks a group question names one by one (the rest are counted): 12 lines with the heading and the buttons
 /// fit a 720p window from the top of the screen.
 pub(crate) const MAX_LISTED: usize = 12;
+
+/// What the game's own merchant window says before it sells (`merchant.rs` `sell`): worn, quick-slotted, no-trade,
+/// or not a misc item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SellAsk {
+    QuickSlot,
+    NoTrade,
+    NotMisc,
+}
+
+impl SellAsk {
+    /// The short reason a group question gives beside a stack.
+    pub(crate) const fn why(self) -> &'static str {
+        match self {
+            Self::QuickSlot => "quick slot",
+            Self::NoTrade => "NO TRADE",
+            Self::NotMisc => "not a misc item",
+        }
+    }
+
+    /// Words of the client's own, for when the game's table has none for this case (words 930-932 and 1842).
+    pub(crate) fn plain(self, name: &str) -> String {
+        match self {
+            Self::QuickSlot => format!("\"{name}\" is on a quick slot. Sell it anyway?"),
+            Self::NoTrade => format!("\"{name}\" is NO TRADE. Sell it anyway?"),
+            Self::NotMisc => format!("Sell item \"{name}\"?"),
+        }
+    }
+}
+
+/// The question for one sale: the game's own words (`game`, empty when its table has none), then what the player gets.
+pub(crate) fn sell_text(game: &str, ask: SellAsk, name: &str, count: i64, total: i64) -> String {
+    let mut text = if game.trim().is_empty() { ask.plain(name) } else { game.trim().to_string() };
+    let what = if count > 1 { format!("{count} x \"{name}\"") } else { format!("\"{name}\"") };
+    text.push_str(&format!("
+You get {total} tunar for {what}."));
+    text
+}
+
+/// One line of a group sale's question: (name, count, what it pays, why the game would ask).
+pub(crate) type SellLine = (String, i64, i64, SellAsk);
+
+/// The question for a group sale: how many items for how many tunar in all, one line for each stack the game would
+/// ask about, and only a count for the rest.
+pub(crate) fn sell_many_text(n: usize, total: i64, asked: &[SellLine], plain: usize) -> String {
+    let noun = if n == 1 { "item" } else { "items" };
+    let mut text = format!("Sell these {n} {noun} for {total} tunar?");
+    for (name, count, price, ask) in asked.iter().take(MAX_LISTED) {
+        let what = if *count > 1 { format!("{count} x \"{name}\"") } else { format!("\"{name}\"") };
+        text.push_str(&format!("
+- {what}, {price} tunar ({})", ask.why()));
+    }
+    if asked.len() > MAX_LISTED {
+        text.push_str(&format!("
+...and {} more that the game would ask about", asked.len() - MAX_LISTED));
+    }
+    if plain > 0 {
+        let noun = if plain == 1 { "other item" } else { "other items" };
+        text.push_str(&format!("
+and {plain} {noun}"));
+    }
+    text
+}
 
 pub(crate) fn drop_quest_text(title: &str) -> String {
     format!("Drop the quest \"{title}\"? Its progress is lost.")
