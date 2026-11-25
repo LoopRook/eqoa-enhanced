@@ -1188,13 +1188,11 @@ fn a11_r3_waiting_windows_do_not_open_on_a_dead_character() {
     assert!(LOCAL.with(|l| l.borrow().merc_waits.is_empty() && !l.borrow().fish_wait), "both waits cleared at death");
 }
 
-/// LOW 5: (a) `TakeoverKind::parse` error text lists the four A11 kinds; (b) `eqoa.actions.dialog_answer(ref, 1)` on
-/// an A11 session returns `unsupported` (matching spec §7), not `out_of_range`; (c) `dye_pick` and `dye_no_dye`
-/// confirms carry `session_kind = "dye_picker"` so ending the session (`pass` / `close_window`) cancels the open
-/// confirm instead of letting it fire on a native picker with the same token.
+/// LOW 5a: `TakeoverKind::parse` error text for both unsupported known windows and invalid names lists the four A11
+/// kinds (`mercenary_items`, `mercenary_spells`, `dye_picker`, `fishing`). Negative control: without the updated
+/// message text, the assertion on `'mercenary_items'` fails.
 #[test]
-fn a11_r3_low_parse_errors_dialog_answer_and_dye_confirm_session() {
-    // (a) parse error messages name all four A11 kinds
+fn a11_r3_low_parse_errors_name_a11_kinds() {
     for (bad, want_code) in [("inventory", "unsupported"), ("not_a_window_kind", "invalid_argument")] {
         let err = TakeoverKind::parse(bad).expect_err("expected parse error");
         assert_eq!(err.0, want_code);
@@ -1202,10 +1200,14 @@ fn a11_r3_low_parse_errors_dialog_answer_and_dye_confirm_session() {
             assert!(err.1.contains(k), "parse({bad:?}) error should name {k}: {}", err.1);
         }
     }
+}
 
-    // (b) `dialog_answer(ref, 1)` on A11 sessions returns `unsupported`
+/// LOW 5b: `eqoa.actions.dialog_answer(ref, 1)` on an A11 session returns `unsupported` (matching spec §7), not
+/// `out_of_range`. Negative control: returning `0` from `Item::answers()` and passing it to `whole(..., 1, 0)`
+/// returns `out_of_range`.
+#[test]
+fn a11_r3_low_dialog_answer_returns_unsupported_on_a11_sessions() {
     let (mut p, host) = rig();
-    p.session.dye_picker_version = 2;
     hold(&host, TakeoverKind::MercItems);
     hold(&host, TakeoverKind::DyePicker);
     hold(&host, TakeoverKind::Fishing);
@@ -1221,8 +1223,23 @@ fn a11_r3_low_parse_errors_dialog_answer_and_dye_confirm_session() {
         let (ok, code) = ask(&mut p, &host, &format!("return eqoa.actions.dialog_answer(eqoa.windows.session('{kind}').ref, 1)"));
         assert!(!ok && code == "unsupported", "dialog_answer on {kind} must return unsupported, got {code}");
     }
+}
 
-    // (c) dye_pick confirm is tied to the `"dye_picker"` session: `pass` cancels it before the native picker opens
+/// LOW 5c: `dye_pick` and `dye_no_dye` confirms carry `session_kind = "dye_picker"` so ending the session (`pass` or
+/// `close_window`) cancels the open confirm instead of letting it fire on a native picker with the same token.
+/// Negative control: passing `session_kind = ""` leaves `confirm::is_open() == true` after `pass` and `close_window`.
+#[test]
+fn a11_r3_low_dye_confirm_ends_with_session() {
+    let (mut p, host) = rig();
+    p.session.dye_picker_version = 2;
+    hold(&host, TakeoverKind::DyePicker);
+    let d1 = dye_open(0x1234, true);
+    pre_event(&p, &dye_packet(d1.clone()));
+    p.dyepick_opcode(&d1);
+    post_event(&mut p);
+    step(&mut p, &host);
+
+    // `dye_pick` confirm is tied to the `"dye_picker"` session: `pass` cancels it before the native picker opens
     let (ok, _) = ask(&mut p, &host, "return eqoa.actions.dye_pick(0x1234, 0xFF0000FF)");
     assert!(ok && confirm::is_open(), "dye_pick opened confirm");
     sent(&mut p);
