@@ -89,7 +89,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 return error(lua, SYMBOL, code, &msg);
             }
             let Some(kind) = str_arg(&kind) else {
-                return error(lua, SYMBOL, "invalid_argument", "kind must be 'inventory', 'spellbook' or 'quest_log'");
+                return error(lua, SYMBOL, "invalid_argument", "kind must be the name of a window (a string; the spec lists them)");
             };
             let opened_from = match opts {
                 None | Some(Value::Nil) => "mod".to_string(),
