@@ -1905,6 +1905,8 @@ mod mods {
         r.settle();
         // (opening asks for the inbox again: count from here)
         let m = sent().len();
+        r.p.mail_recv(&inbox_reply(&[header(11, "Ann", "One")]));
+        r.settle();
         r.tap(110.0, 28.0);
         r.tap(30.0, 304.0);
         assert_eq!(sent().len(), m, "never a second send of the same mail; {}", r.why());
