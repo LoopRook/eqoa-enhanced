@@ -569,14 +569,20 @@ mod tests {
         draw_chat_window(&mut hidden_wnd, &vui, &mut r, 1000, 0.5);
         assert_eq!(r.blits.len() + r.centered.len(), 0, "chat window does not draw when claimed");
         assert!(hidden_wnd.contains([422.0, 440.0]), "open/close state still advances while hidden");
-        // Hold R2 scroll-up key (19) and step 0.5s while hidden: repeat scroll fires
+        // Hold R2 scroll-up key (19) and step 0.5s while hidden. Upstream's `set_scroll(0)` (the wrapper's, every hidden
+        // frame) now lets go of the held key, so the hidden stock box makes no scroll cue of its own (it used to
+        // repeat the cue behind the player's back); the mods' history repeat runs on its own clock and still advances.
         hidden_wnd.set_scroll(1);
         hidden_wnd.key_down(19);
         hidden_wnd.cues.clear();
+        crate::fork_ext::chat_history::reset();
+        chat_history_key(19, true);
         draw_chat_window(&mut hidden_wnd, &vui, &mut r, 25_000, 0.5);
         assert_eq!(r.blits.len() + r.centered.len(), 0, "still no draw calls while hidden");
         assert_eq!(hidden_wnd.text.line(0).unwrap().kind, 0, "text.age still advances while hidden");
-        assert!(!hidden_wnd.cues.is_empty(), "R2 scroll repeat still advances while hidden");
+        assert!(hidden_wnd.cues.is_empty(), "the hidden stock box makes no scroll cue: its held key was let go");
+        assert!(crate::fork_ext::chat_history::total() >= 2, "the mods' history repeat still advances while hidden");
+        crate::fork_ext::chat_history::reset();
 
         clear_claims();
         let mut r = BlitRecorder::default();
