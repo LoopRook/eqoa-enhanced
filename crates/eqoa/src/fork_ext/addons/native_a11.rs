@@ -106,6 +106,8 @@ thread_local! {
     /// What the client last read of each window (`fork_ext/a11_play.rs`), or none while there is nothing to read.
     static STATE: RefCell<[Option<Json>; 3]> = const { RefCell::new([None, None, None]) };
     static REVISION: Cell<u64> = const { Cell::new(0) };
+    /// Bumped on every world transition (`window_takeover::release_all`), so `a11_play` always drops its local state.
+    static WORLD_GEN: Cell<u64> = const { Cell::new(0) };
 }
 
 /// The client's reading of a window's state. A changed state gets the next revision; an unchanged one is left as it
@@ -150,7 +152,14 @@ fn emit(which: Read, data: Json) {
         Read::Fishing => "fishing.changed",
     };
     if super::native_events::interested(name) {
-        super::native_core::CORE.with(|c| c.borrow_mut().emit(name, data));
+        super::native_core::CORE.with(|c| {
+            if let Ok(mut c) = c.try_borrow_mut() {
+                c.emit(name, data);
+            } else {
+                // `window_takeover::release_all` can run inside `Core::reset`'s own mutable borrow
+                super::window_sessions::queue_event(name, data);
+            }
+        });
     }
 }
 
@@ -166,6 +175,17 @@ pub(crate) fn clear_all() {
     for which in [Read::Merc, Read::Dye, Read::Fishing] {
         clear(which);
     }
+}
+
+/// The world changed (`WorldEntry`, `Teleport`, `Disconnected`, runtime reset): clear all published reads and bump the
+/// generation so `a11_play` drops its local state as well.
+pub(crate) fn world_changed() {
+    WORLD_GEN.with(|g| g.set(g.get().wrapping_add(1)));
+    clear_all();
+}
+
+pub(crate) fn world_gen() -> u64 {
+    WORLD_GEN.with(Cell::get)
 }
 
 pub(crate) fn current(which: Read) -> Option<Json> {

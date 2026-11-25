@@ -56,10 +56,43 @@ struct Local {
     pre_dye_event: bool,
     pre_dye_close: Option<u32>,
     was_dead: bool,
+    /// Last `native_a11::world_gen()` seen: catches any `window_takeover::release_all()` that bypassed `begin_game_event`.
+    world_gen: u64,
 }
 
 thread_local! {
     static LOCAL: RefCell<Local> = RefCell::new(Local::default());
+}
+
+fn clear_world_local(l: &mut Local, gen: u64) {
+    l.logged = None;
+    l.fish_sent = None;
+    l.merc_waits.clear();
+    l.fish_wait = false;
+    l.pre_fish_event = false;
+    l.dye = None;
+    l.pre_dye_event = false;
+    l.pre_dye_close = None;
+    l.world_gen = gen;
+}
+
+/// Drops local state if `window_takeover::release_all` ran since the last call.
+fn sync_world() {
+    let gen = native_a11::world_gen();
+    LOCAL.with(|l| {
+        let mut l = l.borrow_mut();
+        if l.world_gen != gen {
+            clear_world_local(&mut l, gen);
+        }
+    });
+}
+
+/// Called from `begin_game_event` on every `WorldEntry`, `Teleport` and `Disconnected` (same-world included), right
+/// after `api_capture` / `window_takeover::release_all` ended any held sessions with `"zoning"`.
+pub(crate) fn world_changed() {
+    let gen = native_a11::world_gen();
+    LOCAL.with(|l| clear_world_local(&mut l.borrow_mut(), gen));
+    native_a11::clear_all();
 }
 
 /// A mod holds a session of this server window now.
@@ -73,6 +106,7 @@ fn hidden_held() -> bool {
 
 /// The server opens a mercenary window (`mode`) while a hidden session holds the game: it waits.
 pub(crate) fn merc_waits(mode: i32) -> bool {
+    sync_world();
     let wait = blocked("mercenary window");
     if wait {
         LOCAL.with(|l| {
@@ -121,7 +155,8 @@ pub(crate) fn blocked(what: &'static str) -> bool {
 
 /// The world is let go: nothing of these windows is left to read.
 pub(crate) fn dropped() {
-    LOCAL.with(|l| *l.borrow_mut() = Local::default());
+    let gen = native_a11::world_gen();
+    LOCAL.with(|l| *l.borrow_mut() = Local { world_gen: gen, ..Local::default() });
     native_a11::clear_all();
 }
 
@@ -191,6 +226,7 @@ fn merc_state(play: &Play) -> Option<Json> {
 }
 
 fn dye_state(play: &Play) -> Option<Json> {
+    sync_world();
     let held = LOCAL.with(|l| l.borrow().dye.clone());
     let o = &held.or_else(|| play.dyepick.open.clone().filter(|_| play.dyepick.picker.open && play.mode == crate::play::dyeplay::MODE))?;
     Some(json!({
@@ -259,15 +295,10 @@ fn fishing_state(play: &Play) -> Option<Json> {
 /// when the server has answered; and what the three windows hold, for `eqoa.merc.get`, `eqoa.dye.get` and
 /// `eqoa.fishing.get`.
 pub(crate) fn tick(play: &mut Play, game_step: bool) {
-    if play.world_change.is_some() {
-        // zoning: the old world's windows are gone, and nothing of them may come back in the new one
-        LOCAL.with(|l| {
-            let mut l = l.borrow_mut();
-            l.merc_waits.clear();
-            l.dye = None;
-            l.fish_wait = false;
-            l.fish_sent = None;
-        });
+    sync_world();
+    if !play.in_world_now() || play.world_change.is_some() {
+        native_a11::clear_all();
+        return;
     }
     resume_merc(play);
     resume_fishing(play);
@@ -393,6 +424,7 @@ fn hold_window(play: &mut Play, kind: TakeoverKind) {
 
 /// Before the game handles a packet: what it looks like, and whether the packet is the dye picker's.
 pub(crate) fn pre_event(play: &Play, event: &net::session::Event) {
+    sync_world();
     let mut dye_open = false;
     let mut dye_close = None;
     if let net::session::Event::Opcode { op, data } = event
@@ -417,6 +449,7 @@ pub(crate) fn pre_event(play: &Play, event: &net::session::Event) {
 /// After the game handled the packet: what it opened is taken for the mod that holds its kind (the game's mode is put
 /// back, as A2 does for a dialog), and a close from the server ends the mod's session.
 pub(crate) fn post_event(play: &mut Play) {
+    sync_world();
     let (pre, dye_open, dye_close) = LOCAL.with(|l| {
         let mut l = l.borrow_mut();
         // any answer of the fishing server lets the one-request guard go, even one that changes nothing (a full pack)
@@ -479,6 +512,7 @@ fn end_window(kind: TakeoverKind, reason: &str) {
 /// The game's window for a session that ended with no answer (passed, released, disabled, idle): as the game would
 /// have shown it.
 pub(crate) fn give_window(play: &mut Play, kind: TakeoverKind) {
+    sync_world();
     match kind {
         TakeoverKind::MercItems | TakeoverKind::MercSpells => {
             // whatever the last state's flags say, the game's window opens (it waits for plain play, as the dye picker
@@ -636,7 +670,8 @@ pub(crate) fn hidden_fishing_step(play: &mut Play, place: (vi::vect::Vect3<vi::f
 
 #[cfg(test)]
 pub(crate) fn reset_for_test() {
-    LOCAL.with(|l| *l.borrow_mut() = Local::default());
+    let gen = native_a11::world_gen();
+    LOCAL.with(|l| *l.borrow_mut() = Local { world_gen: gen, ..Local::default() });
     native_a11::clear_all();
 }
 
@@ -653,6 +688,7 @@ fn item_index(play: &Play, item: &crate::fork_ext::addons::native_items::Resolve
 }
 
 pub(crate) fn dispatch(play: &mut Play, action: &A11Action) -> DispatchOutcome {
+    sync_world();
     if play.is_dead() {
         return refuse("not_ready", "cannot do this while dead");
     }
@@ -769,6 +805,7 @@ fn dispatch_merc(play: &mut Play, action: &A11Action) -> DispatchOutcome {
 
 /// The picker the mod's token names, up now: the token is echoed exactly as the server sent it.
 fn picker_open(play: &Play, token: u32) -> Result<net::dyepick::Open, DispatchOutcome> {
+    sync_world();
     if let Some(o) = LOCAL.with(|l| l.borrow().dye.clone()) {
         if o.token != token {
             return Err(refuse("stale_handle", "that is not the token of the picker now up (eqoa.dye.get().token)"));

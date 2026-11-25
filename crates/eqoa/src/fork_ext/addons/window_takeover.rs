@@ -493,6 +493,9 @@ pub(crate) fn release_all() {
     // round A1: the mod windows, held sessions, controller focus and any question end with the world
     super::window_sessions::world_changed();
     let _ = release_claims_where("zoning", |_| true);
+    // round A11: clear published reads and signal `a11_play` to drop its local state, AFTER `dialog_sessions` and
+    // `window_sessions` have ended held sessions with reason `"zoning"` (which never refills `give_back`)
+    super::native_a11::world_changed();
     // a by-id open of the world left that still waits for its answer decides nothing in the next one
     crate::fork_ext::loot_by_id::clear();
     // a list after the mod's last take or sale belongs to the zone left: a new zone may reuse its entity id

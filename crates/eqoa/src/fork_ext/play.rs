@@ -151,6 +151,16 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
     a2_play::pre_event(play, event);
     a11_play::pre_event(play, event);
     let api = api_capture::begin_game_event(play, event);
+    if matches!(
+        event,
+        net::session::Event::WorldEntry { .. }
+            | net::session::Event::Teleport { .. }
+            | net::session::Event::Disconnected(_)
+    ) {
+        // round A11: clear `a11_play::LOCAL` right after `api_capture` / `window_takeover::release_all` has ended any
+        // held sessions (same-world teleports and respawns never set `play.world_change`)
+        a11_play::world_changed();
+    }
     let a7 = a7_play::begin_event(play, event);
     if let net::session::Event::MasterLoot(m) = event {
         crate::fork_ext::addons::action_broker::set_master_loot(m.is_some());
