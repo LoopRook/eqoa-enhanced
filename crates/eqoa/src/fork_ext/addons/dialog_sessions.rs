@@ -85,13 +85,14 @@ impl Item {
         }
     }
 
-    /// How many answers `dialog_answer` accepts: a text's Done, a box's options, an offer's Yes and No.
-    pub(crate) fn answers(&self) -> usize {
+    /// How many answers `dialog_answer` accepts: a text's Done, a box's options, an offer's Yes and No; `None` for
+    /// A11 server windows, which have no numbered answers (`dialog_answer` returns `unsupported`).
+    pub(crate) fn answers(&self) -> Option<usize> {
         match self {
-            Self::Text { .. } => 1,
-            Self::Box { options, .. } => options.len(),
-            Self::Invite { .. } | Self::Offer { .. } => 2,
-            Self::Window { .. } => 0,
+            Self::Text { .. } => Some(1),
+            Self::Box { options, .. } => Some(options.len()),
+            Self::Invite { .. } | Self::Offer { .. } => Some(2),
+            Self::Window { .. } => None,
         }
     }
 }

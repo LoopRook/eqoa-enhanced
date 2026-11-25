@@ -151,13 +151,19 @@ impl TakeoverKind {
                 "unsupported",
                 format!(
                     "the game's '{s}' window cannot be taken over in this version (only 'loot', 'merchant', \
-                     'bank', 'raid_ready', 'raid_roll', 'text_dialog', 'response_dialog', 'group_invite',                      'revive_offer', 'summon_offer', 'friend_request', 'guild_invite', 'start_menu', 'chat_entry' and 'map'); more windows follow the window-replacement roadmap"
+                     'bank', 'raid_ready', 'raid_roll', 'text_dialog', 'response_dialog', 'group_invite', \
+                     'revive_offer', 'summon_offer', 'friend_request', 'guild_invite', 'start_menu', \
+                     'chat_entry', 'map', 'mercenary_items', 'mercenary_spells', 'dye_picker' and 'fishing'); \
+                     more windows follow the window-replacement roadmap"
                 ),
             )),
             _ => Err((
                 "invalid_argument",
                 format!(
-                    "window takeover kind must be 'loot', 'merchant', 'bank', 'raid_ready', 'raid_roll', 'text_dialog', 'response_dialog', 'group_invite', 'revive_offer', 'summon_offer', 'friend_request', 'guild_invite', 'start_menu', 'chat_entry' or 'map', got '{s}'"
+                    "window takeover kind must be 'loot', 'merchant', 'bank', 'raid_ready', 'raid_roll', \
+                     'text_dialog', 'response_dialog', 'group_invite', 'revive_offer', 'summon_offer', \
+                     'friend_request', 'guild_invite', 'start_menu', 'chat_entry', 'map', 'mercenary_items', \
+                     'mercenary_spells', 'dye_picker' or 'fishing', got '{s}'"
                 ),
             )),
         }

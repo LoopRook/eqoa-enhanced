@@ -874,7 +874,7 @@ fn dispatch_dye(play: &mut Play, action: &A11Action) -> DispatchOutcome {
             // an alpha the player may not choose is FF, as the game's picker sends it
             let rgba = if o.alpha { *rgba } else { (*rgba & 0xFFFF_FF00) | 0xFF };
             let text = format!("Dye with #{:06X}? The dyer may charge for it.", rgba >> 8);
-            super::a1_play::ask(Act::DyeAnswer { token: *token, rgba: Some(rgba) }, text, "")
+            super::a1_play::ask(Act::DyeAnswer { token: *token, rgba: Some(rgba) }, text, "dye_picker")
         }
         A11Action::DyeNoDye { token } => {
             let o = match picker_open(play, *token) {
@@ -884,7 +884,7 @@ fn dispatch_dye(play: &mut Play, action: &A11Action) -> DispatchOutcome {
             if !(play.session.dye_picker_version >= 2 && o.target != net::dyepick::Target::Aura) {
                 return refuse("unsupported", "this picker offers no 'No dye' (the game's has none either)");
             }
-            super::a1_play::ask(Act::DyeAnswer { token: *token, rgba: None }, "Take the dye off? The dyer may charge to put it on again.".into(), "")
+            super::a1_play::ask(Act::DyeAnswer { token: *token, rgba: None }, "Take the dye off? The dyer may charge to put it on again.".into(), "dye_picker")
         }
         A11Action::DyeCancel { token } => {
             if let Err(e) = picker_open(play, *token) {
