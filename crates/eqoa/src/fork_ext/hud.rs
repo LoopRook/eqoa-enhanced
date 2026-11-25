@@ -47,6 +47,7 @@ mod visibility_stub {
         pub name_plates: bool,
         pub damage_numbers: bool,
         pub target_rings: bool,
+        pub stat_window: bool,
     }
     impl PublishedVisibility {
         pub fn player_hidden(&self) -> bool {
@@ -71,6 +72,11 @@ pub(crate) fn damage_hidden() -> bool {
 
 pub(crate) fn rings_hidden() -> bool {
     !published(|v| !v.target_rings)
+}
+
+/// A mod holds the game's own Stat Window (F4, `/stats`): it is not drawn, takes no click, and F4 does nothing.
+pub(crate) fn stat_window_visible() -> bool {
+    published(|v| !v.stat_window)
 }
 
 pub(crate) fn compass_visible(_s: &HudState) -> bool {

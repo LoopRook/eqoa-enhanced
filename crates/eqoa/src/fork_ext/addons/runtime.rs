@@ -1005,6 +1005,7 @@ fn replacement_labels(replaces: &[String], can_takeover: bool) -> [Option<String
                 "hud.name_plates" => "Name plates",
                 "hud.damage_numbers" => "Damage numbers",
                 "hud.target_rings" => "Target rings",
+                "hud.stat_window" => "Stat Window",
                 "hud.spell_bars" => "Spell Bars",
                 "hud.utility_bars" => "Utility Bars",
                 "hud.all_pieces" => "All HUD pieces",

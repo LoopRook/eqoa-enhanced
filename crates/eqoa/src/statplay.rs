@@ -13,6 +13,7 @@ impl Play {
     /// server that turns it off (`qol::STAT_CAPS`), that said instead.
     fn set_stat_window(&mut self, on: bool) {
         use crate::settings::qol;
+        if !crate::hud::fork_hud::stat_window_visible() { return; }
         if qol::off(qol::STAT_CAPS) {
             self.add_chat("The Stat Window is off on this server.".into(), [1.0; 4]);
             return;
