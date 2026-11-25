@@ -797,6 +797,7 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
     table.set(
         name,
         lua.create_function(move |lua, args: MultiValue| {
+            let _probe = super::stall_probe::scope_of("eqoa call", &symbol);
             if matches!(
                 symbol.as_str(),
                 "eqoa.client.get"
@@ -852,6 +853,7 @@ where
     table.set(
         name,
         lua.create_function(move |lua, args: A| {
+            let _probe = super::stall_probe::scope_of("eqoa call", &symbol);
             let _timed = super::addon_perf::api(&symbol);
             super::native_core::flush_deferred();
             match f(lua, args) {

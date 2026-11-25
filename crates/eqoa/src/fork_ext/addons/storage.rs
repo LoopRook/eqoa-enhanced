@@ -471,6 +471,7 @@ impl Storage {
     /// Everything `save_encoded` does except the disk write: the quota check and the encoding, so the same
     /// refusals come back at once. The caller commits the result itself or hands it to the background writer.
     pub(crate) fn prepare_encoded(&self, key: &str, value: &Json) -> Result<PreparedWrite, String> {
+        let _probe = super::stall_probe::scope_of("settings checks (quota)", key);
         let path = self.profile_path(key)?;
         super::sandbox::check_settings_quota(&self.files_dir(key)?, &path, value)?;
         let bytes = encode_json(value)?;

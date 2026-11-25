@@ -35,6 +35,8 @@ thread_local! {
 /// file's sync is queued for the background thread. `owner` is the mod to blame if that sync fails.
 pub(crate) fn atomic_replace_deferred(target: &Path, bytes: &[u8], owner: Option<&str>) -> std::io::Result<()> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
+    // the part of a mod's file write that runs on the frame: said if a disk operation here waits
+    let _probe = super::stall_probe::scope_of("mod file write on the frame", target.file_name().and_then(|n| n.to_str()).unwrap_or(""));
     let parent = target
         .parent()
         .ok_or_else(|| std::io::Error::other("storage target has no parent"))?;

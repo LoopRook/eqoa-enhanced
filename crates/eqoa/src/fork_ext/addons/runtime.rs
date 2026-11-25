@@ -1183,7 +1183,9 @@ fn render_managed(
             plan.commands.extend(extra.commands);
             plan.settings = extra.settings;
         }
+        let probe = super::stall_probe::scope("mods frame (all mods)");
         let settings = with_question_on_top(ui, || dispatch_frame(ui, manager, snapshot, plan));
+        drop(probe);
         #[cfg(test)]
         if fault == Some(RenderFault::PrepareRender) {
             return Err("injected prepare_render failure".into());
@@ -1199,6 +1201,7 @@ fn render_managed(
         if fault == Some(RenderFault::RendererConsumer) {
             return Err("injected renderer_consumer failure".into());
         }
+        let _probe = super::stall_probe::scope("mods ImGui render");
         let frame = context
             .try_render(renderer.renderer_consumer().map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;

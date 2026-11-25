@@ -333,7 +333,12 @@ impl Manager {
                         self.diagnostic(Some(&entry.metadata.id),"initialize","16 addon VM limit reached; remove an instantiated addon before reloading".into());
                         continue;
                     }
-                    match self.prepare(&entry.metadata) {
+                    let prepared = {
+                        // a mod's VM made and its Lua compiled (the first frame after a world entry makes them all)
+                        let _probe = super::stall_probe::scope_of("mod start (VM and Lua)", &entry.metadata.id);
+                        self.prepare(&entry.metadata)
+                    };
+                    match prepared {
                         Ok(i) => {
                             entry.instance = Some(i);
                             count += 1;
@@ -361,19 +366,25 @@ impl Manager {
                 // An entry that throws can still have registered cleanup callbacks.
                 instance.initialized = true;
                 let timing = super::addon_perf::lua_scope(&entry.metadata.id);
+                let probe = super::stall_probe::scope_of("mod frame (its Lua and the calls it makes)", &entry.metadata.id);
                 let called = instance
                     .bridge
                     .invoke(|| instance.host.frame_entry(&instance.function));
+                drop(probe);
                 drop(timing);
                 match called {
                     Ok(()) => {
                         entry.status = Status::Enabled;
                         if first {
+                            let id = entry.metadata.id.clone();
+                            let _probe = super::stall_probe::scope_of("mod load of its saved settings", &id);
                             self.load(entry, true);
                         }
                         if let Some(i) = entry.instance.as_ref() {
                             let timing = super::addon_perf::lua_scope(&entry.metadata.id);
+                            let probe = super::stall_probe::scope_of("mod events", &entry.metadata.id);
                             let finished = i.bridge.invoke(|| i.host.finish_frame(enabling));
+                            drop(probe);
                             drop(timing);
                             if let Err(e) = finished {
                                 self.fail(entry, "events", e.to_string(), true);
@@ -412,6 +423,7 @@ impl Manager {
         self.entries = entries;
     }
     pub fn flush_pending_fonts(&mut self, context: &mut dear_imgui_rs::Context) {
+        let _probe = super::stall_probe::scope("mod fonts built");
         #[cfg(not(target_arch = "wasm32"))]
         {
             let epoch = super::fonts::current_context_epoch();
@@ -440,6 +452,7 @@ impl Manager {
     }
 
     pub fn after_render(&mut self) {
+        let _probe = super::stall_probe::scope("mods after the render (textures, sounds)");
         super::icons::cleanup_active_stale();
         for bank in self.retired.drain(..) {
             bank.borrow_mut().collect(true);
@@ -490,6 +503,7 @@ impl Manager {
     /// write must not be lost or reordered: mod disable, logout, profile switch, quit, and before a
     /// synchronous write or read of the same files.
     fn flush_writes(&mut self) {
+        let _probe = super::stall_probe::scope("flush of the settings writes");
         self.writes.flush();
         super::deferred_sync::flush();
         self.report_write_failures();
