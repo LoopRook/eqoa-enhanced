@@ -589,3 +589,91 @@ fn nameplates_crowded_keeps_the_nearest_and_always_the_target() {
     let v60 = frame(&host, &bridge, &mut context).len();
     assert!(v70 <= v60 + 400, "70 in range draw about what 60 do ({v70} vs {v60}): the cap holds");
 }
+
+// ---- the plate layer is never in anyone's way ---------------------------------------------------------------------
+
+/// Every draw list of a frame, back to front, as positions.
+fn lists(host: &Host, bridge: &Bridge, context: &mut Context) -> Vec<Vec<[f32; 2]>> {
+    context.frame();
+    bridge.invoke(|| { native_events::dispatch(host)?; native_events::render(host) }).unwrap();
+    let draw = context.render_legacy();
+    draw.draw_data().draw_lists().map(|l| l.vtx_buffer().iter().map(|v| v.pos).collect()).collect()
+}
+
+const OTHER_WINDOW: &str = "eqoa.events.on('render', function() ImGui.SetNextWindowPos(60, 60); \
+    ImGui.SetNextWindowSize(300, 200); ImGui.Begin('np_other_window'); ImGui.Text('a real window'); ImGui.End() end)";
+
+#[test]
+fn nameplates_plates_are_behind_every_window_whether_it_opened_before_or_after_the_layer() {
+    for before in [true, false] {
+        world(vec![entity(7001, "Gnoll Pup", "npc", [-3.0, 0.0, -8.0])]);
+        let mut context = context();
+        let host = Host::for_addon(&addon()).unwrap();
+        let bridge = Bridge::install(&host).unwrap();
+        if before {
+            host.execute(OTHER_WINDOW).unwrap();
+        }
+        host.run_addon(&addon()).unwrap();
+        if !before {
+            host.execute(OTHER_WINDOW).unwrap();
+        }
+        let l = lists(&host, &bridge, &mut context);
+        // the background list is first (behind every window) and holds the plate; the other window's list is later
+        // and the layer's own window draws nothing
+        assert!(!l.is_empty() && !l[0].is_empty(), "the plates are in the background list (before = {before})");
+        let others: Vec<usize> = l.iter().enumerate().skip(1).filter(|(_, v)| !v.is_empty()).map(|(i, _)| i).collect();
+        assert_eq!(others.len(), 1, "only the other window draws among the windows: {:?}", l.iter().map(|v| v.len()).collect::<Vec<_>>());
+        // a plate in the middle of the other window is under it (the list order is the draw order)
+        assert!(others[0] > 0);
+    }
+}
+
+#[test]
+fn nameplates_layer_never_counts_as_a_window_in_front_and_holds_no_focus() {
+    use super::pointer_order;
+    world(vec![entity(7001, "Gnoll Pup", "npc", [0.0, 0.0, -10.0])]);
+    let mut context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon()).unwrap();
+    host.execute(OTHER_WINDOW).unwrap();
+    for _ in 0..3 {
+        lists(&host, &bridge, &mut context);
+    }
+    // the front-most real window at a point inside the other window is that window, not the layer; and over empty
+    // screen there is none at all
+    let over_other = pointer_order::front_real_window_z(100.0, 100.0);
+    let over_nothing = pointer_order::front_real_window_z(900.0, 700.0);
+    assert!(over_other.is_some(), "the other window is the front-most real window");
+    assert!(over_nothing.is_none(), "the layer is not a window in front of anything");
+    // no focus, no keyboard, no pointer taken
+    unsafe {
+        let g = dear_imgui_rs::sys::igGetCurrentContext();
+        let nav = (*g).NavWindow;
+        if !nav.is_null() {
+            let name = std::ffi::CStr::from_ptr((*nav).Name).to_string_lossy().to_string();
+            assert_ne!(name, "##nameplates_layer", "the layer never holds focus");
+        }
+        let io = &*dear_imgui_rs::sys::igGetIO_Nil();
+        assert!(!io.WantCaptureKeyboard && !io.WantTextInput, "the layer holds no keyboard");
+        assert!(!io.WantCaptureMouse, "and no mouse");
+    }
+    assert!(host.drain_logs().unwrap().is_empty());
+}
+
+/// Negative control for the test above: the same full-size window WITHOUT the layer's flags is a real window in
+/// front of everything, and it does take the front place.
+#[test]
+fn nameplates_control_a_window_without_the_layers_flags_would_be_in_front() {
+    use super::pointer_order;
+    world(vec![]);
+    let mut context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.execute("eqoa.events.on('render', function() ImGui.SetNextWindowPos(0, 0); ImGui.SetNextWindowSize(1024, 768); \
+        ImGui.Begin('np_unflagged'); ImGui.End() end)").unwrap();
+    for _ in 0..3 {
+        lists(&host, &bridge, &mut context);
+    }
+    assert!(pointer_order::front_real_window_z(900.0, 700.0).is_some(), "an ordinary full-screen window counts as in front");
+}

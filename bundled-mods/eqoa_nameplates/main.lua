@@ -400,9 +400,11 @@ local LAYER_FLAGS
 local failed_once = false
 
 local function draw_layer(player)
-    local w, h = ui.GetDisplaySize()
+    -- The window only holds the font scale: it is tiny, empty, takes no input, no focus and no navigation, and
+    -- everything is drawn on the background draw list, which is behind every window (other mods' windows, the
+    -- game's) however the windows are ordered.
     ui.SetNextWindowPos(0, 0)
-    ui.SetNextWindowSize(w, h)
+    ui.SetNextWindowSize(1, 1)
     if not ui.Begin("##nameplates_layer", true, LAYER_FLAGS) then ui.End() return end
     cur_scale = -1
     local k = S.size / 100
