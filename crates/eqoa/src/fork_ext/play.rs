@@ -42,10 +42,12 @@ mod a2_play;
 mod a8_play;
 
 #[cfg(not(target_arch = "wasm32"))]
-#[path = "a11_play.rs"]
-mod a11_play;
 #[path = "a10_play.rs"]
 mod a10_play;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "a11_play.rs"]
+mod a11_play;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "map_mod_tests.rs"]
@@ -1093,6 +1095,9 @@ pub(super) fn dropped(_play: &mut Play) {
     // round A8: nothing of a mod's crafting window is left to read
     #[cfg(not(target_arch = "wasm32"))]
     a8_play::dropped();
+    // round A10: nothing of a mod's mail or auction window is left to read
+    #[cfg(not(target_arch = "wasm32"))]
+    a10_play::dropped();
     // round A11: nor of a mercenary, dye or fishing window
     #[cfg(not(target_arch = "wasm32"))]
     a11_play::dropped();
@@ -1141,9 +1146,7 @@ pub(crate) fn fishing_start_blocked(play: &mut Play) -> bool {
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn fishing_start_blocked(_: &mut Play) -> bool {
-    // round A10: nothing of a mod's mail or auction window is left to read
-    #[cfg(not(target_arch = "wasm32"))]
-    a10_play::dropped();
+    false
 }
 
 /// Round A10: a mod holds its own auction window, so the auction's search pages are kept (the one line in
