@@ -1,6 +1,6 @@
 # EQOA Crafting
 
-Off by default. Enable it in Mods & Addons (F10); it shows **Provides: Crafting window (Shift+R)** and a
+Off by default. Enable it in Mods & Addons (Shift+F10); it shows **Provides: Crafting window (Shift+R)** and a
 **Crafting: can fill the crafting tray, combine what is in it, answer the keep-this-recipe question** line before you do.
 
 A crafting window of its own, on its own key: **Shift+R** (the Controls page has a **Crafting** row, so you can move

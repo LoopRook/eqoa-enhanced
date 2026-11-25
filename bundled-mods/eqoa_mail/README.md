@@ -1,6 +1,6 @@
 # EQOA Mail
 
-Off by default. Enable it in Mods & Addons (F10); it shows **Provides: Mail window (Shift+M)** and, because it can send
+Off by default. Enable it in Mods & Addons (Shift+F10); it shows **Provides: Mail window (Shift+M)** and, because it can send
 mail, **Mail and auction: can send plain mail, take what a mail carries** and **Asks you first: delete a mail, send
 mail that carries tunar or an item** before you do.
 

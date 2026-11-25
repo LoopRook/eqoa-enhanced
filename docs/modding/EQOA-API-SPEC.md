@@ -406,7 +406,7 @@ A piece stays hidden while at least one enabled mod holds a claim on it. Claims 
 
 `Frame = {width, height, offset_x, offset_y, scale_x, scale_y, side, top, window_width, window_height}`: `width` and `height` are 640 and 448; a frame coordinate maps to window pixels as `offset + coordinate * scale`; `side` and `top` are the margins of the 4:3 area.
 
-`Layout = {player:PlayerLayout, target:TargetLayout, pet:SinglePanelLayout, group_members:GroupMemberLayout[], minimap:Rect}` with `PlayerLayout = {panel, health, power, exp}`, `TargetLayout = {panel, health, power}`, `SinglePanelLayout = {panel}`, `GroupMemberLayout = {index, panel, health, power}` (four entries), each part a `Rect = {x, y, width, height, frame_x, frame_y, frame_width, frame_height}`. `x`, `y`, `width`, `height` are window pixels (the same units as the pointer, below); the `frame_` fields are the same rectangle in the game's HUD frame, for use with the drawing calls below.
+`Layout = {player:PlayerLayout, target:TargetLayout, pet:SinglePanelLayout, group_members:GroupMemberLayout[], minimap:Rect}` with `PlayerLayout = {panel, health, power, exp}`, `TargetLayout = {panel, health, power}`, `SinglePanelLayout = {panel}`, `GroupMemberLayout = {index, panel, health, power}` (four entries), each part a `Rect = {x, y, width, height, frame_x, frame_y, frame_width, frame_height}`. `x`, `y`, `width`, `height` are window pixels (the same units as the pointer, below); the `frame_` fields are the same rectangle in the game's HUD frame, for use with the drawing calls below. The rectangles are where the pieces are drawn now: moved by Move HUD and, since the 2026-11-25 sync, grown about the piece's corner by HUD Scale (both interfaces) and the PC interface's per-piece size, so a mod that places things on a piece measures from the rectangle (its `frame_width` over the piece's width at 100% is the growth) and does not add fixed offsets to its corner.
 
 Drawing in the HUD's own style, in the game's HUD pass (under the game's windows). Each call queues one thing for this frame, so call them every frame from `render`. All four are for the world only (`not_in_world`), return `true`, and give `limit_exceeded` beyond 256 calls per mod per frame (§9).
 
@@ -1499,7 +1499,7 @@ The `input.key` event carries both: `key` is the plain key, `combo` the full nam
 
 **When a mod's key does not fire.** Mod keys work in plain play. They do not fire while the player types in chat or a text box, while a game window or menu has the keyboard, while an ImGui text field has focus, while the character is dead, or while another mod's text editor holds the keyboard (`eqoa.input.capture_text`). Held-key repeats do not fire a binding.
 
-**The Mods & Addons key.** The client itself has one row of this kind, **Mods & Addons**, default `f10`: it opens and closes the Mods & Addons window, follows every rule above, and exists with no mod enabled. It does nothing on the loading screen, with the full map up, or while the world changes.
+**The Mods & Addons key.** The client itself has one row of this kind, **Mods & Addons**, default `shift+f10` (F10 is the game's Settings; a saved `f10` for this row moves to the default once, while the game has F10): it opens and closes the Mods & Addons window, follows every rule above, and exists with no mod enabled. It does nothing on the loading screen, with the full map up, or while the world changes.
 
 Mod keys are saved by the client per player, separately from the game's own keys.
 

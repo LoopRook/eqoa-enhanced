@@ -104,10 +104,30 @@ impl Play {
     /// the effects' piece's place (`hudlayout`).
     pub(super) fn draw_buffs(&mut self, vui: &vi::ui::Vui, r: &mut crate::ui::UiRaster) {
         let lines = self.buff_lines();
-        let now = self.session.now() as i64;
-        let off = r.ui.placed([0.0, 0.0]);
-        let pieces = self.buffs.pieces(vui, &lines, crate::settings::pet_effects(), off);
+        let pieces = self.buffs.pieces(vui, &lines, crate::settings::pet_effects(), [0.0; 2]);
         crate::hud::draw_fx_pieces(vui, r, &pieces, 1.0);
-        self.buffs.draw_info(vui, r, now);
+        if crate::settings::buff_timers() {
+            crate::hud::draw_icon_times(r, &self.buffs.timers(), crate::hud::IconTimes::Buffs);
+        }
+    }
+
+    /// The lit or hovered buff's name box (`BuffWnd::draw_info`), after the
+    /// rest of the HUD so no bar covers it (petition 2944), in the effects'
+    /// piece's place but not counted in it.
+    pub(super) fn draw_buff_info(&mut self, vui: &vi::ui::Vui, r: &mut crate::ui::UiRaster) {
+        let now = self.session.now() as i64;
+        let m = crate::hudlayout::begin(r.ui, crate::hudlayout::Piece::Effects);
+        let m = crate::hudlayout::seal(r.ui, m);
+        let screen = crate::hudlayout::screen_rect(r.ui, &m);
+        self.buffs.draw_info(vui, r, now, screen);
+        crate::hudlayout::end(r.ui, m);
+    }
+
+    /// The mouse moved to frame point `f` (none: it left the window): the
+    /// buff under it named (`BuffWnd::hover`, petition 2924), where the bar
+    /// is up in play and the HUD shown.
+    pub(super) fn buff_hover(&mut self, f: Option<[f32; 2]>) {
+        let up = matches!(self.mode, 0 | 33 | 38) && !self.search.open && !crate::hideui::hidden() && self.buff_window_on() && crate::influence::shown(self.mode);
+        self.buffs.hover(f.filter(|_| up));
     }
 }

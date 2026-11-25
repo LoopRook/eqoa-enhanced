@@ -280,6 +280,19 @@ pub(super) fn roll_point(_play: &mut Play, _f: [f32; 2]) -> Option<bool> {
     }
 }
 
+/// A mod holds `raid_roll`: the native roll strips are not up, so they take no wheel and cover no point
+/// (`Play::roll_wheel`, `Play::rolls_cover`).
+pub(super) fn roll_taken() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        window_takeover::has_activity() && window_takeover::is_taken(TakeoverKind::RaidRoll)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+}
+
 /// Optional guard in `Play::rolls_up`: taken strips do not count as native strips up.
 pub(super) fn rolls_up(_play: &Play) -> Option<bool> {
     #[cfg(not(target_arch = "wasm32"))]

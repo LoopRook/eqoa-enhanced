@@ -63,7 +63,7 @@ fn apply(p: &mut Play, w: &mut crate::walker::Walker, event: Event) {
     let capture = begin_game_event(p, &event);
     match event {
         Event::Opcode { op: 0x007C, data } => p.quests.recv_add(&data),
-        Event::Opcode { op: 0x007D, data } => p.quests.recv_remove(&data),
+        Event::Opcode { op: 0x007D, data } => { p.quests.recv_remove(&data); }
         Event::Opcode { op: op @ (0x0016 | 0x0018), data } => {
             p.npcw_opcode(op, &data);
         }

@@ -205,7 +205,8 @@ pub(crate) fn skip_pick(_what: super::Pick) -> bool {
             Pick::Minimap => v.minimap,
             Pick::Quests => v.quest_tracker,
             Pick::Meter(_) => v.dps_meter,
-            Pick::Report => false,
+            // upstream's PC Settings button (sync 2026-11-25): no mod hides it
+            Pick::Report | Pick::Settings => false,
         }
     }
     #[cfg(target_arch = "wasm32")]
@@ -225,6 +226,8 @@ pub(crate) fn draw_active_effects(vui: &Vui, r: &mut dyn Raster, fx: &net::dump:
 /// per-frame state (text.age, scroll repeat, open/close animation) advancing
 /// while the stock chat window is hidden by an addon claim.
 struct NullRaster;
+// upstream's chat draws on a `ui::Layout` since sync 2026-11-25; every Layout method has a default
+impl crate::ui::Layout for NullRaster {}
 impl Raster for NullRaster {
     fn blit(&mut self, _id: u32, _flags: u32, _at: [i32; 2], _a: [i32; 2], _b: [i32; 2], _mode: i32, _alpha: f32) {}
     fn stretch_blit(&mut self, _id: u32, _flags: u32, _at: [i32; 2], _size: [i32; 2], _a: [i32; 2], _b: [i32; 2], _mode: i32, _alpha: f32) {}
@@ -244,7 +247,7 @@ impl Raster for NullRaster {
 pub(crate) fn draw_chat_window(
     wnd: &mut crate::chat::WndChat,
     vui: &Vui,
-    r: &mut dyn Raster,
+    r: &mut dyn crate::ui::Layout,
     now: u32,
     dt: f32,
 ) {
@@ -411,6 +414,7 @@ mod tests {
         centered: Vec<(String, [i32; 2])>,
     }
 
+    impl crate::ui::Layout for BlitRecorder {}
     impl Raster for BlitRecorder {
         fn blit(&mut self, id: u32, _flags: u32, at: [i32; 2], _a: [i32; 2], _b: [i32; 2], _mode: i32, _alpha: f32) {
             self.blits.push((id, at));
@@ -565,14 +569,20 @@ mod tests {
         draw_chat_window(&mut hidden_wnd, &vui, &mut r, 1000, 0.5);
         assert_eq!(r.blits.len() + r.centered.len(), 0, "chat window does not draw when claimed");
         assert!(hidden_wnd.contains([422.0, 440.0]), "open/close state still advances while hidden");
-        // Hold R2 scroll-up key (19) and step 0.5s while hidden: repeat scroll fires
+        // Hold R2 scroll-up key (19) and step 0.5s while hidden. Upstream's `set_scroll(0)` (the wrapper's, every hidden
+        // frame) now lets go of the held key, so the hidden stock box makes no scroll cue of its own (it used to
+        // repeat the cue behind the player's back); the mods' history repeat runs on its own clock and still advances.
         hidden_wnd.set_scroll(1);
         hidden_wnd.key_down(19);
         hidden_wnd.cues.clear();
+        crate::fork_ext::chat_history::reset();
+        chat_history_key(19, true);
         draw_chat_window(&mut hidden_wnd, &vui, &mut r, 25_000, 0.5);
         assert_eq!(r.blits.len() + r.centered.len(), 0, "still no draw calls while hidden");
         assert_eq!(hidden_wnd.text.line(0).unwrap().kind, 0, "text.age still advances while hidden");
-        assert!(!hidden_wnd.cues.is_empty(), "R2 scroll repeat still advances while hidden");
+        assert!(hidden_wnd.cues.is_empty(), "the hidden stock box makes no scroll cue: its held key was let go");
+        assert!(crate::fork_ext::chat_history::total() >= 2, "the mods' history repeat still advances while hidden");
+        crate::fork_ext::chat_history::reset();
 
         clear_claims();
         let mut r = BlitRecorder::default();
@@ -1319,7 +1329,7 @@ mod tests {
         let vui = test_vui();
         let mut menus = crate::hudmenu::HudMenus::default();
         menus.stacked = true;
-        let item = Entry { icon2: -1, x08: -1, msg: 0x2030000, id: 3 };
+        let item = Entry { icon_back: -1, art: -1, icon2: -1, x08: -1, msg: 0x2030000, id: 3 };
         menus.defs[2] = MenuDef { count: 1, entries: vec![item] };
         let bars = Bars { abilities: 2, gear: false };
         clear_claims();

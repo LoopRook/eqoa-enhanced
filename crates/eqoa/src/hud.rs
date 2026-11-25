@@ -43,6 +43,11 @@ pub struct HudState {
     pub target_level: Option<i32>,
     /// The target's +0x19.
     pub target_hp: i32,
+    /// Debuff Icons in the target box (Heirloom petition 3020): the player's
+    /// effects on the targeted creature the server sent, drawn as the group's
+    /// bars carry their tiny icons, beside its con (`target_effects_pieces`);
+    /// none unless Extended's Debuff Icons says Target Window.
+    pub target_effects: Vec<MemberFx>,
     /// `m_targetInfoValid` and `m_targetDisposition`.
     pub target_info: Option<u8>,
     /// The player has targeted themselves and has +0x2C (`m_p2C > 0`).
@@ -118,11 +123,25 @@ pub struct MemberState {
     /// server last sent it (`Session::power_of`), none when there is none to
     /// show.
     pub power: Option<u8>,
-    /// The client's own (Extended's Group Effects): the icons (DictIDs) of the
-    /// effects on it in their order, as the server last sent them
-    /// (`Session::effects_of`), drawn tiny beside its gauges
-    /// (`member_effects_pieces`); none with Group Effects off.
-    pub effects: Vec<u32>,
+    /// The client's own (Extended's Group Effects): the effects on it in their
+    /// order, as the server last sent them (`Session::effects_of`), drawn tiny
+    /// beside its gauges (`member_effects_pieces`); none with Group Effects
+    /// off.
+    pub effects: Vec<MemberFx>,
+}
+
+/// One effect on a group member as its bar shows it (Extended's Group
+/// Effects): its icon (a DictID), and from a server that sends them its name
+/// (empty from one that does not) and its time left at this frame
+/// (`net::buffs::NO_END`: none), the name shown under the mouse and the time
+/// on the icon with Buff Timers on (Heirloom petition 2962, Graga: "the buff
+/// icons of group members should reveal the buff when mouse hovering and have
+/// timers like the new buff timers").
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemberFx {
+    pub icon: u32,
+    pub name: String,
+    pub left_ms: u32,
 }
 
 /// What `DrawPet` reads: `GetPetName`, whether the pet is the target, and
@@ -226,6 +245,27 @@ pub fn pet_number(at: [i32; 2], pet: &PetState) -> Option<HealthNumber> {
 pub fn target_number(at: [i32; 2], s: &HudState) -> Option<HealthNumber> {
     s.target_name.as_ref()?;
     health_number([at[0] + GAUGE_IN[0], at[1] + 25 + GAUGE_IN[1]], s.target_hp)
+}
+
+/// The target box's bar (25 under "Target" at `at`) and how many of its status
+/// icons show (the con's while the target's disposition is known, the
+/// self-target flag's), as `draw_target` draws them.
+fn target_bar(at: [i32; 2], s: &HudState) -> ([i32; 2], usize) {
+    let status = (s.target_info.is_some() && s.target_name.is_some()) as usize + s.self_targeted_flag as usize;
+    ([at[0], at[1] + 25], status)
+}
+
+/// Debuff Icons in the target box (Heirloom petition 3020, Cucumber: "It
+/// should be moved to their target/con area to align with the group buffs"):
+/// the player's effects on the target as a group member's tiny icons sit on its
+/// bar (`member_effects_pieces`: the same size, rows and room), right of the
+/// health gauge and past the con; none without a creature targeted.
+pub fn target_effects_pieces(at: [i32; 2], s: &HudState) -> Vec<FxPiece> {
+    if s.target_name.is_none() {
+        return Vec::new();
+    }
+    let (bar, status) = target_bar(at, s);
+    member_effects_pieces(bar, status, &s.target_effects.iter().map(|e| e.icon).collect::<Vec<_>>())
 }
 
 /// The player's own health gauge's number (the gauge at `PLAYER_GAUGE`),
@@ -363,13 +403,108 @@ pub fn member_effects_pieces(at: [i32; 2], status: usize, icons: &[u32]) -> Vec<
 }
 
 /// A member's tiny icons drawn: each one's translucent tile, then the icons
-/// whole.
-fn draw_member_effects(vui: &Vui, ui: &mut UiRaster, at: [i32; 2], status: usize, icons: &[u32]) {
-    let pieces = member_effects_pieces(at, status, icons);
-    for p in &pieces {
+/// whole, then with `timers` (Buff Timers) each time left on its icon
+/// (`member_fx_times`). The pieces, for a pointer.
+fn draw_member_effects(vui: &Vui, ui: &mut UiRaster, at: [i32; 2], status: usize, fx: &[MemberFx], timers: bool) -> Vec<FxPiece> {
+    let icons: Vec<u32> = fx.iter().map(|e| e.icon).collect();
+    let pieces = member_effects_pieces(at, status, &icons);
+    draw_tiny_pieces(vui, ui, &pieces, fx, timers);
+    pieces
+}
+
+/// Tiny icons' `pieces` drawn (a member's, the target box's): each one's
+/// translucent tile, the icons whole, then with `timers` their times.
+fn draw_tiny_pieces(vui: &Vui, ui: &mut UiRaster, pieces: &[FxPiece], fx: &[MemberFx], timers: bool) {
+    for p in pieces {
         ui.blit(icon_id("black"), 0, [p.r[0] as i32, p.r[1] as i32], [0, 0], [MEMBER_FX, MEMBER_FX], 3, MEMBER_FX_SHADE);
     }
-    draw_fx_pieces(vui, ui, &pieces, 1.0);
+    draw_fx_pieces(vui, ui, pieces, 1.0);
+    if timers {
+        draw_icon_times(ui, &member_fx_times(pieces, fx), IconTimes::Tiny);
+    }
+}
+
+/// Buff Timers on a member's tiny icons: each icon (as `member_effects_pieces`
+/// placed it) whose effect has an end, with its time left as the buff
+/// window's icons carry theirs (`buffwnd::short_time`: "45s", "12m", "2h").
+pub fn member_fx_times(pieces: &[FxPiece], fx: &[MemberFx]) -> Vec<([f32; 4], String)> {
+    pieces
+        .iter()
+        .zip(fx)
+        .filter_map(|(p, e)| {
+            let t = crate::buffwnd::short_time(e.left_ms);
+            (!t.is_empty()).then_some((p.r, t))
+        })
+        .collect()
+}
+
+/// The member's effect whose tiny icon (`pieces`, as drawn) is under frame
+/// point `f`, each icon's corners where `placed` puts them on the screen: its
+/// rectangle as drawn, its name and its time left; none off the icons or on
+/// one the server sent no name for (a server sending icons alone).
+pub fn member_fx_at(pieces: &[FxPiece], fx: &[MemberFx], f: [f32; 2], placed: impl Fn([f32; 2]) -> [f32; 2]) -> Option<([f32; 4], String, u32)> {
+    pieces.iter().zip(fx).find_map(|(p, e)| {
+        let (a, b) = (placed([p.r[0], p.r[1]]), placed([p.r[0] + p.r[2], p.r[1] + p.r[3]]));
+        let on = f[0] >= a[0] && f[0] < b[0] && f[1] >= a[1] && f[1] < b[1];
+        (on && !e.name.is_empty()).then(|| (p.r, e.name.clone(), e.left_ms))
+    })
+}
+
+/// Which icons times are drawn on (`draw_icon_times`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum IconTimes {
+    /// the buff window's: a third of the icon high (8 pixels at least), at
+    /// the foot of its cell's frame (the icon hangs 4 of its 32 below it), so
+    /// the words stand on the icon, not on the world under the bar
+    Buffs,
+    /// a member's tiny icons (`MEMBER_FX` square): 6 pixels high at the
+    /// icon's foot, narrowed to the icon's width and a pixel each side, so a
+    /// time stays on its own icon
+    Tiny,
+}
+
+/// Times drawn on icons (Buff Timers): each at its icon's foot, right
+/// aligned, outlined in black; white, yellow in its last minute.
+pub fn draw_icon_times(r: &mut UiRaster, times: &[([f32; 4], String)], kind: IconTimes) {
+    let Some(font) = r.assets.font else { return };
+    let fh = r.ui.fonts[font].height.max(1) as f32;
+    for (icon, t) in times {
+        let w = wide(t);
+        let full = r.ui.fonts[font].string_width(&w) as f32;
+        let (h, foot) = match kind {
+            IconTimes::Buffs => ((icon[3] * 0.36).max(8.0), icon[3] * 26.0 / 32.0),
+            IconTimes::Tiny => (6.0, icon[3]),
+        };
+        let mut scale = h / fh;
+        if kind == IconTimes::Tiny && full > 0.0 {
+            scale = scale.min((icon[2] + 2.0) / full);
+        }
+        let tw = full * scale;
+        let (x, y) = (icon[0] + icon[2] - tw - if kind == IconTimes::Tiny { 0.0 } else { 1.0 }, icon[1] + foot - fh * scale);
+        for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+            r.ui.text_scaled(font, x + dx, y + dy, scale, [0.0, 0.0, 0.0, 0.9], &w);
+        }
+        let color = if t.ends_with('s') { [1.0, 0.9, 0.3, 1.0] } else { [1.0; 4] };
+        r.ui.text_scaled(font, x, y, scale, color, &w);
+    }
+}
+
+/// The name of a member's effect under the mouse (`Hud::member_fx_hover`), as
+/// the buff window names its own (`BuffWnd::draw_info`): its name and its time
+/// left (`buffwnd::time_text`; none with no end) in a box under its tiny icon
+/// `cell`, over it where the screen ends first, within `screen`.
+fn draw_member_fx_name(vui: &Vui, r: &mut UiRaster, cell: [f32; 4], name: &str, left_ms: u32, screen: [i32; 4]) {
+    let fh = vui.font_height(r);
+    let (name, left) = (wide(name), wide(&crate::buffwnd::time_text(left_ms)));
+    let lw = vui.string_width(r, &left);
+    let w = vui.string_width(r, &name) + lw + if lw > 0 { 36 } else { 20 };
+    let h = fh + 10;
+    let at = crate::buffwnd::info_at(cell, [w, h], screen);
+    r.blit(icon_id("black"), 0, at, [0, 0], [w, h], 3, 0.8);
+    let fp = vi::ui::FrameParam { tl: (101, 0), top: (102, 0), tr: (103, 0), right: (104, 1), br: (106, 0), bottom: (102, 2), bl: (105, 0), left: (104, 0) };
+    vui.blit_frame(r, at, [w, h], &fp, 3, 1.0, true);
+    vui.draw_string_ex(r, &name, at[0] + 10, at[1] + 5, [1.0, 1.0, 0.0, 1.0], true);
+    vui.draw_string_ex(r, &left, at[0] + w - 10 - lw, at[1] + 5, [1.0; 4], true);
 }
 
 /// Pieces of an effects' row drawn (the pet's, `buffwnd`'s), each at `alpha`.
@@ -457,6 +592,12 @@ pub struct Hud {
     /// Where the DPS meter's panel lay at the last frame, how many items it
     /// showed and how far its list steps (`Hud::meter_wheel`, `meter_page`).
     meter_panel: Option<([f32; 4], usize, usize)>,
+    /// The mouse's frame point while it may name a member's tiny icon (or the
+    /// target box's, petition 3020) (`Hud::member_fx_hover`), and the icon it is
+    /// over as last drawn: the piece it is in, its rectangle there, its name
+    /// and time left.
+    fx_point: Option<[f32; 2]>,
+    fx_named: Option<(Piece, [f32; 4], String, u32)>,
 }
 
 /// What a pointer finds on the HUD's left side (`Hud::pick`): the player's
@@ -476,6 +617,7 @@ pub enum Pick {
     Minimap,
     /// the quest tracker (`tracker`): the quest journal opened
     Quests,
+    Settings,
     /// the DPS meter (`dpsmeter`): its title's view or Reset, or its rows
     Meter(crate::dpsmeter::Hit),
 }
@@ -483,6 +625,8 @@ pub enum Pick {
 /// Where `DrawGroup` starts the group's bars and `DrawTarget` the target's.
 const GROUP_AT: [i32; 2] = [20, 93];
 const TARGET_AT: [i32; 2] = [20, 348];
+/// The PC pet's fixed origin, matching the old solo position for saved offsets.
+const PC_PET_AT: [i32; 2] = [20, 93];
 
 impl Hud {
     pub fn new() -> Self {
@@ -502,7 +646,17 @@ impl Hud {
             raid_panel: None,
             raid_more: 0,
             meter_panel: None,
+            fx_point: None,
+            fx_named: None,
         }
+    }
+
+    /// The mouse at frame point `p` (none: off the window, or the HUD not
+    /// there to point at): the group member's tiny icon under it named in a
+    /// box at the next frame (`draw_member_fx_name`), where the server sent
+    /// its name.
+    pub fn member_fx_hover(&mut self, p: Option<[f32; 2]>) {
+        self.fx_point = p;
     }
 
     /// The wheel's `lines` (up positive) over the DPS meter at frame point `p`,
@@ -564,6 +718,7 @@ impl Hud {
     /// its bottom (the target's bar: `Vertical`).
     pub fn draw(&mut self, vui: &Vui, ui: &mut UiRaster, s: &HudState) {
         self.update_glow();
+        self.fx_named = None;
         ui.ui.anchor = Anchor::Left;
         ui.ui.vertical = Vertical::Top;
         self.hits.clear();
@@ -590,16 +745,19 @@ impl Hud {
         if fork_hud::secondary_exp_bar_visible(s) { draw_gauge(vui, ui, 152, 151, [p[0], p[1] + 10], true, part); }
         if fork_hud::main_exp_bar_visible(s) { draw_gauge(vui, ui, 8, 136, p, true, v); }
         crate::hudlayout::end(ui.ui, m);
+        let pc = crate::settings::pc_mode();
         let m = crate::hudlayout::begin(ui.ui, Piece::Group);
-        let y = if s.raid.is_empty() {
+        let stacked_pet_y = if s.raid.is_empty() {
             self.raid_panel = None;
             self.raid_first = 0;
             self.draw_group(vui, ui, GROUP_AT, s);
             GROUP_AT[1] + ((s.group_count - 1) * 48).max(0)
         } else {
             self.glow1_on = -1;
-            // the pet's bar under it, and its effects' row
-            let below = s.pet.as_ref().map_or(0, |p| crate::raidlist::PET_H + pet_effects_height(p.effects.len()));
+            // Only the Controller layout reserves room under the raid for the pet.
+            let below = if pc { 0 } else {
+                s.pet.as_ref().map_or(0, |p| crate::raidlist::PET_H + pet_effects_height(p.effects.len()))
+            };
             let sections = crate::raidlist::sections(&s.raid, s.raid_new_group);
             let b = if sections.is_empty() {
                 let fit = crate::raidlist::Fit::under(s.raid.len(), below);
@@ -629,7 +787,8 @@ impl Hud {
         };
         crate::hudlayout::end(ui.ui, m);
         let m = crate::hudlayout::begin(ui.ui, Piece::Pet);
-        self.draw_pet(vui, ui, [20, y], s);
+        let pet_at = if pc { PC_PET_AT } else { [GROUP_AT[0], stacked_pet_y] };
+        self.draw_pet(vui, ui, pet_at, s);
         crate::hudlayout::end(ui.ui, m);
         ui.ui.vertical = Vertical::Bottom;
         let p = [-3, 331];
@@ -684,6 +843,28 @@ impl Hud {
             self.meter_panel = Some(([a[0], a[1], b[0], b[1]], p.shown.len(), p.room));
             crate::hudlayout::end(ui.ui, mark);
         }
+        if pc {
+            ui.ui.anchor = Anchor::Right;
+            ui.ui.vertical = Vertical::Bottom;
+            let mark = crate::hudlayout::begin(ui.ui, Piece::Settings);
+            let at = [536, 414];
+            vui.blit_bar(ui, &wide("Settings"), [1.0; 4], at, 25, 26, 94, 3, 1.0, 0, true);
+            self.note(ui, [at[0], at[1], at[0] + 94, at[1] + 25], Pick::Settings);
+            crate::hudlayout::end(ui.ui, mark);
+        }
+        // the member's icon under the mouse named, over the rest of the HUD,
+        // at the group's place (or the target box's) but not counted in it
+        if let Some((piece, cell, name, left)) = self.fx_named.take() {
+            let (anchor, vertical) = (ui.ui.anchor, ui.ui.vertical);
+            ui.ui.anchor = Anchor::Left;
+            ui.ui.vertical = if piece == Piece::Target { Vertical::Bottom } else { Vertical::Top };
+            let m = crate::hudlayout::begin(ui.ui, piece);
+            let m = crate::hudlayout::seal(ui.ui, m);
+            let screen = crate::hudlayout::screen_rect(ui.ui, &m);
+            draw_member_fx_name(vui, ui, cell, &name, left, screen);
+            crate::hudlayout::end(ui.ui, m);
+            (ui.ui.anchor, ui.ui.vertical) = (anchor, vertical);
+        }
     }
 
 
@@ -711,7 +892,14 @@ impl Hud {
             }
             if !m.effects.is_empty() {
                 let status = m.hp.map_or(0, |(_, f4, f8)| f4 as usize + f8 as usize);
-                draw_member_effects(vui, ui, start, status, &m.effects);
+                let pieces = draw_member_effects(vui, ui, start, status, &m.effects, crate::settings::buff_timers());
+                // the icon under the mouse, where placed, if the server named it
+                if let Some(f) = self.fx_point {
+                    let ui = &*ui;
+                    if let Some((r, name, left)) = member_fx_at(&pieces, &m.effects, f, |q| ui.ui.placed(q)) {
+                        self.fx_named = Some((Piece::Group, r, name, left));
+                    }
+                }
             }
             if let Some((hp, f4, f8)) = m.hp {
                 p = [p[0] + GAUGE_IN[0], p[1] + GAUGE_IN[1]];
@@ -817,6 +1005,18 @@ impl Hud {
         }
         if s.self_targeted_flag {
             vui.blit_ex(ui, 211, p, 3, self.glow0, 0);
+        }
+        // Debuff Icons (petition 3020): the player's effects on the target
+        // beside its con, as a member's bar carries its tiny icons
+        let pieces = target_effects_pieces(at, s);
+        if !pieces.is_empty() {
+            draw_tiny_pieces(vui, ui, &pieces, &s.target_effects, crate::settings::buff_timers());
+            if let Some(f) = self.fx_point {
+                let ui = &*ui;
+                if let Some((r, name, left)) = member_fx_at(&pieces, &s.target_effects, f, |q| ui.ui.placed(q)) {
+                    self.fx_named = Some((Piece::Target, r, name, left));
+                }
+            }
         }
     }
 
@@ -1063,6 +1263,63 @@ mod tests {
         assert!(member_effects_pieces(at, 0, &[]).is_empty(), "the control: none, nothing");
     }
 
+    /// Debuff Icons in the target box (Heirloom petition 3020: "It should be
+    /// moved to their target/con area to align with the group buffs"): the
+    /// target's effects sit on its bar (25 under "Target") as a member's tiny
+    /// icons sit on its bar, the same size, rows and room: right of the health
+    /// gauge, pushed past the con (and the self-target flag) when shown, inside
+    /// the bar's 174 by 46. The control: no creature targeted, none.
+    #[test]
+    fn the_targets_debuffs_sit_beside_its_con_as_a_members_icons() {
+        use super::{MemberFx, TARGET_AT, target_effects_pieces};
+        let fx: Vec<MemberFx> = (1..=16).map(|i| MemberFx { icon: i, name: format!("Debuff {i}"), left_ms: 30_000 }).collect();
+        let icons: Vec<u32> = fx.iter().map(|e| e.icon).collect();
+        let bar = [TARGET_AT[0], TARGET_AT[1] + 25];
+        let s = HudState { target_name: Some("a gnoll".into()), target_effects: fx.clone(), ..Default::default() };
+        let p = target_effects_pieces(TARGET_AT, &s);
+        assert_eq!(p, member_effects_pieces(bar, 0, &icons), "a member's layout on the target's bar");
+        assert_eq!(p[0].r, [(bar[0] + 76) as f32, (bar[1] + 25) as f32, 10.0, 10.0], "right of the gauge, level with it, the group's size");
+        for q in &p {
+            assert!(q.r[0] + q.r[2] <= (bar[0] + 174) as f32 && q.r[1] + q.r[3] <= (bar[1] + 46) as f32, "inside the bar: {:?}", q.r);
+        }
+        let con = HudState { target_info: Some(2), ..s.clone() };
+        let p = target_effects_pieces(TARGET_AT, &con);
+        assert_eq!((p[0].r[0], p.len()), ((bar[0] + 101) as f32, 12), "past the con (115-117, 25 on)");
+        let both = HudState { self_targeted_flag: true, ..con.clone() };
+        assert_eq!(target_effects_pieces(TARGET_AT, &both)[0].r[0], (bar[0] + 126) as f32, "and past the self-target flag");
+        assert!(target_effects_pieces(TARGET_AT, &HudState { target_name: None, ..con }).is_empty(), "the control: no creature targeted");
+    }
+
+    /// Group Effects' names and times (Heirloom petition 2962): each tiny icon
+    /// carries its time left as the buff window's icons do (`short_time`), none
+    /// for an effect with no end; the mouse over an icon, where the piece was
+    /// placed (here moved and scaled twice), finds its name and time, and
+    /// between two icons, off them, or on one with no name (a server sending
+    /// icons alone: the control) finds none.
+    #[test]
+    fn a_members_tiny_icons_carry_times_and_names() {
+        use super::{MemberFx, member_fx_at, member_fx_times};
+        use net::buffs::NO_END;
+        let at = GROUP_AT;
+        let fx = vec![
+            MemberFx { icon: 1, name: "Courage".into(), left_ms: 44_100 },
+            MemberFx { icon: 2, name: "Breeze".into(), left_ms: 12 * 60_000 },
+            MemberFx { icon: 3, name: "Marked".into(), left_ms: NO_END },
+            MemberFx { icon: 4, name: String::new(), left_ms: NO_END },
+        ];
+        let p = member_effects_pieces(at, 0, &fx.iter().map(|e| e.icon).collect::<Vec<_>>());
+        let t = member_fx_times(&p, &fx);
+        assert_eq!(t, [(p[0].r, "45s".to_string()), (p[1].r, "12m".to_string())], "the times on their icons, none with no end");
+        let placed = |q: [f32; 2]| [q[0] * 2.0 + 100.0, q[1] * 2.0 + 50.0];
+        let centre = |r: [f32; 4]| placed([r[0] + r[2] / 2.0, r[1] + r[3] / 2.0]);
+        assert_eq!(member_fx_at(&p, &fx, centre(p[1].r), placed), Some((p[1].r, "Breeze".to_string(), 12 * 60_000)), "the second icon named");
+        assert_eq!(member_fx_at(&p, &fx, centre(p[2].r), placed).map(|n| n.1), Some("Marked".to_string()), "no end, still named");
+        assert_eq!(member_fx_at(&p, &fx, [p[0].r[0] + p[0].r[2] / 2.0, p[0].r[1] + p[0].r[3] / 2.0], placed), None, "unplaced, the frame point is elsewhere");
+        let gap = placed([p[0].r[0] + p[0].r[2] + 0.5, p[0].r[1] + 2.0]);
+        assert_eq!(member_fx_at(&p, &fx, gap, placed), None, "between two icons");
+        assert_eq!(member_fx_at(&p, &fx, centre(p[3].r), placed), None, "the control: no name sent, nothing to show");
+    }
+
     /// Health Numbers (Live petition 5393, Spoony: "add the option to overlay
     /// health as a number, or percentage, over party bars. Including pets."):
     /// with it on, each group member whose health is known, a creature pet, the
@@ -1182,6 +1439,56 @@ mod tests {
             hud.draw(&vui, &mut assets.raster(&mut ui), &s);
             assert_eq!(hud.pick(row), want, "{} effects", effects.len());
             assert_eq!(hud.pick([60.0, 100.0]), Some(Pick::Pet), "the bar itself");
+        }
+    }
+
+    #[test]
+    fn the_pc_pet_panel_stays_put_as_the_group_changes() {
+        use crate::hudlayout::{self, Beyond, Piece};
+
+        let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut ui) = crate::ui::tests::layer() else {
+            eprintln!("SKIP: no graphics adapter");
+            return;
+        };
+        crate::settings::testing::reset(false);
+        crate::settings::set_ui_mode(true).unwrap();
+        let vui = strip_vui();
+        let assets = crate::ui::UiAssets::default();
+        let size = (640, 480);
+        let beyond = Beyond::of(size);
+        let mut hud = Hud::new();
+        let mut draw = |hud: &mut Hud, s: &HudState| {
+            ui.begin(size);
+            hudlayout::frame_begin();
+            hud.draw(&vui, &mut assets.raster(&mut ui), s);
+            hudlayout::frame_end();
+        };
+        let saved = "group l 12 t 25\npet l 245 t 125\n";
+        let resized = "size group 125\nsize pet 75\ngroup l 12 t 25\npet l 245 t 125\n";
+        for layout in ["", saved, resized] {
+            assert!(crate::settings::save_hud_layout(layout));
+            hudlayout::testing_reset();
+            let group = hudlayout::frame_point(Piece::Group, [40.0, 105.0], beyond);
+            let pet = hudlayout::frame_point(Piece::Pet, [40.0, 105.0], beyond);
+            let mut s = HudState {
+                pet: Some(PetState { name: "Grand Animation".into(), creature: Some((255, false, false)), power: Some(255), ..Default::default() }),
+                ..Default::default()
+            };
+            for n in [0, 1, 3, 1, 0] {
+                s.group_count = if n == 0 { 0 } else { n + 1 };
+                s.group = (0..n).map(|i| MemberState { id: 100 + i as u32, name: "Mercenary".into(), ..Default::default() }).collect();
+                draw(&mut hud, &s);
+                assert_eq!(hud.pick(pet), Some(Pick::Pet), "{n} other members, layout {layout:?}");
+                assert_eq!(hud.pick(group), (n > 0).then_some(Pick::Member(100)));
+            }
+            s.raid = (1..=20).map(|id| crate::raidlist::Row { id, name: format!("Member {id}"), ..Default::default() }).collect();
+            draw(&mut hud, &s);
+            assert_eq!(hud.pick(pet), Some(Pick::Pet), "the raid keeps the same pet position");
+            let raid_panel = hud.raid_panel.expect("raid list");
+            s.pet = None;
+            draw(&mut hud, &s);
+            assert_eq!(hud.raid_panel, Some(raid_panel), "the raid does not reserve room for the PC pet");
         }
     }
 
@@ -1341,7 +1648,7 @@ mod tests {
         let fight = |n: u32| {
             let mut m = crate::dpsmeter::Meter::default();
             let lines = (0..n).map(|i| net::session::DpsLine { own: i == 0, class: 1, damage: 1000 - i, name: format!("N{i}"), ..Default::default() }).collect();
-            m.take(net::session::DpsMeter { fight: 1, over: false, length_ms: 5000, total: 3000, count: n as u16, place: 1, lines });
+            m.take(net::session::DpsMeter { fight: 1, over: false, length_ms: 5000, total: 3000, count: n as u16, place: 1, lines, ..Default::default() });
             m.shown(crate::dpsmeter::View::Fight, "")
         };
         // three lines: the panel 14 + 3 x 13 + 2 high on the column's bottom (336)

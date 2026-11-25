@@ -101,6 +101,7 @@ impl Layout for Cut<'_> {
 }
 
 impl Raster for Cut<'_> {
+    fn native_list_scrollbars(&self) -> bool { self.r.native_list_scrollbars() }
     fn blit(&mut self, id: u32, flags: u32, at: [i32; 2], a: [i32; 2], b: [i32; 2], mode: i32, alpha: f32) {
         let over = self.over(at[1], b[1]);
         if over > 0 && over == b[1] {
@@ -258,13 +259,14 @@ impl UiAssets {
     }
 
     pub fn raster<'a>(&'a self, ui: &'a mut Ui) -> UiRaster<'a> {
-        UiRaster { assets: self, ui, glyphs: Default::default(), font_override:None, text_scale:1.0 }
+        UiRaster { assets: self, ui, glyphs: Default::default(), font_override:None, text_scale:1.0, native_list_scrollbars: true }
     }
 }
 
 pub struct UiRaster<'a> {
     font_override: Option<usize>,
     text_scale: f32,
+    pub(crate) native_list_scrollbars: bool,
     pub assets: &'a UiAssets,
     pub ui: &'a mut Ui,
     /// The button glyphs drawn, where (for a pointer).
@@ -364,6 +366,7 @@ fn drawn_size(size: [i32; 2]) -> bool {
 }
 
 impl Raster for UiRaster<'_> {
+    fn native_list_scrollbars(&self) -> bool { self.native_list_scrollbars }
     fn blit(&mut self, id: u32, flags: u32, at: [i32; 2], a: [i32; 2], b: [i32; 2], mode: i32, alpha: f32) {
         if !drawn_size(b) {
             return;
@@ -444,6 +447,12 @@ impl Raster for UiRaster<'_> {
 
     fn string_width(&self, s: &[u16]) -> i32 {
         self.font_override.or(self.assets.font).map_or(0, |f| (self.ui.fonts[f].string_width(s) as f32*self.text_scale).ceil() as i32)
+    }
+
+    fn draw_string_scaled(&mut self, at: [f32; 2], color: [f32; 4], s: &[u16], scale: f32) {
+        if let Some(f) = self.assets.font {
+            self.ui.text_scaled(f, at[0], at[1], scale, color, s);
+        }
     }
 
     fn point_size(&self) -> i32 {

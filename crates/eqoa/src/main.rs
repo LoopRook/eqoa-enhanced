@@ -84,6 +84,7 @@ mod icon_art;
 mod saveicon;
 mod editbox;
 mod clipboard;
+mod focus;
 mod fog;
 mod frames;
 mod group;
@@ -123,6 +124,7 @@ mod petart;
 mod petdye;
 mod display;
 mod hudlayout;
+mod pcwindows;
 mod hudmenu;
 mod influence;
 mod input;
@@ -162,6 +164,7 @@ mod quantity;
 mod questguide;
 mod questlog;
 mod statbox;
+mod questtrack;
 mod tracker;
 mod quickchat;
 mod racebody;
@@ -178,6 +181,7 @@ mod startmenu;
 mod textlist;
 mod trade;
 mod trainer;
+mod statwnd;
 mod trails;
 mod options;
 // a web page opened from the game (Station's Forgot Password on our server):
@@ -756,6 +760,8 @@ fn run(args: &[String]) -> Result<()> {
             // patcher fills it; `s2`)
             s2::for_server(host);
             let (session, player, dump) = login(host, user, &pass)?;
+            // Direct world entry uses the same interface profile as the title screen.
+            settings::set_account(host, user);
             let (mut lib, src) = world_library(&player)?;
             let mut play = play::Play::new(session, player, dump);
             play_tables(&mut play)?;

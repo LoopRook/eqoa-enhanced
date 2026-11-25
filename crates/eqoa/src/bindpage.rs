@@ -75,6 +75,8 @@ pub struct ControlsPage {
     pub col: i32,
     /// the first entry shown
     top: i32,
+    /// Fractional wheel motion from a high-resolution mouse or trackpad.
+    wheel: f32,
     /// the entries shown at once, as last drawn
     shown: i32,
     /// waiting for a key or a button
@@ -96,6 +98,17 @@ impl ControlsPage {
     /// The entries: the rows, then Defaults.
     fn entries() -> i32 {
         defaults() + 1
+    }
+
+    pub fn scroll(&mut self, lines: f32) {
+        if self.capture.is_some() { return; }
+        self.wheel += lines;
+        let rows = self.wheel.trunc() as i32;
+        self.wheel = self.wheel.fract();
+        if rows != 0 {
+            self.row = self.row.saturating_sub(rows).clamp(0, Self::entries() - 1);
+            self.note = None;
+        }
     }
 
     /// Whether entry `row`'s column `col` can be moved: a key (△'s row,
@@ -182,10 +195,10 @@ impl ControlsPage {
         if entry(self.row) == Entry::Defaults {
             crate::fork_ext::bindpage::reset_defaults();
             let b = crate::settings::binds();
-            let d = b.controls_defaults();
+            let d = b.controls_defaults_profile(crate::binds::pc_shortcuts());
             let lost = (0..binds::MACROS).filter(|&m| d.macros[m].triggers.len() != b.macros[m].triggers.len()).count();
             crate::settings::set_binds(d);
-            self.note = Some(if lost == 0 { "Every key and button is back where it began.".into() } else { "Every key and button is back where it began, and out of the macros' triggers.".into() });
+            self.note = Some(if crate::binds::pc_shortcuts() { "PC keyboard overrides are reset; shared bindings and macros are kept.".into() } else if lost == 0 { "Every key and button is back where it began.".into() } else { "Every key and button is back where it began, and out of the macros' triggers.".into() });
             cues.push(13);
             return;
         }
@@ -222,20 +235,24 @@ impl ControlsPage {
         if crate::fork_ext::bindpage::capture_key(&mut self.capture, &mut self.note, row, name, cues) { return; }
         let mut b = crate::settings::binds();
         let had = b.macros_with(&Input::Key(name.to_string()));
-        let moved = b.bind_key(row, name);
+        let moved = b.bind_key_profile(row, name, crate::binds::pc_shortcuts());
         crate::settings::set_binds(b.clone());
         self.capture = None;
         let me = format!("{}: {}.", label(vui, row), binds::display(name));
         let mut note = match moved {
-            Moved::Swapped(o) if b.key(o).is_none_or(str::is_empty) => format!("{me} {} has no key now.", label(vui, o)),
-            Moved::Swapped(o) => format!("{me} {}: {}.", label(vui, o), binds::display(b.key(o).unwrap_or(""))),
+            Moved::Swapped(o) if b.profile_key(o, crate::binds::pc_shortcuts()).is_none_or(str::is_empty) => format!("{me} {} has no key now.", label(vui, o)),
+            Moved::Swapped(o) => format!("{me} {}: {}.", label(vui, o), binds::display(b.profile_key(o, crate::binds::pc_shortcuts()).unwrap_or(""))),
             Moved::Freed(Some(old)) if !old.is_empty() => format!("{me} {} does nothing now.", binds::display(&old)),
             _ => me,
         };
         // the macros' triggers the key was in went with it (`bind_key`):
         // said, as a row is
         if !had.is_empty() {
-            note.push_str(&format!(" {} is no longer in a trigger of {}.", binds::display(name), macro_names(&had)));
+            if crate::binds::pc_shortcuts() {
+                note.push_str(&format!(" {} overrides {} in PC mode.", binds::display(name), macro_names(&had)));
+            } else {
+                note.push_str(&format!(" {} is no longer in a trigger of {}.", binds::display(name), macro_names(&had)));
+            }
         }
         self.note = Some(note);
         cues.push(13);
@@ -339,6 +356,8 @@ impl ControlsPage {
         w.text_box(vui, r, &wide("Keyboard"), kx, 1, KEY_W, 1, dim, 8);
         w.text_box(vui, r, &wide("Controller"), px, 1, PAD_W, 1, dim, 8);
         let b = crate::settings::binds();
+        let pc = crate::binds::pc_shortcuts();
+        let mut selected_chord = None;
         for (k, entry) in (self.top..(self.top + self.shown).min(n)).enumerate() {
             let at = k as i32 + 2;
             let on = entry == self.row;
@@ -354,11 +373,18 @@ impl ControlsPage {
             self.hits.push(rows_rect(w, vui, r, 40, at, width - KEY_X - 48, 1), entry * 4);
             // the cells: the selected one framed with its arrows
             let waiting = |col: Column| on && self.capture == Some(col);
-            let kt = if waiting(Column::Keyboard) {
+            let mut kt = if waiting(Column::Keyboard) {
                 "Press a key".to_string()
             } else {
-                b.key(entry as usize).map_or_else(|| "-".to_string(), binds::display)
+                b.profile_key(entry as usize, pc).filter(|s| !s.is_empty()).map_or_else(|| "-".to_string(), binds::display)
             };
+            // A long chord can wrap past this single-line cell. Keep its
+            // base key visible and spell out the selected binding below.
+            if pc && kt.contains('+') && w.text_width(vui, r, &wide(&kt)) >= KEY_W - 8 {
+                let short = kt.replace("Ctrl+", "C+").replace("Alt+", "A+").replace("Shift+", "S+");
+                if on && self.col == 0 { selected_chord = Some(kt); }
+                kt = short;
+            }
             let pt = if waiting(Column::Pad) {
                 "Press".to_string()
             } else {
@@ -381,8 +407,8 @@ impl ControlsPage {
         if on_screen(self.row, self.top, self.shown) {
             w.tick_r(vui, r, 36, self.row - self.top + 2, true);
         }
-        // a scroll bar down the list's right when it is longer than the view
-        if n > self.shown {
+        // Controller shows the original position indicator for its binding list.
+        if n > self.shown && !crate::settings::pc_mode() {
             let h = vui.font_height(r) - 4;
             let top = w.row_center(vui, r, 2)[1] - 4;
             let t = self.top as f32 / (n - self.shown) as f32;
@@ -403,6 +429,8 @@ impl ControlsPage {
             // there does
             if self.col == 1 && row.pad == Pad::None {
                 "A controller's button put here does what this key does, and no longer what it did in the game.".to_string()
+            } else if let Some(chord) = selected_chord {
+                format!("{chord}. {}", expand(vui, row.help))
             } else {
                 expand(vui, row.help)
             }
@@ -442,6 +470,18 @@ pub fn macro_names(ms: &[usize]) -> String {
 
 /// A row's label, its WORDS.TXT words in.
 pub fn label(vui: &Vui, row: usize) -> String {
+    profile_label(vui, row, crate::settings::pc_mode())
+}
+
+fn profile_label(vui: &Vui, row: usize, pc: bool) -> String {
+    if pc && let Some((bar, slot)) = binds::bar_slot(row) {
+        let pc_slot = match bar {
+            0..=3 => Some((bar / 2 + 1, (bar % 2) * 5 + slot + 1)),
+            b if (crate::hudmenu::PC_ACTION_BAR..crate::hudmenu::PC_ACTION_BAR + 2).contains(&b) => Some((b - crate::hudmenu::PC_ACTION_BAR + 3, slot + 1)),
+            _ => None,
+        };
+        if let Some((bar, slot)) = pc_slot { return format!("Bar {bar}: Gem {slot}"); }
+    }
     ROWS.get(row).map_or_else(String::new, |r| expand(vui, r.label))
 }
 
@@ -496,6 +536,21 @@ mod tests {
     use super::*;
     use crate::pointer::testing::{NullRaster, mid, vui};
     use crate::settings::{self, testing};
+
+    #[test]
+    fn pc_labels_match_all_visible_gems_without_changing_controller_labels() {
+        let vui = vui();
+        for bar in 1..=4 {
+            for gem in 1..=10 {
+                let id = if bar <= 2 {
+                    format!("bar{}_slot{}", (bar - 1) * 2 + (gem - 1) / 5 + 1, (gem - 1) % 5 + 1)
+                } else { format!("pcbar{bar}_slot{gem}") };
+                let row = binds::row_named(&id).unwrap();
+                assert_eq!(profile_label(&vui, row, true), format!("Bar {bar}: Gem {gem}"), "{id}");
+                assert_eq!(profile_label(&vui, row, false), expand(&vui, ROWS[row].label), "controller {id}");
+            }
+        }
+    }
 
     fn drawn(page: &mut ControlsPage, w: &mut Window) {
         let vui = vui();
@@ -727,6 +782,23 @@ mod tests {
         assert_eq!(page.top, ControlsPage::entries() - page.shown);
         assert_eq!(cues.last(), Some(&9), "the end");
         testing::reset(false);
+    }
+
+    #[test]
+    fn wheel_scrolls_by_whole_rows_and_keeps_the_captured_binding_in_place() {
+        let mut page = ControlsPage::default();
+        page.scroll(-0.5);
+        assert_eq!(page.row, 0);
+        page.scroll(-2.5);
+        assert_eq!(page.row, 3);
+        page.capture = Some(Column::Keyboard);
+        page.scroll(10.);
+        assert_eq!(page.row, 3);
+        page.capture = None;
+        page.scroll(10.);
+        assert_eq!(page.row, 0);
+        page.scroll(-10_000.);
+        assert_eq!(page.row, defaults());
     }
 
     /// A pointer: a row's words select it, a cell its column, the selection

@@ -1,6 +1,6 @@
 # EQOA Trade
 
-Off by default. Enable it in Mods & Addons (F10); before you enable it, the list shows **Provides: Trade and duel windows**, **Replaces game windows: Trade, Duel** and what it can do, including **Asks you first: accept a trade or a duel wager**. With the mod off, the game's own trade and duel windows are unchanged.
+Off by default. Enable it in Mods & Addons (Shift+F10); before you enable it, the list shows **Provides: Trade and duel windows**, **Replaces game windows: Trade, Duel** and what it can do, including **Asks you first: accept a trade or a duel wager**. With the mod off, the game's own trade and duel windows are unchanged.
 
 - **A request prompt.** When another player asks to trade, a small **Request** box shows their name with **Accept** and **Decline**. If you do not answer, it is refused for you after 45 seconds (the countdown is shown). A duel invitation uses the same box (name, level and class, about 20 seconds). **Show in game** hands that request back to the game's own window.
 - **The trade window.** Shows what you offer and what they offer, with the coins on each side; hover an item for its name and quantity. **Right-click** an item in "Your items" to offer one, or click **Offer** on its row (**All** offers a whole stack); **Take back** takes an item out of your offer. Type a number in the coin box and press **Enter** or click **Set** to offer that many tunar. Hover an item to see what the game's own windows show for it (its stats and text).

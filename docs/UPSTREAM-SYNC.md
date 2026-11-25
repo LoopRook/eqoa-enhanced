@@ -490,3 +490,34 @@ fork_ext/report_no_upload.rs (reports stay local). Hydrogen review:
 accept with fixes; the one MEDIUM was fixed in 3c9c7f39 (Utility Bars
 clicks gated on hud_menu_visible). U is now Quest Helper upstream, so
 mod-key tests use 9.
+
+## Sync 2026-11-25 (88 commits, 51c7635e..8ad5caa9)
+
+Merge 76116866 on sync/2026-11-25, follow-up 1ddbc1e6, then the review fixes (bdcd78ee onward). Upstream
+reworked the HUD and input: separate PC and Controller interfaces, four PC spell bars, the adjustable HUD
+(/hud and a HUD Scale), chat tabs and detached panes, the Stat Window (F4), the Focus window and Settings
+(F10). Seven files needed hand resolution (19 hunks): hudlayout.rs, main.rs, options.rs, play.rs,
+spellbook.rs, ui.rs, viewer.rs; no upstream line was deleted or rewritten.
+
+Re-anchored: upstream's new `category(i)` in options.rs reads `fork_options::pages()[i]` (hook count 6 to 5,
+so the Enhanced page past `CATEGORIES.len()` cannot panic); the play.rs click gates now sit on upstream's
+`local(Piece::X)` conditions. `fork_ext::piece_hidden` maps the new pieces (Chat1-3 hide with chat,
+EquipmentBar with the utility bars; Settings, TargetInfo, RaidPrompts, Stats and Focus have no mod flag).
+The three new click checks (all vanilla-neutral: true with no mod hiding anything): the PC stacked-bar slot
+click and the PC Equipment Bar click in play.rs, and the PC gem press in viewer.rs, each gated on the same
+visibility question as the piece's drawing.
+
+Independent review: 3 HIGH, 3 MEDIUM, 3 LOW, all fixed or listed in the fixes report. In short: a
+hidden stock chat and its panes took no click, wheel or inline typing; `fork_ext/bindpage.rs` uses the
+interface's own keyboard profile; HUD Scale reaches `eqoa.hud.layout()` and the round minimap; a held loot-roll
+strip takes no wheel; touch long-presses honour mod-hidden effects and bars. Owner decisions of 2026-11-25:
+Mods & Addons is Shift+F10 (F10 is Settings; a saved F10 moves once), Map Search's Clear map guide has no
+default key (F4 is the Stat Window; a saved F4 is dropped once), and the hidden stock chat's scroll key is let
+go by upstream's `set_scroll(0)` (the test asserts what is still the fork's promise).
+
+Budget changes (reasons in docs/fork-footprint.json): play.rs +95/-51 to +99/-51, raidplay.rs +5 to +7,
+`reviewed_base` 51c7635e to 8ad5caa9. Every other budget is unchanged. Tests (`tools/sync_upstream.py
+--continue --tests-only`, one thread, the owner's disc linked): client 3629 passed / 0 failed / 39 ignored, net
+152 passed, 54 SKIP lines (no decomp or oracle here; upstream's manual GPU tests are ignored); Python tools 235
+passed. The first run had one failure, the HUD Numbers mod reading a null `frame_x` (a window of zero size made
+the scaled rectangle NaN), fixed before the final run. Nothing was played in either interface.

@@ -24,19 +24,23 @@ eqoa.events.on("render", function()
     local target_on = eqoa.options.get("target_hp_percent")
 
     local layout = eqoa.hud.layout()
-    local px, py = layout.player.panel.frame_x - 10, layout.player.panel.frame_y - 15
-    local tx, ty = layout.target.panel.frame_x - 20, layout.target.panel.frame_y - 348
+    -- The panels as they are drawn now: moved (Move HUD) and, with HUD Scale or the PC interface's piece size
+    -- off 100%, grown about their corner. The numbers sit at the same place on the panel (in the panel's own
+    -- units, 190 and 174 wide at 100%) and grow with it.
+    local pp, tp = layout.player.panel, layout.target.panel
+    local pk = (pp.frame_width and pp.frame_width > 0) and pp.frame_width / 190 or 1
+    local tk = (tp.frame_width and tp.frame_width > 0) and tp.frame_width / 174 or 1
     local player = eqoa.player.get()
     if player then
         -- Player HP %
         if hud_on and eqoa.hud.visible("health") and player.hp_fraction ~= nil then
             local pct = math.floor(player.hp_fraction * 100 + 0.5)
             hud_text({
-                x = 99 + px,
-                y = 35 + py,
+                x = pp.frame_x + 89 * pk,
+                y = pp.frame_y + 20 * pk,
                 text = tostring(pct) .. "%",
                 color = white,
-                scale = 0.6,
+                scale = 0.6 * pk,
                 align = "center",
                 outline = true,
             })
@@ -46,11 +50,11 @@ eqoa.events.on("render", function()
         if hud_on and eqoa.hud.visible("power") and player.power and player.power.maximum and player.power.maximum > 0 then
             local txt = tostring(player.power.current) .. "/" .. tostring(player.power.maximum)
             hud_text({
-                x = 99 + px,
-                y = 45 + py,
+                x = pp.frame_x + 89 * pk,
+                y = pp.frame_y + 30 * pk,
                 text = txt,
                 color = blue,
-                scale = 0.6,
+                scale = 0.6 * pk,
                 align = "center",
                 outline = true,
             })
@@ -64,11 +68,11 @@ eqoa.events.on("render", function()
                 local pct = math.max(0, math.min(100, (cur / need) * 100))
                 local txt = string.format("%d/%d (%.1f%%)", cur, need, pct)
                 hud_text({
-                    x = 99 + px,
-                    y = 55 + py,
+                    x = pp.frame_x + 89 * pk,
+                    y = pp.frame_y + 40 * pk,
                     text = txt,
                     color = gold,
-                    scale = 0.6,
+                    scale = 0.6 * pk,
                     align = "center",
                     outline = true,
                 })
@@ -86,11 +90,11 @@ eqoa.events.on("render", function()
             elseif pct > 20 then col = yellow end
 
             hud_text({
-                x = 60 + tx,
-                y = 397 + ty,
+                x = tp.frame_x + 40 * tk,
+                y = tp.frame_y + 49 * tk,
                 text = tostring(pct) .. "%",
                 color = col,
-                scale = 0.65,
+                scale = 0.65 * tk,
                 align = "center",
                 outline = true,
                 vertical = "bottom",

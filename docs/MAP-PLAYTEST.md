@@ -23,7 +23,7 @@ Developer build and packaging instructions belong in docs/DEVELOPMENT.md.
 - Type part of an NPC name. **Tab** switches NPCs / Group / Places. Arrow keys
   select; **Enter** or a result click starts guidance and closes search.
 - Set a personal pin with the map click/waypoint control, then choose **Track waypoint**, or **Personal waypoint** under Places. Its pink guide follows pin changes and stops on arrival/deletion.
-- **F4** or the minimap's **X**: stop guidance. Personal/group waypoints remain.
+- The minimap's **X**, or the **Clear map guide** key (no default since 2026-11-25, F4 is the game's Stat Window; give it a key on Controls): stop guidance. Personal/group waypoints remain.
 - Rebind these actions in **Controls**; displayed shortcut labels follow saved
   bindings. Controller buttons can be assigned to Search/Stop there too.
 

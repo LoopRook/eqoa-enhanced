@@ -26,5 +26,6 @@ pub mod readycheck;
 pub mod selectinfo;
 pub mod serverworlds;
 pub mod session;
+pub mod statfig;
 pub mod stream;
 pub mod weather;

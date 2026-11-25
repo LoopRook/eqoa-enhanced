@@ -2474,7 +2474,7 @@ fn round6b_non_item_target_cycle_interact_attack_cast_hotbar_move() {
     );
     p.hud_menus.defs[0].count = 5;
     p.hud_menus.defs[0].entries[0] = crate::hudmenu::Entry {
-        icon2: 10,
+        icon_back: -1, art: -1, icon2: 10,
         x08: 0,
         msg: 0x0806_0000,
         id: 501,

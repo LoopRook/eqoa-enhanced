@@ -234,7 +234,7 @@ mod tests {
         testing::reset(false);
         bindpage::reset_in_memory();
         bindpage::register("eqoa_stats_box", "toggle", "b", "Toggle Stats Box");
-        assert!(bindpage::set_key("eqoa_stats_box", "toggle", "f10"));
+        assert!(bindpage::set_key("eqoa_stats_box", "toggle", "f2"));
         bindpage::register("third_party", "open", "8", "Open");
         assert!(bindpage::set_key("third_party", "open", "7"));
         let mut native = binds();
@@ -269,7 +269,7 @@ mod tests {
         bindpage::register("third_party", "open", "8", "Open");
         assert_eq!(
             bindpage::get_key("eqoa_stats_box", "toggle").as_deref(),
-            Some("f10")
+            Some("f2")
         );
         assert_eq!(
             bindpage::get_key("third_party", "open").as_deref(),
@@ -284,7 +284,7 @@ mod tests {
             "the saved key of the other mod works"
         );
         assert_eq!(
-            bindpage::dispatch_keypress("f10"),
+            bindpage::dispatch_keypress("f2"),
             Some(("eqoa_stats_box".into(), "toggle".into()))
         );
         std::fs::remove_dir_all(root).unwrap();
@@ -604,11 +604,11 @@ mod tests {
             "target_of_target",
             false,
         );
-        crate::fork_ext::bindpage::set_key("eqoa_stats_box", "toggle", "f10");
+        crate::fork_ext::bindpage::set_key("eqoa_stats_box", "toggle", "f2");
         super::super::testing::put("client.opt", b"target_of_target=on\n");
         super::super::testing::put(
             "keys.opt",
-            b"mod.eqoa_stats_box.toggle=f10\nkey.stats_box=j\n",
+            b"mod.eqoa_stats_box.toggle=f2\nkey.stats_box=j\n",
         );
         migrate_configs();
         assert_eq!(
@@ -621,7 +621,7 @@ mod tests {
         );
         assert_eq!(
             crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle"),
-            Some("f10".to_string()),
+            Some("f2".to_string()),
             "explicit mod bind choice kept"
         );
 
