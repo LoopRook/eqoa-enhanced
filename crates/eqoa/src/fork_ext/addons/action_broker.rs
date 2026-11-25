@@ -161,7 +161,7 @@ pub(crate) enum ActionKind {
     OpenLoot { entity_id: Option<u32>, keep_target: bool },
     Talk { entity_id: Option<u32>, kind: TalkKind },
     /// `eqoa.map.set_waypoint`: the player's own waypoint of `world` moved to (`x`, `z`) by mod `addon`.
-    SetWaypoint { vm: u64, addon: String, world: i32, x: f32, z: f32, label: Option<String> },
+    SetWaypoint { vm: u64, addon: String, world: i32, x: f32, z: f32, label: Option<String>, keep: bool },
     /// `eqoa.map.clear_waypoint`: VM `vm`'s own waypoint taken away.
     ClearWaypoint { vm: u64 },
     /// Round A3 (`frame_actions`): invite the target, the pet's commands, an emote, a jump, a buff taken off.

@@ -2281,7 +2281,7 @@ fn dispatch_broker_action(
             // nothing followed: `follow(nil)` does nothing (never the toggle, which would follow the target)
             DispatchOutcome::Completed { detail: None }
         }
-        ActionKind::SetWaypoint { vm, addon, world, x, z, label } => {
+        ActionKind::SetWaypoint { vm, addon, world, x, z, label, keep } => {
             if !crate::settings::map() {
                 return DispatchOutcome::Refused {
                     code: "unavailable",
@@ -2292,7 +2292,7 @@ fn dispatch_broker_action(
                 return DispatchOutcome::Refused { code, reason: reason.into() };
             }
             play.map.api_set_waypoint(*world, Some([*x, *z]));
-            crate::fork_ext::addons::map_waypoint::placed(*vm, addon, *world, [*x, *z], label.clone());
+            crate::fork_ext::addons::map_waypoint::placed(*vm, addon, *world, [*x, *z], label.clone(), *keep);
             DispatchOutcome::Completed {
                 detail: Some(serde_json::json!({"world_id": world, "x": x, "z": z})),
             }
