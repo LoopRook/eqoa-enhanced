@@ -483,12 +483,17 @@ impl Core {
     pub fn reset(&mut self, reason: &str) {
         super::input::reset_input_state_for_world();
         super::action_broker::reset_session(reason);
-        super::window_takeover::release_all();
         if self.view.in_world {
             self.emit(
                 "world.leaving",
                 json!({"reason":reason,"world_id":self.view.world_id}),
             );
+        }
+        // `world.leaving` comes first (spec section 3); what the world's end closes (held sessions, questions) is
+        // told right after it and before `state.reset`, not at the next flush, which would be after `state.reset`.
+        super::window_takeover::release_all();
+        for (name, data) in super::window_sessions::take_outbox() {
+            self.emit(name, data);
         }
         self.items_reset_events();
         self.generation += 1;

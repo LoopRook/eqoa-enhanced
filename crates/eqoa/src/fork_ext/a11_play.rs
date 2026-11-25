@@ -24,6 +24,7 @@ use crate::fork_ext::addons::{
     native_a11::{self, A11Action, Read},
     dialog_sessions::{self, Item},
     native_items::is_handle_fresh,
+    window_sessions,
     window_takeover::{self, TakeoverKind},
 };
 use net::mercwin::{CARRIED, HEIRLOOM, OPEN, SLOTS, STOCK, WORN};
@@ -120,8 +121,16 @@ fn up(kind: TakeoverKind) -> bool {
     dialog_sessions::windows().iter().any(|a| a.item.kind() == kind)
 }
 
-fn hidden_held() -> bool {
-    TakeoverKind::ALL.iter().any(|k| window_takeover::is_hidden_active(*k)) || super::a9_play::hidden_active()
+/// The one answer to "does a mod hold a window the game would count as up while its own mode reads 0": a hidden
+/// corpse, merchant or bank session, a hidden trade, duel or blacksmith window (A9), a held NPC dialog, offer or
+/// server window (A2, A11: `dialog_sessions`), and a held Start menu, chat line or map (A6, A13). A window a mod opens
+/// as a view of its own (Bags, Journal, the crafting and mail windows) hides nothing and does not count. Every round's
+/// "open natively, or wait" decision asks this, and nothing else.
+pub(crate) fn mod_window_up() -> bool {
+    TakeoverKind::ALL.iter().any(|k| window_takeover::is_hidden_active(*k))
+        || super::a9_play::hidden_active()
+        || dialog_sessions::any_up()
+        || window_sessions::client_window_up()
 }
 
 /// The server opens a mercenary window (`mode`) while a hidden session holds the game: it waits.
@@ -156,7 +165,7 @@ pub(crate) fn fishing_blocked(play: &mut Play) -> bool {
 /// A hidden session of a mod (a corpse, merchant, bank, trade, duel or blacksmith) holds the game in a window of its own while the game's mode
 /// reads 0. True means "act as the game does with a window up". `what` names the window for the log.
 pub(crate) fn blocked(what: &'static str) -> bool {
-    let held = hidden_held();
+    let held = mod_window_up();
     LOCAL.with(|l| {
         let mut l = l.borrow_mut();
         if held {
@@ -383,7 +392,7 @@ fn resume_merc(play: &mut Play) {
             hold_window(play, kind);
             continue;
         }
-        if opened || hidden_held() || play.mode != 0 {
+        if opened || mod_window_up() || play.mode != 0 {
             keep.push((mode, bypass));
             continue;
         }
@@ -420,7 +429,7 @@ fn resume_fishing(play: &mut Play) {
     }
     if play.is_dead() || play.fish.part.state == crate::fishing::state::OFF || up(TakeoverKind::Fishing) {
         LOCAL.with(|l| l.borrow_mut().fish_wait = false);
-    } else if play.mode == 0 && !hidden_held() {
+    } else if play.mode == 0 && !mod_window_up() {
         LOCAL.with(|l| l.borrow_mut().fish_wait = false);
         open_fishing_window(play);
     }
@@ -584,7 +593,7 @@ pub(crate) fn give_window(play: &mut Play, kind: TakeoverKind) {
         }
         _ => {
             if play.fish.part.state != crate::fishing::state::OFF {
-                if play.mode == 0 && !hidden_held() {
+                if play.mode == 0 && !mod_window_up() {
                     open_fishing_window(play);
                 } else {
                     // another window is up: the session waits for plain play, nothing is cancelled

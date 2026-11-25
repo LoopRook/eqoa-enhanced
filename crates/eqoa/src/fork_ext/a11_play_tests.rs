@@ -1478,3 +1478,119 @@ fn a11_r4_low2_dye_token_cleared_when_mod_goes_in_same_step_as_death() {
     let (ok, code) = ask(&mut p, &host, "return eqoa.actions.dye_cancel(0x11112222)");
     assert!(ok, "new picker after death must succeed, got {code}");
 }
+
+// ---- integration review 2026-11-25: M3 (one answer to "a mod holds a window") and P5 (order on a world change) ----------
+
+/// A text dialog a mod holds (round A2): the game's mode reads 0 while it is shown.
+fn hold_a_dialog(vm: u64, addon: &str) -> String {
+    assert!(window_takeover::takeover(vm, addon, TakeoverKind::TextDialog, TakeoverScope::All).is_ok());
+    crate::fork_ext::addons::dialog_sessions::hold(
+        crate::fork_ext::addons::dialog_sessions::Item::Text { text: "Hail, traveller.".encode_utf16().collect(), talked_to: None },
+        None,
+    );
+    assert!(crate::fork_ext::addons::dialog_sessions::start_next(true, None).is_some(), "the dialog session started");
+    let id = ws::get(vm, "text_dialog").expect("the session").id;
+    assert!(mod_window_up(), "a held dialog is a mod window up");
+    id
+}
+
+/// M3: a held NPC dialog counts as a mod window up, as a hidden corpse or trade does: a mercenary window and the dye
+/// picker wait for it and open when it ends, and a fishing start under it is cancelled. Negative control (run red):
+/// with `dialog_sessions::any_up()` out of `mod_window_up()` (the old `hidden_held()`), all three open natively over it.
+#[test]
+fn a11_m3_merc_dye_and_fishing_respect_a_held_dialog() {
+    // 1. the mercenary inventory waits behind the dialog, then opens when it ends
+    let mut p = ready();
+    let id = hold_a_dialog(7, "dialogs");
+    open_merc(&mut p);
+    assert_eq!(p.mode, 0, "the merc window must wait behind the held dialog");
+    assert!(p.merc.window.is_some());
+    crate::fork_ext::addons::dialog_sessions::finish(&id, "answered");
+    tick(&mut p, true);
+    assert_eq!(p.mode, crate::play::mercplay::ITEMS_MODE, "the waiting merc window opens when the dialog ends");
+
+    // 2. the dye picker waits, then opens
+    let mut p = ready();
+    let id = hold_a_dialog(7, "dialogs");
+    p.dyepick_opcode(&dye_open(0x5555_6666, true));
+    let (v, mut r) = (vui(), NullRaster);
+    p.run_dyepick(&v, &mut r);
+    assert_eq!(p.mode, 0, "the dye picker must wait behind the held dialog");
+    assert!(!p.dyepick.picker.open);
+    crate::fork_ext::addons::dialog_sessions::finish(&id, "answered");
+    p.run_dyepick(&v, &mut r);
+    assert_eq!(p.mode, crate::play::dyeplay::MODE, "the waiting dye picker opens when the dialog ends");
+
+    // 3. a fishing start is cancelled, with the game's cancel bytes and the chat line
+    let mut p = ready();
+    hold_a_dialog(7, "dialogs");
+    sent(&mut p);
+    assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
+    assert_eq!(p.mode, 0, "fishing must not open over a held dialog");
+    assert_eq!(sent_op(&mut p, 0x01, 0x0F), vec![crate::fishing::sub_msg(2)], "fishing sends its cancel");
+    assert!(p.chat.iter().any(|(t, _)| t == "Fishing stopped: a mod window was busy, cast again"));
+}
+
+/// Every kind the one check counts, and the views it does not: a held Start menu, chat line and map (client-side
+/// windows) count; a window a mod opened as a view of its own (Bags) does not.
+#[test]
+fn a11_m3_the_one_check_counts_held_client_windows_and_not_views() {
+    let _p = ready();
+    assert!(!mod_window_up(), "nothing held");
+    ws::open(7, "mod", "inventory", "mod").unwrap();
+    assert!(!mod_window_up(), "Bags, a view of the mod's own, hides nothing");
+    for kind in [TakeoverKind::StartMenu, TakeoverKind::ChatEntry, TakeoverKind::Map] {
+        ws::reset_for_test();
+        assert!(window_takeover::takeover(7, "mod", kind, TakeoverScope::All).is_ok());
+        ws::start_dialog_session(7, "mod", kind, serde_json::Value::Null);
+        assert!(mod_window_up(), "a held {} counts", kind.name());
+    }
+}
+
+/// P5a: on every kind of world change a mod hears `world.leaving` first, then the end of what it held (`zoning`), then
+/// `state.reset`: over a teleport, a new world entry into the same world (the server restarting under the player), a
+/// new entry into another world (a zone) and a disconnect. Negative control (run red): with the closes left in the
+/// outbox (the old order) they arrived after `state.reset`.
+#[test]
+fn p5_a_world_change_tells_leaving_then_the_closed_sessions_then_the_reset() {
+    use net::session::Event;
+    for which in ["teleport", "world_entry_same_world", "world_entry_other_world", "disconnect"] {
+        let (mut p, host) = rig();
+        CORE.with(|c| c.borrow_mut().view.in_world = true);
+        host.execute(
+            r#"seen = {}
+            for _, n in ipairs({"world.leaving", "state.reset", "windows.session", "confirm.closed"}) do
+                eqoa.events.on(n, function(e)
+                    local d = e.data
+                    seen[#seen + 1] = n .. (d.phase and (":" .. d.phase .. ":" .. tostring(d.reason)) or "")
+                end)
+            end"#,
+        )
+        .unwrap();
+        let vm = native_events::bus(&host.lua).borrow().vm;
+        hold_a_dialog(vm, "dialogs");
+        step(&mut p, &host);
+        host.execute("seen = {}").unwrap();
+        let ev = match which {
+            "teleport" => Event::Teleport { world: p.player.world as u8, pos: [5.0, 0.0, 5.0], hpr: [0.0; 3], token: 9 },
+            "world_entry_same_world" => Event::WorldEntry { self_id: 0x100, player: p.player.clone(), dump: Default::default() },
+            "world_entry_other_world" => {
+                let mut other = p.player.clone();
+                other.world = other.world.wrapping_add(1);
+                Event::WorldEntry { self_id: 0x100, player: other, dump: Default::default() }
+            }
+            _ => Event::Disconnected(3),
+        };
+        let cap = super::super::begin_game_event(&p, &ev);
+        p.mode = 0;
+        super::super::divert_event(&mut p);
+        super::super::end_game_event(&p, cap);
+        step(&mut p, &host);
+        let seen: String = host.lua.load("return table.concat(seen, ' ')").eval().unwrap();
+        let at = |needle: &str| seen.find(needle).unwrap_or_else(|| panic!("{which}: {needle} not told: {seen}"));
+        assert!(
+            at("world.leaving") < at("windows.session:closed:zoning") && at("windows.session:closed:zoning") < at("state.reset"),
+            "{which}: order was: {seen}"
+        );
+    }
+}
