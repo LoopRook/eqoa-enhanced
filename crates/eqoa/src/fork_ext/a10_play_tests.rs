@@ -2115,7 +2115,7 @@ mod mods {
         bm_type(&mut r, "250");
         let (x, y) = bm_hit(&r, "Deposit tunar");
         r.press_px(x, y, "left", false);
-        assert_eq!(bm_calls(&r), "deposit:250", "{}", r.why());
+        assert_eq!(bm_calls(&r), "Deposit 250 tunar", "{}", r.why());
         assert_eq!(r.p.bank.state, 1, "the game's own 0x1255 went out; {}", r.why());
         // the server's answer: the bank now holds 750 and the pack 750 (the game's own money events)
         let mut w = Writer::default();
@@ -2133,7 +2133,7 @@ mod mods {
         }
         let (x, y) = bm_hit(&r, "Withdraw all tunar");
         r.press_px(x, y, "left", false);
-        assert_eq!(bm_calls(&r), "deposit:250,withdraw:750", "All withdraws the whole bank balance; {}", r.why());
+        assert_eq!(bm_calls(&r), "Deposit 250 tunar,Withdraw 750 tunar", "All withdraws the whole bank balance; {}", r.why());
     }
 
     #[test]
