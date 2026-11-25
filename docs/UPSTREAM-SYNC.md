@@ -516,5 +516,8 @@ default key (F4 is the Stat Window; a saved F4 is dropped once), and the hidden 
 go by upstream's `set_scroll(0)` (the test asserts what is still the fork's promise).
 
 Budget changes (reasons in docs/fork-footprint.json): play.rs +95/-51 to +99/-51, raidplay.rs +5 to +7,
-`reviewed_base` 51c7635e to 8ad5caa9. Every other budget is unchanged. Tests: see the fixes report; the
-client suite is run through `tools/sync_upstream.py --continue --tests-only`.
+`reviewed_base` 51c7635e to 8ad5caa9. Every other budget is unchanged. Tests (`tools/sync_upstream.py
+--continue --tests-only`, one thread, the owner's disc linked): client 3629 passed / 0 failed / 39 ignored, net
+152 passed, 54 SKIP lines (no decomp or oracle here; upstream's manual GPU tests are ignored); Python tools 235
+passed. The first run had one failure, the HUD Numbers mod reading a null `frame_x` (a window of zero size made
+the scaled rectangle NaN), fixed before the final run. Nothing was played in either interface.
