@@ -210,7 +210,7 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("chat.history_scroll", "active steps"),
         (
             "combat.hit",
-            "attacker_id defender_id amount kind color outgoing incoming from_pet to_pet",
+            "attacker_id defender_id amount kind color outgoing incoming from_pet to_pet by_player from_merc",
         ),
         ("input.key", "key down repeat synthetic text"),
         ("input.pad", "before after"),

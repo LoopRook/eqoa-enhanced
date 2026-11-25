@@ -1413,7 +1413,7 @@ function M.engaged_recently(id)
 end
 
 function M.on_combat_hit(d)
-    if d and d.outgoing and d.kind == "damage" and not d.from_pet and d.defender_id then
+    if d and d.outgoing and d.by_player ~= false and d.kind == "damage" and not d.from_pet and d.defender_id then
         M.mark_engaged(d.defender_id)
     end
 end

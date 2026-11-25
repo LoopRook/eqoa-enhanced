@@ -740,18 +740,18 @@ fn native_combat_and_forge_share_signed_amount_rgb_snapshot_and_consumer_lifecyc
         .unwrap();
     h.snapshot.set(p.forge_snapshot(None));
     h.execute("hits={};forge_combat.Acquire('source');forge_combat.On('source','OnDamageDealt',function(e) hits[#hits+1]=e end)").unwrap();
-    p.fork_combat_event(0x100, i32::MIN, 0x200, Some([0, 0, 0]));
+    p.fork_combat_event(0x100, i32::MIN, 0x200, Some([0, 0, 0]), None);
     let snapshot = p.forge_snapshot(None);
     assert_eq!(snapshot.combat.count, 1);
     assert_eq!(snapshot.combat.events[0].color, 0x01000000);
     assert_eq!(snapshot.combat.events[0].amount, i32::MIN);
     h.snapshot.set(snapshot);
     h.execute("forge_combat.Update();assert(#hits==1 and hits[1].amount==-2147483648 and hits[1].color==0x01000000 and not hits[1].is_heal);assert(forge_combat.UninstallHook());assert(not forge_combat.IsHookInstalled());assert(not forge_combat.GetHookInfo().installed)").unwrap();
-    p.fork_combat_event(0x100, -1, 0x200, None);
+    p.fork_combat_event(0x100, -1, 0x200, None, None);
     h.snapshot.set(p.forge_snapshot(None));
     h.execute("forge_combat.Update();assert(#hits==1);assert(forge_combat.InstallHook());assert(forge_combat.IsHookInstalled());forge_combat.Update();assert(#hits==1)").unwrap();
     native_events::clear(&h);
-    p.fork_combat_event(0x100, -2, 0x200, None);
+    p.fork_combat_event(0x100, -2, 0x200, None, None);
     h.snapshot.set(p.forge_snapshot(None));
     h.execute("forge_combat.Update();assert(#hits==1);assert(not forge_combat.IsHookInstalled());assert(not forge_combat.GetHookInfo().installed)").unwrap();
 }

@@ -4694,11 +4694,12 @@ impl Play {
         _amount: i32,
         _defender: u32,
         _color: Option<[u8; 3]>,
+        _tag: Option<net::session::NumberTag>,
     ) {
         #[cfg(not(target_arch = "wasm32"))]
         crate::fork_ext::addons::combat::record_combat_event(_attacker, _amount, _defender);
         #[cfg(not(target_arch = "wasm32"))]
-        crate::fork_ext::addons::native_core::observe_hit(_attacker, _defender, _amount, _color);
+        crate::fork_ext::addons::native_core::observe_hit_tagged(_attacker, _defender, _amount, _color, _tag.map(|t| (t.pet, t.merc)));
         // Unit tests never emit to a real companion. The browser has no native socket
         // or SystemTime clock; neither is touched by this hook there.
         #[cfg(all(not(target_arch = "wasm32"), not(test)))]
