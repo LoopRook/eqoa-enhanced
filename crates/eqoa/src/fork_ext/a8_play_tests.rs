@@ -305,6 +305,11 @@ fn a8_the_tray_keeps_the_games_limits_and_a_fill_is_all_or_nothing() {
     let (mut p, host) = rig();
     open(&mut p, &host, "experiment");
     host.execute("c = assert(eqoa.craft.get()); assert(#c.items == 3, 'components only'); iron, pine, silk = c.items[1], c.items[2], c.items[3]").unwrap();
+    // P1 (integration review): a row's id is the spec's `Id`, a decimal string, as `Item.id` is (control: it was a Lua
+    // number before the fix, so `type` was 'number' and a number id is refused below)
+    host.execute("assert(type(iron.id) == 'string' and iron.id == tostring(tonumber(iron.id)), tostring(iron.id))").unwrap();
+    let (ok, c, _) = act(&mut p, &host, "return eqoa.actions.craft_tray_add({slot = iron.slot, id = tonumber(iron.id)})");
+    assert!(!ok && c == "invalid_argument", "a number is not an Id: {c}");
     // the rows are the bag copy's: Iron Ore is the second item of the bags, so row 1 of the components... by slot
     let (ok, c, r) = act(&mut p, &host, "return eqoa.actions.craft_tray_add({slot = iron.slot, id = iron.id})");
     assert!(ok, "{c} {r}");
@@ -312,10 +317,10 @@ fn a8_the_tray_keeps_the_games_limits_and_a_fill_is_all_or_nothing() {
     assert_eq!(snapshot_json()["items"][0]["in_tray"], 1);
     assert!(sent().is_empty(), "the tray is the client's own list until a combine: nothing is sent");
     // a wrong id (the bags changed under the mod) is refused
-    let (ok, c, _) = act(&mut p, &host, "return eqoa.actions.craft_tray_add({slot = iron.slot, id = iron.id + 1})");
+    let (ok, c, _) = act(&mut p, &host, "return eqoa.actions.craft_tray_add({slot = iron.slot, id = tostring(iron.id + 1)})");
     assert!(!ok && c == "stale_handle", "{c}");
     // not a component
-    let (ok, c, _) = act(&mut p, &host, "return eqoa.actions.craft_tray_add({slot = 1, id = 900001})");
+    let (ok, c, _) = act(&mut p, &host, "return eqoa.actions.craft_tray_add({slot = 1, id = '900001'})");
     assert!(!ok && c == "invalid_argument", "{c}");
     // the stack holds two logs: a third is the game's own "already in the combine list"
     host.execute("assert(eqoa.actions.craft_tray_add({slot = pine.slot, id = pine.id}))").unwrap();
@@ -339,14 +344,14 @@ fn a8_the_tray_keeps_the_games_limits_and_a_fill_is_all_or_nothing() {
     // a fill replaces the tray; a fill with a pick the bags cannot give changes nothing (the control)
     let before = p.craft.combine.clone();
     assert_eq!(before.len(), 3);
-    let (ok, c, _) = act(&mut p, &host, "return eqoa.actions.craft_fill({{slot = iron.slot, id = iron.id}, {slot = silk.slot, id = silk.id + 5}})");
+    let (ok, c, _) = act(&mut p, &host, "return eqoa.actions.craft_fill({{slot = iron.slot, id = iron.id}, {slot = silk.slot, id = tostring(silk.id + 5)}})");
     assert!(!ok && c == "stale_handle", "{c}");
     assert_eq!(p.craft.combine.len(), before.len(), "a refused fill leaves the tray as it was");
     let (ok, ..) = act(&mut p, &host, "return eqoa.actions.craft_fill({{slot = iron.slot, id = iron.id}, {slot = iron.slot, id = iron.id}, {slot = silk.slot, id = silk.id}})");
     assert!(ok);
     assert_eq!(p.craft.combine.iter().map(|i| i.item.id).collect::<Vec<_>>(), vec![900_002, 900_002, 900_004]);
     // more than four picks never reaches the game
-    host.execute("big = {iron, iron, silk, silk, pine}; r, e = eqoa.actions.craft_fill({{slot=1,id=1},{slot=1,id=1},{slot=1,id=1},{slot=1,id=1},{slot=1,id=1}})").unwrap();
+    host.execute("big = {iron, iron, silk, silk, pine}; r, e = eqoa.actions.craft_fill({{slot=1,id='1'},{slot=1,id='1'},{slot=1,id='1'},{slot=1,id='1'},{slot=1,id='1'}})").unwrap();
     host.execute("assert(r == nil and e.code == 'out_of_range')").unwrap();
     // clear
     let (ok, ..) = act(&mut p, &host, "return eqoa.actions.craft_tray_clear()");
@@ -578,7 +583,7 @@ fn a8_only_the_rows_the_games_experiment_lists_are_offered() {
     }
     assert!(p.craft.combine.is_empty());
     // the control: a listed row goes in
-    let (ok, ..) = act(&mut p, &host, "return eqoa.actions.craft_tray_add({slot = 2, id = 900002})");
+    let (ok, ..) = act(&mut p, &host, "return eqoa.actions.craft_tray_add({slot = 2, id = '900002'})");
     assert!(ok);
 }
 
@@ -599,7 +604,7 @@ fn a8_the_tray_follows_the_real_bags_while_the_window_is_open() {
     // adding what is gone is stale, what was just looted works
     let (ok, c, _) = act(&mut p, &host, "return eqoa.actions.craft_tray_add({slot = silk.slot, id = silk.id})");
     assert!(!ok && c == "stale_handle", "{c}");
-    let (ok, ..) = act(&mut p, &host, "return eqoa.actions.craft_tray_add({slot = 4, id = 900005})");
+    let (ok, ..) = act(&mut p, &host, "return eqoa.actions.craft_tray_add({slot = 4, id = '900005'})");
     assert!(ok);
     // the control: with a request out the copy is left as the game's replies updated it
     p.craft.pending = 4;

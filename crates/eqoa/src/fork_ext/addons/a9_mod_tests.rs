@@ -87,14 +87,14 @@ fn request_state() -> serde_json::Value {
 
 fn open_state(accepted_mine: bool) -> serde_json::Value {
     let bag = |slot: i64, id: i64, name: &str, qty: i64, worn: bool| {
-        json!({"slot": slot, "id": id, "name": name, "quantity": qty, "worn": worn, "no_trade": false, "can_offer": !worn, "text": format!("{name}\nDamage 12 / Delay 30\nLevel 20")})
+        json!({"slot": slot, "id": id.to_string(), "name": name, "quantity": qty, "worn": worn, "no_trade": false, "can_offer": !worn, "text": format!("{name}\nDamage 12 / Delay 30\nLevel 20")})
     };
     json!({
         "kind": "trade", "phase": "open", "held": true,
         "partner": {"id": 77, "name": "Bobbington the Long-Named Trader"},
         "initiated": false,
-        "mine": {"items": [{"slot": 1, "id": 10, "name": "A Very Long Item Name Of Great Rarity", "quantity": 5}], "money": 120, "accepted": accepted_mine},
-        "theirs": {"items": [{"slot": 1, "id": 99, "name": "Fine Steel Sword of the Northern Wastes", "quantity": 1}], "money": 5000, "accepted": false},
+        "mine": {"items": [{"slot": 1, "id": "10", "name": "A Very Long Item Name Of Great Rarity", "quantity": 5}], "money": 120, "accepted": accepted_mine},
+        "theirs": {"items": [{"slot": 1, "id": "99", "name": "Fine Steel Sword of the Northern Wastes", "quantity": 1}], "money": 5000, "accepted": false},
         "bags": [
             bag(1, 10, "A Very Long Item Name Of Great Rarity", 5, false),
             bag(2, 11, "Rusty Sword", 1, false),
@@ -290,7 +290,7 @@ fn smith_state(costs: &[(i64, i64)], pending: bool, coin: i64) -> serde_json::Va
         .iter()
         .enumerate()
         .map(|(i, (key, cost))| {
-            json!({"slot": i + 1, "id": 100 + key, "inventory_key": key, "name": format!("Damaged Item Number {key} of Great Length"),
+            json!({"slot": i + 1, "id": (100 + key).to_string(), "inventory_key": key, "name": format!("Damaged Item Number {key} of Great Length"),
                 "quantity": 1, "condition": 0.5, "cost": cost, "can_repair": *cost > 0, "worn": false})
         })
         .collect();

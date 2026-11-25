@@ -348,8 +348,10 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         "merc_spell_set",
         lua.create_function(|lua, (slot, spell): (Value, Value)| {
             enqueue_lua_with(lua, "eqoa.actions.merc_spell_set", || {
-                let (Some(slot), Some(spell)) = (uint_arg(&slot, 10), uint_arg(&spell, u32::MAX as i64)) else {
-                    return Err(("invalid_argument", "pass a slot from 1 to 10 and a spell id of eqoa.merc.get().spells.spells (0 empties the slot)".into()));
+                // the spell is an ability `Id` string, as `Spell.id` gives it ("0" empties the slot)
+                let spell = super::native::id_arg(&spell).filter(|n| (0..=i64::from(u32::MAX)).contains(n));
+                let (Some(slot), Some(spell)) = (uint_arg(&slot, 10), spell) else {
+                    return Err(("invalid_argument", "pass a slot from 1 to 10 and a spell's id (a decimal string) of eqoa.merc.get().spells.spells (\"0\" empties the slot)".into()));
                 };
                 if slot == 0 {
                     return Err(("out_of_range", "the merc's slots are 1 to 10".into()));

@@ -115,13 +115,14 @@ fn int_arg(v: &Value) -> Option<i64> {
     }
 }
 
-/// A `{slot = n, id = n}` pick: `slot` is 1-based in Lua (the first row of `items` is 1).
+/// A `{slot = n, id = "n"}` pick: `slot` is 1-based in Lua (the first row of `items` is 1); `id` is the row's `Id`
+/// string, as the read gives it.
 fn pick_of(table: &mlua::Table) -> std::result::Result<(usize, i64), (&'static str, String)> {
     let slot = table.get::<Value>("slot").ok().and_then(|v| int_arg(&v));
-    let id = table.get::<Value>("id").ok().and_then(|v| int_arg(&v));
+    let id = table.get::<Value>("id").ok().and_then(|v| super::native::id_arg(&v));
     match (slot, id) {
         (Some(slot), Some(id)) if (1..=100_000).contains(&slot) => Ok((slot as usize - 1, id)),
-        _ => Err(("invalid_argument", "a tray pick is {slot = a row of items (1 or more), id = that row's id}".into())),
+        _ => Err(("invalid_argument", "a tray pick is {slot = a row of items (1 or more), id = that row's id (a decimal string)}".into())),
     }
 }
 

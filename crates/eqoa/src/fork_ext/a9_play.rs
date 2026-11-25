@@ -245,7 +245,7 @@ fn clear_tips() {
 }
 
 fn item_row(play: &Play, slot: usize, it: &NetItem, theirs: bool) -> Json {
-    json!({"slot": slot, "id": it.item.id, "name": it.item.name, "quantity": it.quantity.max(1), "text": tip_text(play, it, theirs)})
+    json!({"slot": slot, "id": it.item.id.to_string(), "name": it.item.name, "quantity": it.quantity.max(1), "text": tip_text(play, it, theirs)})
 }
 
 fn bag_row(play: &Play, slot: usize, it: &NetItem, room: bool) -> Json {
@@ -253,7 +253,7 @@ fn bag_row(play: &Play, slot: usize, it: &NetItem, room: bool) -> Json {
     let no_trade = it.item.no_trade > 0;
     json!({
         "slot": slot,
-        "id": it.item.id,
+        "id": it.item.id.to_string(),
         "name": it.item.name,
         "quantity": it.quantity.max(1),
         "worn": worn,
@@ -407,7 +407,7 @@ fn smith_state(play: &Play) -> Option<Json> {
             let condition = if it.item.max_hp == 0 { 1.0 } else { (it.cur_hp as f64 / it.item.max_hp as f64).clamp(0.0, 1.0) };
             json!({
                 "slot": i + 1,
-                "id": it.item.id,
+                "id": it.item.id.to_string(),
                 "inventory_key": it.inv_index,
                 "name": it.item.name,
                 "quantity": it.quantity.max(1),

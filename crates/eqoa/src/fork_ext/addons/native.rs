@@ -456,6 +456,16 @@ pub(super) fn quiet_error(
     lua.pack_multi((Value::Nil, e))
 }
 
+/// An `Id` argument (§1): an item-definition or ability id as the canonical decimal string the reads give
+/// (`Item.id`, `Ability.id`, a row's `id`). A Lua number is not an `Id`: the reads never give one, and a 64-bit id
+/// does not fit a Lua number exactly. None for anything else (the caller refuses it `invalid_argument`).
+pub(crate) fn id_arg(v: &Value) -> Option<i64> {
+    let Value::String(s) = v else { return None };
+    let s = s.to_str().ok()?;
+    let text: &str = &s;
+    text.parse::<i64>().ok().filter(|n| n.to_string() == text)
+}
+
 pub(crate) fn record(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
     if matches!(value, Json::Array(_)) || matches!(value, Json::Object(f) if !f.contains_key("$ref")) {
         if let Some(built) = super::record_raw::build(lua, path, value)? {

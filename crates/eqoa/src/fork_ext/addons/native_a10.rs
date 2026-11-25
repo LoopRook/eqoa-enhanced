@@ -207,14 +207,18 @@ fn id_arg(v: &Value, what: &str, max: i64) -> std::result::Result<i64, Refusal> 
     }
 }
 
-/// `{slot = n, id = n, count = n?}`: `slot` is 1-based in Lua (the first row of the list is 1).
+/// `{slot = n, id = "n", count = n?}`: `slot` is 1-based in Lua (the first row of the list is 1); `id` is the row's
+/// `Id` string, as the read gives it.
 fn item_pick(t: &mlua::Table) -> std::result::Result<(usize, i64, Option<i64>), Refusal> {
     let slot = field_int(t, "slot", 1, 100_000)?;
-    let id = field_int(t, "id", 0, i64::MAX)?;
+    let id = match t.get::<Value>("id").unwrap_or(Value::Nil) {
+        Value::Nil => None,
+        v => Some(super::native::id_arg(&v).ok_or_else(|| bad("id must be the row's id as a decimal string"))?),
+    };
     let count = field_int(t, "count", 1, 1_000_000)?;
     match (slot, id) {
         (Some(slot), Some(id)) => Ok((slot as usize - 1, id, count)),
-        _ => Err(bad("an item is {slot = a row of the list (1 or more), id = that row's id, count = how many}")),
+        _ => Err(bad("an item is {slot = a row of the list (1 or more), id = that row's id (a decimal string), count = how many}")),
     }
 }
 

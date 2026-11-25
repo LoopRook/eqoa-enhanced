@@ -212,7 +212,7 @@ fn merc_state(play: &Play) -> Option<Json> {
             "records": w.records.iter().map(|r| json!({
                 "id": r.id,
                 "kind": kind_name(r.kind),
-                "item_id": r.item.item.id,
+                "item_id": r.item.item.id.to_string(),
                 "name": r.item.item.name,
                 "quantity": r.item.quantity.max(1),
                 "equip_slot": r.item.equip_slot,
@@ -227,9 +227,10 @@ fn merc_state(play: &Play) -> Option<Json> {
             "class": s.class,
             "level": s.level,
             "set": s.set(),
-            "slots": s.slots,
+            // spell ids are ability `Id` strings, as `Spell.id`; "0" is an empty slot (the game's own 0)
+            "slots": s.slots.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
             "spells": s.spells.iter().map(|sp| json!({
-                "id": sp.ability.id,
+                "id": sp.ability.id.to_string(),
                 "name": sp.ability.name,
                 "slot": s.slots.iter().position(|&id| id as i64 == sp.ability.id && id != 0).map_or(Json::Null, |k| json!(k + 1)),
             })).collect::<Vec<_>>(),

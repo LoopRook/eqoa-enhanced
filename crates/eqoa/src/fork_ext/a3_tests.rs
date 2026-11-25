@@ -135,7 +135,7 @@ fn a3_buffs_read_time_left_whose_spell_and_removable_and_count_down_on_the_game_
         local b, err = eqoa.effects.buffs()
         assert(err == nil and #b == 2, tostring(err and err.code))
         assert(b[1].index == 1 and b[1].whose == 'player' and b[1].name == 'Dark Ward')
-        assert(b[1].spell_id == 9304 and b[1].icon == 11 and b[1].removable == true)
+        assert(b[1].spell_id == '9304' and b[1].icon == 11 and b[1].removable == true)
         assert(math.abs(b[1].time_left - 60) < 0.1, b[1].time_left)
         assert(b[2].whose == 'pet' and b[2].removable == false and b[2].time_left == nil, 'no end kept is nil')
         "#,

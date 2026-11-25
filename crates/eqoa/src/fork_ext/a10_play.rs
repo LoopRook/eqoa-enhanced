@@ -196,7 +196,7 @@ fn mail_snapshot(play: &Play) -> Json {
     let pack: Vec<Json> = pack_rows(play)
         .iter()
         .enumerate()
-        .map(|(i, it)| json!({"slot": i + 1, "id": it.item.id, "name": it.item.name, "quantity": it.quantity.max(1)}))
+        .map(|(i, it)| json!({"slot": i + 1, "id": it.item.id.to_string(), "name": it.item.name, "quantity": it.quantity.max(1)}))
         .collect();
     let offer = if g.live { g.attach.offer } else { None };
     json!({
@@ -303,7 +303,7 @@ fn auction_snapshot(play: &Play) -> Json {
             .iter()
             .enumerate()
             .filter(|(_, it)| crate::auction::can_sell(it))
-            .map(|(i, it)| json!({"slot": i + 1, "id": it.item.id, "name": it.item.name, "quantity": it.quantity.max(1), "value": it.item.value}))
+            .map(|(i, it)| json!({"slot": i + 1, "id": it.item.id.to_string(), "name": it.item.name, "quantity": it.quantity.max(1), "value": it.item.value}))
             .collect()
     } else {
         Vec::new()

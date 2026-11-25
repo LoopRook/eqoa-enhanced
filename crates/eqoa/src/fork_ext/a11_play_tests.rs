@@ -480,7 +480,7 @@ fn a11_the_reads_say_what_the_windows_hold() {
         local m = eqoa.merc.get()
         assert(m.available == true and m.own_out == true and m.inventory.open == false and m.inventory.name == 'Kel')
         assert(#m.inventory.records == 3 and m.inventory.records[2].kind == 'carried' and m.inventory.records[2].id == 9)
-        assert(m.inventory.records[3].kind == 'stock' and m.spells.spells[1].id == 950)
+        assert(m.inventory.records[3].kind == 'stock' and m.spells.spells[1].id == '950')
         local f = eqoa.fishing.get()
         assert(f.open == true and f.state == 'waiting' and f.casting == false and f.perfect_from == 56 and f.perfect_to == 63)
         "#,

@@ -247,7 +247,7 @@ fn snapshot(play: &Play) -> Json {
     let tray: Vec<Json> = craft
         .combine
         .iter()
-        .map(|it| json!({"slot": row_of(it.item.id), "id": it.item.id, "name": it.item.name}))
+        .map(|it| json!({"slot": row_of(it.item.id), "id": it.item.id.to_string(), "name": it.item.name}))
         .collect();
     let items: Vec<Json> = craft
         .items
@@ -258,7 +258,7 @@ fn snapshot(play: &Play) -> Json {
         .map(|(i, it)| {
             json!({
                 "slot": i + 1,
-                "id": it.item.id,
+                "id": it.item.id.to_string(),
                 "name": it.item.name,
                 "quantity": it.quantity.max(1),
                 "in_tray": craft.combine.iter().filter(|c| c.item.id == it.item.id).count(),
