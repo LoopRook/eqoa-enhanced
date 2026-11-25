@@ -54,7 +54,7 @@ pub(crate) fn take_mod_log_for_test() -> Vec<String> {
     MOD_LOG.with(|l| std::mem::take(&mut *l.borrow_mut()))
 }
 
-const MAX_INSTANCES: usize = 64;
+const MAX_INSTANCES: usize = 256;
 const MAX_DIAGNOSTICS: usize = 128;
 #[path = "manager_profiles.rs"]
 mod named;
@@ -2385,7 +2385,7 @@ mod tests {
             .filter(|e| e.instance.is_none()).map(|e| e.metadata.id.clone()).collect();
         assert_eq!(blocked.len(), 1);
         assert!(manager.entries.iter().find(|e| e.metadata.id == blocked[0]).unwrap().limit_blocked);
-        assert!(manager.diagnostics().iter().any(|d| d.message.contains("64 addon VM limit")));
+        assert!(manager.diagnostics().iter().any(|d| d.message.contains(&format!("{MAX_INSTANCES} addon VM limit"))));
         let other = manager.entries.iter().find(|e| e.instance.is_some()).unwrap().metadata.id.clone();
         manager.queue(Command::Enable(other, false));
         // a disabled mod keeps its VM, so remove its package to free the slot
