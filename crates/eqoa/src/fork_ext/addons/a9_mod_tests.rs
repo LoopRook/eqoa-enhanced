@@ -495,9 +495,15 @@ fn window_ptr(name_part: &str) -> Option<*mut sys::ImGuiWindow> {
     None
 }
 
-/// Every place (sampled every few pixels) where Dear ImGui says the item `label` of the window (or child) whose name
-/// contains `window` is hovered: its drawn rectangle as the player can reach it.
-fn hovered_points(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, window: &str, label: &str) -> Vec<(f32, f32)> {
+/// What a scan of an item found: its Dear ImGui id and every place (sampled every few pixels) where it was hovered.
+struct Scan {
+    want: u32,
+    hits: Vec<(f32, f32)>,
+}
+
+/// Every place where Dear ImGui says the item `label` of the window (or child) whose name contains `window` is
+/// hovered: its drawn rectangle as the player can reach it.
+fn hovered_points(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, window: &str, label: &str) -> Scan {
     let w = window_ptr(window).unwrap_or_else(|| panic!("window {window:?} is not drawn"));
     let (pos, size, seed) = unsafe { ((*w).Pos, (*w).Size, (*w).ID) };
     let label_c = std::ffi::CString::new(label).unwrap();
@@ -516,33 +522,50 @@ fn hovered_points(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context
         }
         y += 3.0;
     }
-    hits
+    Scan { want, hits }
 }
 
-/// The points a player clicks on a button: its centre and four points inside its corners, each one a place that
-/// really hovers it. A button something else lies over hovers only a thin strip: its height fails the size check.
-fn click_points(hits: &[(f32, f32)], label: &str) -> Vec<(f32, f32)> {
+/// The points a player clicks on a button: its centre and four points inside its corners. Each is moved to for real
+/// and must hover the item now (the nearest sampled place that does). A button something else lies over hovers only a
+/// thin strip: its height fails the size check.
+fn click_points(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, scan: &Scan, label: &str) -> Vec<(f32, f32)> {
+    let hits = &scan.hits;
     assert!(!hits.is_empty(), "no place hovers {label:?}");
     let x0 = hits.iter().map(|p| p.0).fold(f32::MAX, f32::min);
     let x1 = hits.iter().map(|p| p.0).fold(f32::MIN, f32::max);
     let y0 = hits.iter().map(|p| p.1).fold(f32::MAX, f32::min);
     let y1 = hits.iter().map(|p| p.1).fold(f32::MIN, f32::max);
     assert!(y1 - y0 >= 10.0, "{label:?} is hovered over only {:.0}px of height: it is covered by something", y1 - y0);
-    let near = |tx: f32, ty: f32| *hits.iter().min_by(|a, b| ((a.0 - tx).powi(2) + (a.1 - ty).powi(2)).total_cmp(&((b.0 - tx).powi(2) + (b.1 - ty).powi(2)))).unwrap();
     let (w, h) = (x1 - x0, y1 - y0);
-    vec![
-        near((x0 + x1) / 2.0, (y0 + y1) / 2.0),
-        near(x0 + w * 0.15, y0 + h * 0.15),
-        near(x1 - w * 0.15, y0 + h * 0.15),
-        near(x0 + w * 0.15, y1 - h * 0.15),
-        near(x1 - w * 0.15, y1 - h * 0.15),
-    ]
+    let targets = [
+        ((x0 + x1) / 2.0, (y0 + y1) / 2.0),
+        (x0 + w * 0.15, y0 + h * 0.15),
+        (x1 - w * 0.15, y0 + h * 0.15),
+        (x0 + w * 0.15, y1 - h * 0.15),
+        (x1 - w * 0.15, y1 - h * 0.15),
+    ];
+    let mut out = Vec::new();
+    for (tx, ty) in targets {
+        let mut sorted = hits.clone();
+        sorted.sort_by(|a, b| ((a.0 - tx).powi(2) + (a.1 - ty).powi(2)).total_cmp(&((b.0 - tx).powi(2) + (b.1 - ty).powi(2))));
+        let mut found = None;
+        for (x, y) in sorted.into_iter().take(40) {
+            ctx.io_mut().add_mouse_pos_event([x, y]);
+            frames(host, bridge, ctx, 1);
+            if unsafe { (*sys::igGetCurrentContext()).HoveredId } == scan.want {
+                found = Some((x, y));
+                break;
+            }
+        }
+        out.push(found.unwrap_or_else(|| panic!("no place near ({tx:.0}, {ty:.0}) of {label:?} hovers it when the pointer goes there")));
+    }
+    out
 }
 
 /// Moves the pointer to the item's centre (a place that really hovers it).
 fn hover_item(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, window: &str, label: &str) -> (f32, f32) {
-    let hits = hovered_points(host, bridge, ctx, window, label);
-    let (x, y) = click_points(&hits, label)[0];
+    let scan = hovered_points(host, bridge, ctx, window, label);
+    let (x, y) = click_points(host, bridge, ctx, &scan, label)[0];
     ctx.io_mut().add_mouse_pos_event([x, y]);
     frames(host, bridge, ctx, 1);
     (x, y)
@@ -602,7 +625,8 @@ fn a9_trade_mod_offers_by_button_and_by_right_click_with_the_window_in_front() {
     frames(&host, &bridge, &mut ctx, 1);
     click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Right);
     assert_eq!(queued().len(), 2);
-    // a stack's All button offers the whole stack
+    // a stack's All button offers the whole stack (a moment after the other row: the double-click guard has passed)
+    host.execute("require('tradeui').state.last_offer = nil").unwrap();
     hover_item(&host, &bridge, &mut ctx, "##bags", "All##all_1");
     click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Left);
     assert_eq!(queued().len(), 3);
@@ -633,8 +657,8 @@ fn a9_trade_mod_buttons_work_in_the_middle_and_empty_enter_and_double_clicks_off
     frames(&host, &bridge, &mut ctx, 3);
     // every click point of Offer (row 2) and of All (row 1), across the drawn rectangle: centre and four corners
     for (label, rows_left) in [("Offer##offer_2", 5usize), ("All##all_1", 5usize)] {
-        let hits = hovered_points(&host, &bridge, &mut ctx, "##bags", label);
-        let points = click_points(&hits, label);
+        let scan = hovered_points(&host, &bridge, &mut ctx, "##bags", label);
+        let points = click_points(&host, &bridge, &mut ctx, &scan, label);
         assert_eq!(points.len(), rows_left);
         for (n, (x, y)) in points.into_iter().enumerate() {
             host.execute("require('tradeui').state.last_offer = nil").unwrap();
@@ -664,7 +688,7 @@ fn a9_trade_mod_buttons_work_in_the_middle_and_empty_enter_and_double_clicks_off
     )
     .unwrap();
     frames(&host, &bridge, &mut ctx, 3);
-    let covered = hovered_points(&host, &bridge, &mut ctx, "eqoa_ctl", "Btn##ctl_btn");
+    let covered = hovered_points(&host, &bridge, &mut ctx, "eqoa_ctl", "Btn##ctl_btn").hits;
     let ys: Vec<f32> = covered.iter().map(|p| p.1).collect();
     let height = if ys.is_empty() { 0.0 } else { ys.iter().cloned().fold(f32::MIN, f32::max) - ys.iter().cloned().fold(f32::MAX, f32::min) };
     assert!(height < 10.0, "control: a button under a full-line row is hovered over only a strip ({height:.0}px)");
