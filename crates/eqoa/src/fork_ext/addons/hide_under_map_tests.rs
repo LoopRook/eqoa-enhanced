@@ -73,7 +73,7 @@ fn hide_under_map_start_menu_draws_nothing_under_the_map_and_is_drawn_again_afte
 #[test]
 fn hide_under_map_every_drawing_bundled_mod_has_the_rule() {
     // the map's own overlays and mods that draw nothing stay as they are; the Forge UIs are vendored (see the report)
-    let exempt = ["eqoa_map_search", "eqoa_round_minimap", "eqoa_creature_journal"];
+    let exempt = ["eqoa_map_search", "eqoa_round_minimap", "eqoa_creature_journal", "eqoa_world_map"];
     let vendored = ["arpg_ui", "avoids_modern_ui", "wereoxxs_ui"];
     let mut checked = 0;
     for entry in std::fs::read_dir(root("eqoa_chat").parent().unwrap()).unwrap() {
