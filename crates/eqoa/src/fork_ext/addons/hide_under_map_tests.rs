@@ -97,3 +97,39 @@ fn hide_under_map_every_drawing_bundled_mod_has_the_rule() {
     }
     assert!(checked >= 14, "the check saw {checked} mods");
 }
+
+/// A box being typed in lets go of the keyboard the moment the game's map is up (so M and Esc reach the game), and the
+/// window is drawn again, not typing, when the map closes. Control: while the map is closed the capture is held.
+fn capture_released_under_map(id: &str, probe: &str, typing: &str) {
+    fresh();
+    let mut context = context();
+    let host = Host::for_addon(&addon(id)).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon(id)).unwrap();
+    map_state(false);
+    CORE.with(|c| c.borrow_mut().emit("mod.command", json!({"from": "test", "command": "open", "args": {}})));
+    frames(&host, &bridge, &mut context, 3);
+    host.execute(&format!("{probe}.state.{typing} = true")).unwrap();
+    let shown = frames(&host, &bridge, &mut context, 3);
+    assert!(shown > 0, "{id}: control: the window is drawn");
+    assert!(super::input::is_text_capture_active(), "{id}: control: the box holds the keyboard");
+    map_state(true);
+    frames(&host, &bridge, &mut context, 1);
+    assert!(!super::input::is_text_capture_active(), "{id}: the keyboard is the game's the moment the map is up");
+    assert_eq!(frames(&host, &bridge, &mut context, 2), 0, "{id}: nothing drawn under the map");
+    map_state(false);
+    assert!(frames(&host, &bridge, &mut context, 3) > 0, "{id}: drawn again");
+    let open: bool = host.lua.load(&format!("return {probe}.state.open")).eval().unwrap();
+    assert!(open, "{id}: still open");
+    assert!(host.drain_logs().unwrap().is_empty());
+}
+
+#[test]
+fn hide_under_map_spellbook_lets_go_of_the_keyboard_at_once() {
+    capture_released_under_map("eqoa_spellbook", "spellbook_probe", "focus");
+}
+
+#[test]
+fn hide_under_map_crafting_lets_go_of_the_keyboard_at_once() {
+    capture_released_under_map("eqoa_crafting", "crafting_probe", "typing");
+}

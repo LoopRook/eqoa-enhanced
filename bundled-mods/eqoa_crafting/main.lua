@@ -25,7 +25,16 @@ local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == 
 local GATED = { render = true, ["input.key"] = true, ["pointer.pressed"] = true, ["pointer.wheel"] = true, ["windows.key"] = true, ["input.pad"] = true }
 local function listen(name, fn)
     local inner = fn
-    if GATED[name] then inner = function(e) if map_up() then return end return fn(e) end end
+    if GATED[name] then
+        inner = function(e)
+            if map_up() then
+                -- the keyboard is the game's under its map: a box being typed in lets go at once
+                if name == "render" and state.on_map then state.on_map() end
+                return
+            end
+            return fn(e)
+        end
+    end
     local token = eqoa.events.on(name, inner)
     if token then state.tokens[#state.tokens + 1] = token end
 end
@@ -85,6 +94,7 @@ local function stop_typing()
     if state.typing then eqoa.input.capture_text(false) end
     state.typing = false
 end
+state.on_map = stop_typing
 
 local function open_session(kind)
     local s, err = eqoa.windows.open_session(KINDS[kind], { opened_from = "key" })
@@ -433,3 +443,6 @@ function draw()
     ui.SetWindowFontScale(1)
     ui.End()
 end
+
+-- what a test reads
+crafting_probe = { state = state }
