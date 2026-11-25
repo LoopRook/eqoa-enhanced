@@ -57,6 +57,9 @@ class Scene:
     control_env: dict = field(default_factory=dict)    # negative control: env changes (e.g. leave out the Yes click)
     notes: tuple = ()                                 # parts of the scene this server cannot test, said as SKIP lines
     records_perf: bool = False                        # record this run's median fps/cpu/hud in the history file
+    restart_at: float = 0                             # seconds after the client starts: restart the server then
+    options: dict = field(default_factory=dict)       # mod id -> {option id: value} saved in the scratch profile
+    seed: object = None                              # callable(sqlite3 connection): edits the fresh database copy
     fresh_db: bool = False                           # restart the server on a fresh copy of the seed database first
     control_patch: dict = field(default_factory=dict)  # negative control: mod id -> [(old, new)] edits to its main.lua
 
@@ -98,6 +101,17 @@ def dark_fraction(path, box, below=48):
     except OSError:
         return None
     return sum(1 for v in data if v < below) / max(1, len(data))
+
+
+def green_pixels(path, box):
+    """Pixels in `box` that are clearly green (the Dialog Window's hand-in mark is a green frame and button)."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            data = list(im.convert("RGB").crop(box).getdata())
+    except (ImportError, OSError):
+        return None
+    return sum(1 for r, g, b in data if g > 110 and g > r + 50 and g > b + 40)
 
 
 def window_up(path, box, threshold=0.7):
@@ -194,7 +208,7 @@ class Suite:
         ls.wait_for_server(self.server, self.server_log)
         self.starts = 1
 
-    def reset_database(self):
+    def reset_database(self, seed=None):
         """A fresh copy of the seed database (a scene that sells or destroys items starts from the character's own)."""
         if self.server is not None and self.server.poll() is None:
             self.server.terminate()
@@ -202,6 +216,10 @@ class Suite:
         for suffix in ("", "-wal", "-shm"):
             Path(str(self.database) + suffix).unlink(missing_ok=True)
         ls.copy_database(self.install / "eqoa-server" / "eqoa.db", self.database)
+        if seed:       # the scene's own starting state, written to the disposable copy before the server reads it
+            with closing(sqlite3.connect(self.database)) as db:
+                seed(db)
+                db.commit()
         with self.server_log.open("ab") as log:
             self.server = subprocess.Popen(
                 [self.install / "eqoa-server" / "gameserver.exe", "-config", "config.yaml"], cwd=self.runtime,
@@ -216,6 +234,30 @@ class Suite:
                 return
             time.sleep(0.5)
         raise TimeoutError("Local server did not become ready after a database reset")
+
+    def bounce_server(self, down_seconds=4):
+        """Stop the local server, keep it down for a while, start it again on the same database (a restart)."""
+        if self.server is not None and self.server.poll() is None:
+            self.server.terminate()
+            self.server.wait(timeout=15)
+        time.sleep(down_seconds)
+        with self.server_log.open("ab") as log:
+            self.server = subprocess.Popen(
+                [self.install / "eqoa-server" / "gameserver.exe", "-config", "config.yaml"], cwd=self.runtime,
+                env=ls.base_environment(), stdout=log, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
+        self.starts += 1
+
+    def server_since(self):
+        """The local server's log lines written since this scene's client was started."""
+        with self.server_log.open("rb") as f:
+            f.seek(self.log_mark)
+            return f.read().decode("utf-8", errors="replace")
+
+    def item_count(self, pattern_id):
+        """How many of one item the character carries in the live database copy."""
+        with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True)) as db:
+            return db.execute("SELECT COALESCE(SUM(1), 0) FROM charinventory JOIN characters USING (serverid) "
+                              "WHERE charName = ? AND patternid = ?", (ls.CHARACTER, pattern_id)).fetchone()[0]
 
     def inventory(self):
         """(rows, stack sum, tunar) of the character in the live database copy."""
@@ -278,6 +320,8 @@ class Suite:
             (files / "junk.cfg").write_text(f"grey=0\n{ls.JUNK_ID}\n", encoding="utf-8")
         if scene.mod_keys_file:
             (config / "mod-keys.opt").write_text(scene.mod_keys_file, encoding="utf-8")
+        for m, opts in scene.options.items():      # a mod's switches are kept in addons/<its key>.json
+            ls.write_json(config / "addons" / f"{addon_key(m)}.json", {"table": [[k, v] for k, v in opts.items()]})
         ls.write_json(profiles / "Default.json", {"schemaVersion": 1, "enabled": enabled, "addons": {}, "layout": ""})
         ls.write_json(profiles / "characters.json", {
             "schemaVersion": 1, "characters": {self.host: {ls.CHARACTER.lower(): "Default"}}, "classes": {}})
@@ -302,6 +346,11 @@ class Suite:
             self.write_patched_mod(mods, mod_id, edits)
         error = None
         try:
+            timer = None
+            if scene.restart_at and not control:      # the control leaves the server up
+                import threading
+                timer = threading.Timer(scene.restart_at, self.bounce_server)
+                timer.start()
             with (run_dir / "client.log").open("wb") as log:
                 result = subprocess.run([self.runtime / "eqoa.exe", "play", self.host, ls.ACCOUNT], cwd=run_dir, env=env,
                                         stdout=log, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW,
@@ -310,6 +359,9 @@ class Suite:
                 error = f"client exited with code {result.returncode}"
         except subprocess.TimeoutExpired:
             error = "client timed out"
+        finally:
+            if timer is not None:
+                timer.join()
         time.sleep(3)  # the server holds the session briefly after a client ends
         log_text = (run_dir / "client.log").read_text(encoding="utf-8", errors="replace")
         return run_dir, log_text, error
@@ -333,7 +385,8 @@ class Suite:
             return {"scene": scene.number, "name": scene.name, "verdict": SKIP, "reason": reason, "shots": [], "checks": []}
         folder = f"{scene.number}-{re.sub('[^a-z0-9]+', '-', scene.name.lower()).strip('-')[:40]}" + ("-control" if control else "")
         if scene.fresh_db:
-            self.reset_database()
+            self.reset_database(scene.seed)
+        self.log_mark = self.server_log.stat().st_size      # what the server says from here on is this scene's
         for attempt in range(4):
             shutil.rmtree(self.dir / folder, ignore_errors=True)
             run_dir, log, error = self.run_client(scene, folder, scene.control_patch if control else None, control)
@@ -408,7 +461,7 @@ def main(argv=None):
         for scene in build_scenes(suite):
             if wanted and scene.number not in wanted and scene.number.rstrip("abc") not in wanted:
                 continue
-            if args.control and not (scene.control_patch or scene.control_env):
+            if args.control and not (scene.control_patch or scene.control_env or scene.restart_at):
                 continue
             print(f"Scene {scene.number}: {scene.name}" + (" (negative control)" if args.control else ""), flush=True)
             r = suite.run_scene(scene, control=args.control)
