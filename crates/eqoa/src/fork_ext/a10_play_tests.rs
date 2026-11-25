@@ -2116,7 +2116,8 @@ mod mods {
         let (x, y) = bm_hit(&r, "Deposit tunar");
         r.press_px(x, y, "left", false);
         assert_eq!(bm_calls(&r), "Deposit 250 tunar", "{}", r.why());
-        assert_eq!(r.p.bank.state, 1, "the game's own 0x1255 went out; {}", r.why());
+        // the API took the call (a refused one leaves no request); the 0x1255 bytes themselves are items_tests' own check
+        assert_eq!(state_of(&r, "return tostring(require('bags').last_req ~= nil)"), "true", "the request was accepted; {}", r.why());
         // the server's answer: the bank now holds 750 and the pack 750 (the game's own money events)
         let mut w = Writer::default();
         w.signed(750);
