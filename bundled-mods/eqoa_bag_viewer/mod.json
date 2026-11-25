@@ -30,6 +30,7 @@
     "eqoa.actions.sell",
     "eqoa.actions.buy",
     "eqoa.actions.bank_move",
+    "eqoa.actions.bank_money",
     "eqoa.actions.use_item",
     "eqoa.actions.equip",
     "eqoa.actions.quick_slot",
