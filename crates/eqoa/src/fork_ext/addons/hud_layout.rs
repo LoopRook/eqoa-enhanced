@@ -162,21 +162,35 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
     }
     let to_rect = |piece: Piece, x: f32, y: f32, w: f32, h: f32, anc: &str, vert: &str| {
         let beyond = crate::hudlayout::Beyond::of(window_size);
-        // the piece's drawing coordinates, moved and scaled as `hudlayout::begin` draws it (`frame_point` is
-        // in frame pixels with the screen's side added; the anchor's own offset comes off again)
-        let (own_h, own_v) = piece.own();
-        let off = |e: crate::hudlayout::Edge, span: f32| match e {
-            crate::hudlayout::Edge::Start => -span,
-            crate::hudlayout::Edge::Middle => 0.0,
-            crate::hudlayout::Edge::End => span,
+        let size = crate::hudlayout::scale(piece, beyond).factor;
+        let [dx, dy] = shifts[match piece {
+            Piece::Player => 0,
+            Piece::Group => 1,
+            Piece::Target => 2,
+            Piece::Pet => 3,
+            Piece::Minimap => 4,
+            _ => unreachable!("only the documented stock rectangles"),
+        }];
+        let (x, y, w, h) = if size == 1.0 || !size.is_finite() || !beyond.side.is_finite() || !beyond.top.is_finite() {
+            // not scaled (or no window to measure): moved only, as before
+            (x + dx, y + dy, w, h)
+        } else {
+            // The piece's drawing coordinates, moved and scaled about its corner as `hudlayout::begin` draws it
+            // (`frame_point` gives frame pixels with the screen's side added; the anchor's own offset comes off).
+            let (own_h, own_v) = piece.own();
+            let off = |e: crate::hudlayout::Edge, span: f32| match e {
+                crate::hudlayout::Edge::Start => -span,
+                crate::hudlayout::Edge::Middle => 0.0,
+                crate::hudlayout::Edge::End => span,
+            };
+            let (ox, oy) = (off(own_h, beyond.side), off(own_v, beyond.top));
+            let placed = |px: f32, py: f32| {
+                let q = crate::hudlayout::frame_point(piece, [px, py], beyond);
+                [q[0] - ox, q[1] - oy]
+            };
+            let (p0, p1) = (placed(x, y), placed(x + w, y + h));
+            (p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1])
         };
-        let (ox, oy) = (off(own_h, beyond.side), off(own_v, beyond.top));
-        let placed = |px: f32, py: f32| {
-            let q = crate::hudlayout::frame_point(piece, [px, py], beyond);
-            [q[0] - ox, q[1] - oy]
-        };
-        let (p0, p1) = (placed(x, y), placed(x + w, y + h));
-        let (x, y, w, h) = (p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
         let out = transform_rect([x, y, w, h], anc, vert, m);
         json!({
             "frame_x": x,
