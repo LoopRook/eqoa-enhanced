@@ -309,6 +309,11 @@ function X.build_menu(fx, fy)
         local deny = (not bank_open and not near) and "no banker nearby" or far
         row(string.format("Take out of bank (%d)", n), deny == nil, deny,
             function() X.start("withdraw", items, {}) end, {far_kind = far and "bank" or nil})
+        if B.auction_list then
+            -- the bank is opened as Take out of bank opens it; one form for each item in turn
+            row(string.format("List on auction (%d)", n), deny == nil, deny,
+                function() B.auction_list.start_group(items) end, {far_kind = far and "bank" or nil})
+        end
     else
         local H = B.helpers
         local to_mark, marked, risky_mark = 0, 0, 0

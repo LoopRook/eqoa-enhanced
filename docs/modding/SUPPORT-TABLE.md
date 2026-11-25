@@ -881,6 +881,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.auction.Sellable.name` | supported | 8 |  |
 | `eqoa.auction.Sellable.quantity` | supported | 8 |  |
 | `eqoa.auction.Sellable.slot` | supported | 8 |  |
+| `eqoa.auction.Sellable.value` | supported | 8 |  |
 | `eqoa.auction.State` | supported | 8 |  |
 | `eqoa.auction.State.banked` | supported | 8 |  |
 | `eqoa.auction.State.bidders` | supported | 8 |  |
@@ -895,6 +896,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.auction.State.results` | supported | 8 |  |
 | `eqoa.auction.State.revision` | supported | 8 |  |
 | `eqoa.auction.State.sellable` | supported | 8 |  |
+| `eqoa.auction.State.stacks` | supported | 8 |  |
 | `eqoa.auction.State.tunar` | supported | 8 |  |
 | `eqoa.auction.State.uncertain` | supported | 8 |  |
 | `eqoa.blacksmith.Item` | supported | 8 |  |

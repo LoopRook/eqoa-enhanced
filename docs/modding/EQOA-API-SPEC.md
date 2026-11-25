@@ -1014,8 +1014,9 @@ A mod can show its own inbox, mail compose form and auction. It opens a `"mail_i
 | `minutes` | The server's clock in minutes, or nil. |
 | `lots`, `bids` | The character's own: `eqoa.auction.Own = {lot, name, quantity, buyout, minutes_left}` and `eqoa.auction.Bid = {lot, price, count, escrow}`. |
 | `bidders_lot`, `bidders` | The lot `auction_bidders` asked about and its bidders, each an `eqoa.auction.Bidder = {name:string, bid:int}`, highest first. |
-| `sellable` | The bank's items that can be put up, each an `eqoa.auction.Sellable = {slot:int, id:int, name:string, quantity:int}` (`slot` is 1-based and is what `auction_sell` takes, with `id`), only while a mod holds the bank. |
+| `sellable` | The bank's items that can be put up, each an `eqoa.auction.Sellable = {slot:int, id:int, name:string, quantity:int, value:int}` (`slot` is 1-based and is what `auction_sell` takes, with `id`; `value` is the item's value, the lowest starting price the game's form allows and its default), only while a mod holds the bank. |
 | `tunar`, `banked` | Tunar carried and in the bank. |
+| `stacks` | The server's auction takes a count: `auction_bid` and `auction_sell` may name a count above 1. |
 | `uncertain` | The kind of the last request that got no answer in 15 seconds (`"search"`, `"lots"`, `"bids"`, `"bid"`, `"sell"`, `"bidders"`), or nil. It may have gone through: it is never resent, and the same lot is not bid on, and the same bank item not put up, until a fresh page shows the lots again. While the game's own Auction window is up its own request state is left alone. |
 
 | Action (capability of the same name) | What it does |

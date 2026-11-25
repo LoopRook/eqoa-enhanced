@@ -45,6 +45,8 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_social",
     "eqoa_start_menu",
     "eqoa_chat",
+    "eqoa_mail",
+    "eqoa_auction",
     "eqoa_nameplates",
     "eqoa_world_map",
     "eqoa_trade",
@@ -96,6 +98,36 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_chat/README.md",
         package: "eqoa_chat",
         data: include_bytes!("../../../../bundled-mods/eqoa_chat/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_mail/mod.json",
+        package: "eqoa_mail",
+        data: include_bytes!("../../../../bundled-mods/eqoa_mail/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_mail/main.lua",
+        package: "eqoa_mail",
+        data: include_bytes!("../../../../bundled-mods/eqoa_mail/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_mail/README.md",
+        package: "eqoa_mail",
+        data: include_bytes!("../../../../bundled-mods/eqoa_mail/README.md"),
+    },
+    BundledFile {
+        path: "eqoa_auction/mod.json",
+        package: "eqoa_auction",
+        data: include_bytes!("../../../../bundled-mods/eqoa_auction/mod.json"),
+    },
+    BundledFile {
+        path: "eqoa_auction/main.lua",
+        package: "eqoa_auction",
+        data: include_bytes!("../../../../bundled-mods/eqoa_auction/main.lua"),
+    },
+    BundledFile {
+        path: "eqoa_auction/README.md",
+        package: "eqoa_auction",
+        data: include_bytes!("../../../../bundled-mods/eqoa_auction/README.md"),
     },
     BundledFile {
         path: "eqoa_round_minimap/main.lua",
@@ -235,6 +267,11 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_trade/modules/tradeui.lua",
         package: "eqoa_trade",
         data: include_bytes!("../../../../bundled-mods/eqoa_trade/modules/tradeui.lua"),
+    },
+    BundledFile {
+        path: "eqoa_bag_viewer/modules/auction_list.lua",
+        package: "eqoa_bag_viewer",
+        data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/modules/auction_list.lua"),
     },
     BundledFile {
         path: "eqoa_bag_viewer/README.md",
@@ -1389,6 +1426,8 @@ mod tests {
                 "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat",
+                "eqoa_mail",
+                "eqoa_auction",
                 "eqoa_nameplates",
                 "eqoa_world_map",
                 "eqoa_trade"
@@ -1695,6 +1734,8 @@ mod tests {
                 "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat",
+                "eqoa_mail",
+                "eqoa_auction",
                 "eqoa_nameplates",
                 "eqoa_world_map",
                 "eqoa_trade"
@@ -1754,6 +1795,8 @@ mod tests {
                 "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat",
+                "eqoa_mail",
+                "eqoa_auction",
                 "eqoa_nameplates",
                 "eqoa_world_map",
                 "eqoa_trade"
@@ -1787,6 +1830,8 @@ mod tests {
                 "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat",
+                "eqoa_mail",
+                "eqoa_auction",
                 "eqoa_nameplates",
                 "eqoa_world_map",
                 "eqoa_trade"
@@ -1886,6 +1931,8 @@ mod tests {
                 "eqoa_social",
                 "eqoa_start_menu",
                 "eqoa_chat",
+                "eqoa_mail",
+                "eqoa_auction",
                 "eqoa_nameplates",
                 "eqoa_world_map",
                 "eqoa_trade"

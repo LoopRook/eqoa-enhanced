@@ -242,6 +242,8 @@ function M.learn_native_open(kind)
 end
 
 local function release_takeover(kind)
+    -- a listing's form, question or run holds the bank until it is done
+    if kind == "bank" and M.auction_list and M.auction_list.busy() then return end
     if kind and eqoa.windows and eqoa.windows.release then
         eqoa.windows.release(kind)
     end
@@ -1108,6 +1110,10 @@ function M.build_menu(it, fx, fy)
                 M.run_single("Withdraw", function() return eqoa.actions.bank_move("bank", it.ref, qty) end)
             end)
         end
+        if M.auction_list then
+            -- the bank is opened as Withdraw opens it (a banker near), and kept while the form or a question is up
+            add("List on auction...", can_bank, not can_bank and no_bank or nil, function() M.auction_list.begin(it) end, true)
+        end
         if it.quantity > 1 then
             add("Withdraw 1", can_bank, not can_bank and no_bank or nil,
                 function() return bank_move_or_open(1) end, nil, bank_far and "bank" or nil)
@@ -1237,6 +1243,7 @@ function M.run_asking(label, fn)
         M.ask_req = nil
     else
         M.ask_req = req
+        M.ask_label = label
         M.result = {text = label .. ": answer the question on the screen", ok = nil}
     end
     M.dirty()
@@ -1244,6 +1251,7 @@ function M.run_asking(label, fn)
 end
 
 function M.on_confirm_closed(d)
+    if M.auction_list and M.auction_list.on_confirm_closed(d) then return end
     if d and d.kind == "destroy_many" and M.multi then M.multi.on_destroy_closed(d); return end
     if not d or d.kind ~= "destroy" then return end
     if d.answer == "yes" then
@@ -1978,7 +1986,7 @@ function M.on_action_result(d)
     -- the destroy call's own result: the question is up, or the call was refused (the answer is `confirm.closed`)
     if M.ask_req and d.request_id == M.ask_req and d.ok ~= nil then
         M.ask_req = nil
-        if d.ok == false then M.result = {text = "Destroy: " .. (d.reason or d.code or "refused"), ok = false} end
+        if d.ok == false then M.result = {text = (M.ask_label or "Destroy") .. ": " .. (d.reason or d.code or "refused"), ok = false} end
         M.dirty()
         return
     end

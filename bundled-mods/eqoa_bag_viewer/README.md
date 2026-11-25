@@ -67,7 +67,7 @@ exactly as before, and a helper acts only on its button or on its own switch.
 - **Restock**: an item's menu has **Keep up to N (Restock)** (N starts at what the bags hold; the menu steps it by 5). Near
   a merchant, **Restock (N)** buys up to N of each kept item that merchant sells, counting everything of that kind in the
   pack, never more than N. It stops, and says why, when money or bag space runs out.
-- **Bank marked**: **Bank this** in an item's menu (a marked item's menu says **Unmark bank** instead, which takes the mark off); near a banker, **Bank marked (N)** deposits the marked stacks (never worn
+- **Bank marked**: **Bank this** in an item's menu; near a banker, **Bank marked (N)** deposits the marked stacks (never worn
   ones) and says so when the bank is full.
 - **Do it when I get near**: three switches under the buttons (Sell junk, Restock, Bank), kept for each character, off by
   default. A helper acts once per approach (it arms again after you have been out of the NPC's reach by 5 more units),
@@ -101,8 +101,7 @@ A plain click works as before and clears the selection. The line under the grid 
 selected item for one menu titled **"N items selected"**:
 
 - **Mark as junk** and **Unmark** (marking asks once, with the same Yes or No as a single item, when some of the items are
-  equipment, potions or other things the game's merchant would ask about), **Mark to bank**, and **Unmark bank (N)**, which shows
-  when any selected item (even a worn one) carries the bank mark and takes it off from all of them.
+  equipment, potions or other things the game's merchant would ask about), **Mark to bank**.
 - **Sell (N)** at a merchant and **Put in bank (N)** at a banker: greyed with the reason when none is near ("no merchant nearby",
   "too far from the merchant"; the same reach rules as the other buttons, and a second click tries anyway). They go item by item
   at the game's own pace, never faster than the game's own single actions: one batch at a time, each item looked up again by its
@@ -120,3 +119,21 @@ A worn item is never sold, banked or destroyed by a group action (the client ref
 you close the window, zone, change tab, or when the action finishes. The controller does not multi-select (its d-pad and confirm
 work as before). The mod uses `eqoa.actions.destroy_many` and the `ctrl` and `shift` fields of `pointer.pressed` (both
 additions to `eqoa/1`).
+
+## List on auction (at a bank)
+
+On the Bank tab, an item's menu has **List on auction...** and the group menu of several selected bank items has
+**List on auction (N)**. They are there whenever a banker is near or the bank is open, like Withdraw and Take out of
+bank, and they open the bank themselves the same way (if the game's own bank window is open, close it first: listing
+goes through this window). On a server without the auction the form says so.
+
+A small form opens over the Bags window for each item: **Price** and **Buy now** are boxes you type a number in (click
+a box, type, Tab moves on, Enter or a click elsewhere stops; the lowest price the game's own sell form allows, the
+item's value, is filled in, and buy now starts at twice that and must be at least the price), **Time** is 12, 24, 48 or
+72 hours, and on servers that sell by the stack a **Count** appears. **List it** only asks: the client's own "Are you
+sure?" shows the item and its price, and only your answer lists it. **Cancel** (or Escape) leaves.
+
+A group is listed one item at a time: the form comes again for each, with its own price box and **Skip** and **Stop**;
+the next waits until the server has answered the last. A line at the end says how many went up. Mods & Addons shows
+**Asks you first: put an item up at the auction**. The **Auction** button on the title row opens the EQOA Auction
+window when that mod is on.

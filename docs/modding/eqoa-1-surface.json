@@ -3426,7 +3426,8 @@
         "eqoa.auction.Sellable.id",
         "eqoa.auction.Sellable.name",
         "eqoa.auction.Sellable.quantity",
-        "eqoa.auction.Sellable.slot"
+        "eqoa.auction.Sellable.slot",
+        "eqoa.auction.Sellable.value"
       ],
       "path": "eqoa.auction.Sellable",
       "reason": null,
@@ -3467,6 +3468,14 @@
       "status": "supported"
     },
     {
+      "children": [],
+      "path": "eqoa.auction.Sellable.value",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
       "children": [
         "eqoa.auction.State.banked",
         "eqoa.auction.State.bidders",
@@ -3481,6 +3490,7 @@
         "eqoa.auction.State.results",
         "eqoa.auction.State.revision",
         "eqoa.auction.State.sellable",
+        "eqoa.auction.State.stacks",
         "eqoa.auction.State.tunar",
         "eqoa.auction.State.uncertain"
       ],
@@ -3589,6 +3599,14 @@
     {
       "children": [],
       "path": "eqoa.auction.State.sellable",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.stacks",
       "reason": null,
       "revision": 1,
       "round": 8,

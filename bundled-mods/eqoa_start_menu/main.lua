@@ -28,6 +28,11 @@ local ROUTES = {
     ["0xb053000"] = { mod = "eqoa_social", page = "ignore" },     -- Community > Ignore > View List
     ["0xb051001"] = { mod = "eqoa_social", page = "guild" },      -- Community > Guild > Guild List
     ["0x2090000"] = { mod = "eqoa_social", page = "lfg" },        -- Community > Group > Group Search (live servers)
+    ["0xb0b0002"] = { mod = "eqoa_mail", page = "inbox" },         -- Community > Mail > Inbox
+    ["0xb0b0000"] = { mod = "eqoa_mail", page = "compose" },      -- Community > Mail > Compose
+    ["0xa8010000"] = { mod = "eqoa_auction", page = "search" },   -- Auction > Search (where the server has the auction)
+    ["0xa8020000"] = { mod = "eqoa_auction", page = "lots" },     -- Auction > My lots
+    ["0xa8030000"] = { mod = "eqoa_auction", page = "bids" },     -- Auction > My bids
 }
 local state = {
     session = nil, path = {}, selected = 1, scroll = 0, tokens = {}, escape = nil, enter = nil,

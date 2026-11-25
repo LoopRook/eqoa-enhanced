@@ -291,13 +291,13 @@ pub(crate) fn install(host: &Host) -> Result<()> {
         ("eqoa.mail.PackItem", "slot id name quantity"),
         (
             "eqoa.auction.State",
-            "revision offered mode pending page results minutes lots bids bidders_lot bidders sellable tunar banked uncertain",
+            "revision offered mode pending page results minutes lots bids bidders_lot bidders sellable tunar banked stacks uncertain",
         ),
         ("eqoa.auction.Lot", "lot name quantity seller min_bid buyout minutes_left high_bid leader bids next_bid mine"),
         ("eqoa.auction.Bidder", "name bid"),
         ("eqoa.auction.Own", "lot name quantity buyout minutes_left"),
         ("eqoa.auction.Bid", "lot price count escrow"),
-        ("eqoa.auction.Sellable", "slot id name quantity"),
+        ("eqoa.auction.Sellable", "slot id name quantity value"),
     ] {
         describe(lua, path, "supported", Some(ROUND), "");
         for field in fields.split_whitespace() {
