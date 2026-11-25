@@ -24,6 +24,7 @@ fn ready() -> Play {
     action_broker::reset_all_for_test();
     ws::reset_for_test();
     window_takeover::reset_all_for_test();
+    super::super::a9_play::reset_for_test();
     reset_for_test();
     let mut p = super::super::tests::play();
     let _ = p.loading.wait.take();
@@ -1268,4 +1269,208 @@ fn a11_r3_low_dye_confirm_ends_with_session() {
     let (ok, _) = ask(&mut p, &host, "return eqoa.actions.close_window(eqoa.windows.session('dye_picker').ref)");
     assert!(ok);
     assert!(!confirm::is_open(), "closing the dye_picker session must cancel its open dye_no_dye confirm");
+}
+
+// ---- merge with develop: M1 and LOW 1 / LOW 2 ----------------------------------------------------------------------------
+
+fn deliver_a9(p: &mut Play, op: u16, data: Vec<u8>) {
+    let ev = net::session::Event::Opcode { op, data: data.clone() };
+    let cap = super::super::begin_game_event(p, &ev);
+    let handled = p.npcw_opcode(op, &data) || p.duel_opcode(op, &data, None) || p.support_opcode(op, &data);
+    assert!(handled, "A9 opcode {op:#06x} not handled");
+    super::super::divert_event(p);
+    super::super::end_game_event(p, cap);
+}
+
+fn open_hidden_a9(p: &mut Play, which: &str) {
+    use net::stream::Writer;
+    match which {
+        "trade" => {
+            assert!(window_takeover::takeover(7, "a9mod", TakeoverKind::Trade, TakeoverScope::All).is_ok());
+            p.npcw.trade_state.asked = true;
+            p.npcw.trade_state.with = 77;
+            let mut w = Writer::default();
+            w.u8(2).u32(77);
+            deliver_a9(p, 0x0056, w.data);
+        }
+        "duel" => {
+            assert!(window_takeover::takeover(7, "a9mod", TakeoverKind::Duel, TakeoverScope::All).is_ok());
+            let mut open = vec![1u8];
+            open.extend(5u32.to_le_bytes());
+            deliver_a9(p, crate::duel::OP_IN, open);
+            let mut inv = Writer::default();
+            inv.u8(6).u8(0).u8(40).string(b"Lanerender").wide("").wide("");
+            let mut inv_pkt = vec![2u8];
+            inv_pkt.extend(5u32.to_le_bytes());
+            inv_pkt.extend(inv.data);
+            deliver_a9(p, crate::duel::OP_IN, inv_pkt);
+            let mut wager = vec![13u8];
+            wager.extend(5u32.to_le_bytes());
+            deliver_a9(p, crate::duel::OP_IN, wager);
+        }
+        "blacksmith" => {
+            assert!(window_takeover::takeover(7, "a9mod", TakeoverKind::Blacksmith, TakeoverScope::All).is_ok());
+            deliver_a9(p, 0x0061, 4242u32.to_le_bytes().to_vec());
+        }
+        other => panic!("unknown A9 window {other}"),
+    }
+    assert_eq!(p.mode, 0, "{which}: hidden A9 window leaves play.mode at 0");
+    assert!(super::super::a9_play::hidden_active(), "{which}: A9 reports hidden window active");
+}
+
+fn close_hidden_a9(p: &mut Play, which: &str) {
+    use net::stream::Writer;
+    match which {
+        "trade" => {
+            let mut w = Writer::default();
+            w.u8(7).u32(77);
+            deliver_a9(p, 0x0056, w.data);
+        }
+        "duel" => {
+            let mut done = vec![15u8];
+            done.extend(5u32.to_le_bytes());
+            done.extend([1u8, 1, 1]);
+            deliver_a9(p, crate::duel::OP_IN, done);
+        }
+        "blacksmith" => {
+            deliver_a9(p, 0x0063, vec![]);
+        }
+        other => panic!("unknown A9 window {other}"),
+    }
+    assert!(!super::super::a9_play::hidden_active(), "{which}: hidden A9 window ended");
+}
+
+/// M1: A9's hidden trade, duel, and blacksmith windows count in `a11_play::hidden_held()`: while one is hidden,
+/// mercenary windows wait (and open when it closes), the dye picker waits (and opens when it closes), and a fishing
+/// start is cancelled with the game's cancel bytes and chat notice. Negative control: without `a9_play::hidden_active()`
+/// in `hidden_held()`, all three open natively over the hidden trade/duel/blacksmith.
+#[test]
+fn a11_m1_merc_dye_and_fishing_respect_hidden_trade_duel_and_blacksmith() {
+    for which in ["trade", "duel", "blacksmith"] {
+        // 1. Mercenary inventory waits behind hidden A9 window, then opens when it closes
+        let mut p = ready();
+        open_hidden_a9(&mut p, which);
+        open_merc(&mut p);
+        assert_eq!(p.mode, 0, "{which}: merc inventory must wait behind hidden {which}");
+        assert!(p.merc.window.is_some());
+        close_hidden_a9(&mut p, which);
+        tick(&mut p, true);
+        assert_eq!(p.mode, crate::play::mercplay::ITEMS_MODE, "{which}: waiting merc opens after hidden {which} closes");
+
+        // 2. Dye picker waits behind hidden A9 window, then opens when it closes
+        let mut p = ready();
+        open_hidden_a9(&mut p, which);
+        p.dyepick_opcode(&dye_open(0x5555_6666, true));
+        let (v, mut r) = (vui(), NullRaster);
+        p.run_dyepick(&v, &mut r);
+        assert_eq!(p.mode, 0, "{which}: dye picker must wait behind hidden {which}");
+        assert!(!p.dyepick.picker.open);
+        close_hidden_a9(&mut p, which);
+        p.run_dyepick(&v, &mut r);
+        assert_eq!(p.mode, crate::play::dyeplay::MODE, "{which}: waiting dye picker opens after hidden {which} closes");
+        assert_eq!(p.dyepick.open.as_ref().map(|o| o.token), Some(0x5555_6666));
+
+        // 3. Fishing start is cancelled behind hidden A9 window with chat notice
+        let mut p = ready();
+        open_hidden_a9(&mut p, which);
+        sent(&mut p);
+        assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
+        assert_eq!(p.mode, 0, "{which}: fishing must not open over hidden {which}");
+        assert_eq!(sent_op(&mut p, 0x01, 0x0F), vec![crate::fishing::sub_msg(2)], "{which}: fishing sends cancel");
+        assert!(
+            p.chat.iter().any(|(t, _)| t == "Fishing stopped: a mod window was busy, cast again"),
+            "{which}: fishing tells the player why it stopped"
+        );
+    }
+}
+
+/// LOW 1: zoning/teleporting with a held dye picker sends the exact same `cancelled(token)` bytes as the native
+/// picker (`dyeplay.rs`, `run_dyepick` when `mode` leaves `MODE`); disconnecting sends nothing. Negative control:
+/// dropping `LOCAL.dye` without queueing `dye_cancel_owed` sends no cancel bytes on teleport.
+#[test]
+fn a11_r4_low1_zoning_with_held_dye_picker_sends_same_cancel_bytes_as_native() {
+    use net::session::Event;
+
+    // Native picker baseline: Teleport sets mode = 0, then `run_dyepick` cancels with `net::dyepick::cancelled(token)`.
+    let native_bytes = {
+        let mut p = ready();
+        open_dye(&mut p, 0xCAFE_BABE, true);
+        assert_eq!(p.mode, crate::play::dyeplay::MODE);
+        sent(&mut p);
+        p.mode = 0;
+        let (v, mut r) = (vui(), NullRaster);
+        p.run_dyepick(&v, &mut r);
+        sent_op(&mut p, 0x96, 0x7E)
+    };
+    assert_eq!(native_bytes, vec![net::dyepick::cancelled(0xCAFE_BABE)]);
+
+    // Held picker on same-world Teleport: exact same bytes sent.
+    let (mut p, host) = rig();
+    hold(&host, TakeoverKind::DyePicker);
+    let bytes = dye_open(0xCAFE_BABE, true);
+    pre_event(&p, &dye_packet(bytes.clone()));
+    p.dyepick_opcode(&bytes);
+    post_event(&mut p);
+    step(&mut p, &host);
+    sent(&mut p);
+    let tp = Event::Teleport { world: p.player.world as u8, pos: [5.0, 0.0, 5.0], hpr: [0.0; 3], token: 9 };
+    let cap = super::super::begin_game_event(&p, &tp);
+    p.mode = 0;
+    super::super::divert_event(&mut p);
+    super::super::end_game_event(&p, cap);
+    let held_bytes = sent_op(&mut p, 0x96, 0x7E);
+    assert_eq!(held_bytes, native_bytes, "held dye picker on teleport must send the same Cancel bytes as native");
+    assert!(LOCAL.with(|l| l.borrow().dye.is_none() && l.borrow().dye_cancel_owed.is_none()));
+
+    // Disconnect sends nothing on the dead connection.
+    let (mut p, host) = rig();
+    hold(&host, TakeoverKind::DyePicker);
+    let bytes = dye_open(0xBEEF_0001, true);
+    pre_event(&p, &dye_packet(bytes.clone()));
+    p.dyepick_opcode(&bytes);
+    post_event(&mut p);
+    step(&mut p, &host);
+    sent(&mut p);
+    let dc = Event::Disconnected(3);
+    let cap = super::super::begin_game_event(&p, &dc);
+    p.disconnected = Some(3);
+    super::super::divert_event(&mut p);
+    super::super::end_game_event(&p, cap);
+    step(&mut p, &host);
+    assert!(sent_op(&mut p, 0x96, 0x7E).is_empty(), "disconnect must not send Cancel on a dead connection");
+}
+
+/// LOW 2: if the mod goes away (disable/error) in the same step the character dies, `dialog_sessions::death()` wipes
+/// `give_back` before `give_window` runs; `a11_play::tick` cancels and clears the orphaned `LOCAL.dye` token so
+/// `eqoa.dye.get()` clears and a later native picker is not refused `stale_handle`. Negative control: without the
+/// orphan check in `tick`, `LOCAL.dye` stays `Some(0xDEAD_BEEF)`.
+#[test]
+fn a11_r4_low2_dye_token_cleared_when_mod_goes_in_same_step_as_death() {
+    let (mut p, host) = rig();
+    let vm = hold(&host, TakeoverKind::DyePicker);
+    let bytes = dye_open(0xDEAD_BEEF, true);
+    pre_event(&p, &dye_packet(bytes.clone()));
+    p.dyepick_opcode(&bytes);
+    post_event(&mut p);
+    step(&mut p, &host);
+    host.execute("assert(eqoa.dye.get().token == 0xDEADBEEF)").unwrap();
+    sent(&mut p);
+
+    // Same step: mod goes away (`end_vm` -> `vm_gone` puts DyePicker into `give_back`) AND character dies.
+    ws::end_vm(vm);
+    window_takeover::release_vm(vm);
+    p.death = Some(crate::death::DeathCam::new([0.0; 3], [0.0, 0.0, 1.0], [0.0; 3]));
+    p.mode = 0;
+    step(&mut p, &host);
+
+    assert!(LOCAL.with(|l| l.borrow().dye.is_none()), "orphaned dye token must be cleared when mod goes at death");
+    assert_eq!(sent_op(&mut p, 0x96, 0x7E), vec![net::dyepick::cancelled(0xDEAD_BEEF)], "orphaned dye picker cancelled");
+    assert!(native_a11::current(Read::Dye).is_none(), "published dye read cleared");
+    host.execute("assert(eqoa.dye.get() == nil)").unwrap();
+
+    // After reviving, a fresh native picker works (not blocked by stale token 0xDEAD_BEEF).
+    p.death = None;
+    open_dye(&mut p, 0x1111_2222, true);
+    let (ok, code) = ask(&mut p, &host, "return eqoa.actions.dye_cancel(0x11112222)");
+    assert!(ok, "new picker after death must succeed, got {code}");
 }
