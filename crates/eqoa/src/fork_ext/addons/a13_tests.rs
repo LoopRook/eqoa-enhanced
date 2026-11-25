@@ -145,7 +145,7 @@ fn a13_the_terrain_checks_its_arguments_and_keeps_its_quota() {
         -- no game map drawn yet: the transform is not known and the picture is nil
         assert(a.texture == nil and a.bounds == nil and a.world_id == nil)
         local px, err = a.project(1, 1)
-        assert(px == nil and err.code == 'not_ready', tostring(err and err.code))
+        assert(px == nil and err.code == 'unavailable', tostring(err and err.code))
         px, err = a.project(0 / 0, 1)
         assert(px == nil and err.code == 'invalid_argument')
         assert(a.close() == true)
