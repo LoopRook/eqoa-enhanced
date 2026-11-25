@@ -123,6 +123,8 @@ pub(crate) mod native_a6;
 mod a6_tests;
 #[cfg(test)]
 mod a13_tests;
+#[cfg(test)]
+mod a13_mod_tests;
 pub(crate) mod native_a8;
 pub(crate) mod native_a10;
 #[cfg(test)]
@@ -132,6 +134,8 @@ mod a8_tests;
 pub(crate) mod native_a12;
 #[cfg(test)]
 mod a12_tests;
+#[cfg(test)]
+mod nameplates_mod_tests;
 pub(crate) mod native_a7;
 pub(crate) mod native_a5;
 #[cfg(test)]
@@ -142,6 +146,8 @@ mod a1_mod_tests;
 mod click_through_tests;
 #[cfg(test)]
 mod menu_routes_tests;
+#[cfg(test)]
+mod reclaim_tests;
 #[cfg(test)]
 mod a7_mod_tests;
 #[cfg(test)]

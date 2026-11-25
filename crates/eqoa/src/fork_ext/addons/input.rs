@@ -163,6 +163,39 @@ pub fn reset_input_state() {
     PRESSES.with(|c| c.borrow_mut().clear());
 }
 
+/// The input state when a world is left (`Core::reset`: a zone, a teleport, a respawn, a disconnect): everything of
+/// `reset_input_state`, except the claims of a FrontiersForge package (its owner names carry `:forge:`). The Forge API
+/// has no "claims end with the world" rule: a package claims its key hook and its rotated d-pad once and its own code
+/// never claims them again (`Input.Update` only suspends them while the game is not in a world), so a package that
+/// claimed before a zone lost them for good (owner audit 2026-11-24, the ARPG and Wereoxxs ability bars' d-pad). Claims
+/// of the eqoa/1 API (`eqoa.input.claim`, `capture_text`) do end with the world, as the spec says, and the mods claim
+/// them again on `world.entered`.
+pub fn reset_input_state_for_world() {
+    INPUT_STATE.with(|s| {
+        let mut old = s.borrow_mut();
+        let forge = |owner: &String| owner.contains(":forge:");
+        let mut kept = InputState::default();
+        kept.hook_claims = old.hook_claims.iter().filter(|o| forge(o)).cloned().collect();
+        kept.key_claims = old.key_claims.iter().filter(|(_, o)| forge(o)).map(|(k, o)| (*k, o.clone())).collect();
+        kept.suppress_shadow = old.suppress_shadow.iter().filter(|(k, _)| kept.key_claims.contains_key(k)).map(|(k, v)| (*k, *v)).collect();
+        kept.dpad_claims = old.dpad_claims.iter().filter(|o| forge(o)).cloned().collect();
+        kept.dpad_requests = old.dpad_requests.iter().filter(|(o, _)| forge(o)).map(|(o, v)| (o.clone(), *v)).collect();
+        if !kept.hook_claims.is_empty() {
+            kept.key_hook_installed = old.key_hook_installed;
+            kept.key_hook_desired = old.key_hook_desired;
+        }
+        if !kept.dpad_claims.is_empty() {
+            kept.dpad_installed = old.dpad_installed;
+            kept.dpad_desired = old.dpad_desired;
+            kept.dpad_rotated = kept.dpad_requests.values().any(|v| *v);
+        }
+        *old = kept;
+    });
+    set_modifiers((false, false, false));
+    set_super(false);
+    PRESSES.with(|c| c.borrow_mut().clear());
+}
+
 thread_local! {
     /// Ctrl, Alt and Shift as the window last said them (`ModifiersChanged`).
     static MODIFIERS: std::cell::Cell<(bool, bool, bool)> = const { std::cell::Cell::new((false, false, false)) };
@@ -1278,6 +1311,53 @@ mod tests {
             assert(not Input.IsDpadHookInstalled(), "uninstalled when all owners release")
         "#;
         lua.load(script).exec().unwrap();
+    }
+
+    /// A FrontiersForge package claims its key hook and its rotated d-pad once, and nothing in the Forge API tells it a world
+    /// ended: `Core::reset` (a zone, a teleport, a respawn) kept none of them (owner audit 2026-11-24: the ARPG and
+    /// Wereoxxs bars' d-pad rotation was gone after the first zone). A Forge package's claims stay; an eqoa/1 mod's end with
+    /// the world, as the spec says, and its text capture too.
+    #[test]
+    fn a_zone_keeps_the_forge_claims_and_ends_the_eqoa_ones() {
+        let forge = "\u{1f}5:forge:arpg".to_string();
+        let native = "\u{1f}6:native:1".to_string();
+        let set = |forge: &str, native: &str| {
+            INPUT_STATE.with(|s| {
+                let mut s = s.borrow_mut();
+                s.key_hook_installed = true;
+                s.key_hook_desired = true;
+                s.hook_claims.insert(forge.to_string());
+                s.key_claims.insert(0x0D, forge.to_string());
+                s.suppress_shadow.insert(0x0D, true);
+                s.key_claims.insert(0x1B, native.to_string());
+                s.suppress_shadow.insert(0x1B, true);
+                s.dpad_installed = true;
+                s.dpad_desired = true;
+                s.dpad_claims.insert(forge.to_string());
+                s.dpad_requests.insert(forge.to_string(), true);
+                s.dpad_rotated = true;
+                s.text_capture_owners.insert(native.to_string(), Instant::now());
+                s.text_capture = true;
+            });
+        };
+        // the control: the whole reset (what a test or a new session wants) takes everything
+        reset_input_state();
+        set(&forge, &native);
+        reset_input_state();
+        assert!(!is_dpad_rotated() && !is_key_claimed(0x0D), "the full reset takes the Forge claims too");
+        // a world left through the client's own path
+        reset_input_state();
+        set(&forge, &native);
+        crate::fork_ext::addons::native_core::CORE.with(|c| c.borrow_mut().reset("zone"));
+        assert!(is_key_claimed(0x0D) && is_dpad_rotated(), "the Forge package's key claim and rotated d-pad stay");
+        assert!(INPUT_STATE.with(|s| {
+            let s = s.borrow();
+            s.key_hook_installed && s.dpad_installed && s.dpad_claims.contains(&forge) && s.hook_claims.contains(&forge) && s.suppress_shadow.get(&0x0D) == Some(&true)
+        }));
+        assert!(!is_key_claimed(0x1B), "an eqoa/1 mod's key claim ends with the world");
+        assert!(INPUT_STATE.with(|s| !s.borrow().suppress_shadow.contains_key(&0x1B)), "and its suppression with it");
+        assert!(!is_text_capture_active(), "a text capture ends with the world");
+        reset_input_state();
     }
 
     #[test]

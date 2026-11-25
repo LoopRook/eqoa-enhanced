@@ -525,3 +525,56 @@ fn multi_the_selection_goes_with_the_tab_the_stack_and_the_end_of_an_action() {
     run(&prune, "view(SIX()); ctrl(1); ctrl(3); set_pack({it_(1, 'Rat Pelt')}); B.rebuild()");
     assert_eq!(int(&prune, "X.n"), 2, "negative control: a gone stack stayed selected");
 }
+
+/// The owner's bug (build 4b4626ac): a bank mark could be put on but not taken off from the group menu. Both menus now offer
+/// "Unmark bank" for what carries the mark, the mark is saved and its corner letter goes at once.
+#[test]
+fn multi_a_bank_mark_can_be_taken_off_from_the_single_menu_and_the_group_menu() {
+    // Rat Pelt (1) and the worn sword (3) carry the mark (the sword was marked before it was put on); the tooth (2) does not
+    let setup = r#"
+        view({it_(1, "Rat Pelt", {q = 3}), it_(2, "Chipped Tooth"), it_(3, "Rusty Sword", {worn = true, tabs = {"equipment"}})})
+        H.bank["1"] = true; H.bank["3"] = true; H.save()
+    "#;
+    let lua = world();
+    run(&lua, setup);
+    // single menu: a marked item offers Unmark bank (not Bank this), an unmarked one offers Bank this
+    run(&lua, "B.build_menu(INV_ITEMS[1])");
+    assert!(boolean(&lua, "row('Unmark bank') ~= nil and row('Bank this') == nil"), "{}", string(&lua, "labels()"));
+    run(&lua, "B.build_menu(INV_ITEMS[2])");
+    assert!(boolean(&lua, "row('Bank this') ~= nil and row('Unmark bank') == nil"));
+    run(&lua, "B.build_menu(INV_ITEMS[1]); choose('Unmark bank')");
+    assert!(boolean(&lua, "H.bank['1'] == nil and H.bank['3'] == true"));
+    assert!(boolean(&lua, "B.mark_letter(INV_ITEMS[1]) == nil and B.mark_letter(INV_ITEMS[3]) == 'B'"), "the corner letter goes at once");
+    assert!(boolean(&lua, "FILES['helpers.cfg']:find('bank:1', 1, true) == nil and FILES['helpers.cfg']:find('bank:3', 1, true) ~= nil"), "saved");
+    // group menu, a mixed selection: both Mark to bank and Unmark bank are offered, the worn item's mark counts
+    run(&lua, "H.bank['1'] = true; view(); X.clear(); ctrl(1); ctrl(2); ctrl(3); group_menu(2)");
+    assert!(boolean(&lua, "row('Mark to bank').enabled == true and row('Unmark bank (2)') ~= nil and row('Unmark bank (2)').enabled"), "{}", string(&lua, "labels()"));
+    run(&lua, "choose('Unmark bank')");
+    assert!(boolean(&lua, "next(H.bank) == nil"), "both marks are gone, the worn item's too");
+    assert_eq!(string(&lua, "B.result.text"), "Unmarked 2 items for the bank");
+    assert!(boolean(&lua, "B.mark_letter(INV_ITEMS[1]) == nil and B.mark_letter(INV_ITEMS[3]) == nil"));
+    assert!(boolean(&lua, "FILES['helpers.cfg']:find('bank:', 1, true) == nil"), "saved");
+    assert_eq!(int(&lua, "X.n"), 0, "the selection is cleared when the action finishes");
+    // nothing marked: no Unmark bank row (the menu is the one it was)
+    run(&lua, "view(); ctrl(1); ctrl(2); group_menu(1)");
+    assert!(boolean(&lua, "row('Unmark bank') == nil"));
+    assert_eq!(string(&lua, "labels()"), "Mark as junk|Unmark|Mark to bank|Sell (2)|Put in bank (2)|Destroy...");
+
+    // negative controls: the old single label, no group row, and a mark on a worn item kept
+    let old_single = mutated(&[("add(\"Unmark bank\", true, nil", "add(\"Stop banking this\", true, nil")]);
+    run(&old_single, setup);
+    run(&old_single, "B.build_menu(INV_ITEMS[1])");
+    assert!(boolean(&old_single, "row('Unmark bank') == nil"), "negative control: the old label");
+    let no_row = mutated(&[("if banked > 0 then", "if false then")]);
+    run(&no_row, setup);
+    run(&no_row, "ctrl(1); ctrl(2); group_menu(1)");
+    assert!(boolean(&no_row, "row('Unmark bank') == nil"), "negative control: the old group menu had no way to unmark");
+    let worn_kept = mutated(&[("if flag and it.equipped then
+            worn[#worn + 1] = it
+        elseif flag and not H.is_banked(it)", "if it.equipped then
+            worn[#worn + 1] = it
+        elseif flag and not H.is_banked(it)")]);
+    run(&worn_kept, setup);
+    run(&worn_kept, "ctrl(1); ctrl(3); group_menu(1); choose('Unmark bank')");
+    assert!(boolean(&worn_kept, "H.bank['3'] == true"), "negative control: a worn item's mark stayed");
+}

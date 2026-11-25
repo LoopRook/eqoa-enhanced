@@ -262,5 +262,93 @@ def perf_scene():
     )
 
 
+# --- scene 8: quest hand-ins with the Dialog Window mod -------------------------------------------------------------
+# A fixture quest is written into the DISPOSABLE database copy only: "Bracer Test", given by Commander Nothard, one
+# give step that takes a militia bracer (item 8570, which `#giveitem` hands the GM). The server offers the step's
+# answer as an option only when the bracer is held; the step's journal line is the quest's title ("Bracer Test") because
+# this server's journal shows the step's line, and the mod matches an option that names a journal entry.
+BRACER = 8570
+HANDIN_BOX = (810, 128, 900, 152)       # the Hand in button beside the first option
+HANDIN_BUTTON = (855, 140)
+FINISHED = 'Quests: Lsgm finished "Bracer Test"'
+
+
+def handin_seed(*answers):
+    lines = chr(10).join(answers)
+
+    def seed(db):
+        db.execute("INSERT INTO quests (questid,name,enabled,giver,source) VALUES (990001,'Bracer Test',1,'Commander Nothard','scene-suite')")
+        db.execute("INSERT INTO queststeps (questid,step,kind,target,items,count,journal,answer,says,waiting,reminder) "
+                   "VALUES (990001,1,'give','Commander Nothard',?,1,'Bracer Test',?,'Well done. Keep it.','Have you the bracer?','Bring me the bracer.')",
+                   (str(BRACER), lines))
+        db.execute("INSERT INTO charquests (serverid,questid,step,count,done,slot,updated,picks) VALUES (2,990001,1,0,0,0,'','')")
+    return seed
+
+
+def handin_scene(suite, number, name, *, answers=("Hand over the Bracer Test",), give=True, click=False, auto=False,
+                 expect_mark=True, expect_finished=True, expect_auto=False, control_env=None):
+    say = f"#giveitem {BRACER} Lsgm@6000" if give else "#testmode@6000"
+    mouse = {"EQOA_MOUSE": f"click {HANDIN_BUTTON[0]} {HANDIN_BUTTON[1]}@14500"} if click else {}
+
+    def checks(run_dir, log):
+        server = suite.server_since()
+        mark = ss.green_pixels(run_dir / "1-dialog.png", HANDIN_BOX)
+        out = [] if expect_auto else [(f"the Hand in mark {'is' if expect_mark else 'is not'} on the option (green pixels {mark})",
+                                       mark is not None and ((mark > 60) if expect_mark else (mark < 10)))]
+        out.append((f"the server {'finished' if expect_finished else 'did not finish'} the quest (server log)", (FINISHED in server) == expect_finished))
+        out.append((f"the bracer is {'gone from' if expect_finished else 'still in'} the character's bag (database)",
+                    suite.item_count(BRACER) == (0 if expect_finished else (1 if give else 0))))
+        auto_said = "handing in Bracer Test automatically" in log
+        out.append((f"the mod {'answered by itself' if expect_auto else 'left the answer to the player'}", auto_said == expect_auto))
+        return out
+
+    expect = [("Nothard hailed", r"script: target Commander Nothard: true")]
+    expect.append(("the server's answer to the hail is " + ("a question (response dialog)" if give else "only his words (no question)"),
+                   r"takeover: response_dialog session started for the mod" if give else r"takeover: text_dialog session started for the mod"))
+    return ss.Scene(
+        number, name, mods=("eqoa_dialogs",), fresh_db=True, seed=handin_seed(*answers),
+        options={"eqoa_dialogs": {"auto_answer": True}} if auto else {},
+        env={"EQOA_SAY": say, "EQOA_TARGET": "Commander Nothard@9000", "EQOA_PLAY_KEYS": "q@10500", **mouse},
+        control_env=control_env or {},
+        quit_after=22, shots="12500=1-dialog.png,16500=2-after.png", expect=expect, extra=checks,
+        absent=[] if give else [("a question when the bracer is not held", r"takeover: response_dialog session started")],
+    )
+
+
+def handin_scenes(suite):
+    wrong = {"EQOA_SAY": "#giveitem 8398 Lsgm@6000"}       # field rations: not what the step takes
+    return [
+        handin_scene(suite, "8a", "Quest hand-in: the Hand in button is clicked and the server takes the bracer",
+                     click=True, control_env=wrong),
+        handin_scene(suite, "8b", "Quest hand-in: without the bracer there is no question and no button",
+                     give=False, expect_mark=False, expect_finished=False,
+                     control_env={"EQOA_SAY": f"#giveitem {BRACER} Lsgm@6000"}),   # the bracer held: a question and a button
+        handin_scene(suite, "8c", "Quest hand-in, automatic: the one real answer (Goodbye beside it does not count) is sent",
+                     answers=("Hand over the Bracer Test", "Goodbye"), auto=True, expect_auto=True,
+                     control_env={"EQOA_SAY": "#testmode@6000"}),
+        handin_scene(suite, "8d", "Quest hand-in, automatic on but two real answers: only marked, never sent",
+                     answers=("Hand over the Bracer Test", "Tell me about the weather"), auto=True, expect_finished=False,
+                     control_env={"EQOA_SAY": "#testmode@6000"}),
+    ]
+
+
+def restart_scene(suite):
+    """The local server is stopped under a client that is in the world and started again 4 s later."""
+    return ss.Scene(
+        "9", "Server restart under a client in the world: the client reports the loss and ends cleanly",
+        mods=(), restart_at=14, quit_after=60,
+        # after the restart the player says something: the unanswered line is what shows the client the server is gone
+        env={"EQOA_MOD_KEYS": "enter@10000;text /s before@10500;enter@12000;enter@28000;text /s anyone@28500;enter@30500;enter@40000;text /s again@40500;enter@42500"}, shots="12000=1-before-restart.png",
+        expect=[("the client says the connection was lost", r"play: disconnected \(reason 10\): Connection problem or server currently unavailable")],
+        extra=lambda run_dir, log: [
+            ("the server came back up (a second 'Game server ready' since this scene began)",
+             suite.server_since().count("Game server ready on port") >= 1),
+        ],
+        notes=("re-entering the world after the restart: SKIP, the scripted client has no reconnect path (it ends at the disconnect and "
+               "its next `play` is a new login), so 'world entry again' cannot be driven in one run",),
+    )
+
+
 def make_scenes(suite):
-    return [dialog_scene(), start_menu_scene(), chat_scene(), overlap_scene(), sell_scene(suite), destroy_scene(suite), drag_scene(), perf_scene()]
+    return [dialog_scene(), start_menu_scene(), chat_scene(), overlap_scene(), sell_scene(suite), destroy_scene(suite),
+            drag_scene(), perf_scene(), *handin_scenes(suite), restart_scene(suite)]
