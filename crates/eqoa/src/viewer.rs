@@ -640,7 +640,7 @@ pub fn shot_with(
                         eprintln!("touch tap: {c:?} on a window (mode {mode})");
                         continue;
                     }
-                    let id = p.creature_at(c.at(), (w, h), vp);
+                    let id = p.creature_at_for(c.at(), (w, h), vp, !matches!(c, crate::mouse::Click::Target(..)));
                     eprintln!("touch tap: {c:?} on {id:?}");
                     p.click(id, !matches!(c, crate::mouse::Click::Target(..)));
                 }
@@ -733,7 +733,7 @@ pub fn shot_with(
                         eprintln!("mouse {step}: {c:?} on a window (mode {mode})");
                         continue;
                     }
-                    let id = p.creature_at(c.at(), (w, h), vp);
+                    let id = p.creature_at_for(c.at(), (w, h), vp, !matches!(c, crate::mouse::Click::Target(..)));
                     eprintln!("mouse {step}: {:?} on {id:?}", c);
                     p.click(id, !matches!(c, crate::mouse::Click::Target(..)));
                 }
@@ -1417,11 +1417,11 @@ pub fn shot_with(
             cords.extend(p.decor_presents(walker.eye_position().to_array()));
             crate::decorlights::light_cords(&mut cords, &view);
             // the model bulbs, unlit: a bulb is its own light
-            cords.extend(p.decor_globes(walker.eye_position().to_array(), t));
-            // and the Strings of Lights' glass (`toys::glass`)
-            cords.extend(p.worn_light_glass(&walker, pose, t));
-            // with the world, before the name plates (`draw_decor`)
-            renderer.decor = cords;
+            renderer.set_decor(render::billboard::Decorations {
+                cords_and_presents: cords,
+                globes: p.decor_globes(eye, t),
+                worn_glass: p.worn_light_glass(&walker, pose, t),
+            });
         }
         renderer.strips = shot_bolts;
         renderer.strips.append(&mut shot_trails);
@@ -1478,7 +1478,7 @@ pub fn shot_with(
                 let mut pv = crate::play::PlateView::of(&walker.cam, &walker.eye.position, (w, h));
                 pv.fog = p.weather_fog;
                 if shot_override {
-                    (pv.eye, pv.scale) = (shot_eye, 1.0);
+                    (pv.eye, pv.scale) = (shot_eye, crate::settings::client().display_ui().nameplate_scale as f32 / 100.0);
                 }
                 t.plates = crate::play::labels(&plates, &pv, view.view_proj, t);
                 t.plate_scale = pv.scale;
@@ -1486,6 +1486,10 @@ pub fn shot_with(
                 if hide {
                     t.plates.clear();
                     t.labels.clear();
+                } else if let Some(u) = renderer.ui.as_mut() {
+                    // Debuff Icons under the plates kept (petition 2997)
+                    let marks = crate::play::debuff_marks(&plates, &pv, view.view_proj, t);
+                    p.draw_debuffs(u, &marks, (w, h));
                 }
             }
         }
@@ -1727,16 +1731,33 @@ fn device_keyboard() -> bool {
     false
 }
 
-/// Whether a key pressed before the world is the art's (`era`): F9, or the
-/// key its row was moved onto on the Controls page (`binds`); F9 moved off
-/// is not.
-fn is_art_key(k: &Key) -> bool {
-    let Some(name) = crate::binds::name_of(k) else { return false };
-    match crate::settings::with_binds(|b| b.alias(&name)) {
-        crate::binds::Alias::Same => name == "f9",
-        crate::binds::Alias::To(to) => to == "f9",
-        _ => false,
+/// Name a physical chord as Controls captures it and play dispatches it.
+/// While typing, preserve the logical character produced by the keyboard.
+pub(crate) fn binding_input_name(logical: &Key, base: Option<&str>, mods: (bool, bool, bool), capture: bool, typing: bool, binds: &crate::binds::Binds, pc: bool) -> Option<String> {
+    let plain = crate::binds::name_of(logical)?;
+    let (ctrl, alt, shift) = mods;
+    if (ctrl || alt || shift) && !typing {
+        let combo = crate::binds::combo_name(ctrl, alt, shift, base.unwrap_or(&plain));
+        if capture || binds.profile_alias(&combo, pc) != crate::binds::Alias::Same { return Some(combo); }
     }
+    Some(plain)
+}
+
+/// Resolve the pre-login art and Settings shortcuts, including a remapped chord.
+fn title_shortcut(event: &KeyIn, mods: (bool, bool, bool)) -> Option<String> {
+    use crate::binds::Alias;
+    let plain = crate::binds::name_of(&event.logical_key)?;
+    let (ctrl, alt, shift) = mods;
+    crate::settings::with_binds(|bindings| {
+        let pc = crate::binds::pc_shortcuts();
+        let chord = crate::binds::combo_name(ctrl, alt, shift, event.base.unwrap_or(&plain));
+        let name = if (ctrl || alt || shift) && bindings.profile_alias(&chord, pc) != Alias::Same { chord } else { plain };
+        match bindings.profile_alias(&name, pc) {
+            Alias::Same => Some(name),
+            Alias::To(key) => Some(key.to_string()),
+            _ => None,
+        }
+    })
 }
 
 /// A test script's times (`EQOA_COVERED`, `EQOA_UNFOCUS`):
@@ -1813,6 +1834,19 @@ fn held_name(k: &Key) -> Option<String> {
 /// its own: one with no swim of its own swims as the human (`raceemote::put_swim`).
 pub fn shot_body() -> u32 {
     std::env::var("EQOA_BODY").ok().and_then(|v| u32::from_str_radix(v.trim().trim_start_matches("0x"), 16).ok()).unwrap_or(HUMAN as u32)
+}
+
+/// The walker's controls from the keys `held` (by their default names, the
+/// Controls page's moves undone): W/S forward, A/D strafe, I/J/K/L a right
+/// stick. With `ad_turn` (A/D Keys at Turn, petition 2909, and the mouse not
+/// steering) A and D are J and L, the right stick's push to the side: first
+/// person and the Follow camera turn the body, the orbits swing round.
+pub(crate) fn key_controls(held: impl Fn(&str) -> bool, ad_turn: bool) -> Controls {
+    let k = |a: &str, b: &str| held(a) as i32 as f32 - held(b) as i32 as f32;
+    if ad_turn {
+        return Controls { fwd: k("w", "s"), strafe: 0.0, orbit: (k("l", "j") + k("d", "a")).clamp(-1.0, 1.0), pitch: k("k", "i") };
+    }
+    Controls { fwd: k("w", "s"), strafe: k("d", "a"), orbit: k("l", "j"), pitch: k("k", "i") }
 }
 
 /// `EQOA_WALK=fwd,strafe,orbit,ms[;...]`: each set of controls held for its
@@ -3159,7 +3193,7 @@ impl App {
     }
 
     /// The walker's controls from the held keys (a pad's sticks): W/S
-    /// forward, A/D strafe, the client's own; I/J/K/L a right stick (orbit
+    /// forward, A/D strafe (or turn, A/D Keys), the client's own; I/J/K/L a right stick (orbit
     /// and zoom), which the game's keyboard leaves free (its own camera keys
     /// are Home, End, Page Up and Page Down, `game_keys`).
     fn controls(&self) -> Controls {
@@ -3171,8 +3205,8 @@ impl App {
             let t = self.clock.elapsed().as_millis() as i64;
             return segs.iter().find(|s| t <= s.1).map_or(Controls::default(), |s| s.0);
         }
-        let k = |a: &str, b: &str| self.held.contains(a) as i32 as f32 - self.held.contains(b) as i32 as f32;
-        Controls { fwd: k("w", "s"), strafe: k("d", "a"), orbit: k("l", "j"), pitch: k("k", "i") }
+        let steering = self.walker.as_ref().is_some_and(|w| self.mouse.steer(w.cam.camera_mode));
+        key_controls(|k| self.held.contains(k), crate::settings::ad_turn() && !steering)
     }
 
     /// The game's UI sounds asked for outside a window of its own (the
@@ -3537,6 +3571,9 @@ impl App {
     /// mouse thought it free: on Windows a clip left by a grab the window
     /// no longer knows of would hold the cursor in it (`mouse::unclip`).
     fn let_go_pointer(&mut self) {
+        if let Some(p) = self.play.as_mut() {
+            p.spell_gem_leave();
+        }
         let held = self.mouse.lose_focus();
         if let Some(g) = &self.gfx {
             if held || cfg!(windows) {
@@ -3782,10 +3819,14 @@ impl App {
     fn click(&mut self, c: crate::mouse::Click, finger: bool) {
         let (Some(p), Some(g), Some(vp)) = (self.play.as_mut(), self.gfx.as_ref(), self.last_view) else { return };
         let size = (g.config.width, g.config.height);
+        if !finger && matches!(c, crate::mouse::Click::Right(..)) && p.spell_gem_right(c.at(), size, vp) {
+            return;
+        }
         if p.point(c, size, finger) {
             return;
         }
-        p.click(p.creature_at(c.at(), size, vp), !matches!(c, crate::mouse::Click::Target(..)));
+        let interact = !matches!(c, crate::mouse::Click::Target(..));
+        p.click(p.creature_at_for(c.at(), size, vp, interact), interact);
     }
 
     /// A mouse button on the chat box's lines (`Play::chat_press`), true when it
@@ -4235,7 +4276,7 @@ impl App {
         match frame {
             Some(f) => g.queue.present(f),
             None => {
-                let _ = g.device.poll(wgpu::PollType::wait_indefinitely());
+                crate::gpulost::poll(&g.device, wgpu::PollType::wait_indefinitely());
             }
         }
         match done {
@@ -4285,7 +4326,7 @@ impl App {
                 t.plates.clear();
             }
             g.renderer.strips.clear();
-            g.renderer.decor.clear();
+            g.renderer.set_decor(Default::default());
             g.renderer.set_overlay(&g.device, &g.queue, glam::Mat4::IDENTITY, &[], &|_| None);
             g.window.request_redraw();
         }
@@ -4462,6 +4503,9 @@ impl App {
         {
             let down = event.state == ElementState::Pressed;
             let soft = !p.edit_pad_only();
+            if p.inline_editing() && event.repeat && event.logical_key == Key::Named(NamedKey::Enter) {
+                return;
+            }
             let named = match &event.logical_key {
                 Key::Named(NamedKey::Backspace) => Some(8),
                 Key::Named(NamedKey::Escape) => Some(27),
@@ -5085,7 +5129,7 @@ impl App {
             let open = |p: &mut crate::play::Play, held: &mut HashSet<String>, s: &str| {
                 held.clear();
                 if p.hud_ready() {
-                    p.chat_key(s, s.is_empty() || s == "/");
+                    p.keyboard_chat_key(s);
                 } else {
                     p.typing = Some(s.to_string());
                 }
@@ -5121,8 +5165,10 @@ impl App {
                 }
             }
             match (&mut p.typing, &event.logical_key) {
-                (None, Key::Named(NamedKey::Enter)) => {
-                    open(p, &mut self.held, "");
+                (None, Key::Named(NamedKey::Enter)) if p.mode == 0 => {
+                    if !event.repeat {
+                        open(p, &mut self.held, "");
+                    }
                     return;
                 }
                 // Q: InteractWithTarget.
@@ -5146,6 +5192,10 @@ impl App {
                 // Z (90, 122): the quick-chat menus, as L2.
                 (None, Key::Character(c)) if p.mode == 0 && c.eq_ignore_ascii_case("z") => {
                     p.open_quick_chat();
+                    return;
+                }
+                (None, Key::Named(NamedKey::F10)) if p.mode == 0 && !event.repeat => {
+                    p.open_options();
                     return;
                 }
                 // F1: the Options window's Controls page (the client's
@@ -5182,11 +5232,29 @@ impl App {
                     crate::settings::toggle_quest_helper();
                     return;
                 }
+                // F4: the Stat Window shown or hidden, kept (the client's
+                // own, `statwnd`, petition 2925; F4 makes no code in the
+                // game's keyboard table), in play and the manual camera
+                (None, Key::Named(NamedKey::F4)) if (p.mode == 0 || p.mode == 38) && !event.repeat => {
+                    p.toggle_stat_window();
+                    return;
+                }
                 // F: the game's Assist Target asked, whom the target targets
                 // (the client's key for it, `Play::assist_target`; free in
                 // the game's keyboard table)
                 (None, Key::Character(c)) if (p.mode == 0 || p.mode == 38) && c.eq_ignore_ascii_case("f") && !event.repeat => {
                     p.assist_target();
+                    return;
+                }
+                // [ and ]: Set Focus and Target Focus (the client's own,
+                // `focus`, Heirloom petition 3038; free in the game's
+                // keyboard table), in play and the manual camera
+                (None, Key::Character(c)) if (p.mode == 0 || p.mode == 38) && c.as_str() == "[" && !event.repeat => {
+                    p.focus_key();
+                    return;
+                }
+                (None, Key::Character(c)) if (p.mode == 0 || p.mode == 38) && c.as_str() == "]" && !event.repeat => {
+                    p.target_focus();
                     return;
                 }
                 // X (88, 120): autorun (`ToggleP74`), as L3.
@@ -5860,13 +5928,7 @@ impl App {
         {
             return Some(n.clone());
         }
-        let (c, a, sh) = self.mods;
-        let name = if (c || a || sh) && !typing {
-            let combo = crate::binds::combo_name(c, a, sh, &own);
-            if capture || crate::settings::with_binds(|b| b.combo_bound(&combo)) { combo } else { plain }
-        } else {
-            plain
-        };
+        let name = crate::settings::with_binds(|b| binding_input_name(&ev.logical_key, Some(&own), self.mods, capture, typing, b, crate::binds::pc_shortcuts()))?;
         self.key_names.insert(own, name.clone());
         Some(name)
     }
@@ -5940,10 +6002,13 @@ impl App {
             if !device_keyboard() {
                 self.touch.hide();
             }
-            // F9 (`era`), as the Controls page has it: the art swapped
-            if event.state == ElementState::Pressed && !event.repeat && is_art_key(&event.logical_key) && self.host.as_ref().is_some_and(|h| h.pre.setup.capturing().is_none()) {
-                self.toggle_era();
-                return;
+            // Title-screen shortcuts follow the same rows in Controls as play.
+            if pressed && !event.repeat && self.host.as_ref().is_some_and(|h| h.pre.setup.capturing().is_none()) {
+                match title_shortcut(&event, self.mods).as_deref() {
+                    Some("f9") => { self.toggle_era(); return; }
+                    Some("f10") if self.host.as_mut().unwrap().pre.ask_options() => return,
+                    _ => {}
+                }
             }
             // the title's Options' Controls page waiting for a key: it is
             // the page's, as play's is
@@ -5979,13 +6044,13 @@ impl App {
         // Escape with chat lines selected: they are let go, and nothing more
         if event.state == ElementState::Pressed
             && event.logical_key == Key::Named(NamedKey::Escape)
-            && self.play.as_mut().is_some_and(|p| p.chat_escape())
+            && self.play.as_mut().is_some_and(|p| !p.inline_editing() && p.chat_escape())
         {
             return;
         }
         // Escape while the mouse look holds the pointer: it is let go
         // (as a browser ends its lock on Escape), and nothing more
-        if event.state == ElementState::Pressed && event.logical_key == Key::Named(NamedKey::Escape) && self.mouse.escape() {
+        if event.state == ElementState::Pressed && event.logical_key == Key::Named(NamedKey::Escape) && !self.play.as_ref().is_some_and(|p| p.inline_editing()) && self.mouse.escape() {
             self.grab_pointer(false);
             return;
         }
@@ -6031,6 +6096,29 @@ impl App {
                 p.capture_key_up(&name);
             }
         }
+        // These physical keyboard shortcuts take precedence over gameplay
+        // bindings only while chat has focus. Keep their repeats and releases
+        // out of those bindings too, even if chat expand is released first.
+        let unmodified = self.mods == (false, false, false);
+        #[cfg(target_os = "macos")]
+        let unmodified = unmodified && !self.super_held;
+        if pressed && !event.repeat && !typing && capturing.is_none() && unmodified
+            && let Some(name) = kname.as_deref()
+            && let Some(p) = self.play.as_mut()
+        {
+            use crate::chat::HistoryKey;
+            let shortcut = match event.logical_key {
+                Key::Named(NamedKey::Tab) => Some(HistoryKey::NextTab),
+                Key::Named(NamedKey::ArrowLeft) => Some(HistoryKey::PageUp),
+                Key::Named(NamedKey::ArrowRight) => Some(HistoryKey::PageDown),
+                _ => None,
+            };
+            let size = self.gfx.as_ref().map_or((640, 480), |g| (g.config.width, g.config.height));
+            if shortcut.is_some_and(|key| p.chat_history_shortcut(key, size)) {
+                self.keys_edge.hold_back(name);
+                return;
+            }
+        }
         // The player's own keys (`binds`, the client's, at the edge):
         // a key a row was moved onto is that row's default key to all
         // below, the row's old key nothing; a key given to △'s row
@@ -6046,6 +6134,8 @@ impl App {
                 // jumps (a window up, any other server); with the map up it is
                 // the map's (its Center), whatever the server
                 self.keys_edge.space_attacks = self.play.as_ref().is_some_and(|p| !(p.mode == 0 && p.session.jumps) && !p.map.open);
+                self.keys_edge.pc_mode = crate::binds::pc_shortcuts()
+                    && self.play.as_ref().is_some_and(|p| matches!(p.mode, 0 | 38) && !p.map.open);
                 match crate::settings::with_binds(|b| self.keys_edge.key(&name, down, event.repeat, typing, b)) {
                     Some(Sent::Key(to)) if to == name => event,
                     Some(Sent::Key(to)) => KeyIn { logical_key: crate::binds::key_of(&to), text: None, ..event },
@@ -6075,10 +6165,7 @@ impl App {
                     // its ability used on the press
                     Some(Sent::Slot(bar, slot)) => {
                         if let Some(p) = self.play.as_mut() {
-                            p.keyboard = true;
-                            if down && !event.repeat {
-                                p.bar_slot_key(bar, slot);
-                            }
+                            p.keyboard_slot_edge(bar, slot, down, event.repeat);
                         }
                         return;
                     }
@@ -6230,12 +6317,21 @@ impl App {
                     p.hud_release();
                     p.map.let_go();
                     p.map.mini_hover(None);
+                    p.spell_gem_leave();
+                    p.spell_hover(None, (1, 1));
+                    p.pointer = None;
                 }
             }
             WindowEvent::MouseInput { state, button, .. } if matches!(button, MouseButton::Left | MouseButton::Right) => {
                 let down = state == ElementState::Pressed;
-                // the map up: a drag pans it, a click is its (`map.rs`)
                 let at = [self.cursor.0 as f32, self.cursor.1 as f32];
+                if !down && button == MouseButton::Left
+                    && let (Some(p), Some(g)) = (self.play.as_mut(), self.gfx.as_ref())
+                    && p.spell_gem_release(at, (g.config.width, g.config.height), p.session.now(), self.last_view)
+                {
+                    return;
+                }
+                // the map up: a drag pans it, a click is its (`map.rs`)
                 if let Some(c) = self.play.as_mut().filter(|p| p.map.open).map(|p| p.map.mouse_button(button == MouseButton::Right, down, at)) {
                     if let Some(c) = c {
                         self.click(c, false);
@@ -6256,6 +6352,20 @@ impl App {
                     // mouse's gesture (the look, a click's target) is none of it
                     if self.chat_button(button == MouseButton::Left, down) {
                         return;
+                    }
+                    if down && button == MouseButton::Left && self.mouse.idle()
+                        && let (Some(p), Some(g)) = (self.play.as_mut(), self.gfx.as_ref())
+                        && crate::hud::fork_hud::hud_menu_visible(&p.hud_menus) && p.spell_gem_press(at, (g.config.width, g.config.height), p.session.now())
+                    {
+                        return;
+                    }
+                    // both buttons are the run: a left press a gem took is
+                    // the mouse's again, and casts nothing when let go
+                    if down && button == MouseButton::Right
+                        && let Some(p) = self.play.as_mut()
+                        && p.spell_gem_handoff()
+                    {
+                        let _ = self.mouse.button(false, true, Instant::now());
                     }
                     // the left button on a quick-chat choice holds its
                     // direction while it is down (`Play::point_press`), and
@@ -6315,6 +6425,9 @@ impl App {
                     && let Some(p) = self.play.as_mut()
                 {
                     p.chat_moved(self.cursor, (g.config.width, g.config.height));
+                    p.spell_hover(Some([position.x as f32, position.y as f32]), (g.config.width, g.config.height));
+                    // Mouseover Casting (petition 2960)
+                    p.pointer = Some(self.cursor);
                 }
                 // a drag begun: the pointer taken, within the press's
                 // gesture; a confined cursor put back to the middle
@@ -6350,7 +6463,7 @@ impl App {
                     // over the minimap: its zoom, not the camera's
                     p.map.mini_wheel(steps);
                 } else if let Some(h) = self.host.as_mut().filter(|_| self.walker.is_none()) {
-                    // before the world: the screen's list (character select's)
+                    // Before entering the world, scroll the active list.
                     h.scroll(d, 0.0);
                 } else if self.walker.is_some() {
                     // over the chat box's history in view, its lines
@@ -6973,11 +7086,11 @@ impl App {
                         cords.extend(p.decor_presents(w.eye_position().to_array()));
                         crate::decorlights::light_cords(&mut cords, &lights.0);
                         // the model bulbs, unlit: a bulb is its own light
-                        cords.extend(p.decor_globes(w.eye_position().to_array(), now));
-                        // and the Strings of Lights' glass (`toys::glass`)
-                        cords.extend(p.worn_light_glass(w, m, now));
-                        // with the world, before the name plates (`draw_decor`)
-                        g.renderer.decor = cords;
+                        g.renderer.set_decor(render::billboard::Decorations {
+                            cords_and_presents: cords,
+                            globes: p.decor_globes(w.eye_position().to_array(), now),
+                            worn_glass: p.worn_light_glass(w, m, now),
+                        });
                     }
                     // the characters' blob shadows (`VIScene::RenderShadows`,
                     // `shadows`): drawn after the particle system's batches,
@@ -7081,6 +7194,9 @@ impl App {
                 self.last_view = Some(view.view_proj);
                 #[cfg(not(target_arch = "wasm32"))]
                 fork_report::view(view.view_proj, (g.config.width, g.config.height));
+                if let Some(p) = self.play.as_mut() {
+                    p.pointer_view = Some((view.view_proj, (g.config.width, g.config.height)));
+                }
                 // the minimap inside (`map::indoor`): the ceiling over the
                 // player, in the collision world
                 if let (Some(p), Some(w)) = (self.play.as_mut(), self.walker.as_mut()) {
@@ -7149,6 +7265,10 @@ impl App {
                         if hide {
                             t.plates.clear();
                             t.labels.clear();
+                        } else if let Some(u) = g.renderer.ui.as_mut() {
+                            // Debuff Icons under the plates kept (petition 2997)
+                            let marks = crate::play::debuff_marks(&plates, &pv, view.view_proj, t);
+                            p.draw_debuffs(u, &marks, (g.config.width, g.config.height));
                         }
                     }
                     // the frame's sends leave at its end (`Play::flush`)
@@ -7222,7 +7342,7 @@ impl App {
                 // they painted over when drawn after them
                 match bb_view {
                     Some((v, p)) => g.renderer.draw_decor(&g.device, &g.queue, &mut enc, st, &f.depth, v, p, &textures),
-                    None => g.renderer.decor.clear(),
+                    None => g.renderer.set_decor(Default::default()),
                 }
                 // the effect volumes' fans, then the particles over them,
                 // all in the scene (the Brightness curve takes them too)
@@ -7268,7 +7388,7 @@ impl App {
                     Some(f) => g.queue.present(f),
                     None => {
                         if let Some(prev) = g.in_flight.replace(sent) {
-                            let _ = g.device.poll(wgpu::PollType::Wait { submission_index: Some(prev), timeout: None });
+                            crate::gpulost::poll(&g.device, wgpu::PollType::Wait { submission_index: Some(prev), timeout: None });
                         }
                     }
                 }
@@ -7288,6 +7408,25 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A/D Keys (petition 2909): Strafe, A and D are the left stick's
+    /// sideways push; Turn, they are J and L's right stick (the turn in first
+    /// person and the Follow camera, the swing round in the orbits), W and S
+    /// left as they are; A with L held cancels as J with L does. The control:
+    /// nothing held is still at rest either way.
+    #[test]
+    fn a_and_d_turn_when_chosen() {
+        let held = |keys: &'static [&'static str]| move |k: &str| keys.contains(&k);
+        let strafe = key_controls(held(&["w", "d"]), false);
+        assert_eq!(strafe.axes(), [0.0, 0.0, 1.0, -1.0], "D strafes right, W forward");
+        let turn = key_controls(held(&["w", "d"]), true);
+        assert_eq!(turn.axes(), [1.0, 0.0, 0.0, -1.0], "D is L: the right stick right");
+        assert_eq!(turn.axes(), key_controls(held(&["w", "l"]), false).axes());
+        assert_eq!(key_controls(held(&["a"]), true).axes(), key_controls(held(&["j"]), true).axes(), "A is J");
+        assert_eq!(key_controls(held(&["a", "l"]), true).axes(), [0.0; 4], "A against L");
+        assert_eq!(key_controls(held(&["d", "l"]), true).axes()[0], 1.0, "both right: full, not past it");
+        assert_eq!(key_controls(held(&[]), true).axes(), key_controls(held(&[]), false).axes());
+    }
 
     /// Enter in an edit box is 13 (a new line in a box of lines), with Shift
     /// 4, done (petition 1626).

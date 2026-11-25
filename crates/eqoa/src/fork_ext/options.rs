@@ -22,9 +22,10 @@ const fn categories<const M: usize>(upstream: &[Category]) -> [Category; M] {
     all
 }
 const PAGES: [Category; super::CATEGORIES.len() + 1] = categories(super::CATEGORIES);
-// upstream's pages keep their own rule (none scrolls); the fork's page is taller than a game page
-// and drawn without its title bar (`WndOptions::page_window`)
-const _: () = assert!(super::fits(super::CATEGORIES));
+// every page holds its rows (`MENU_MOST`); since upstream's sync 2026-11-25 a page longer than
+// `STANDARD_PAGE_ITEMS` (the Enhanced page) takes the menu's place with its own title
+// (`WndOptions::extended_window`)
+const _: () = assert!(super::pages_fit(&PAGES));
 // the Enhanced page joins the UI group's menu: every group's menu must still fit (`menus_fit`)
 const _: () = assert!(super::menus_fit(&PAGES));
 /// The rows of the Enhanced page ahead of the Mods & Addons rows: one per Enhanced HUD toggle.
@@ -327,13 +328,14 @@ mod tests {
         let count = listed.len();
         listed.dedup();
         assert_eq!(listed.len(), count);
-        // upstream's pages fit as ever; the fork's one page is taller (HUD rows, then Mods & Addons rows)
+        // every page fits (upstream's `pages_fit` since sync 2026-11-25); the fork's one page is longer
+        // than a standard page (HUD rows, then Mods & Addons rows), so it opens in the menu's place
         let (fork, upstream_pages) = pages().split_last().unwrap();
-        assert!(super::super::fits(upstream_pages));
+        assert!(super::super::pages_fit(upstream_pages) && super::super::pages_fit(pages()));
         assert_eq!(fork.name, "Enhanced");
         assert_eq!(fork.items.len(), if cfg!(target_arch = "wasm32") { 8 } else { 9 }, "six HUD rows and the Mods & Addons rows");
         assert_eq!(pages().iter().filter(|c| c.name == "Enhanced HUD" || c.name == "Mods & Addons").count(), 0, "no second fork page");
-        assert!(!super::super::fits(pages()), "control: the fork's page is more than a game page's rows");
+        assert!(fork.items.len() > super::super::STANDARD_PAGE_ITEMS, "control: the fork's page is more than a standard page's rows");
         assert!(
             items().all(|&(id, label)| !label.is_empty() && super::super::label_of(id) == label)
         );

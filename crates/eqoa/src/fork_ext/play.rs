@@ -4773,6 +4773,7 @@ mod tests {
             visibility::{HudClaimsRegistry, publish_claims},
         };
         struct Discard;
+        impl crate::ui::Layout for Discard {}
         impl vi::ui::Raster for Discard {
             fn blit(
                 &mut self,
@@ -5228,6 +5229,7 @@ mod tests {
             }
             fn set_viewport(&mut self, _: [i32; 4]) {}
         }
+        impl crate::ui::Layout for DummyRaster {}
         wnd.draw(&vui, &mut DummyRaster, 0, 0.0);
         assert!(wnd.contains([422.0, 420.0]));
         p.wnd_chat = Some(wnd);

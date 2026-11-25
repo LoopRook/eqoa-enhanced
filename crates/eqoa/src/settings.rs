@@ -295,17 +295,76 @@ pub fn save_waypoints(w: &[(i32, [f32; 2])]) -> bool {
 /// was moved. The client's own, kept the moment a drag ends or Reset HUD is
 /// chosen, never sent anywhere.
 pub fn hud_layout() -> String {
-    account_read("hud").or_else(|| store::read(&own_file("hud", place()))).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
+    let file = if pc_mode() { "hud-pc" } else { "hud" };
+    // the account's, else this window's own, as before the PC layout came (a
+    // layout kept before the account had one of its own is not lost)
+    account_read(file).or_else(|| store::read(&own_file(file, place()))).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
 }
 
 /// Keeps this window's HUD layout (`hud_layout`): whether it was kept.
 pub fn save_hud_layout(text: &str) -> bool {
-    match store::write(&own_file("hud", place()), text.as_bytes()).and(account_write("hud", text.as_bytes())) {
+    let file = if pc_mode() { "hud-pc" } else { "hud" };
+    match store::write(&own_file(file, place()), text.as_bytes()).and_then(|_| account_write(file, text.as_bytes())) {
         Ok(()) => true,
         Err(e) => {
             crate::say(&format!("the HUD's layout was not kept: {e}"));
             false
         }
+    }
+}
+
+/// The named HUD layouts (`hudlayout::save_profile`, Heirloom petition 2947:
+/// "save the UI I have customized and have more than 1 ... ultrawide full
+/// screen vs half screen (dualbox)"): one file an interface, shared by every
+/// window and account (a profile is a screen's, not a character's).
+pub fn hud_profiles() -> String {
+    let file = if pc_mode() { "hud-profiles-pc.opt" } else { "hud-profiles.opt" };
+    store::read(file).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
+}
+
+/// Keeps the named HUD layouts (`hud_profiles`): whether they were kept.
+pub fn save_hud_profiles(text: &str) -> bool {
+    let file = if pc_mode() { "hud-profiles-pc.opt" } else { "hud-profiles.opt" };
+    match store::write(file, text.as_bytes()) {
+        Ok(()) => true,
+        Err(e) => {
+            crate::say(&format!("the HUD profiles were not kept: {e}"));
+            false
+        }
+    }
+}
+
+/// The interface's HUD Scale % now (the PC's or the Controller's).
+pub fn hud_scale_percent() -> u8 {
+    let c = client();
+    if c.pc_mode { c.hud_scale } else { c.controller_hud_scale }
+}
+
+/// The interface's HUD Scale % set (a HUD profile's, `hudlayout`), kept; out
+/// of its range, nothing.
+pub fn set_hud_scale_percent(v: u8) {
+    if !(HUD_SCALE_MIN..=HUD_SCALE_MAX).contains(&v) {
+        return;
+    }
+    // the kept options (`write_client` writes what Save Changes would)
+    let c = kept_client();
+    let next = if c.pc_mode { ClientOptions { hud_scale: v, ..c } } else { ClientOptions { controller_hud_scale: v, ..c } };
+    if next != c {
+        CLIENT.with(|k| k.set(Some((cache_key(), next))));
+        if let Err(e) = write_client(next) {
+            crate::say(&format!("the HUD Scale was not kept: {e}"));
+        }
+    }
+}
+
+pub(crate) fn pc_window_layout() -> String {
+    read_interface_file("windows-pc").map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
+}
+
+pub(crate) fn save_pc_window_layout(text: &str) {
+    let bytes = text.as_bytes();
+    if let Err(e) = store::write(&own_file("windows-pc", place()), bytes).and_then(|_| account_write("windows-pc", bytes)) {
+        crate::say(&format!("Could not save PC window positions: {e}"));
     }
 }
 
@@ -353,6 +412,18 @@ pub fn save_dye_recent(text: &str) -> bool {
             false
         }
     }
+}
+
+// ---- the tracked quests (`questtrack`) ----------------------------------------------
+
+/// A file of the config directory's (`questtrack`'s), none when not kept.
+pub fn store_read(name: &str) -> Option<Vec<u8>> {
+    store::read(name)
+}
+
+/// Keeps a file of the config directory's (`questtrack`'s).
+pub fn store_write(name: &str, b: &[u8]) -> Result<(), String> {
+    store::write(name, b)
 }
 
 // ---- the auto slots (`autocast`) --------------------------------------------------
@@ -445,6 +516,8 @@ pub fn set_account(server: &str, user: &str) {
         migrate(&key);
     }
     bump_generation();
+    #[cfg(target_arch = "wasm32")]
+    crate::web::keyboard_profile(pc_mode());
 }
 
 /// The account's files made from the window's set kept most recently (the
@@ -461,8 +534,10 @@ fn migrate(key: &str) {
     if let Some(b) = store::read(&own_file("client", from)) {
         let _ = store::write(&account_file(key, "client"), ClientOptions::from_text(&String::from_utf8_lossy(&b)).rows_text().as_bytes());
     }
-    if let Some(b) = store::read(&own_file("hud", from)) {
-        let _ = store::write(&account_file(key, "hud"), &b);
+    for name in ["hud", "hud-pc", "windows-pc", "interface-controller", "interface-pc"] {
+        if let Some(b) = store::read(&own_file(name, from)) {
+            let _ = store::write(&account_file(key, name), &b);
+        }
     }
     crate::say(&format!("options: kept for the account from now on (from window {}'s)", from + 1));
 }
@@ -728,6 +803,16 @@ pub(crate) fn write_config(name: &str, bytes: &[u8]) -> Result<(), String> {
 pub const BRIGHTNESS_STEPS: u8 = 10;
 pub const BRIGHTNESS_AS_DRAWN: u8 = 5;
 
+/// Nameplate Size's least (Interface Size, petition 2908: "Would you
+/// consider allowing Nameplate scaling down to 30%?"), in percent of the
+/// game's plates; 100 stays the default, 200 the most.
+pub const NAMEPLATE_MIN: u8 = 30;
+
+/// HUD Scale's range in either interface, in percent (Interface Size; the
+/// Controller's since petition 2912).
+pub const HUD_SCALE_MIN: u8 = 50;
+pub const HUD_SCALE_MAX: u8 = 150;
+
 /// The Extended page's Camera Distance: the follow orbit's zoom-out ceiling
 /// (`camstyle`), from the game's 8 to 50 in steps of 3 (15 places on the
 /// slider, the client's 11 among them, and its default).
@@ -922,6 +1007,14 @@ impl std::fmt::Debug for DeviceName {
 /// The client's own settings: the Options window's Extended page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClientOptions {
+    /// The selected interface, independent of the last device that sent input.
+    pub pc_mode: bool,
+    /// Visible ten-slot shortcut rows in the PC layout, independent of spell memorization capacity.
+    pub pc_action_rows: u8,
+    /// Routed chat tabs 1–3 displayed in independent PC windows.
+    pub chat_detached: [bool; crate::chat::TABS],
+    /// Detached panes inherit the main chat size until individually resized.
+    pub chat_pane_sizes: [Option<[u8; 2]>; crate::chat::TABS],
     /// Level of Detail: the game's levels (`VILODSprite::Raster`) while set;
     /// off, every LOD body draws its near level out to its off distance
     pub lod: bool,
@@ -932,14 +1025,23 @@ pub struct ClientOptions {
     /// Frame Rate as chosen; `None` until it is, the platform's
     /// (`set_platform_rate`: 30 on a page's WebGL2, else the display's)
     pub frame_rate: Option<FrameRate>,
-    /// Camera Distance: the follow orbit's ceiling, `CAMERA_MIN` to
-    /// `CAMERA_MAX`
+    /// Camera Distance: the follow orbit's ceiling, and the Follow camera's
+    /// (the game options' 3rd Person Camera: Follow, petition 2909),
+    /// `CAMERA_MIN` to `CAMERA_MAX`
     pub camera_distance: u8,
     /// Camera Turn Speed: percent of the game's, `TURN_MIN` to `TURN_MAX`
     pub camera_turn: u16,
     /// Screen Shake: the camera shaken as the game shakes it (the spell
     /// effects' shake events, `camstyle::screen_shake`), or never
     pub screen_shake: bool,
+    /// A/D Keys (petition 2909: "for A/D to be able to set to turn
+    /// left/right instead of strafing"): the keyboard's A and D as J and L,
+    /// the right stick's sideways push (`viewer::controls`): first person and
+    /// the Follow camera turn the body, the orbits swing round; while the
+    /// mouse steers they still sidestep. Off (Strafe) by default, the
+    /// client's A and D as they were. The keyboard's only: a controller's
+    /// left stick is the game's.
+    pub ad_turn: bool,
     /// Controller Focus, each window's by its place (`focus`)
     pub controller: [Focus; crate::multibox::PLACES],
     /// Slow When Not Focused (a GM's petition 1634), each window's
@@ -994,15 +1096,63 @@ pub struct ClientOptions {
     /// effects on each group member as tiny icons beside its bar's gauges
     /// (`hud::member_effects_pieces`), where the server sends them
     /// (`Session::agree_group_effects`, go-eqoa-server's 0x7EC0/0x7EC1); off,
-    /// none, as the game shows another's effects nowhere. On by default; a
+    /// none, as the game shows another's effects nowhere. From a server that
+    /// sends version 2 (petition 2962) each icon's name shows under the mouse
+    /// and, with Buff Timers on, its time left on it. On by default; a
     /// server that turns Pet Effects off turns this off with it.
     pub group_effects: bool,
+    /// Debuff Icons (Extended > UI > Name Plates; Heirloom petition 2997:
+    /// "Debuffs cast on evil NPCs (combat) give an icon under their ID plate
+    /// with remaining time on the debuff (so you know when to refresh)"): the
+    /// harmful effects the player, its pet and its mercs have on a creature as
+    /// small icons, each with its time left while Buff Timers is on, where the
+    /// server sends them (`Session::agree_npc_debuffs`, go-eqoa-server's
+    /// 0x7EC2/0x7EC3). Where (Heirloom petition 3020, Cucumber: "It should be
+    /// moved to their target/con area to align with the group buffs"): the
+    /// target's in the target box beside its con, as the group's bars carry
+    /// their tiny icons (`hud::target_effects_pieces`), by default; or under
+    /// every creature's name plate (`play::debuff_quads`), the first way; or
+    /// none, as the game shows them nowhere. A server that turns Pet Effects
+    /// off turns this off with it.
+    pub npc_debuffs: DebuffIcons,
     /// Buff Window (`buffwnd`; a GM's petition 1761): on a server that
     /// offers it (`Session::agree_buffs`), the player's effects in two rows and
     /// its pet's in a third, each with its name and time left and a beneficial
     /// one taken off by a click or the pad; off, or on any other server, the
     /// game's strip (`influence`). On by default.
     pub buff_window: bool,
+    /// Buff Timers (petition 2924: "On the icons themselves, a number showing
+    /// how long it has remaining"): each of the player's buffs in the Buff
+    /// Window carries its time left on its icon ("45s", "12m", "2h";
+    /// `buffwnd::short_time`), and so does each group member's tiny icon
+    /// where the server sends its time (Group Effects, petition 2962); off,
+    /// the icons alone, as before. On by default: the Buff Window is the
+    /// client's own. A server that turns the Buff Window off turns this off
+    /// with it.
+    pub buff_timers: bool,
+    /// Stat Window (petition 2925: "a stat box ... health, power, resists,
+    /// AC ... HoT and PoT"): the client's own panel of what the stat channel
+    /// tells (`statwnd`), shown or hidden by F4, `/stats` and Extended > UI >
+    /// HUD Extras, kept. Off by default. A server that turns Character >
+    /// Summary's stat caps off (`qol::STAT_CAPS`) turns it off with them.
+    pub stat_window: bool,
+    /// Item Slot Icons (petitions 2926, 2928: "can we have the icon change to
+    /// whatever item is mounted"): Item (true), each item quick slot holding
+    /// an item shows that item's own icon (`hudmenu::Entry::art`), on the
+    /// Utility Bars and in the carousel's stack; Slot, the game's gem and
+    /// potion icons for the slot whatever is on it. Item by default. A server
+    /// that turns the spell bars' additions off (`qol::SPELL_BARS`: the game's
+    /// carousel) turns this to Slot.
+    pub item_icons: bool,
+    /// Spell Cooldowns (Heirloom petition 2946: "a raw number on each spell
+    /// icon on our bar representing how long until we can recast, or ...
+    /// darkened with a clock swipe"): an ability's icon on the bars darkened
+    /// by its recast time left (the server's lockout, 0x00CD), a clock's hand
+    /// sweeping it clear, and the seconds left in its middle
+    /// (`hudmenu::Cooldowns`); off, the game's lock badge alone. On by default,
+    /// as Buff Timers. A server that turns the spell bars' additions off
+    /// (`qol::SPELL_BARS`) turns this off with them.
+    pub spell_cooldowns: bool,
     /// Quest Markers over the heads (Extended > UI > Name Plates;
     /// a GM's petition 1813): on a server that sends them
     /// (`Session::agree_head_marks`), a yellow "!" over an NPC with a quest
@@ -1062,6 +1212,13 @@ pub struct ClientOptions {
     /// DPS Meter Shows: the fight (under way, or the last) or Overall, every
     /// fight since the login; a click on the panel's title or `/dps` turns it.
     pub dps_view: crate::dpsmeter::View,
+    /// DPS Meter Columns (Heirloom petition 3030): the DPS alone (the
+    /// default), with the HPS, or with the HPS and the power given a second, on
+    /// a server that counts them (layout 2).
+    pub dps_columns: crate::dpsmeter::Columns,
+    /// DPS Meter Sort: what the lines are ranked and the bars drawn by, one
+    /// of the columns shown (damage by default).
+    pub dps_sort: crate::dpsmeter::Metric,
     /// Item Links (`itemlink`; a GM's petition 1463: "This should be
     /// off by default for ps2 players and a toggle option. If toggled off for
     /// players, they should just see a plain text item name if linked"): links
@@ -1079,16 +1236,82 @@ pub struct ClientOptions {
     /// target or a dead one, the nearest creature fighting the player (else
     /// its pet or group) targeted. Off by default.
     pub auto_target: bool,
+    /// Mouseover Casting (Heirloom petition 2960): in the PC interface, a heal
+    /// or buff cast at a target goes to the friend under the mouse (the
+    /// player's pet, group or their mercs) without targeting it: Mouseover
+    /// First, or Target First (only when the target is no friend). Off by
+    /// default (`Play::mouseover_target`). A server that turns auto-cast off
+    /// (`qol::AUTO_CAST`) turns this off with it.
+    pub mouseover_cast: MouseoverCast,
     /// Weapon Swap Back (a GM, 2026-11-16, work board 1581): a weapon set
     /// used from the HUD asks the server to put back what it took off when
     /// pressed again (0x0022's swap-back byte, `gear::use_message`). Off by
     /// default.
     pub weapon_swap_back: bool,
+    /// Auto Loot (Heirloom petition 3008, Cucumber: "when you open the loot
+    /// window and auto loot is selected it auto loots everything. Probably
+    /// have it not auto loot NO TRADE stuff"): a corpse opened takes each of
+    /// its items but the NO TRADE ones (and a Lore one already held) with the
+    /// window's own take, one `LootOne` an item (`loot::auto_takes`). Off by
+    /// default. A server that turns auto-cast off (`qol::AUTO_CAST`: the
+    /// game's own UI, an [OG] account) turns this off with it.
+    pub auto_loot: bool,
+    /// Attack With Abilities (Heirloom petition 3015, Cucumber: "an option
+    /// that if you use an attack skill as tank/melee, it auto starts your
+    /// regular attack/auto attack"): an attack ability (`autocast::Kind::
+    /// Attack` at a target: a taunt, a kick, a bash, a strike, a nuke) the
+    /// server takes (its lockout, 0x00CD) on a hostile target starts the
+    /// auto-attack as the attack button does (`Play::attack_with_ability`).
+    /// Off by default. A server that turns auto-cast off (`qol::AUTO_CAST`)
+    /// turns this off with it.
+    pub attack_abilities: bool,
     /// Chat Always Shown (a player's ticket 1914: "allows your chat box to stay
     /// fully visible without auto collapse"): the chat box open at its five
     /// rows with the last lines in it, never sliding away (`chat::WndChat::
     /// always`). Off by default, the game's box.
     pub chat_always: bool,
+    /// Interface sizes and chat background opacity, in percent of the original
+    /// sizes and of full opacity. Chat height is a count of visible rows.
+    pub hud_scale: u8,
+    pub nameplate_scale: u8,
+    /// The Controller interface's HUD Scale (petition 2912: "adjust the size
+    /// of the user interface, such as scaling it down by 50% or so ... but
+    /// not necessarily have to hide the UI"), in percent, `HUD_SCALE_MIN` to
+    /// `HUD_SCALE_MAX`: what `display_ui` gives as `hud_scale` there, each
+    /// piece scaled about its own corner (`hudlayout::scale`). Its own key,
+    /// not `hud_scale`, which an older settings file may hold from before
+    /// the two interfaces and which stays the PC's. 100 by default: the
+    /// game's HUD, every quad where it was.
+    pub controller_hud_scale: u8,
+    /// The Controller interface's Nameplate Size (petition 2908, the owner's
+    /// of 2026-11-24: in both interfaces), in percent, `NAMEPLATE_MIN` to
+    /// 200: what `display_ui` gives as `nameplate_scale` there. Its own key,
+    /// as `controller_hud_scale`: an older file's `nameplate_scale` stays the
+    /// PC's. 100 by default, the game's plates.
+    pub controller_nameplate_scale: u8,
+    pub chat_width: u8,
+    pub chat_rows: u8,
+    /// Hotkey Label Size % (Heirloom petition 2945: "The hotkey label for the
+    /// spells/spellbar are quite large compared to the icons. Could the
+    /// size/scale be an option"): the PC bars' key names drawn at this share
+    /// of the font, 40 to 100, 100 (the font's own) by default.
+    pub hotkey_label_scale: u8,
+    pub chat_opacity: u8,
+    /// PC chat idle fade delay in seconds; zero leaves chat visible.
+    pub chat_fade_seconds: u8,
+    /// Let newly received chat wake its PC pane; otherwise only interaction does.
+    pub chat_wake_on_message: bool,
+    /// Wake on New Chat's Any Tab (Heirloom petition 2953: "chat 'wakes up'
+    /// when any tab gets a new entry ... Make it wake only when the active
+    /// tab gets a new entry"): off, a line for a tab not shown marks the tab
+    /// and wakes nothing; on, it wakes Main as it did before.
+    pub chat_wake_any_tab: bool,
+    /// Inline Keyboard Chat: on a computer Enter types into the chat box
+    /// itself, the HUD kept (on by default since Heirloom petition 2943: "if
+    /// I press Enter most of my UI disappears. I am in the PC mode"); off,
+    /// the game's Text Entry window, which hides the HUD as a console did.
+    /// The Controller interface keeps the game's window either way.
+    pub inline_chat: bool,
     /// R2 Channel Switch (the server owner, 2026-11-18: "for switching chat
     /// channels hold r2 then dpad left/right can switch channels if players
     /// have that on"): with R2 held (the chat box's history, mode 33) left
@@ -1527,6 +1750,10 @@ pub fn step_name_distance(v: u8, d: i32) -> Option<u8> {
 impl Default for ClientOptions {
     fn default() -> Self {
         ClientOptions {
+            pc_mode: false,
+            pc_action_rows: 4,
+            chat_detached: [false; crate::chat::TABS],
+            chat_pane_sizes: [None; crate::chat::TABS],
             lod: true,
             brightness: BRIGHTNESS_AS_DRAWN,
             fog: crate::fog::GAME,
@@ -1534,6 +1761,7 @@ impl Default for ClientOptions {
             camera_distance: crate::camstyle::FOLLOW_MAX_DISTANCE as u8,
             camera_turn: TURN_GAME,
             screen_shake: true,
+            ad_turn: false,
             controller: [Focus::Auto; crate::multibox::PLACES],
             slow_unfocused: [false; crate::multibox::PLACES],
             capture: false,
@@ -1546,7 +1774,12 @@ impl Default for ClientOptions {
             raid_list: true,
             pet_effects: true,
             group_effects: true,
+            npc_debuffs: DebuffIcons::Target,
             buff_window: true,
+            buff_timers: true,
+            stat_window: false,
+            item_icons: true,
+            spell_cooldowns: true,
             head_marks: true,
             target_level: true,
             power_bars: true,
@@ -1556,11 +1789,28 @@ impl Default for ClientOptions {
             number_colors: crate::numcolor::DEFAULTS,
             dps_meter: false,
             dps_view: crate::dpsmeter::View::Fight,
+            dps_columns: crate::dpsmeter::Columns::Dps,
+            dps_sort: crate::dpsmeter::Metric::Damage,
             item_links: true,
             auto_cast: true,
             auto_target: false,
+            mouseover_cast: MouseoverCast::Off,
             weapon_swap_back: false,
+            auto_loot: false,
+            attack_abilities: false,
             chat_always: false,
+            hud_scale: 100,
+            nameplate_scale: 100,
+            controller_hud_scale: 100,
+            controller_nameplate_scale: 100,
+            chat_width: 100,
+            chat_rows: 5,
+            hotkey_label_scale: 100,
+            chat_opacity: 75,
+            chat_fade_seconds: 0,
+            chat_wake_on_message: false,
+            chat_wake_any_tab: false,
+            inline_chat: true,
             r2_channels: false,
             stacked_bars: false,
             spell_bar_opacity: 100,
@@ -1641,6 +1891,15 @@ impl ClientOptions {
     /// when on (Ambient Occlusion and Dynamic Lighting the same).
     pub fn to_text(self) -> String {
         let mut s = format!("lod={}\nbrightness={}\ncamera_distance={}\n", if self.lod { "on" } else { "off" }, self.brightness, self.camera_distance);
+        if self.pc_mode { s.push_str("ui_mode=pc\n"); }
+        if self.pc_action_rows != 4 { s.push_str(&format!("pc_action_rows={}\n", self.pc_action_rows)); }
+        let detached = self.chat_detached.iter().enumerate().fold(0u8, |mask, (i, &on)| mask | (u8::from(on) << i));
+        if detached != 0 { s.push_str(&format!("chat_detached={detached}\n")); }
+        for (i, size) in self.chat_pane_sizes.iter().enumerate() {
+            if let Some([width, rows]) = size {
+                s.push_str(&format!("chat_pane_{}={width},{rows}\n", i + 1));
+            }
+        }
         if let Some(r) = self.frame_rate {
             s.push_str(&format!("frame_rate={}\n", r.key()));
         }
@@ -1652,6 +1911,10 @@ impl ClientOptions {
         }
         if !self.screen_shake {
             s.push_str("screen_shake=off\n");
+        }
+        // A/D Keys only when Turn
+        if self.ad_turn {
+            s.push_str("ad_keys=turn\n");
         }
         for (k, f) in self.controller.iter().enumerate().filter(|(_, f)| **f != Focus::Auto) {
             s.push_str(&format!("controller.{}={}\n", k + 1, f.key()));
@@ -1689,8 +1952,26 @@ impl ClientOptions {
         if !self.group_effects {
             s.push_str("group_effects=off\n");
         }
+        // Target Window, the default, unwritten (as "on" was before it)
+        match self.npc_debuffs {
+            DebuffIcons::Target => {}
+            DebuffIcons::Plate => s.push_str("npc_debuffs=plate\n"),
+            DebuffIcons::Off => s.push_str("npc_debuffs=off\n"),
+        }
         if !self.buff_window {
             s.push_str("buff_window=off\n");
+        }
+        if !self.buff_timers {
+            s.push_str("buff_timers=off\n");
+        }
+        if self.stat_window {
+            s.push_str("stat_window=on\n");
+        }
+        if !self.spell_cooldowns {
+            s.push_str("spell_cooldowns=off\n");
+        }
+        if !self.item_icons {
+            s.push_str("item_icons=slot\n");
         }
         if !self.head_marks {
             s.push_str("head_marks=off\n");
@@ -1727,10 +2008,22 @@ impl ClientOptions {
         if self.dps_view != crate::dpsmeter::View::Fight {
             s.push_str(&format!("dps_meter_shows={}\n", self.dps_view.key()));
         }
+        // its columns and sort only when not the DPS alone, by damage
+        if self.dps_columns != crate::dpsmeter::Columns::Dps {
+            s.push_str(&format!("dps_meter_columns={}\n", self.dps_columns.key()));
+        }
+        if self.dps_sort != crate::dpsmeter::Metric::Damage {
+            s.push_str(&format!("dps_meter_sort={}\n", self.dps_sort.key()));
+        }
         // Item Links only when off
         // Auto-Cast only when off, Auto Target only when on
         if !self.auto_cast {
             s.push_str("auto_cast=off\n");
+        }
+        match self.mouseover_cast {
+            MouseoverCast::Off => {}
+            MouseoverCast::MouseoverFirst => s.push_str("mouseover_cast=mouseover\n"),
+            MouseoverCast::TargetFirst => s.push_str("mouseover_cast=target\n"),
         }
         if self.auto_target {
             s.push_str("auto_target=on\n");
@@ -1739,6 +2032,14 @@ impl ClientOptions {
         if self.weapon_swap_back {
             s.push_str("weapon_swap_back=on\n");
         }
+        // Auto Loot only when on
+        if self.auto_loot {
+            s.push_str("auto_loot=on\n");
+        }
+        // Attack With Abilities only when on
+        if self.attack_abilities {
+            s.push_str("attack_abilities=on\n");
+        }
         // R2 Channel Switch only when on
         if self.r2_channels {
             s.push_str("r2_channels=on\n");
@@ -1746,6 +2047,25 @@ impl ClientOptions {
         // Chat Always Shown and Stacked Spell Bars only when on
         if self.chat_always {
             s.push_str("chat_always=on\n");
+        }
+        if self.chat_fade_seconds != 0 {
+            s.push_str(&format!("chat_fade_seconds={}\n", self.chat_fade_seconds));
+        }
+        if self.chat_wake_on_message { s.push_str("chat_wake_on_message=on\n"); }
+        if self.chat_wake_any_tab { s.push_str("chat_wake_any_tab=on\n"); }
+        for (key, value, default) in [
+            ("hud_scale", self.hud_scale, 100), ("nameplate_scale", self.nameplate_scale, 100), ("controller_hud_scale", self.controller_hud_scale, 100), ("controller_nameplate_scale", self.controller_nameplate_scale, 100),
+            ("chat_width", self.chat_width, 100), ("chat_rows", self.chat_rows, 5), ("chat_opacity", self.chat_opacity, 75),
+            ("hotkey_label_scale", self.hotkey_label_scale, 100),
+        ] {
+            if value != default {
+                s.push_str(&format!("{key}={value}\n"));
+            }
+        }
+        // on by default since Heirloom petition 2943 (a computer's Enter
+        // hid the HUD behind the game's Text Entry window): only Off is kept
+        if !self.inline_chat {
+            s.push_str("inline_chat=off\n");
         }
         if self.stacked_bars {
             s.push_str("stacked_bars=on\n");
@@ -1943,6 +2263,24 @@ impl ClientOptions {
         for line in s.lines() {
             let Some((k, v)) = line.split_once('=') else { continue };
             match (k.trim(), v.trim()) {
+                ("ui_mode", "pc") => c.pc_mode = true,
+                ("ui_mode", "controller") => c.pc_mode = false,
+                ("pc_action_rows", v) => {
+                    if let Some(rows) = ranged(v, 1, 4) { c.pc_action_rows = rows; }
+                }
+                (k, v) if k.starts_with("chat_pane_") => {
+                    if let Some(index) = k["chat_pane_".len()..].parse::<usize>().ok().and_then(|t| t.checked_sub(1))
+                        && let Some(pane) = c.chat_pane_sizes.get_mut(index)
+                        && let Some((width, rows)) = v.split_once(',')
+                        && let (Some(w), Some(r)) = (ranged(width, 50, 125), ranged(rows, 3, 12)) {
+                        *pane = Some([w, r]);
+                    }
+                }
+                ("chat_detached", v) => {
+                    if let Some(mask) = ranged(v, 0, (1 << crate::chat::TABS) - 1) {
+                        c.chat_detached = std::array::from_fn(|i| mask & (1 << i) != 0);
+                    }
+                }
                 ("lod", "on") => c.lod = true,
                 ("lod", "off") => c.lod = false,
                 ("brightness", v) => {
@@ -1968,6 +2306,8 @@ impl ClientOptions {
                 }
                 ("screen_shake", "on") => c.screen_shake = true,
                 ("screen_shake", "off") => c.screen_shake = false,
+                ("ad_keys", "turn") => c.ad_turn = true,
+                ("ad_keys", "strafe") => c.ad_turn = false,
                 ("capture_controller", "on") => c.capture = true,
                 ("capture_controller", "off") => c.capture = false,
                 ("art", "2002") => c.art = esf::Era::Y2002,
@@ -1986,8 +2326,21 @@ impl ClientOptions {
                 ("pet_effects", "off") => c.pet_effects = false,
                 ("group_effects", "on") => c.group_effects = true,
                 ("group_effects", "off") => c.group_effects = false,
+                // "on" was the plates' (petition 2997), never written as the
+                // default: on now reads as the new default, the target box
+                ("npc_debuffs", "on" | "target") => c.npc_debuffs = DebuffIcons::Target,
+                ("npc_debuffs", "plate") => c.npc_debuffs = DebuffIcons::Plate,
+                ("npc_debuffs", "off") => c.npc_debuffs = DebuffIcons::Off,
                 ("buff_window", "on") => c.buff_window = true,
                 ("buff_window", "off") => c.buff_window = false,
+                ("buff_timers", "on") => c.buff_timers = true,
+                ("buff_timers", "off") => c.buff_timers = false,
+                ("stat_window", "on") => c.stat_window = true,
+                ("stat_window", "off") => c.stat_window = false,
+                ("spell_cooldowns", "on") => c.spell_cooldowns = true,
+                ("spell_cooldowns", "off") => c.spell_cooldowns = false,
+                ("item_icons", "item") => c.item_icons = true,
+                ("item_icons", "slot") => c.item_icons = false,
                 ("head_marks", "on") => c.head_marks = true,
                 ("head_marks", "off") => c.head_marks = false,
                 ("target_level", "on") => c.target_level = true,
@@ -2004,15 +2357,52 @@ impl ClientOptions {
                 ("dps_meter", "off") => c.dps_meter = false,
                 ("dps_meter_shows", "fight") => c.dps_view = crate::dpsmeter::View::Fight,
                 ("dps_meter_shows", "overall") => c.dps_view = crate::dpsmeter::View::Overall,
+                ("dps_meter_columns", "dps") => c.dps_columns = crate::dpsmeter::Columns::Dps,
+                ("dps_meter_columns", "hps") => c.dps_columns = crate::dpsmeter::Columns::Hps,
+                ("dps_meter_columns", "all") => c.dps_columns = crate::dpsmeter::Columns::All,
+                ("dps_meter_sort", "dps") => c.dps_sort = crate::dpsmeter::Metric::Damage,
+                ("dps_meter_sort", "hps") => c.dps_sort = crate::dpsmeter::Metric::Healing,
+                ("dps_meter_sort", "power") => c.dps_sort = crate::dpsmeter::Metric::Power,
                 ("item_links", "on") => c.item_links = true,
                 ("item_links", "off") => c.item_links = false,
                 ("auto_cast", "on") => c.auto_cast = true,
                 ("auto_cast", "off") => c.auto_cast = false,
+                ("mouseover_cast", "off") => c.mouseover_cast = MouseoverCast::Off,
+                ("mouseover_cast", "mouseover") => c.mouseover_cast = MouseoverCast::MouseoverFirst,
+                ("mouseover_cast", "target") => c.mouseover_cast = MouseoverCast::TargetFirst,
                 ("auto_target", "on") => c.auto_target = true,
                 ("auto_target", "off") => c.auto_target = false,
                 ("weapon_swap_back", "on") => c.weapon_swap_back = true,
                 ("weapon_swap_back", "off") => c.weapon_swap_back = false,
+                ("auto_loot", "on") => c.auto_loot = true,
+                ("auto_loot", "off") => c.auto_loot = false,
+                ("attack_abilities", "on") => c.attack_abilities = true,
+                ("attack_abilities", "off") => c.attack_abilities = false,
                 ("chat_always", "on") => c.chat_always = true,
+                ("chat_fade_seconds", v) => {
+                    if let Ok(n) = v.parse::<u8>() && n <= 120 { c.chat_fade_seconds = n; }
+                }
+                ("chat_wake_on_message", "on") => c.chat_wake_on_message = true,
+                ("chat_wake_on_message", "off") => c.chat_wake_on_message = false,
+                ("chat_wake_any_tab", "on") => c.chat_wake_any_tab = true,
+                ("chat_wake_any_tab", "off") => c.chat_wake_any_tab = false,
+                ("inline_chat", "on") => c.inline_chat = true,
+                ("inline_chat", "off") => c.inline_chat = false,
+                (key @ ("hud_scale" | "nameplate_scale" | "controller_hud_scale" | "controller_nameplate_scale" | "chat_width" | "chat_rows" | "chat_opacity" | "hotkey_label_scale"), v) => {
+                    let (field, range) = match key {
+                        "hud_scale" => (&mut c.hud_scale, HUD_SCALE_MIN..=HUD_SCALE_MAX),
+                        "controller_hud_scale" => (&mut c.controller_hud_scale, HUD_SCALE_MIN..=HUD_SCALE_MAX),
+                        "controller_nameplate_scale" => (&mut c.controller_nameplate_scale, NAMEPLATE_MIN..=200),
+                        "nameplate_scale" => (&mut c.nameplate_scale, NAMEPLATE_MIN..=200),
+                        "chat_width" => (&mut c.chat_width, 50..=125),
+                        "chat_rows" => (&mut c.chat_rows, 3..=12),
+                        "hotkey_label_scale" => (&mut c.hotkey_label_scale, HOTKEY_LABEL_MIN..=100),
+                        _ => (&mut c.chat_opacity, 0..=100),
+                    };
+                    if let Some(n) = v.parse::<u8>().ok().filter(|n| range.contains(n)) {
+                        *field = n;
+                    }
+                }
                 ("r2_channels", "on") => c.r2_channels = true,
                 ("r2_channels", "off") => c.r2_channels = false,
                 ("chat_always", "off") => c.chat_always = false,
@@ -2211,6 +2601,11 @@ impl ClientOptions {
         }
         c.touch_stick = stick.or(old_size).unwrap_or(c.touch_stick);
         c.touch_buttons = buttons.or(old_size).unwrap_or(c.touch_buttons);
+        // Older profiles omitted dimensions for a detached pane. Snapshot
+        // the inherited dimensions before a later resize of Main.
+        for (detached, size) in c.chat_detached.iter().zip(&mut c.chat_pane_sizes) {
+            if *detached { size.get_or_insert([c.chat_width, c.chat_rows]); }
+        }
         c
     }
 }
@@ -2249,8 +2644,127 @@ fn read_client() -> ClientOptions {
 /// own as the file has them now (another window may have saved its own since
 /// this one read them).
 fn save_client() -> Result<(), String> {
+    write_client(kept_client())
+}
+
+/// Replace only the choices that travel with an interface. Audio, graphics,
+/// game options and the server's feature mask keep their usual lifetimes.
+impl ClientOptions {
+    /// PC display choices may be present in an older settings file. Keep
+    /// those choices available when the player first selects the PC interface.
+    pub(crate) fn display_ui(self) -> Self {
+        if self.pc_mode { return self; }
+        Self { hud_scale: self.controller_hud_scale, nameplate_scale: self.controller_nameplate_scale, chat_width: 100, chat_rows: 5,
+            chat_opacity: 75, chat_fade_seconds: 0, chat_wake_on_message: false, chat_wake_any_tab: false, inline_chat: false, chat_detached: [false; crate::chat::TABS], ..self }
+    }
+
+    pub(crate) fn with_interface(self, ui: Self) -> Self {
+        Self {
+            pc_mode: ui.pc_mode, pc_action_rows: ui.pc_action_rows, ability_bars: ui.ability_bars, stacked_bars: ui.stacked_bars,
+            spell_bar_opacity: ui.spell_bar_opacity, spell_bar_layout: ui.spell_bar_layout, utility_layout: ui.utility_layout,
+            hud_scale: ui.hud_scale, nameplate_scale: ui.nameplate_scale,
+            chat_always: ui.chat_always, chat_width: ui.chat_width, chat_rows: ui.chat_rows, chat_opacity: ui.chat_opacity, chat_fade_seconds: ui.chat_fade_seconds, chat_wake_on_message: ui.chat_wake_on_message, chat_wake_any_tab: ui.chat_wake_any_tab,
+            inline_chat: ui.inline_chat, chat_tabs: ui.chat_tabs, chat_tab_names: ui.chat_tab_names, chat_detached: ui.chat_detached,
+            chat_pane_sizes: ui.chat_pane_sizes,
+            health_numbers: ui.health_numbers, ..self
+        }
+    }
+
+    fn first_pc(self) -> Self {
+        let mut routes = self.chat_tabs;
+        if routes == [0; crate::chat::KINDS] {
+            use crate::chat::Kind;
+            for (kind, tab) in [(Kind::Tells, 1), (Kind::Combat, 2), (Kind::System, 3)] {
+                routes[kind.index()] = tab;
+            }
+        }
+        Self {
+            pc_mode: true, ability_bars: 4, stacked_bars: true, health_numbers: true,
+            utility_layout: crate::hudmenu::UtilityLayout::Below,
+            hud_scale: if self.hud_scale == 100 { 85 } else { self.hud_scale },
+            chat_width: if self.chat_width == 100 { 65 } else { self.chat_width },
+            chat_rows: if self.chat_rows == 5 { 7 } else { self.chat_rows },
+            chat_opacity: if self.chat_opacity == 75 { 65 } else { self.chat_opacity },
+            chat_always: true, inline_chat: true, chat_tabs: routes, ..self
+        }
+    }
+}
+
+pub fn pc_mode() -> bool { kept_client().pc_mode }
+
+pub fn pc_action_rows() -> u8 { client().pc_action_rows.clamp(1, 4) }
+
+fn read_interface_file(name: &str) -> Option<Vec<u8>> {
+    match account_key() {
+        Some(account) => store::read(&account_file(&account, name)),
+        None => store::read(&own_file(name, place())),
+    }
+}
+
+/// A switch is kept immediately. Keep the outgoing interface before publishing
+/// the new selection, and preserve unrelated unsaved edits in the open window.
+pub fn set_ui_mode(pc: bool) -> Result<(), String> {
+    let current = kept_client();
+    if pc == current.pc_mode { return Ok(()); }
+    let file = |pc| if pc { "interface-pc" } else { "interface-controller" };
+    let outgoing = ClientOptions::default().with_interface(current).to_text();
+    store::write(&own_file(file(current.pc_mode), place()), outgoing.as_bytes())?;
+    account_write(file(current.pc_mode), outgoing.as_bytes())?;
+    let incoming = read_interface_file(file(pc));
+    let profile = match incoming {
+        Some(b) => ClientOptions::from_text(&String::from_utf8_lossy(&b)),
+        None if pc => current.first_pc(),
+        None => ClientOptions::default(),
+    };
+    let profile = ClientOptions { pc_mode: pc, ..profile };
+    write_client(read_client().with_interface(profile))?;
+    CLIENT.with(|c| c.set(Some((cache_key(), current.with_interface(profile)))));
+    #[cfg(target_arch = "wasm32")]
+    crate::web::keyboard_profile(pc);
+    Ok(())
+}
+
+pub fn set_chat_detached(tab: usize, detached: bool) -> Result<(), String> {
+    let Some(i) = tab.checked_sub(1).filter(|&i| i < crate::chat::TABS) else { return Err("Unknown chat tab".into()) };
+    if !pc_mode() { return Err("Detach chat in PC mode".into()); }
+    let mut live = kept_client();
+    let mut saved = read_client();
+    if detached {
+        let size = *live.chat_pane_sizes[i].get_or_insert([live.chat_width, live.chat_rows]);
+        saved.chat_pane_sizes[i] = Some(size);
+    }
+    saved.chat_detached[i] = detached;
+    write_client(saved)?;
+    live.chat_detached[i] = detached;
+    CLIENT.with(|c| c.set(Some((cache_key(), live))));
+    Ok(())
+}
+
+pub(crate) fn hud_cache_key() -> (usize, bool) { (cache_key(), pc_mode()) }
+
+pub fn chat_pane_size(tab: usize) -> (u8, u8) {
+    let c = client().display_ui();
+    let size = tab.checked_sub(1).and_then(|i| c.chat_pane_sizes.get(i).copied()).flatten();
+    let [w, r] = size.unwrap_or([c.chat_width, c.chat_rows]);
+    (w, r)
+}
+
+/// Resizing a chat window saves just the dimensions of that window.
+pub fn keep_chat_pane_size(tab: usize, width: u8, rows: u8) {
+    if tab > crate::chat::TABS { return; }
+    let resize = |mut c: ClientOptions| {
+        if tab == 0 { (c.chat_width, c.chat_rows) = (width, rows); }
+        else { c.chat_pane_sizes[tab - 1] = Some([width, rows]); }
+        c
+    };
+    set_client(resize(kept_client()));
+    if let Err(e) = write_client(resize(read_client())) {
+        crate::say(&format!("The chat size could not be saved: {e}"));
+    }
+}
+
+fn write_client(mine: ClientOptions) -> Result<(), String> {
     let me = place();
-    let mine = kept_client();
     let mut shared = read_shared();
     shared.controller[me] = mine.controller[me];
     shared.slow_unfocused[me] = mine.slow_unfocused[me];
@@ -2347,22 +2861,23 @@ pub mod qol {
     /// Number Colors and Merc Colors: every number the game's colour.
     pub const NUMBER_COLORS: u32 = 1 << 4;
     /// Character > Summary's stat caps ("346/435"): the value alone and the
-    /// game's column widths (`trainer`).
+    /// game's column widths (`trainer`); and the Stat Window (`statwnd`).
     pub const STAT_CAPS: u32 = 1 << 5;
     /// Others' power under their health (Power Bars), and the health numbers
     /// over the bars (Health Numbers).
     pub const POWER_BARS: u32 = 1 << 6;
-    /// The buff window: the game's effects strip.
+    /// The buff window: the game's effects strip (and its Buff Timers).
     pub const BUFF_WINDOW: u32 = 1 << 7;
     /// The pet's effects under its bar (Pet Effects).
     pub const PET_EFFECTS: u32 = 1 << 8;
-    /// Auto-cast on the quick bars and Auto Target.
+    /// Auto-cast on the quick bars and Auto Target (and Mouseover Casting,
+    /// Auto Loot and Attack With Abilities, the client's other automation).
     pub const AUTO_CAST: u32 = 1 << 9;
     /// Item links in chat (Item Links) OFF BY DEFAULT, not locked: read from
     /// `item_links_here`, the player's to turn there (plain names until then).
     pub const ITEM_LINKS: u32 = 1 << 10;
     /// Ability Bars 3 and 4 and Stacked Spell Bars: the game's two bars, its
-    /// carousel.
+    /// carousel (and its slots' own icons: Item Slot Icons at Slot).
     pub const SPELL_BARS: u32 = 1 << 11;
     /// An [OG] account's (go-eqoa-server's `world.og_accounts`; the owner,
     /// 2026-11-18: "[OG] tag shows players you opt-out of the QoL changes to
@@ -2406,13 +2921,14 @@ pub mod qol {
     pub fn of_item(item: i32) -> Option<u32> {
         Some(match item {
             44 | 45 | 85 => QUEST_HELPER,
-            70..=72 => DPS_METER,
+            70..=72 | crate::options::DPS_COLUMNS | crate::options::DPS_SORT => DPS_METER,
             64..=69 | 80 | 81 => NUMBER_COLORS,
             86 | crate::options::HEALTH_NUMBERS => POWER_BARS,
-            83 => BUFF_WINDOW,
-            58 | crate::options::GROUP_EFFECTS => PET_EFFECTS,
-            78 | 79 => AUTO_CAST,
-            22 | 90 | crate::options::SPELL_BAR_LAYOUT | crate::options::UTILITY_LAYOUT => SPELL_BARS,
+            83 | crate::options::BUFF_TIMERS => BUFF_WINDOW,
+            crate::options::STAT_WINDOW => STAT_CAPS,
+            58 | crate::options::GROUP_EFFECTS | crate::options::NPC_DEBUFFS => PET_EFFECTS,
+            78 | 79 | crate::options::MOUSEOVER_CAST | crate::options::AUTO_LOOT | crate::options::ATTACK_ABILITIES => AUTO_CAST,
+            22 | 90 | crate::options::SPELL_BAR_LAYOUT | crate::options::UTILITY_LAYOUT | crate::options::SPELL_BAR_SIZE | crate::options::ITEM_ICONS | crate::options::SPELL_COOLDOWNS => SPELL_BARS,
             _ => return None,
         })
     }
@@ -2446,6 +2962,9 @@ pub mod qol {
         if off(TARGET_LEVEL) {
             c.target_level = false;
         }
+        if off(STAT_CAPS) {
+            c.stat_window = false;
+        }
         if off(DPS_METER) {
             c.dps_meter = false;
         }
@@ -2456,19 +2975,20 @@ pub mod qol {
             (c.power_bars, c.health_numbers) = (false, false);
         }
         if off(BUFF_WINDOW) {
-            c.buff_window = false;
+            (c.buff_window, c.buff_timers) = (false, false);
         }
         if off(PET_EFFECTS) {
-            (c.pet_effects, c.group_effects) = (false, false);
+            (c.pet_effects, c.group_effects, c.npc_debuffs) = (false, false, super::DebuffIcons::Off);
         }
         if off(AUTO_CAST) {
-            (c.auto_cast, c.auto_target) = (false, false);
+            (c.auto_cast, c.auto_target, c.mouseover_cast, c.auto_loot, c.attack_abilities) = (false, false, super::MouseoverCast::Off, false, false);
         }
         if off(ITEM_LINKS) {
             c.item_links = c.item_links_here && !off(LOCKED);
         }
         if off(SPELL_BARS) {
             (c.ability_bars, c.stacked_bars, c.spell_bar_layout, c.utility_layout) = (super::ABILITY_BARS_GAME, false, crate::hudmenu::Layout::Stacked, crate::hudmenu::UtilityLayout::UpperLeft);
+            (c.item_icons, c.spell_cooldowns) = (false, false);
         }
         c
     }
@@ -2488,6 +3008,9 @@ pub mod qol {
         if off(TARGET_LEVEL) {
             v.target_level = kept.target_level;
         }
+        if off(STAT_CAPS) {
+            v.stat_window = kept.stat_window;
+        }
         if off(DPS_METER) {
             v.dps_meter = kept.dps_meter;
         }
@@ -2498,13 +3021,13 @@ pub mod qol {
             (v.power_bars, v.health_numbers) = (kept.power_bars, kept.health_numbers);
         }
         if off(BUFF_WINDOW) {
-            v.buff_window = kept.buff_window;
+            (v.buff_window, v.buff_timers) = (kept.buff_window, kept.buff_timers);
         }
         if off(PET_EFFECTS) {
-            (v.pet_effects, v.group_effects) = (kept.pet_effects, kept.group_effects);
+            (v.pet_effects, v.group_effects, v.npc_debuffs) = (kept.pet_effects, kept.group_effects, kept.npc_debuffs);
         }
         if off(AUTO_CAST) {
-            (v.auto_cast, v.auto_target) = (kept.auto_cast, kept.auto_target);
+            (v.auto_cast, v.auto_target, v.mouseover_cast, v.auto_loot, v.attack_abilities) = (kept.auto_cast, kept.auto_target, kept.mouseover_cast, kept.auto_loot, kept.attack_abilities);
         }
         if off(ITEM_LINKS) {
             v.item_links_here = if off(LOCKED) { kept.item_links_here } else { v.item_links };
@@ -2512,6 +3035,7 @@ pub mod qol {
         }
         if off(SPELL_BARS) {
             (v.ability_bars, v.stacked_bars, v.spell_bar_layout, v.utility_layout) = (kept.ability_bars, kept.stacked_bars, kept.spell_bar_layout, kept.utility_layout);
+            (v.item_icons, v.spell_cooldowns) = (kept.item_icons, kept.spell_cooldowns);
         }
         v
     }
@@ -2586,6 +3110,11 @@ pub fn screen_shake() -> bool {
     client().screen_shake
 }
 
+/// A/D Keys now: true when A and D turn (`ClientOptions::ad_turn`).
+pub fn ad_turn() -> bool {
+    client().ad_turn
+}
+
 /// VSync now: the player's natively, always on in a page (the browser
 /// paces its frames).
 pub fn vsync() -> bool {
@@ -2655,9 +3184,118 @@ pub fn group_effects() -> bool {
     client().group_effects
 }
 
+/// Debuff Icons: the player's effects on creatures shown anywhere (the server
+/// asked for them: `Session::agree_npc_debuffs`).
+pub fn npc_debuffs() -> bool {
+    client().npc_debuffs != DebuffIcons::Off
+}
+
+/// Debuff Icons' place now (`DebuffIcons`).
+pub fn debuff_icons() -> DebuffIcons {
+    client().npc_debuffs
+}
+
+/// Where Debuff Icons shows the player's effects on creatures (petitions 2997,
+/// 3020).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DebuffIcons {
+    /// the target's, in the target box beside its con (`hud`)
+    #[default]
+    Target,
+    /// every creature's, under its name plate (`play::debuff_quads`)
+    Plate,
+    Off,
+}
+
+impl DebuffIcons {
+    pub fn name(self) -> &'static str {
+        match self {
+            DebuffIcons::Target => "Target Window",
+            DebuffIcons::Plate => "Name Plate",
+            DebuffIcons::Off => "Off",
+        }
+    }
+
+    /// The next (`d` > 0) or the one before.
+    pub fn step(self, d: i32) -> Self {
+        let all = [DebuffIcons::Target, DebuffIcons::Plate, DebuffIcons::Off];
+        let i = all.iter().position(|&m| m == self).unwrap_or(0) as i32;
+        all[(i + d.signum()).rem_euclid(3) as usize]
+    }
+}
+
 /// Buff Window: the client's own effects window (`buffwnd`).
 pub fn buff_window() -> bool {
     client().buff_window
+}
+
+/// Buff Timers: the Buff Window's icons carry their time left (`buffwnd`).
+pub fn buff_timers() -> bool {
+    client().buff_timers
+}
+
+/// Stat Window: the client's panel of the stat channel (`statwnd`).
+pub fn stat_window() -> bool {
+    client().stat_window
+}
+
+/// Mouseover Casting's order (petition 2960, `Play::mouseover_target`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MouseoverCast {
+    #[default]
+    Off,
+    /// the friend under the mouse before the target
+    MouseoverFirst,
+    /// the target when it is a friend, else the friend under the mouse
+    TargetFirst,
+}
+
+impl MouseoverCast {
+    pub fn name(self) -> &'static str {
+        match self {
+            MouseoverCast::Off => "Off",
+            MouseoverCast::MouseoverFirst => "Mouseover First",
+            MouseoverCast::TargetFirst => "Target First",
+        }
+    }
+
+    /// The next (`d` > 0) or the one before.
+    pub fn step(self, d: i32) -> Self {
+        let all = [MouseoverCast::Off, MouseoverCast::MouseoverFirst, MouseoverCast::TargetFirst];
+        let i = all.iter().position(|&m| m == self).unwrap_or(0) as i32;
+        all[(i + d.signum()).rem_euclid(3) as usize]
+    }
+}
+
+/// Mouseover Casting now.
+pub fn mouseover_cast() -> MouseoverCast {
+    client().mouseover_cast
+}
+
+/// Spell Cooldowns: the bars' icons show their recast time (`hudmenu`).
+pub fn spell_cooldowns() -> bool {
+    client().spell_cooldowns
+}
+
+/// The smallest Hotkey Label Size % (petition 2945).
+pub const HOTKEY_LABEL_MIN: u8 = 40;
+
+/// Hotkey Label Size %: the PC bars' key names' share of the font (`hudmenu`).
+pub fn hotkey_label_scale() -> f32 {
+    f32::from(client().hotkey_label_scale.clamp(HOTKEY_LABEL_MIN, 100)) / 100.0
+}
+
+/// Item Slot Icons at Item: an item quick slot shows its item's own icon
+/// (`hudmenu`).
+pub fn item_icons() -> bool {
+    client().item_icons
+}
+
+/// The Stat Window shown or hidden (F4, `/stats`), kept as Save Changes keeps
+/// it.
+pub fn set_stat_window(on: bool) -> Result<(), String> {
+    set_client(ClientOptions { stat_window: on, ..client() });
+    save_client()
 }
 
 /// Quest Markers over the heads: the "!" and "?" over quest NPCs' names
@@ -2725,6 +3363,18 @@ pub fn weapon_swap_back() -> bool {
     client().weapon_swap_back
 }
 
+/// Auto Loot (Heirloom petition 3008), off where the server turns
+/// auto-cast off (`qol::AUTO_CAST`).
+pub fn auto_loot() -> bool {
+    client().auto_loot
+}
+
+/// Attack With Abilities (Heirloom petition 3015), off where the server
+/// turns auto-cast off (`qol::AUTO_CAST`).
+pub fn attack_abilities() -> bool {
+    client().attack_abilities
+}
+
 /// R2 Channel Switch (Extended > UI > Chat; the server owner, 2026-11-18).
 pub fn r2_channels() -> bool {
     client().r2_channels
@@ -2786,6 +3436,17 @@ pub fn map_pointer() -> crate::map::Pointer {
 /// What the DPS Meter shows (`dpsmeter::View`).
 pub fn dps_view() -> crate::dpsmeter::View {
     client().dps_view
+}
+
+/// DPS Meter Columns.
+pub fn dps_columns() -> crate::dpsmeter::Columns {
+    client().dps_columns
+}
+
+/// DPS Meter Sort, as the columns shown let it be.
+pub fn dps_sort() -> crate::dpsmeter::Metric {
+    let c = client();
+    c.dps_sort.fit(c.dps_columns)
 }
 
 /// What the windows share as another window saved it (Capture Controller,
@@ -3312,6 +3973,36 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pc_chat_fade_delay_is_bounded_and_profile_specific() {
+        use super::ClientOptions;
+        let default = ClientOptions::default();
+        assert_eq!(default.chat_fade_seconds, 0);
+        assert!(!default.chat_wake_on_message);
+        assert!(!default.to_text().contains("chat_fade_seconds="));
+        assert!(!default.to_text().contains("chat_wake_on_message="));
+        for seconds in [0, 1, 5, 10, 37, 120] {
+            let c = ClientOptions { pc_mode: true, chat_fade_seconds: seconds, ..default };
+            assert_eq!(ClientOptions::from_text(&c.to_text()).chat_fade_seconds, seconds);
+            let controller = ClientOptions { pc_mode: false, chat_fade_seconds: seconds, ..default };
+            assert_eq!(controller.display_ui().chat_fade_seconds, 0);
+            assert_eq!(default.with_interface(c).chat_fade_seconds, seconds);
+        }
+        for bad in ["121", "255", "-1", "invalid"] {
+            assert_eq!(ClientOptions::from_text(&format!("chat_fade_seconds={bad}\n")).chat_fade_seconds, 0);
+        }
+        assert_eq!(ClientOptions::from_text("chat_always=on\n").chat_fade_seconds, 0, "legacy settings do not enable a new fade");
+        let wake = ClientOptions { pc_mode: true, chat_wake_on_message: true, ..default };
+        assert!(ClientOptions::from_text(&wake.to_text()).chat_wake_on_message);
+        assert!(default.with_interface(wake).chat_wake_on_message);
+        assert!(!ClientOptions { pc_mode: false, ..wake }.display_ui().chat_wake_on_message);
+        assert!(!ClientOptions::from_text("chat_wake_on_message=invalid\n").chat_wake_on_message);
+        // Any Tab (petition 2953): off by default, kept, with the PC profile
+        assert!(!default.chat_wake_any_tab && !default.to_text().contains("chat_wake_any_tab"));
+        let any = ClientOptions { chat_wake_any_tab: true, ..wake };
+        assert!(ClientOptions::from_text(&any.to_text()).chat_wake_any_tab);
+        assert!(default.with_interface(any).chat_wake_any_tab);
+    }
     use super::*;
 
     fn changed() -> GameOptions {
@@ -3440,6 +4131,94 @@ mod tests {
         assert_eq!(game_options(), none);
         assert_eq!(client(), ClientOptions::default());
         testing::reset(false);
+    }
+
+    #[test]
+    fn hud_chat_settings_round_trip_and_reject_out_of_range_values() {
+        let defaults = ClientOptions::default();
+        let options = ClientOptions { hud_scale: 65, nameplate_scale: 170, chat_width: 85, chat_rows: 9, chat_opacity: 0, inline_chat: true, ..defaults };
+        assert_eq!(ClientOptions::from_text(&options.to_text()), options);
+        assert_eq!(ClientOptions::from_text("hud_scale=0\nnameplate_scale=255\nchat_width=0\nchat_rows=255\nchat_opacity=101\ninline_chat=bad"), defaults);
+        assert_eq!(ClientOptions::from_text(""), defaults);
+        for key in ["hud_scale=", "nameplate_scale=", "chat_width=", "chat_rows=", "chat_opacity=", "inline_chat="] {
+            assert!(!defaults.to_text().contains(key));
+        }
+        // Inline Keyboard Chat on by default (petition 2943): Off is what is kept
+        assert!(defaults.inline_chat);
+        let off = ClientOptions { inline_chat: false, ..defaults };
+        assert!(off.to_text().contains("inline_chat=off\n"));
+        assert_eq!(ClientOptions::from_text(&off.to_text()), off);
+    }
+
+    /// The Controller interface's HUD Scale (petition 2912): its own key,
+    /// 50 to 150, written only when moved, what `display_ui` gives there;
+    /// the PC's `hud_scale` stays the PC's, and it is not an interface's
+    /// profile, so a switch there and back keeps it.
+    #[test]
+    fn controller_hud_scale_is_its_own() {
+        let d = ClientOptions::default();
+        assert_eq!(d.controller_hud_scale, 100);
+        assert!(!d.to_text().contains("controller_hud_scale"));
+        let c = ClientOptions { controller_hud_scale: 50, ..d };
+        assert!(c.to_text().contains("controller_hud_scale=50\n"));
+        assert_eq!(ClientOptions::from_text(&c.to_text()), c, "round trip");
+        for bad in ["controller_hud_scale=45", "controller_hud_scale=155", "controller_hud_scale=x"] {
+            assert_eq!(ClientOptions::from_text(bad).controller_hud_scale, 100, "{bad}");
+        }
+        let both = ClientOptions { hud_scale: 85, controller_hud_scale: 60, ..d };
+        assert_eq!(both.display_ui().hud_scale, 60, "Controller: its own");
+        assert_eq!(ClientOptions { pc_mode: true, ..both }.display_ui().hud_scale, 85, "PC: the PC's");
+        assert_eq!(ClientOptions { hud_scale: 85, ..d }.display_ui().hud_scale, 100, "an older file's hud_scale is not the Controller's");
+        testing::reset(false);
+        set_client(ClientOptions { controller_hud_scale: 70, ..client() });
+        write_client(client()).unwrap();
+        set_ui_mode(true).unwrap();
+        assert_eq!(client().display_ui().hud_scale, 85, "the PC's first default");
+        set_ui_mode(false).unwrap();
+        assert_eq!((client().display_ui().hud_scale, read_client().controller_hud_scale), (70, 70), "kept over the switch");
+        testing::reset(false);
+    }
+
+    /// The Controller interface's Nameplate Size (petition 2908, the owner's
+    /// of 2026-11-24): its own key, 30 to 200, written only when moved, what
+    /// `display_ui` gives there; an older file's `nameplate_scale` stays the
+    /// PC's, and a switch there and back keeps it.
+    #[test]
+    fn controller_nameplate_scale_is_its_own() {
+        let d = ClientOptions::default();
+        assert_eq!(d.controller_nameplate_scale, 100);
+        assert!(!d.to_text().contains("controller_nameplate_scale"));
+        let c = ClientOptions { controller_nameplate_scale: 30, ..d };
+        assert!(c.to_text().contains("controller_nameplate_scale=30\n"));
+        assert_eq!(ClientOptions::from_text(&c.to_text()), c, "round trip");
+        for bad in ["controller_nameplate_scale=29", "controller_nameplate_scale=201", "controller_nameplate_scale=x"] {
+            assert_eq!(ClientOptions::from_text(bad).controller_nameplate_scale, 100, "{bad}");
+        }
+        let both = ClientOptions { nameplate_scale: 150, controller_nameplate_scale: 40, ..d };
+        assert_eq!(both.display_ui().nameplate_scale, 40, "Controller: its own");
+        assert_eq!(ClientOptions { pc_mode: true, ..both }.display_ui().nameplate_scale, 150, "PC: the PC's");
+        assert_eq!(ClientOptions { nameplate_scale: 150, ..d }.display_ui().nameplate_scale, 100, "an older file's nameplate_scale is not the Controller's");
+        testing::reset(false);
+        set_client(ClientOptions { controller_nameplate_scale: 45, ..client() });
+        write_client(client()).unwrap();
+        set_ui_mode(true).unwrap();
+        assert_eq!(client().display_ui().nameplate_scale, 100, "the PC's own");
+        set_ui_mode(false).unwrap();
+        assert_eq!((client().display_ui().nameplate_scale, read_client().controller_nameplate_scale), (45, 45), "kept over the switch");
+        testing::reset(false);
+    }
+
+    /// Nameplate Size goes down to 30% (petition 2908), not below; the
+    /// default stays 100 and is not written.
+    #[test]
+    fn nameplate_size_goes_down_to_thirty() {
+        let d = ClientOptions::default();
+        assert_eq!(d.nameplate_scale, 100);
+        assert_eq!(ClientOptions::from_text("nameplate_scale=30").nameplate_scale, 30);
+        assert_eq!(ClientOptions::from_text("nameplate_scale=45").nameplate_scale, 45);
+        assert_eq!(ClientOptions::from_text("nameplate_scale=29").nameplate_scale, 100, "below the least: the default");
+        let c = ClientOptions { nameplate_scale: 30, ..d };
+        assert_eq!(ClientOptions::from_text(&c.to_text()), c, "round trip");
     }
 
     /// The keys and buttons: kept by Save Changes in keys.opt and read back
@@ -3942,6 +4721,52 @@ mod tests {
         }
     }
 
+    #[test]
+    fn pc_profile_keeps_two_layouts_and_leaves_global_changes_pending() {
+        testing::reset(false);
+        let base = ClientOptions::default();
+        let legacy = ClientOptions { chat_rows: 9, nameplate_scale: 130, ..base };
+        testing::put(CLIENT_FILE, legacy.to_text().as_bytes());
+        assert!(!pc_mode());
+        assert_eq!(client().display_ui().nameplate_scale, 100);
+        set_client(ClientOptions { camera_distance: 14, ..client() });
+        set_ui_mode(true).unwrap();
+        assert!(client().inline_chat && client().chat_always);
+        assert_eq!((client().ability_bars, client().chat_rows, client().nameplate_scale), (4, 9, 130));
+        assert_eq!(read_client().camera_distance, base.camera_distance);
+        set_chat_detached(2, true).unwrap();
+        keep_chat_pane_size(0, 85, 8);
+        keep_chat_pane_size(2, 55, 4);
+        set_ui_mode(false).unwrap();
+        assert_eq!((client().chat_rows, client().chat_width), (9, 100));
+        assert_eq!(client().camera_distance, 14);
+        set_ui_mode(true).unwrap();
+        CLIENT.with(|c| c.set(None));
+        assert_eq!((client().chat_rows, client().chat_width, client().chat_detached), (8, 85, [false, true, false]));
+        assert_eq!((chat_pane_size(0), chat_pane_size(1), chat_pane_size(2)), ((85, 8), (85, 8), (55, 4)));
+        assert!(pc_mode());
+        testing::reset(true);
+        assert!(set_ui_mode(true).is_err());
+        assert!(!pc_mode(), "the selector still represents the kept mode on a write failure");
+    }
+
+    #[test]
+    fn pc_spell_row_count_is_saved_in_the_pc_profile() {
+        testing::reset(false);
+        assert_eq!(pc_action_rows(), 4);
+        set_account("a", "player");
+        set_ui_mode(true).unwrap();
+        set_client(ClientOptions { pc_action_rows: 2, ..client() });
+        set_ui_mode(false).unwrap();
+        set_ui_mode(true).unwrap();
+        assert_eq!(pc_action_rows(), 2);
+        assert_eq!(client().ability_bars, 4, "the legacy five-slot menu setting stays independent");
+        for invalid in ["0", "5", "-1", ""] {
+            assert_eq!(ClientOptions::from_text(&format!("pc_action_rows={invalid}")).pc_action_rows, 4);
+        }
+        testing::reset(false);
+    }
+
     /// The options kept by the build with Textures' Crisp (gone the same day:
     /// the user, "world textures cant render proper without smooth. so only
     /// use for UI, Text") still load: the line is left out and written back
@@ -3976,7 +4801,7 @@ mod tests {
     #[test]
     fn the_server_turns_additions_off_and_the_choices_stay() {
         testing::reset(false);
-        let chosen = ClientOptions { dps_meter: true, auto_target: true, health_numbers: true, number_colors: [3; crate::numcolor::ROWS], ability_bars: 4, stacked_bars: true, spell_bar_layout: crate::hudmenu::Layout::Columns, utility_layout: crate::hudmenu::UtilityLayout::Below, ..Default::default() };
+        let chosen = ClientOptions { dps_meter: true, auto_target: true, auto_loot: true, attack_abilities: true, stat_window: true, health_numbers: true, number_colors: [3; crate::numcolor::ROWS], ability_bars: 4, stacked_bars: true, spell_bar_layout: crate::hudmenu::Layout::Columns, utility_layout: crate::hudmenu::UtilityLayout::Below, ..Default::default() };
         set_client(chosen);
         assert_eq!(client(), chosen, "nothing off: as kept");
         let all = qol::MAP | qol::QUEST_HELPER | qol::TARGET_LEVEL | qol::DPS_METER | qol::NUMBER_COLORS | qol::STAT_CAPS | qol::POWER_BARS | qol::BUFF_WINDOW | qol::PET_EFFECTS | qol::AUTO_CAST | qol::ITEM_LINKS | qol::SPELL_BARS;
@@ -3986,7 +4811,7 @@ mod tests {
         assert!(!(c.map || c.minimap || map() || minimap()), "the map, off by default");
         assert!(c.map_markers, "its markers the player's, with it");
         assert!(!(c.quest_helper || c.quest_markers || c.quest_tracker || c.head_marks || quest_helper() || quest_markers() || quest_tracker()), "the quest helper");
-        assert!(!(c.target_level || c.dps_meter || c.power_bars || c.health_numbers || health_numbers() || c.buff_window || c.pet_effects || c.group_effects || c.auto_cast || c.auto_target), "the rest");
+        assert!(!(c.target_level || c.dps_meter || c.power_bars || c.health_numbers || health_numbers() || c.buff_window || c.buff_timers || buff_timers() || c.stat_window || stat_window() || c.item_icons || item_icons() || c.spell_cooldowns || spell_cooldowns() || c.pet_effects || c.group_effects || c.npc_debuffs != DebuffIcons::Off || npc_debuffs() || c.auto_cast || c.auto_target || c.mouseover_cast != MouseoverCast::Off || c.auto_loot || auto_loot() || c.attack_abilities || attack_abilities()), "the rest");
         assert_eq!(c.number_colors, [0; crate::numcolor::ROWS], "every number the game's colour");
         assert!(!c.item_links && (c.ability_bars, c.stacked_bars, c.spell_bar_layout, c.utility_layout) == (ABILITY_BARS_GAME, false, crate::hudmenu::Layout::Stacked, crate::hudmenu::UtilityLayout::UpperLeft), "item links off by default, the game's two bars");
         let d = ClientOptions::default();
@@ -4169,6 +4994,64 @@ mod tests {
         assert!(ClientOptions::from_text("buff_window=maybe").buff_window, "the default");
     }
 
+    /// Item Slot Icons (petitions 2926, 2928): Item by default and not
+    /// written; Slot written and read back; an unknown value the default.
+    #[test]
+    fn item_slot_icons_are_kept_only_at_slot() {
+        let d = ClientOptions::default();
+        assert!(d.item_icons, "Item by default");
+        assert!(!d.to_text().contains("item_icons"));
+        let c = ClientOptions { item_icons: false, ..d };
+        assert!(c.to_text().contains("item_icons=slot\n"));
+        assert_eq!(ClientOptions::from_text(&c.to_text()), c, "round trip");
+        assert!(ClientOptions::from_text("item_icons=item").item_icons);
+        assert!(ClientOptions::from_text("item_icons=banner").item_icons, "the default");
+    }
+
+    /// Stat Window (petition 2925): off by default and not written; on
+    /// written and read back; an unknown value the default.
+    #[test]
+    fn the_stat_window_is_kept_only_when_on() {
+        let d = ClientOptions::default();
+        assert!(!d.stat_window, "off by default");
+        assert!(!d.to_text().contains("stat_window"));
+        let c = ClientOptions { stat_window: true, ..d };
+        assert!(c.to_text().contains("stat_window=on\n"));
+        assert_eq!(ClientOptions::from_text(&c.to_text()), c, "round trip");
+        assert!(!ClientOptions::from_text("stat_window=off").stat_window);
+        assert!(!ClientOptions::from_text("stat_window=maybe").stat_window, "the default");
+    }
+
+    /// Spell Cooldowns (petition 2946): on by default and not written, off
+    /// written and read back. Hotkey Label Size % (petition 2945): 100 by
+    /// default and not written, another kept, out of 40..=100 the default.
+    #[test]
+    fn spell_cooldowns_and_hotkey_label_size_are_kept() {
+        let d = ClientOptions::default();
+        assert!(d.spell_cooldowns && !d.to_text().contains("spell_cooldowns"));
+        let c = ClientOptions { spell_cooldowns: false, hotkey_label_scale: 60, ..d };
+        assert!(c.to_text().contains("spell_cooldowns=off\n") && c.to_text().contains("hotkey_label_scale=60\n"));
+        assert_eq!(ClientOptions::from_text(&c.to_text()), c);
+        assert_eq!(d.hotkey_label_scale, 100);
+        assert!(!d.to_text().contains("hotkey_label_scale"));
+        assert_eq!(ClientOptions::from_text("hotkey_label_scale=30").hotkey_label_scale, 100, "under the least: the default");
+        assert_eq!(ClientOptions::from_text("hotkey_label_scale=120").hotkey_label_scale, 100);
+    }
+
+    /// Buff Timers (petition 2924): on by default and not written; off
+    /// written and read back; an unknown value the default.
+    #[test]
+    fn buff_timers_are_kept_only_when_off() {
+        let d = ClientOptions::default();
+        assert!(d.buff_timers, "on by default");
+        assert!(!d.to_text().contains("buff_timers"));
+        let c = ClientOptions { buff_timers: false, ..d };
+        assert!(c.to_text().contains("buff_timers=off\n"));
+        assert_eq!(ClientOptions::from_text(&c.to_text()), c, "round trip");
+        assert!(ClientOptions::from_text("buff_timers=on").buff_timers);
+        assert!(ClientOptions::from_text("buff_timers=sometimes").buff_timers, "the default");
+    }
+
     #[test]
     fn health_numbers_are_kept_only_when_on() {
         assert!(!ClientOptions::default().health_numbers, "off by default");
@@ -4222,6 +5105,29 @@ mod tests {
         assert!(ClientOptions::from_text("head_marks=on").head_marks);
         assert!(ClientOptions::from_text("head_marks=maybe").head_marks, "the default");
         assert!(ClientOptions::from_text("quest_markers=off").head_marks, "the control: the map's row is not this");
+    }
+
+    #[test]
+    /// Debuff Icons' place (petition 3020): the target box by default and
+    /// unwritten; Name Plate and Off written and read back. The migration: a
+    /// client.opt from before (on unwritten, or "on") reads as the target box,
+    /// "off" stays off. The control: another row's key is not this.
+    fn npc_debuffs_are_kept_only_when_not_the_target_window() {
+        assert_eq!(ClientOptions::default().npc_debuffs, DebuffIcons::Target, "the target box by default");
+        assert!(!ClientOptions::default().to_text().contains("npc_debuffs"));
+        for (d, line) in [(DebuffIcons::Plate, "npc_debuffs=plate\n"), (DebuffIcons::Off, "npc_debuffs=off\n")] {
+            let t = ClientOptions { npc_debuffs: d, ..Default::default() }.to_text();
+            assert!(t.contains(line), "{t}");
+            assert_eq!(ClientOptions::from_text(&t).npc_debuffs, d, "read back");
+        }
+        // what an older client wrote (petition 2997's on/off): on, unwritten or said, is now the target box
+        assert_eq!(ClientOptions::from_text("").npc_debuffs, DebuffIcons::Target, "on before, unwritten");
+        assert_eq!(ClientOptions::from_text("npc_debuffs=on").npc_debuffs, DebuffIcons::Target, "on before");
+        assert_eq!(ClientOptions::from_text("npc_debuffs=off").npc_debuffs, DebuffIcons::Off, "off stays off");
+        assert_eq!(ClientOptions::from_text("npc_debuffs=maybe").npc_debuffs, DebuffIcons::Target, "the default");
+        assert_eq!(ClientOptions::from_text("group_effects=off").npc_debuffs, DebuffIcons::Target, "the control: Group Effects' key is not this");
+        assert_eq!((DebuffIcons::Target.step(1), DebuffIcons::Plate.step(1), DebuffIcons::Off.step(1)), (DebuffIcons::Plate, DebuffIcons::Off, DebuffIcons::Target));
+        assert_eq!(DebuffIcons::Target.step(-1), DebuffIcons::Off, "and back round");
     }
 
     #[test]
@@ -4302,6 +5208,20 @@ mod tests {
     }
 
     /// Weapon Swap Back (work board 1581): off by default, written only when
+    /// A/D Keys (petition 2909): Strafe by default and not written; Turn
+    /// written and read back; an unknown value the default.
+    #[test]
+    fn ad_keys_kept_only_when_turn() {
+        let d = ClientOptions::default();
+        assert!(!d.ad_turn, "Strafe by default");
+        assert!(!d.to_text().contains("ad_keys"));
+        let c = ClientOptions { ad_turn: true, ..d };
+        assert!(c.to_text().contains("ad_keys=turn\n"));
+        assert_eq!(ClientOptions::from_text(&c.to_text()), c, "round trip");
+        assert!(!ClientOptions::from_text("ad_keys=strafe").ad_turn);
+        assert!(!ClientOptions::from_text("ad_keys=sideways").ad_turn, "the default");
+    }
+
     /// on, read back, an unknown value left at the default.
     #[test]
     fn weapon_swap_back_is_kept_only_when_on() {
@@ -4314,6 +5234,35 @@ mod tests {
         assert_eq!(ClientOptions::from_text(&t), c, "round trip");
         assert!(!ClientOptions::from_text("weapon_swap_back=off").weapon_swap_back);
         assert!(!ClientOptions::from_text("weapon_swap_back=maybe").weapon_swap_back, "the default");
+    }
+
+    /// Attack With Abilities (petition 3015): off by default, written only
+    /// when on, read back, an unknown value left at the default.
+    #[test]
+    fn attack_abilities_is_kept_only_when_on() {
+        let d = ClientOptions::default();
+        assert!(!d.attack_abilities, "off by default");
+        assert!(!d.to_text().contains("attack_abilities"));
+        let c = ClientOptions { attack_abilities: true, ..Default::default() };
+        let t = c.to_text();
+        assert!(t.contains("attack_abilities=on\n"), "{t}");
+        assert_eq!(ClientOptions::from_text(&t), c, "round trip");
+        assert!(!ClientOptions::from_text("attack_abilities=maybe").attack_abilities, "the default");
+    }
+
+    /// Auto Loot (petition 3008): off by default, written only when on, read
+    /// back, an unknown value left at the default.
+    #[test]
+    fn auto_loot_is_kept_only_when_on() {
+        let d = ClientOptions::default();
+        assert!(!d.auto_loot, "off by default");
+        assert!(!d.to_text().contains("auto_loot"));
+        let c = ClientOptions { auto_loot: true, ..Default::default() };
+        let t = c.to_text();
+        assert!(t.contains("auto_loot=on\n"), "{t}");
+        assert_eq!(ClientOptions::from_text(&t), c, "round trip");
+        assert!(!ClientOptions::from_text("auto_loot=off").auto_loot);
+        assert!(!ClientOptions::from_text("auto_loot=maybe").auto_loot, "the default");
     }
 
     /// R2 Channel Switch: off by default, written only when on, read back, an
@@ -4450,6 +5399,27 @@ mod tests {
         assert_eq!(ClientOptions::from_text("dps_meter_shows=fight").dps_view, View::Fight);
         let odd = ClientOptions::from_text("dps_meter=maybe\ndps_meter_shows=sideways");
         assert!(!odd.dps_meter && odd.dps_view == View::Fight, "anything else: the defaults");
+    }
+
+    /// DPS Meter Columns and Sort (Heirloom petition 3030): the DPS alone by
+    /// damage by default, writing nothing; each other kept and read back; an
+    /// odd word the default; a sort the columns do not show read as damage.
+    #[test]
+    fn the_dps_meters_columns_and_sort_are_kept() {
+        use crate::dpsmeter::{Columns, Metric};
+        let d = ClientOptions::default();
+        assert_eq!((d.dps_columns, d.dps_sort), (Columns::Dps, Metric::Damage), "the DPS alone by default");
+        assert!(!d.to_text().contains("dps_meter_columns") && !d.to_text().contains("dps_meter_sort"));
+        for (cols, sort) in [(Columns::Hps, Metric::Healing), (Columns::All, Metric::Power), (Columns::All, Metric::Damage)] {
+            let c = ClientOptions { dps_columns: cols, dps_sort: sort, ..Default::default() };
+            let back = ClientOptions::from_text(&c.to_text());
+            assert_eq!((back.dps_columns, back.dps_sort), (cols, sort), "{}", c.to_text());
+            assert_eq!(back, c, "nothing else changed");
+        }
+        let odd = ClientOptions::from_text("dps_meter_columns=everything\ndps_meter_sort=luck");
+        assert_eq!((odd.dps_columns, odd.dps_sort), (Columns::Dps, Metric::Damage), "anything else: the defaults");
+        assert_eq!(Metric::Power.fit(Columns::Hps), Metric::Damage, "not shown: damage");
+        assert_eq!(Metric::Healing.fit(Columns::Hps), Metric::Healing);
     }
 
     #[test]

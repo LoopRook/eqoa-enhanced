@@ -97,6 +97,13 @@ pub trait Raster {
     /// `DrawCenteredString(font, at, c, s, mode)`: 1 centres vertically, 2
     /// horizontally, 0 and 3 both, anything else draws nothing.
     fn draw_centered_string(&mut self, at: [i32; 2], color: [f32; 4], s: &[u16], mode: u32);
+    /// `s` at `scale` times the font's size, its top left at `at` (the
+    /// client's own, not the game's: a hotkey label's Size %). A raster with
+    /// no scaled text draws it at the font's size.
+    fn draw_string_scaled(&mut self, at: [f32; 2], color: [f32; 4], s: &[u16], scale: f32) {
+        let _ = scale;
+        self.draw_string([at[0] as i32, at[1] as i32], color, s);
+    }
     /// `GetStringWidth`: each glyph's width plus one, `'?'` for a missing
     /// one, -1 when that is missing too.
     fn string_width(&self, s: &[u16]) -> i32;
@@ -104,6 +111,9 @@ pub trait Raster {
     fn point_size(&self) -> i32;
     fn viewport(&self) -> [i32; 4];
     fn set_viewport(&mut self, v: [i32; 4]);
+    /// Whether to draw the original lists' vertical position indicators.
+    /// A PC window supplies its own interactive scrollbars when undersized.
+    fn native_list_scrollbars(&self) -> bool { true }
     /// Whether surface `id` is there to draw (CLIENT's icon cache asks; a
     /// recorder has everything).
     fn has(&self, _id: u32) -> bool {
@@ -705,6 +715,11 @@ impl Window {
     /// draws the panel in the window's set, faded by `1 - (1-open)^2`, and
     /// the title. True when fully open or fully closed.
     pub fn draw(&mut self, vui: &Vui, ui: &mut dyn Raster) -> bool {
+        self.draw_with_panel_opacity(vui, ui, 0.75)
+    }
+
+    /// Draw the window with a caller-selected opacity for the translucent panel.
+    pub fn draw_with_panel_opacity(&mut self, vui: &Vui, ui: &mut dyn Raster, opacity: f32) -> bool {
         let fp = frame_sets();
         if self.dir > 0.0 {
             self.open = (self.open + 0.15).min(1.0);
@@ -722,7 +737,7 @@ impl Window {
                 vui.blit_fill_frame(ui, ipos, [isize[0] + 1, isize[1]], &fp[1], 35, 3, k, true);
                 vui.blit_frame(ui, tl, size, &fp[0], 3, k, true);
             }
-            1 => vui.blit_fill_frame(ui, ipos, isize, &fp[3], 61, 3, k * 0.75, true),
+            1 => vui.blit_fill_frame(ui, ipos, isize, &fp[3], 61, 3, k * opacity, true),
             2 => {
                 vui.blit_rect(ui, 51, ipos, [isize[0] + 1, isize[1]], 3, k);
                 vui.blit_frame(ui, tl, size, &fp[0], 3, k, true);
@@ -755,6 +770,7 @@ impl Window {
     /// `DrawVScroll(at, h, t, flags)`: the bar down `h` and the thumb at
     /// `t` (0 top, 1 bottom; none outside that).
     pub fn draw_vscroll(&self, vui: &Vui, ui: &mut dyn Raster, at: [i32; 2], h: i32, t: f32) {
+        if !ui.native_list_scrollbars() { return; }
         let e = vui.entry(84);
         vui.blit_vert_bar(ui, at, 81, 83, 82, h, 3, self.open);
         if (0.0..=1.0).contains(&t) {

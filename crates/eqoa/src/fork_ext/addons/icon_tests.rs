@@ -1007,7 +1007,7 @@ fn forge_icon_prefetch_set_follows_game_state_lists() {
 
     let mut hud_menus = crate::hudmenu::HudMenus::default();
     hud_menus.defs[0].entries = vec![crate::hudmenu::Entry {
-        icon2: 33333,
+        icon_back: -1, art: -1, icon2: 33333,
         x08: 44444,
         msg: 0,
         id: 0,

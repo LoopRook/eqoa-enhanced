@@ -39,6 +39,9 @@ static WHY: Mutex<String> = Mutex::new(String::new());
 /// device let go before (its `Destroyed` as it is dropped, or a late one) is
 /// not this one's.
 static DEVICE: AtomicU64 = AtomicU64::new(0);
+/// The device the client draws on now, as `render::device_key` keys it: the
+/// one `mark` takes as lost (`render::device_lost`).
+static DEVICE_KEY: AtomicU64 = AtomicU64::new(0);
 /// When the last recovery made its device, for `again_soon`.
 static RECOVERED: Mutex<Option<Instant>> = Mutex::new(None);
 /// How many recoveries this run.
@@ -59,6 +62,7 @@ pub const REPEAT: Duration = Duration::from_secs(60);
 /// recovery failed (`refused`) instead of the panic wgpu raises by default.
 pub fn watch(device: &wgpu::Device, recovered: bool) {
     let me = DEVICE.fetch_add(1, Ordering::SeqCst) + 1;
+    DEVICE_KEY.store(render::device_key(device), Ordering::SeqCst);
     device.set_device_lost_callback(move |reason, message| {
         if !matches!(reason, wgpu::DeviceLostReason::Destroyed) && DEVICE.load(Ordering::SeqCst) == me {
             mark(&format!("{reason:?}: {message}"));
@@ -66,6 +70,14 @@ pub fn watch(device: &wgpu::Device, recovered: bool) {
     });
     device.on_uncaptured_error(std::sync::Arc::new(move |e: wgpu::Error| {
         if DEVICE.load(Ordering::SeqCst) != me || lost() {
+            return;
+        }
+        // a call refused because the device is lost ("Parent device is
+        // lost", nested in a validation error: Yevkassim's crash report
+        // 3042, a driver reset on Vulkan): the loss itself, recovered from,
+        // never a panic (and on a recovery's device the loss, not a refusal)
+        if is_device_lost_error(&e.to_string()) {
+            mark("the device refused a call: it is lost");
             return;
         }
         // out of graphics memory (Hoofbite's Iris Xe in Freeport, three
@@ -83,8 +95,15 @@ pub fn watch(device: &wgpu::Device, recovered: bool) {
         // window's, not the device's, made again from the window by the
         // next frame (`surface`), never a panic (the crash reports of
         // 2026-11-19/21, "In Surface::configure  Invalid surface")
+        // the window's own texture gone under a submission (Live crash
+        // report 5605, Firefox's WebGPU after hours with the tab in the
+        // back: "In Queue::submit In a pass parameter Texture with ''
+        // label has been destroyed"): every texture the game makes carries
+        // a label, so the unlabelled one is the canvas's, which the browser
+        // destroys when it takes the frame back; the frame is lost, the
+        // surface made again, never a panic
         if let wgpu::Error::Validation { description, .. } = &e
-            && is_surface_error(description)
+            && (is_surface_error(description) || is_window_texture_gone(description))
         {
             surface_failed(description);
             return;
@@ -105,6 +124,32 @@ pub fn watch(device: &wgpu::Device, recovered: bool) {
     }));
 }
 
+/// Whether an error's words say the device is lost: wgpu-core's
+/// `DeviceError::Lost` ("Parent device is lost"), anywhere in the error's
+/// chain, which a call made on a lost device raises (wrapped as the call's
+/// own validation error when it is nested: "In a bundle parameter").
+pub fn is_device_lost_error(text: &str) -> bool {
+    text.contains("Parent device is lost")
+}
+
+/// `device.poll`, which wgpu panics in (not through the device's error
+/// handler) when the wait finds the device lost: skipped while it is taken
+/// as lost, and natively a panic there for the loss (`is_device_lost_error`)
+/// stepped over and taken as the loss; any other panic goes on as it was.
+pub fn poll(device: &wgpu::Device, how: wgpu::PollType) {
+    if lost() || render::device_lost(device) {
+        return;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    match crate::logfile::caught(|| device.poll(how)) {
+        Ok(_) => {}
+        Err(e) if is_device_lost_error(&e) => mark("a wait on the device found it lost"),
+        Err(e) => panic!("{e}"),
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = device.poll(how);
+}
+
 /// A surface call's validation error that reached the device's handler (one
 /// made outside the error scopes `viewer`'s `Gfx` puts round its own).
 static SURFACE_FAILED: AtomicBool = AtomicBool::new(false);
@@ -114,6 +159,14 @@ static SURFACE_FAILED: AtomicBool = AtomicBool::new(false);
 /// Surface::get_current_texture_view", "In Surface::present").
 pub fn is_surface_error(description: &str) -> bool {
     description.contains("In Surface::") || description.contains("Error in Surface::")
+}
+
+/// Whether a validation error is a submission's that drew on the window's
+/// own texture after it was destroyed (`watch`): the one texture without a
+/// label (wgpu's and the browser's surface textures; every one the game makes
+/// is named).
+pub fn is_window_texture_gone(description: &str) -> bool {
+    description.contains("In Queue::submit") && description.contains("Texture with '' label has been destroyed")
 }
 
 /// The window's surface refused a call (`is_surface_error`): taken by the
@@ -138,6 +191,9 @@ pub fn mark(why: &str) {
     {
         *w = why.to_string();
     }
+    // nothing more made on it (`render::finish_bundle`), from now: wgpu's
+    // lost callback runs inside the call that found the loss
+    render::set_lost_device(DEVICE_KEY.load(Ordering::SeqCst));
     if !LOST.swap(true, Ordering::SeqCst) {
         crate::say(&format!("graphics: the device was lost ({why}): a new one is made, the game going on"));
     }
@@ -223,6 +279,7 @@ pub fn recovered() {
     if let Ok(mut w) = WHY.lock() {
         w.clear();
     }
+    render::set_lost_device(0);
     LOST.store(false, Ordering::SeqCst);
 }
 
@@ -452,6 +509,20 @@ mod tests {
     use super::*;
     use render::wgpu::Backend;
 
+    /// A lost device's refusal (crash report 3042's words, and the nested
+    /// form a create call's validation error takes) is the loss; the
+    /// controls: a surface's refusal, a destroyed window texture and an
+    /// ordinary validation error are not.
+    #[test]
+    fn a_lost_devices_error_is_the_loss() {
+        let crash = "Error in RenderBundleEncoder::finish: Validation Error\n\nCaused by:\n  In a bundle parameter\n    Parent device is lost\n";
+        assert!(is_device_lost_error(crash));
+        assert!(is_device_lost_error("Validation Error\n\nCaused by:\n  In Device::create_bind_group, label = 'layer'\n    Parent device is lost\n"));
+        assert!(!is_device_lost_error("Validation Error\n\nCaused by:\n  In Surface::configure\n    Invalid surface\n"));
+        assert!(!is_device_lost_error("In Queue::submit In a pass parameter Texture with '' label has been destroyed"));
+        assert!(!is_device_lost_error("Validation Error\n\nCaused by:\n  In Device::create_texture\n    Dimension X is zero\n"));
+    }
+
     /// WebGPU is tried again for 45-60 s, no pause over 5 s and none
     /// shorter than the one before; then WebGL2 on a fresh canvas; then,
     /// refused, WebGL2 on that canvas for 2 minutes more (never WebGPU there:
@@ -539,6 +610,17 @@ mod tests {
         assert!(is_surface_error("Validation Error\n\nCaused by:\n  In Surface::get_current_texture_view\n    Surface is not configured for presentation\n"));
         assert!(!is_surface_error("Validation Error\n\nCaused by:\n  In Device::create_buffer, label = 'vertices'\n    Buffer size 0 is invalid\n"), "the control");
         assert!(!is_surface_error("In a render pass\n  Surface texture used after present"), "the control: a pass's words, not a surface call's");
+    }
+
+    /// Live crash report 5605's words are the window's texture gone; the
+    /// controls: a named texture destroyed under a pass is the game's own
+    /// (a fault to see, still wgpu's panic), and a submit's other errors.
+    #[test]
+    fn the_window_texture_gone_is_the_surfaces() {
+        let report = "Validation Error\n\nCaused by:\n  In Queue::submit\n    Validation Error\n\nCaused by:\n  In Queue::submit\n    In a pass parameter\n      Texture with '' label has been destroyed\n";
+        assert!(is_window_texture_gone(report));
+        assert!(!is_window_texture_gone(&report.replace("''", "'map tile'")), "the control: a texture of the game's");
+        assert!(!is_window_texture_gone("Validation Error\n\nCaused by:\n  In Queue::submit\n    Buffer with 'vertices' label has been destroyed\n"), "the control: a buffer");
     }
 
     #[test]

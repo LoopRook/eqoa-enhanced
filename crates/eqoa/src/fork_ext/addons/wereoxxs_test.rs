@@ -1815,6 +1815,7 @@ struct TestBlitRecorder {
     strings: Vec<String>,
 }
 
+impl crate::ui::Layout for TestBlitRecorder {}
 impl vi::ui::Raster for TestBlitRecorder {
     fn blit(
         &mut self,
