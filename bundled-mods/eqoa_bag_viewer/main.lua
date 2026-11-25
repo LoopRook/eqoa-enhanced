@@ -32,7 +32,7 @@ local function listen(name, fn)
     if GATED[name] then
         inner = function(e)
             if map_up() then
-                if name == "render" then AL.stop_typing() end -- a price being typed lets go of the keyboard at once
+                if name == "render" and (AL.enter or (AL.form and AL.form.field)) then AL.stop_typing() end -- a price being typed lets go of the keyboard at once
                 return
             end
             return fn(e)
