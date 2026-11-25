@@ -498,6 +498,12 @@ fn stat_window_a_mod_holds_back_the_games_stat_window_and_gives_it_back() {
     assert_eq!(hidden(), (false, false, false));
     assert!(super::hud_layout::hud_element_visible("name_plates"));
     assert!(super::hud_layout::hud_element_visible("target"));
+    // the player's "Use the game's windows" gives the game's window back while the mod still holds its claim
+    super::window_takeover::set_use_game_windows(true);
+    assert!(crate::hud::fork_hud::stat_window_visible(), "the switch is on: the game's Stat Window");
+    assert!(super::hud_layout::hud_element_visible("stat_window"));
+    super::window_takeover::forget_switch_for_test();
+    assert!(!crate::hud::fork_hud::stat_window_visible(), "the switch is off again: held");
     h.host.execute("assert(eqoa.hud.show(claim))").unwrap();
     h.publish();
     assert!(crate::hud::fork_hud::stat_window_visible(), "shown again");

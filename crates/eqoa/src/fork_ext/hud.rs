@@ -75,7 +75,12 @@ pub(crate) fn rings_hidden() -> bool {
 }
 
 /// A mod holds the game's own Stat Window (F4, `/stats`): it is not drawn, takes no click, and F4 does nothing.
+/// The player's "Use the game's windows" switch gives the game's window back whatever a mod holds.
 pub(crate) fn stat_window_visible() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    if crate::fork_ext::addons::window_takeover::use_game_windows() {
+        return true;
+    }
     published(|v| !v.stat_window)
 }
 
