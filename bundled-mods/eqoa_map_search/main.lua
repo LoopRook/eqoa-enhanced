@@ -31,7 +31,8 @@ eqoa.input.bind({id="open",label="Map search",default_key="f2"},function()
     end
     s.toggle()
 end)
-eqoa.input.bind({id="clear",label="Clear map guide",default_key="f4"},function() s.clear() end)
+-- no default key: F4 is the game's Stat Window; a player can give this a key on Controls (the button clears too)
+eqoa.input.bind({id="clear",label="Clear map guide",default_key=""},function() s.clear() end)
 eqoa.events.on("input.key",function(e) s.key(e.data) end)
 eqoa.events.on("mod.command",function(e)
     if e.data.from=="eqoa_creature_journal" and e.data.command=="journal_status" and e.data.args then

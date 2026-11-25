@@ -1,7 +1,8 @@
 # EQOA Map Search
 
-Enabled by default. F2 opens search over the map or minimap; F4 clears guidance.
-Both keys can be changed on Controls. The search button follows Move HUD.
+Enabled by default. F2 opens search over the map or minimap. The search window's
+Clear button clears guidance; Clear map guide has no key until you give it one on
+Controls (F4 is the game's Stat Window). F2 can be changed on Controls too. The search button follows Move HUD.
 Creatures, Group and Places use the native search rules. Enter guides to a live
 entity when available, otherwise to the nearest recorded location. Recorded
 locations are observations, not a promise of a living spawn. Import and Export

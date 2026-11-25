@@ -1,6 +1,6 @@
 # EQOA Auction
 
-Off by default. Enable it in Mods & Addons (F10); it shows **Provides: Auction window (Shift+U)**, **Mail and auction:
+Off by default. Enable it in Mods & Addons (Shift+F10); it shows **Provides: Auction window (Shift+U)**, **Mail and auction:
 can search the auction, look at your lots, look at your bids** and **Asks you first: bid at the auction, buy out an
 auction lot** before you do.
 

@@ -1,6 +1,6 @@
 # EQOA World Map
 
-Off by default. Enable it in Mods & Addons (F10); it shows **Provides: World map window with pins (the map key)** and
+Off by default. Enable it in Mods & Addons (Shift+F10); it shows **Provides: World map window with pins (the map key)** and
 **Replaces game windows: Map** before you do.
 
 The map key (and the compass and the minimap click) opens this mod's map instead of the game's: the game's own map

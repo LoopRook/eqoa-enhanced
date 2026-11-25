@@ -1,6 +1,6 @@
 # EQOA Start Menu
 
-Off by default. Enable it in Mods & Addons (F10); it shows **Provides: Start menu (the Start key and button)** and
+Off by default. Enable it in Mods & Addons (Shift+F10); it shows **Provides: Start menu (the Start key and button)** and
 **Replaces game windows: Start Menu** before you do.
 
 The Start key (the keyboard's and the controller's Start button) opens this mod's menu instead of the game's. It lists

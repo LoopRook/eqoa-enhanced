@@ -64,7 +64,7 @@ global `ImGui`).
 
 ## 4. Turning it on, reloading, finding errors
 
-1. Start the game and enter the world. Press **F10** to open **Mods & Addons** (the key is the
+1. Start the game and enter the world. Press **Shift+F10** to open **Mods & Addons** (the key is the
    **Mods & Addons** row on the Controls page and can be changed; the window is also reached through
    Options → Extended → UI → Enhanced → Addon Manager).
 2. Click **Rescan folder** if the mod was added while the game was running. New mods start disabled.

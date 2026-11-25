@@ -1499,7 +1499,7 @@ The `input.key` event carries both: `key` is the plain key, `combo` the full nam
 
 **When a mod's key does not fire.** Mod keys work in plain play. They do not fire while the player types in chat or a text box, while a game window or menu has the keyboard, while an ImGui text field has focus, while the character is dead, or while another mod's text editor holds the keyboard (`eqoa.input.capture_text`). Held-key repeats do not fire a binding.
 
-**The Mods & Addons key.** The client itself has one row of this kind, **Mods & Addons**, default `f10`: it opens and closes the Mods & Addons window, follows every rule above, and exists with no mod enabled. It does nothing on the loading screen, with the full map up, or while the world changes.
+**The Mods & Addons key.** The client itself has one row of this kind, **Mods & Addons**, default `shift+f10` (F10 is the game's Settings; a saved `f10` for this row moves to the default once, while the game has F10): it opens and closes the Mods & Addons window, follows every rule above, and exists with no mod enabled. It does nothing on the loading screen, with the full map up, or while the world changes.
 
 Mod keys are saved by the client per player, separately from the game's own keys.
 

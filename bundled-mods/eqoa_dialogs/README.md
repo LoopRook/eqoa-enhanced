@@ -1,6 +1,6 @@
 # EQOA Dialog Window
 
-Off by default. Enable it in Mods & Addons (F10); it shows **Provides: NPC dialog window**, **Replaces game windows:
+Off by default. Enable it in Mods & Addons (Shift+F10); it shows **Provides: NPC dialog window**, **Replaces game windows:
 Dialog, Group Invitation, Resurrection Offer, Summons** and **Can answer NPC dialogs** before you do.
 
 A cleaner window for what NPCs say. While the mod is on, the words of an NPC (hail, quest offers, trainers, coaches)
