@@ -6,6 +6,9 @@ centred). Mod windows are checked by what the client logs where the mod or the g
 what is on the screen (`ss.dark_fraction`) where nothing is logged.
 """
 
+from contextlib import closing
+import sqlite3
+
 import local_scene as ls
 import scene_suite as ss
 
@@ -349,6 +352,151 @@ def restart_scene(suite):
     )
 
 
+# --- scene 10: REAL quests, unchanged rows (only the character's own quest row, items and position are set) -------------
+# A diagnostic edit of a COPY of the Dialog Window's main.lua (not the bundled mod) logs what the mod sees at each dialog.
+DUMP_OLD = "    state.auto_ref = s.ref" + chr(10) + "    if s.kind"
+DUMP_NEW = """    state.auto_ref = s.ref
+    do
+        local d = s.data or {}
+        local seen = {}
+        for _, k in ipairs({ "text", "title", "options", "talked_to", "npc", "speaker", "id", "ref", "kind", "can_pass", "detail", "page", "more" }) do
+            local v = d[k]
+            if v ~= nil then seen[#seen + 1] = k .. "=" .. (type(v) == "table" and "<table>" or tostring(v)) end
+        end
+        note("info", "DUMP kind=" .. tostring(s.kind) .. " ref=" .. tostring(s.ref) .. " data fields present{" .. table.concat(seen, "; ") .. "}")
+        local tt = d.talked_to
+        if type(tt) == "table" then
+            local f = {}
+            for _, k in ipairs({ "name", "id", "ref", "title", "level", "kind", "race", "class" }) do
+                if tt[k] ~= nil then f[#f + 1] = k .. "=" .. tostring(tt[k]) end
+            end
+            note("info", "DUMP talked_to fields{" .. table.concat(f, "; ") .. "}")
+        end
+        note("info", "DUMP talked_to=" .. tostring(d.talked_to and d.talked_to.name))
+        note("info", "DUMP text=" .. tostring(d.text))
+        for i, o in ipairs(d.options or {}) do note("info", "DUMP option " .. i .. "=" .. tostring(o)) end
+        for _, q in ipairs(eqoa.quests.list() or {}) do
+            local f = {}
+            for _, k in ipairs({ "title", "index", "ref", "id", "name", "text", "step", "done" }) do
+                if q[k] ~= nil then f[#f + 1] = k .. "=" .. tostring(q[k]) end
+            end
+            note("info", "DUMP journal entry {" .. table.concat(f, "; ") .. "}")
+        end
+    end
+    if s.kind""".replace("\n", chr(10))
+DUMP_PATCH = {"eqoa_dialogs": [(DUMP_OLD, DUMP_NEW)]}
+
+
+def real_seed(questid):
+    def seed(db):
+        db.execute("INSERT INTO charquests (serverid,questid,step,count,done,slot,updated,picks) VALUES (2,?,1,0,0,0,'','')", (questid,))
+    return seed
+
+
+def real_scene(suite, number, name, *, questid, quest, giver, item, count, answer_key, expect_text, give=True):
+    say = ["#testmode@5000"]
+    if give:
+        say.append(f"#giveitem {item} Lsgm {count}@6000")
+    say.append(f"#goto {giver}@8000")
+    keys = (f"{answer_key}@21000;enter@24000" if answer_key else "enter@21000")
+
+    def checks(run_dir, log):
+        server = suite.server_since()
+        dump = [ln for ln in log.splitlines() if "Dialog window: DUMP" in ln]
+        (run_dir / "mod-dump.txt").write_text(chr(10).join(dump), encoding="utf-8")
+        mark = ss.green_pixels(run_dir / "1-dialog.png", HANDIN_BOX)
+        return [
+            (f'the server finished "{quest}" (server log)', f'Quests: Lsgm finished "{quest}"' in server),
+            (f"the {item} items were taken (database rows left: {suite.item_count(item)})", suite.item_count(item) == 0),
+            (f"RECORDED, not required: green Hand in mark on the first option row: {'yes' if (mark or 0) > 60 else 'no'} (green pixels {mark})", True),
+        ]
+
+    return ss.Scene(
+        number, name, mods=("eqoa_dialogs",), fresh_db=True, seed=real_seed(questid), patch=DUMP_PATCH,
+        env={"EQOA_SAY": ";".join(say), "EQOA_TARGET": f"{giver}@16500", "EQOA_PLAY_KEYS": "q@18000", "EQOA_MOD_KEYS": keys},
+        control_env={"EQOA_SAY": f"#testmode@5000;#goto {giver}@8000"},           # nothing held: the step must not be done
+        quit_after=29, shots="20000=1-dialog.png,22800=2-after-answer.png,26000=3-end.png",
+        expect=[("the giver was hailed", rf"script: target {giver}: true"),
+                ] + ([("the answer option was taken by the mod (response dialog)", r"takeover: response_dialog session started for the mod")] if answer_key else [])
+        + [("the Dialog Window showed his words", addon_line("eqoa_dialogs", r"Dialog window: a (text|response)_dialog opened"))],
+        extra=checks,
+    )
+
+
+def realquest_scenes(suite):
+    return [
+        real_scene(suite, "10a", 'REAL quest 100083 "Dragonfly Wings": a give step WITH answer words (Solenia Freyar, Freeport)',
+                   questid=100083, quest="Dragonfly Wings", giver="Solenia Freyar", item=4873, count=2, answer_key="1",
+                   expect_text="Yes, here they are."),
+        real_scene(suite, "10b", 'REAL quest 102386 "A Zombie Swatch": a give step with NO answer words (Fatima Ubel, Secrets)',
+                   questid=102386, quest="A Zombie Swatch", giver="Fatima Ubel", item=996077, count=3, answer_key=None,
+                   expect_text="Fatima stitches"),
+    ]
+
+
+def choice_option(suite, questid, step, index):
+    """(answer words, spell id or None) of one option of a real choice step, read from the server's own rows."""
+    import json
+    with closing(sqlite3.connect((suite.install / "eqoa-server" / "eqoa.db").as_uri() + "?mode=ro", uri=True)) as db:
+        choices = json.loads(db.execute("SELECT choices FROM queststeps WHERE questid = ? AND step = ?", (questid, step)).fetchone()[0])
+    option = choices["options"][index]
+    return option["answer"], (int(option["spells"]) if option.get("spells") else None)
+
+
+def choice_scene(suite, number, name, *, questid, giver, level, tclass, index, step=1, complete=True, records_pick=True, riddle_first=False):
+    """A REAL choice step (rows unchanged). Auto mode is ON: the mod must leave the choice to the player, whose key
+    (option number index+1) sends the pick; the server records it. The control presses nothing: if the mod answered for
+    the player the control would record a pick and fail to fail."""
+    answer, spell = choice_option(suite, questid, step, index)
+    expect_pick = f"{step}:{index}"
+
+    def seed(db):
+        db.execute("INSERT INTO charquests (serverid,questid,step,count,done,slot,updated,picks) VALUES (2,?,?,0,0,0,'','')", (questid, step))
+        db.execute("UPDATE characters SET level=?, tclass=? WHERE charName='Lsgm'", (level, tclass))
+
+    def checks(run_dir, log):
+        server = suite.server_since()
+        (run_dir / "mod-dump.txt").write_text(chr(10).join(ln for ln in log.splitlines() if "Dialog window: DUMP" in ln), encoding="utf-8")
+        row = suite.char_quest(questid)
+        out = [(f'the server recorded the pick "{answer}" (server log)', f'Quests: Lsgm picked "{answer}"' in server)]
+        if records_pick:
+            out.append((f"charquests.picks is {expect_pick!r} (database row: {row})", row is not None and row[2] == expect_pick))
+        if complete:
+            out.append((f"the step was completed (the quest advanced past step {step} or is done): {row}",
+                        row is not None and (row[0] != step or row[1] == 1)))
+        if spell:
+            out.append((f"the option's spell {spell} was given to the character (database)", suite.has_spell(spell)))
+        out.append(("the mod never answered by itself", "automatically" not in log))
+        return out
+
+    return ss.Scene(
+        number, name, mods=("eqoa_dialogs",), options={"eqoa_dialogs": {"auto_answer": True}}, fresh_db=True, seed=seed,
+        patch=DUMP_PATCH,
+        env={"EQOA_SAY": f"#testmode@5000;#goto {giver}@8000", "EQOA_TARGET": f"{giver}@16500", "EQOA_PLAY_KEYS": "q@18000",
+             "EQOA_MOD_KEYS": (f"enter@20000;{index + 1}@22500;enter@25000" if riddle_first else f"{index + 1}@21000;enter@24000")},
+        control_env={"EQOA_MOD_KEYS": ""},
+        quit_after=29,
+        shots=("19500=0-the-riddle.png,21500=1-the-choice.png,24000=2-after-pick.png,27000=3-end.png" if riddle_first
+               else "20000=1-the-choice.png,22500=2-after-pick.png,26000=3-end.png"),
+        expect=[("the giver was hailed", rf"script: target {giver}: true"),
+                ("the mod took the choice (response dialog)", r"takeover: response_dialog session started for the mod")],
+        extra=checks,
+    )
+
+
+def choice_scenes(suite):
+    return [
+        choice_scene(suite, "10c", "REAL class path choice 100951 \"The Paladin's Reward, Level 30\": 6 options, the player takes the SECOND, auto on",
+                     questid=100951, giver="Sir Arik Lightfire", level=30, tclass=2, index=1),
+        choice_scene(suite, "10d", "REAL choice 101136 \"The Shaman's Epic Reward\": 6 options, the player takes the SIXTH, auto on",
+                     questid=101136, giver="Ediopolus", level=60, tclass=8, index=5),
+        choice_scene(suite, "10e", "REAL riddle choice 101298 \"The Manticores' Riddles\" step 1: the player answers, the mod never does, auto on",
+                     questid=101298, giver="Sektamoot", level=53, tclass=0, index=1, complete=False, records_pick=False, riddle_first=True),
+        choice_scene(suite, "10f", "REAL level 20 class choice 100020 \"Tillian Bracelets\" (class 9, last step, 3 options, the third gives a spell), auto on",
+                     questid=100020, giver="Tessarina Starshimmer", level=20, tclass=9, index=2, step=8),
+    ]
+
+
 def make_scenes(suite):
     return [dialog_scene(), start_menu_scene(), chat_scene(), overlap_scene(), sell_scene(suite), destroy_scene(suite),
-            drag_scene(), perf_scene(), *handin_scenes(suite), restart_scene(suite)]
+            drag_scene(), perf_scene(), *handin_scenes(suite), restart_scene(suite), *realquest_scenes(suite), *choice_scenes(suite)]
