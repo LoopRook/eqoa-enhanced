@@ -1677,6 +1677,10 @@ impl Play {
         self.run_npcw(&vui, &mut r);
         self.run_bank(&vui, &mut r);
     }
+    /// Test seam: the item lists are read on game steps only (the build before the hidden-session fix).
+    pub(crate) fn bags_items_only_on_steps(on: bool) {
+        super::updates::set_items_only_on_steps_for_test(on);
+    }
     pub(crate) fn bags_broker_tick(&mut self) {
         super::super::begin_iteration(self, true);
         let (vui, mut r) = (

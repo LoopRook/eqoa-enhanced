@@ -507,7 +507,7 @@ function M.select(tab)
         M.tab = 7; M.scroll = 0; M.grid_scroll = 0; M.grid = nil; M.menu = nil
     elseif tab ~= M.tab and M.TABS[tab] then
         if M.tab == 7 then
-            M.note_player_closed()
+            M.note_player_closed("the Loot tab was left")
             release_takeover("loot")
         end
         if M.tab == 6 then release_takeover("bank") end
@@ -1010,7 +1010,7 @@ function M.start_loot_non_junk()
 end
 
 function M.stop_batch()
-    M.note_player_closed() -- Stop is the player's: a corpse they stopped is not asked for again
+    M.note_player_closed("the Stop button") -- Stop is the player's: a corpse they stopped is not asked for again
     if M.pending_open then
         local req = M.pending_open.req
         local kind = M.pending_open.kind
@@ -1542,14 +1542,14 @@ function M.note_loot_closed(d)
     if not (d and d.before and not d.after) then return end
     local id = d.before.source and d.before.source.entity_id
     if d.closed_by ~= "player" and M.player_closed_recently(id) then return end -- keep the player's mark
-    M.last_close = {by = d.closed_by or "other", at = os.clock(), id = id}
+    M.last_close = {by = d.closed_by or "other", at = os.clock(), id = id, src = "the game's loot window (client mark)"}
 end
 
 -- The player closed or stopped the corpse in hand: the one being taken, else the one the window shows (nil when neither
 -- is known: then it counts for any corpse).
-function M.note_player_closed()
+function M.note_player_closed(src)
     local l = eqoa.loot and eqoa.loot.get and eqoa.loot.get()
-    M.last_close = {by = "player", at = os.clock(), id = M.auto_take or (l and l.source and l.source.entity_id) or nil}
+    M.last_close = {by = "player", at = os.clock(), src = src or "the viewer", id = M.auto_take or (l and l.source and l.source.entity_id) or nil}
 end
 
 -- Did the player close or stop corpse `id` (nil: any) in the last PLAYER_CLOSE_SECS? `since` (a clock time): only a
@@ -1636,7 +1636,8 @@ function M.auto_done_line(text, unfinished, bags_full)
         -- the player's close: theirs, not asked for again, but its items were NOT taken: never "already looted"
         M.auto_left = M.auto_left or {}
         M.auto_left[id] = true
-        M.alog(id, "done", text .. " (you closed it: left alone)")
+        local c = M.last_close
+        M.alog(id, "done", text .. " (you closed it" .. (c and c.src and (" via " .. c.src) or "") .. ": left alone)")
         return
     end
     M.auto_done = M.auto_done or {}

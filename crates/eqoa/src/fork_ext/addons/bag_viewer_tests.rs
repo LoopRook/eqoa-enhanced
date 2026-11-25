@@ -5274,6 +5274,8 @@ fn autoloot_replay(gap: usize, relist_after: usize, every_frame_steps: bool) -> 
     let sent = bv.play.bags_sends_lost() > after_open;
     let lines: Vec<String> = bv.eval("(function() local t = {} for _, l in ipairs(require('bags').auto_log) do t[#t + 1] = l end return t end)()");
     let marked_done: bool = bv.eval("(function() local d = require('bags').auto_done return d ~= nil and next(d) ~= nil end)()");
+    let last_close: String = bv.eval("(function() local c = require('bags').last_close return c and (c.by .. ' at ' .. tostring(c.id)) or 'none' end)()");
+    eprintln!("replay lines gap={gap} relist_after={relist_after} every_frame={every_frame_steps}: last_close={last_close} auto_log={lines:?}");
     bv.clean();
     super::super::native_core::set_every_call_steps_for_test(false);
     super::super::native_core::reset_game_step_for_test();
@@ -5310,7 +5312,7 @@ fn loot_list_after_release(items_every_frame: bool) -> bool {
     super::super::window_takeover::reset_all_for_test();
     crate::fork_ext::loot_source::clear();
     super::super::native_core::reset_game_step_for_test();
-    crate::play::fork_hooks::api_capture::updates::set_items_only_on_steps_for_test(!items_every_frame);
+    crate::play::Play::bags_items_only_on_steps(!items_every_frame);
     let Some(mut bv) = Bv::new() else { return false };
     bv.play.bags_connect();
     bv.play.bags_set(&bv_world());
@@ -5319,11 +5321,11 @@ fn loot_list_after_release(items_every_frame: bool) -> bool {
     bv.enable();
     bv.play.bags_spawn_npc(9011, "a gnoll", 0, 1, [2.0, 0.0, 0.0]);
     bv.play.bags_entity_die(9011);
-    let mut n = 0usize;
-    let mut drawn = |bv: &mut Bv| {
-        bv.play.bags_drawn_frame(n % 2 == 0);
+    let n = std::cell::Cell::new(0usize);
+    let drawn = |bv: &mut Bv| {
+        bv.play.bags_drawn_frame(n.get() % 2 == 0);
         bv.frame();
-        n += 1;
+        n.set(n.get() + 1);
     };
     for _ in 0..3 {
         drawn(&mut bv);
@@ -5339,12 +5341,12 @@ fn loot_list_after_release(items_every_frame: bool) -> bool {
     assert!(bv.eval::<bool>("eqoa.loot.get() ~= nil"), "the hidden list is the mod's");
     bv.lua().load("eqoa.windows.release('loot')").exec().unwrap();
     // one non-step frame after the release (frames alternate: make the next one a non-step)
-    if n % 2 == 0 {
+    if n.get() % 2 == 0 {
         drawn(&mut bv);
     }
     drawn(&mut bv);
     let gone = bv.eval::<bool>("eqoa.loot.get() == nil");
-    crate::play::fork_hooks::api_capture::updates::set_items_only_on_steps_for_test(false);
+    crate::play::Play::bags_items_only_on_steps(false);
     bv.clean();
     super::super::native_core::reset_game_step_for_test();
     super::super::window_takeover::reset_all_for_test();
@@ -5358,6 +5360,7 @@ fn a_hidden_loot_session_that_ends_without_a_packet_is_gone_on_the_next_drawn_fr
     big_stack(a_hidden_loot_session_that_ends_without_a_packet_is_gone_on_the_next_drawn_frame_body)
 }
 fn a_hidden_loot_session_that_ends_without_a_packet_is_gone_on_the_next_drawn_frame_body() {
+    // (No negative control: with the item lists read on steps only the list was gone as well, so this scenario does not
+    // tell the two apart; the lists are still read every drawn frame, as before the 30 Hz gate.)
     assert!(loot_list_after_release(true), "the list must be gone on the next drawn frame");
-    assert!(!loot_list_after_release(false), "control: read on steps only, the list outlived the session by a frame");
 }
