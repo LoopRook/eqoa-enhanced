@@ -723,8 +723,8 @@ fn a13_world_map_size_settings_are_saved_whole_and_come_back() {
     rig1.host.execute("world_map.pins['0'] = { { x = 25300, z = 15200, note = 'Keep me' } }; world_map.win.x = 40; world_map.win.y = 30; world_map.win.w = 700; world_map.win.h = 500; world_map.opts.text = 3; world_map.opts.marker = 4; world_map.persist()").unwrap();
     let saved = rig1.saved.borrow().last().cloned().expect("saved");
     let text = saved.to_string();
-    assert!(text.contains("\"text_size\":3") && text.contains("\"marker_size\":4"), "the sizes are saved: {saved}");
-    assert!(text.contains("Keep me") && text.contains("\"w\":700"), "the whole snapshot: {saved}");
+    assert!(text.contains("[\"text_size\",3]") && text.contains("[\"marker_size\",4]"), "the sizes are saved: {saved}");
+    assert!(text.contains("Keep me") && text.contains("[\"w\",700]"), "the whole snapshot: {saved}");
     drop(rig1);
     fresh();
     let mut again = rig([1024.0, 768.0], Some(saved));
