@@ -24,6 +24,10 @@ fn ready() -> Play {
     action_broker::reset_all_for_test();
     ws::reset_for_test();
     window_takeover::reset_all_for_test();
+    window_takeover::forget_switch_for_test();
+    confirm::reset_for_test();
+    crate::fork_ext::addons::dialog_sessions::reset_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
     super::super::a9_play::reset_for_test();
     reset_for_test();
     let mut p = super::super::tests::play();
@@ -1323,7 +1327,7 @@ fn close_hidden_a9(p: &mut Play, which: &str) {
     match which {
         "trade" => {
             let mut w = Writer::default();
-            w.u8(7).u32(77);
+            w.u8(1).u32(77);
             deliver_a9(p, 0x0056, w.data);
         }
         "duel" => {
