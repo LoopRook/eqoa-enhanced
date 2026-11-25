@@ -440,6 +440,19 @@ pub(crate) fn latest() -> Option<crate::fork_ext::addons::host::Snapshot> {
     SNAPSHOT.with(|s| s.borrow().as_ref().map(|(_, _, snapshot)| *snapshot))
 }
 #[cfg(test)]
+thread_local! {static ITEMS_ONLY_ON_STEPS: Cell<bool> = const { Cell::new(false) };}
+/// Test seam: the item lists read on steps only (the build before the fix for hidden sessions).
+#[cfg(test)]
+pub(crate) fn set_items_only_on_steps_for_test(on: bool) {
+    ITEMS_ONLY_ON_STEPS.with(|n| n.set(on));
+}
+fn items_only_on_steps() -> bool {
+    #[cfg(test)]
+    return ITEMS_ONLY_ON_STEPS.with(Cell::get);
+    #[cfg(not(test))]
+    false
+}
+#[cfg(test)]
 thread_local! {static NO_UPGRADE: Cell<bool> = const { Cell::new(false) };}
 /// Test seam: the gate as it was before the fix (a state event between steps did not rebuild).
 #[cfg(test)]
@@ -536,9 +549,15 @@ pub(crate) fn refresh(play: &Play, walker: Option<&crate::walker::Walker>) {
         super::a5::refresh(play);
         native_core::flush_deferred();
     } else {
-        // Between steps only the camera and the packets' deltas run. If either produced an event about the
-        // game's state (a target, a window, a quest, an item), the state those events describe is rebuilt now, so a
-        // handler never reads a snapshot older than the event it was told about.
+        // Between steps only the camera, the packets' deltas and the item windows run. The item lists are read every
+        // drawn frame as before: a hidden loot, merchant or bank session starts and ends with no packet of its own,
+        // and a mod that asks `eqoa.loot.get()` must not see the window a frame after the session is gone.
+        if !items_only_on_steps() {
+            super::items::refresh(play);
+        }
+        // If the camera, the packets' deltas or the item lists produced an event about the game's state (a target, a
+        // window, a quest, an item), the state those events describe is rebuilt now, so a handler never reads a
+        // snapshot older than the event it was told about.
         super::r6a::refresh(play, walker);
         native_core::flush_deferred();
         if native_core::state_event_since(seq_at_start) && !no_upgrade() {
