@@ -169,15 +169,12 @@ pub(crate) fn take_outbox() -> Vec<(&'static str, serde_json::Value)> {
     OUTBOX.with(|o| std::mem::take(&mut *o.borrow_mut()))
 }
 
-/// A mod holds the Start menu, the chat line or the full map: client-side windows the game's mode does not show
-/// (`a11_play::mod_window_up`).
+/// A mod is showing the Start menu (`a11_play::mod_window_up`): the one client-side window that stands in for a game
+/// window the game itself counts as up (its own Start menu, mode 13). The chat line and the full map are not counted:
+/// the game leaves fishing, the mercenary and dye windows alone while they are open (a World Map kept in a corner,
+/// or a chat bar kept open, must not cancel a cast). Matched by kind: client-opened sessions carry no `held`.
 pub(crate) fn client_window_up() -> bool {
-    is_active()
-        && with(|s| {
-            s.sessions
-                .iter()
-                .any(|x| matches!(x.held, Some(TakeoverKind::StartMenu | TakeoverKind::ChatEntry | TakeoverKind::Map)))
-        })
+    is_active() && with(|s| s.sessions.iter().any(|x| x.kind == "start_menu"))
 }
 
 /// Hands the queued events to the core (`native_core::flush_deferred` calls it first).

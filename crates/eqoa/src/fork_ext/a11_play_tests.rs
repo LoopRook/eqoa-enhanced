@@ -1532,20 +1532,25 @@ fn a11_m3_merc_dye_and_fishing_respect_a_held_dialog() {
     assert!(p.chat.iter().any(|(t, _)| t == "Fishing stopped: a mod window was busy, cast again"));
 }
 
-/// Every kind the one check counts, and the views it does not: a held Start menu, chat line and map (client-side
-/// windows) count; a window a mod opened as a view of its own (Bags) does not.
+/// The one check counts a Start menu a mod shows (opened as the client opens it, `open_client`) and nothing else
+/// client-side: not the chat line, not the map (the game leaves fishing, merc and dye windows alone under them), and
+/// not a view of the mod's own (Bags). Negative control (run red): with `client_window_up` matching `held` (the old
+/// check) the real Start menu session is not counted; matching all three kinds counts chat_entry and map.
 #[test]
-fn a11_m3_the_one_check_counts_held_client_windows_and_not_views() {
+fn a11_m3_the_one_check_counts_the_start_menu_and_not_the_chat_line_map_or_views() {
     let _p = ready();
     assert!(!mod_window_up(), "nothing held");
     ws::open(7, "mod", "inventory", "mod").unwrap();
     assert!(!mod_window_up(), "Bags, a view of the mod's own, hides nothing");
-    for kind in [TakeoverKind::StartMenu, TakeoverKind::ChatEntry, TakeoverKind::Map] {
-        ws::reset_for_test();
-        assert!(window_takeover::takeover(7, "mod", kind, TakeoverScope::All).is_ok());
-        ws::start_dialog_session(7, "mod", kind, serde_json::Value::Null);
-        assert!(mod_window_up(), "a held {} counts", kind.name());
+    ws::reset_for_test();
+    for kind in ["chat_entry", "map"] {
+        ws::open_client(7, "mod", kind, "key", serde_json::Value::Null);
+        assert!(!mod_window_up(), "an open {kind} is not a window the game counts");
     }
+    ws::open_client(7, "mod", "start_menu", "key", serde_json::Value::Null);
+    assert!(mod_window_up(), "an open Start menu counts");
+    ws::reset_for_test();
+    assert!(!mod_window_up(), "closed again");
 }
 
 /// P5a: on every kind of world change a mod hears `world.leaving` first, then the end of what it held (`zoning`), then
