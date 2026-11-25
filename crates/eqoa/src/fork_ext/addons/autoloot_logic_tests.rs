@@ -268,7 +268,36 @@ fn a_take_cut_short_is_asked_again_when_the_server_closed_it_but_not_when_the_pl
     assert!(boolean(&lua3, "logged('you closed it')"), "said why it is left alone");
     run(&lua3, "later(120); kill(9300); poll()");
     assert_eq!(int(&lua3, "#OPENS"), 1, "a corpse the player closed is not asked for again");
-    assert!(boolean(&lua3, "B.auto_done[9300] == true"));
+    // left alone, but its items were NOT taken: it is never called "already looted" (owner log 2026-11-24, 0x187fc)
+    assert!(boolean(&lua3, "B.auto_left[9300] == true and not (B.auto_done and B.auto_done[9300])"));
+    assert!(boolean(&lua3, "logged('skipped, left alone (you closed it before its items were taken)')"));
+    assert!(!boolean(&lua3, "logged('skipped, already looted')"), "never already looted for a corpse nothing was taken from");
+}
+
+/// The mark of an older close (another corpse, the player's tab change before this take began) is not a reason to
+/// give up a take that failed because the server closed and listed the corpse again (the owner's log: the take
+/// never went out, then "you closed it: left alone" and "already looted"). It is asked again. (Control: the same
+/// mark made DURING the take is the player's.)
+#[test]
+fn a_player_close_from_before_the_take_began_does_not_make_a_failed_take_the_players() {
+    let lua = world();
+    run(
+        &lua,
+        "kill(9300); poll();          B.note_player_closed(); later(2.0);          corpse_list(2); open_answered('keep_target');          B.on_action_result({request_id = 'all' .. #LOOTALLS, ok = false, state = 'failed', phase = 'dispatch', kind = 'loot_all', code = 'window_closed', reason = 'corpse window is not open'}); LOOT = nil",
+    );
+    assert!(boolean(&lua, "logged('unfinished')"), "asked again, not given up");
+    assert!(!boolean(&lua, "logged('you closed it')"));
+    assert!(boolean(&lua, "not (B.auto_left and B.auto_left[9300]) and not (B.auto_done and B.auto_done[9300])"));
+    run(&lua, "later(11); poll()");
+    assert_eq!(int(&lua, "#OPENS"), 2, "the corpse is opened again");
+    // control: a close by the player during the take is theirs
+    let lua = world();
+    run(
+        &lua,
+        "kill(9300); poll(); corpse_list(2); open_answered('keep_target'); later(0.5); B.note_player_closed();          B.on_action_result({request_id = 'all' .. #LOOTALLS, ok = false, state = 'failed', phase = 'dispatch', kind = 'loot_all', code = 'window_closed', reason = 'corpse window is not open'}); LOOT = nil",
+    );
+    assert!(boolean(&lua, "logged('you closed it')"));
+    assert!(boolean(&lua, "B.auto_left[9300] == true"));
 }
 
 #[test]

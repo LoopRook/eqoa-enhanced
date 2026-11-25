@@ -1666,6 +1666,17 @@ impl Play {
     pub(crate) fn bags_sends_lost(&self) -> u32 {
         self.session.sends_lost
     }
+    /// One drawn frame of the game's loop as far as the loot flow goes: the frame hook (a game step or not), then the
+    /// windows' sends.
+    pub(crate) fn bags_drawn_frame(&mut self, game_step: bool) {
+        super::super::begin_iteration(self, game_step);
+        let (vui, mut r) = (
+            crate::pointer::testing::vui(),
+            crate::pointer::testing::NullRaster,
+        );
+        self.run_npcw(&vui, &mut r);
+        self.run_bank(&vui, &mut r);
+    }
     pub(crate) fn bags_broker_tick(&mut self) {
         super::super::begin_iteration(self, true);
         let (vui, mut r) = (
