@@ -456,6 +456,16 @@ pub(super) fn quiet_error(
     lua.pack_multi((Value::Nil, e))
 }
 
+/// An `Id` argument (§1): an item-definition or ability id as the canonical decimal string the reads give
+/// (`Item.id`, `Ability.id`, a row's `id`). A Lua number is not an `Id`: the reads never give one, and a 64-bit id
+/// does not fit a Lua number exactly. None for anything else (the caller refuses it `invalid_argument`).
+pub(crate) fn id_arg(v: &Value) -> Option<i64> {
+    let Value::String(s) = v else { return None };
+    let s = s.to_str().ok()?;
+    let text: &str = &s;
+    text.parse::<i64>().ok().filter(|n| n.to_string() == text)
+}
+
 pub(crate) fn record(lua: &Lua, path: &str, value: &Json) -> Result<Value> {
     if matches!(value, Json::Array(_)) || matches!(value, Json::Object(f) if !f.contains_key("$ref")) {
         if let Some(built) = super::record_raw::build(lua, path, value)? {
@@ -1310,6 +1320,10 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.windows.StartEntry", "entries") => Some("eqoa.windows.StartEntry"),
         ("eqoa.windows.SessionData", "links") => Some("eqoa.windows.ChatLink"),
         ("eqoa.windows.SessionData", "offer") => Some("eqoa.windows.LinkOffer"),
+        ("eqoa.windows.SessionData", "talked_to") => Some("eqoa.windows.TalkedTo"),
+        ("eqoa.windows.SessionData", "inventory") => Some("eqoa.merc.Inventory"),
+        ("eqoa.windows.SessionData", "spells") => Some("eqoa.merc.Spells"),
+        ("eqoa.windows.SessionData", "catch") => Some("eqoa.fishing.Catch"),
         ("eqoa.chat.ChatTabs", "tabs") => Some("eqoa.chat.ChatTab"),
         ("eqoa.input.InputState", "pad") => Some("eqoa.input.Pad"),
         ("eqoa.input.Pad", "left" | "right") => Some("eqoa.Vec2"),
@@ -1462,7 +1476,7 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.combat.CombatHit",
-            "attacker_id defender_id amount kind color outgoing incoming from_pet to_pet",
+            "attacker_id defender_id amount kind color outgoing incoming from_pet to_pet by_player from_merc",
         ),
         ("eqoa.combat.Counters", "received dropped"),
         ("eqoa.input.InputState", "focused pad text_capture"),

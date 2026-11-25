@@ -130,11 +130,15 @@ pub(crate) fn piece_hidden(_ui: &mut render::ui::Ui, _piece: crate::hudlayout::P
             Piece::Quests => v.quest_tracker,
             Piece::Meter => v.dps_meter,
             Piece::Effects => v.active_effects,
-            Piece::Chat => v.chat,
+            // upstream's PC interface (sync 2026-11-25) splits chat into up to four panes
+            Piece::Chat | Piece::Chat1 | Piece::Chat2 | Piece::Chat3 => v.chat,
             Piece::Breath => v.breath,
             Piece::QuickMenus => v.ability_bar || (v.spell_bars && v.utility_bars),
             Piece::SpellBars => v.ability_bar || v.spell_bars,
-            Piece::UtilityBars => v.ability_bar || v.utility_bars,
+            // the PC weapon-set bar was part of the Utility Bars before upstream gave it its own piece
+            Piece::UtilityBars | Piece::EquipmentBar => v.ability_bar || v.utility_bars,
+            // upstream's pieces with no mod visibility flag: always drawn
+            Piece::Settings | Piece::TargetInfo | Piece::RaidPrompts | Piece::Stats | Piece::Focus => false,
         };
         if hidden {
             let start = _from.min(_ui.quads.len());

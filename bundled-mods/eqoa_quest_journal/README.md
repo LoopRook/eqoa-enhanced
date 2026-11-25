@@ -1,6 +1,6 @@
 # EQOA Quest Journal
 
-Off by default. Enable it in Mods & Addons (F10); it shows **Provides: Quest Journal window (Shift+J)** and
+Off by default. Enable it in Mods & Addons (Shift+F10); it shows **Provides: Quest Journal window (Shift+J)** and
 **Asks you first: drop a quest** before you do.
 
 A Quest Journal window of its own, on its own key: **Shift+J** (the Controls page has a **Quest Journal** row, so you

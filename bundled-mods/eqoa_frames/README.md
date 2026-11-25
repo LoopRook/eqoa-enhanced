@@ -1,6 +1,6 @@
 # EQOA Frames (demo)
 
-A small demonstration of what the client gives a unit-frame mod. It is off until you switch it on in Mods & Addons (F10).
+A small demonstration of what the client gives a unit-frame mod. It is off until you switch it on in Mods & Addons (Shift+F10).
 Three draggable windows:
 
 - **Effects**: your effects with the time left. Click one to take it off, where the game lets you (only effects the server

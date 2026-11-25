@@ -231,13 +231,13 @@ fn int_arg(v: &Value) -> Option<i64> {
     }
 }
 
-/// A `{slot = n, id = n}` pick of a listed row: `slot` is 1-based in Lua.
+/// A `{slot = n, id = "n"}` pick of a listed row: `slot` is 1-based in Lua; `id` is the row's `Id` string.
 fn pick_of(table: &mlua::Table) -> std::result::Result<(usize, i64), (&'static str, String)> {
     let slot = table.get::<Value>("slot").ok().and_then(|v| int_arg(&v));
-    let id = table.get::<Value>("id").ok().and_then(|v| int_arg(&v));
+    let id = table.get::<Value>("id").ok().and_then(|v| super::native::id_arg(&v));
     match (slot, id) {
         (Some(slot), Some(id)) if (1..=100_000).contains(&slot) => Ok((slot as usize - 1, id)),
-        _ => Err(("invalid_argument", "pass a row of the read's list: {slot = row (1 or more), id = that row's id}".into())),
+        _ => Err(("invalid_argument", "pass a row of the read's list: {slot = row (1 or more), id = that row's id (a decimal string)}".into())),
     }
 }
 
@@ -376,8 +376,14 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     ));
                 };
                 if let Some(v) = t.get::<Value>("inventory_key").ok().filter(|v| !matches!(v, Value::Nil)) {
-                    // an optional `id` is checked against the item that key names now
-                    let id = t.get::<Value>("id").ok().and_then(|v| int_arg(&v)).unwrap_or(0);
+                    // an optional `id` (the row's `Id` string) is checked against the item that key names now
+                    let id = match t.get::<Value>("id").unwrap_or(Value::Nil) {
+                        Value::Nil => 0,
+                        v => super::native::id_arg(&v).ok_or((
+                            "invalid_argument",
+                            "id must be the item's id as a decimal string (Item.id)".to_string(),
+                        ))?,
+                    };
                     return match int_arg(&v).and_then(|n| u32::try_from(n).ok()) {
                         Some(key) => Ok(ActionKind::A9(A9Action::BlacksmithRepair { slot: 0, id, key: Some(key) })),
                         None => Err(("invalid_argument", "inventory_key must be an item's inventory_key".into())),

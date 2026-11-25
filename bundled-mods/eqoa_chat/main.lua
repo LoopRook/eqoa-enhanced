@@ -140,12 +140,26 @@ local function entity_name(id)
     return e and e.name or "Something"
 end
 
+-- `by_player` and `from_merc` are the core's answer to who made the figure: a server that tags its numbers tells a pet's or
+-- a mercenary's hit with the player as the attacker, so `outgoing` alone would make them yours. A core without the two
+-- fields (nil) is read as before: `outgoing` is you.
 local function on_hit(d)
-    if not d or not (d.outgoing or d.incoming or d.from_pet or d.to_pet) then return end
+    if not d or not (d.outgoing or d.incoming or d.from_pet or d.to_pet or d.from_merc) then return end
     local heal = d.kind == "heal"
-    local who = d.outgoing and "You" or entity_name(d.attacker_id)
-    local whom = (d.outgoing and d.incoming) and "yourself" or (d.incoming and "you" or entity_name(d.defender_id))
-    local verb = heal and (d.outgoing and "heal" or "heals") or (d.outgoing and "hit" or "hits")
+    local mine = d.outgoing and d.by_player ~= false
+    local who
+    if mine then
+        who = "You"
+    elseif d.from_merc then
+        local e = not d.outgoing and eqoa.entities.find(d.attacker_id)
+        who = e and e.name or "Your mercenary"
+    elseif d.outgoing then
+        who = "Your pet"
+    else
+        who = entity_name(d.attacker_id)
+    end
+    local whom = (mine and d.incoming) and "yourself" or (d.incoming and "you" or entity_name(d.defender_id))
+    local verb = heal and (mine and "heal" or "heals") or (mine and "hit" or "hits")
     local color = heal and { r = .5, g = 1, b = .6 } or (d.incoming and { r = 1, g = .6, b = .6 } or { r = .85, g = .95, b = .85 })
     add_combat(string.format("%s %s %s for %d.", who, verb, whom, d.amount or 0), color)
 end

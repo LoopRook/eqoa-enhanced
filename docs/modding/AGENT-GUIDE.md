@@ -43,7 +43,7 @@ reference, section 2.
 
 ## 4. Check your work
 
-- Load it: copy the folder to the mods folder, open Mods & Addons (F10 in the world), Rescan folder,
+- Load it: copy the folder to the mods folder, open Mods & Addons (Shift+F10 in the world), Rescan folder,
   Enable. Errors and unsupported calls show there (`[Warnings: N]`) and in `mods/addons_error.log`. Zero
   warnings is the bar; an `unknown_symbol` diagnostic is a misspelt name.
 - Toggle it off and on; zone; log out and in. It must release everything and not crash.

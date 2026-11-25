@@ -319,10 +319,13 @@ impl Pregame {
     }
 
     /// The wheel's `lines` or a finger's drag of `dy` frame pixels: the
-    /// window up scrolls (character select's list).
+    /// window up scrolls (PC Controls or character select).
     pub fn scroll(&mut self, lines: f32, dy: f32) {
-        if self.entering.is_none() && self.stage == Stage::Client {
-            self.client.scroll(lines, dy);
+        if self.entering.is_some() { return; }
+        match self.stage {
+            Stage::Setup => self.setup.scroll(lines),
+            Stage::Client => self.client.scroll(lines, dy),
+            _ => {}
         }
     }
 
@@ -512,10 +515,8 @@ impl Pregame {
     /// macOS's Settings… (⌘,): SETUP's title's Options (`setup::ask_options`);
     /// STATION, the server list and character select have none of the game's.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub fn ask_options(&mut self) {
-        if self.stage == Stage::Setup {
-            self.setup.ask_options();
-        }
+    pub fn ask_options(&mut self) -> bool {
+        self.stage == Stage::Setup && self.setup.ask_options()
     }
 
     /// One of the game's screens up and waiting on the player, nothing being

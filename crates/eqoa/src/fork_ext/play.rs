@@ -66,6 +66,12 @@ mod native_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "a4_hud_tests.rs"]
 mod a4_hud_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "sync_fix_tests.rs"]
+mod sync_fix_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "api_codes_tests.rs"]
+mod api_codes_tests;
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy)]
 struct CachedCycleView {
@@ -904,7 +910,10 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         } else {
             0
         };
-        let pet_y = if _play.group.raid.is_empty() {
+        // the PC interface draws the pet at its own place (`hud.rs` PC_PET_AT), not under the group or raid
+        let pet_y = if crate::settings::pc_mode() {
+            93
+        } else if _play.group.raid.is_empty() {
             93 + ((_play.group.count() as i32 - 1) * 48).max(0)
         } else {
             let below = if has_pet {
@@ -4689,11 +4698,12 @@ impl Play {
         _amount: i32,
         _defender: u32,
         _color: Option<[u8; 3]>,
+        _tag: Option<net::session::NumberTag>,
     ) {
         #[cfg(not(target_arch = "wasm32"))]
         crate::fork_ext::addons::combat::record_combat_event(_attacker, _amount, _defender);
         #[cfg(not(target_arch = "wasm32"))]
-        crate::fork_ext::addons::native_core::observe_hit(_attacker, _defender, _amount, _color);
+        crate::fork_ext::addons::native_core::observe_hit_tagged(_attacker, _defender, _amount, _color, _tag.map(|t| (t.pet, t.merc)));
         // Unit tests never emit to a real companion. The browser has no native socket
         // or SystemTime clock; neither is touched by this hook there.
         #[cfg(all(not(target_arch = "wasm32"), not(test)))]
@@ -4768,6 +4778,7 @@ mod tests {
             visibility::{HudClaimsRegistry, publish_claims},
         };
         struct Discard;
+        impl crate::ui::Layout for Discard {}
         impl vi::ui::Raster for Discard {
             fn blit(
                 &mut self,
@@ -5223,6 +5234,7 @@ mod tests {
             }
             fn set_viewport(&mut self, _: [i32; 4]) {}
         }
+        impl crate::ui::Layout for DummyRaster {}
         wnd.draw(&vui, &mut DummyRaster, 0, 0.0);
         assert!(wnd.contains([422.0, 420.0]));
         p.wnd_chat = Some(wnd);

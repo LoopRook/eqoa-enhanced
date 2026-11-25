@@ -295,15 +295,38 @@ fn parse_link(text: &str, v: &Value) -> std::result::Result<LinkSpec, (&'static 
     Ok(LinkSpec { start: before, len: inside, list, key })
 }
 
+/// What each session kind's `data` carries (spec section 7, "What a session's `data` holds"): kind, then the fields
+/// that kind's `data` has. Every other session kind has an empty table. The union is declared on
+/// `eqoa.windows.SessionData`; `session_data_table_*` in `session_contract_tests.rs` checks this list against the spec.
+pub(crate) const SESSION_DATA: &[(&str, &str)] = &[
+    ("start_menu", "entries"),
+    ("chat_entry", "text channel reply_to links offer"),
+    ("text_dialog", "text talked_to"),
+    ("response_dialog", "text options talked_to"),
+    ("group_invite", "name text"),
+    ("revive_offer", "text from"),
+    ("summon_offer", "text from"),
+    ("mercenary_items", "available own_out waiting inventory"),
+    ("mercenary_spells", "available own_out waiting spells"),
+    ("dye_picker", "token target title slots current alpha open no_dye"),
+    (
+        "fishing",
+        "open state casting ready perfect_from perfect_to fair_from fair_to list catch message",
+    ),
+];
+
+/// The union of `SESSION_DATA`, declared on `eqoa.windows.SessionData`.
+const SESSION_DATA_ALL: &str = "entries text links channel reply_to offer options talked_to name from     available own_out waiting inventory spells token target title slots current alpha open no_dye     state casting ready perfect_from perfect_to fair_from fair_to list catch message";
+
 pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;
     for (path, fields) in [
         ("eqoa.chat.ChatTabs", "tabs kinds"),
         ("eqoa.chat.ChatTab", "index name kinds"),
-        (
-            "eqoa.windows.SessionData",
-            "entries text links channel reply_to offer",
-        ),
+        // Every field any session kind's `data` carries (`SESSION_DATA`): a kind that does not carry one reads nil,
+        // with no diagnostic (rule: a declared field is never `unknown_symbol`).
+        ("eqoa.windows.SessionData", SESSION_DATA_ALL),
+        ("eqoa.windows.TalkedTo", "id name"),
         ("eqoa.windows.StartEntry", "text enabled command native entries"),
         ("eqoa.windows.ChatLink", "start len list key name"),
         ("eqoa.windows.LinkOffer", "seq name list key"),

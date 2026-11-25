@@ -19,6 +19,7 @@
     "eqoa.actions.auction_bid",
     "eqoa.actions.auction_buyout",
     "eqoa.items.slot_info",
+    "eqoa.player.get",
     "eqoa.windows.session",
     "eqoa.log.write",
     "eqoa.hud.frame",

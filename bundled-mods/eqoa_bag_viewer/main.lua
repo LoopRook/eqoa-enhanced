@@ -23,6 +23,66 @@ local tokens, escape, tab_hits, slot_hits, menu_hits, action_hits, log_rect, gri
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
+-- Bank tunar (the Bank tab, with the bank open): an amount typed in a box (digits only), Deposit and Withdraw, and an All
+-- for each. The amounts are what the client says the pack and the bank hold (`eqoa.inventory.get().money`,
+-- `eqoa.bank.get().money`, which follow the game's own money events); a button that cannot work is greyed and a press
+-- on it says why. The keyboard is taken only while the box is typed in, as the auction price box takes it.
+local BM = {text = "", field = false, enter = nil, rect = nil, was_down = false}
+local BM_DIGITS = 9
+package.loaded["bank_money_state"] = BM -- for the mod's tests: nothing else reads it
+local function bm_stop()
+    local was = BM.field
+    BM.field = false
+    if BM.enter then eqoa.input.release(BM.enter); BM.enter = nil end
+    if was then eqoa.input.capture_text(false) end
+end
+local function bm_start()
+    BM.field = true
+    B.result = nil
+    if not BM.enter then BM.enter = eqoa.input.claim("Enter", true) end
+end
+-- the amount the box holds, and what the pack and the bank hold
+local function bm_numbers()
+    local bank, inv = eqoa.bank.get(), eqoa.inventory.get()
+    return bank and bank.open == true, (inv and inv.money) or 0, (bank and bank.money) or 0, tonumber(BM.text) or 0
+end
+-- why `amount` cannot be moved in `dir` now, or nil
+local function bm_why(dir, amount)
+    local open, carried, banked = bm_numbers()
+    if not open then return "bank window is not open" end
+    if dir == "deposit" then
+        if carried <= 0 then return "you carry no tunar" end
+        if amount <= 0 then return "type an amount" end
+        if amount > carried then return "you carry only " .. B.tunar(carried) end
+    else
+        if banked <= 0 then return "the bank holds no tunar" end
+        if amount <= 0 then return "type an amount" end
+        if amount > banked then return "the bank holds only " .. B.tunar(banked) end
+    end
+    return nil
+end
+local function bm_send(dir, amount)
+    bm_stop()
+    local why = bm_why(dir, amount)
+    local label = (dir == "deposit" and "Deposit " or "Withdraw ") .. B.tunar(amount) .. " tunar"
+    if why then
+        B.result = {text = label .. ": " .. why, ok = false}
+        return
+    end
+    B.run_single(label, function() return eqoa.actions.bank_money(dir, amount) end)
+end
+function BM.on_key(d)
+    if not BM.field or not d.down then return false end
+    local key = d.key:lower()
+    if key == "escape" or key == "enter" or key == "return" then bm_stop()
+    elseif key == "backspace" then BM.text = BM.text:sub(1, -2)
+    elseif d.text and #d.text > 0 then
+        local t = (d.text:gsub("%D", ""))
+        if #BM.text + #t <= BM_DIGITS then BM.text = BM.text .. t end
+    end
+    return true
+end
+
 -- The window stops listening to everything but loot while it is closed.
 -- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
 local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
@@ -33,6 +93,7 @@ local function listen(name, fn)
         inner = function(e)
             if map_up() then
                 if name == "render" and (AL.enter or (AL.form and AL.form.field)) then AL.stop_typing() end -- a price being typed lets go of the keyboard at once
+                if name == "render" and BM.field then bm_stop() end -- so does an amount
                 return
             end
             return fn(e)
@@ -50,6 +111,7 @@ local function close(from_client)
     if session and not from_client then eqoa.windows.close_session(session.ref) end
     session, pad.on = nil, false
     AL.close()
+    bm_stop()
     if escape then eqoa.input.release(escape); escape = nil end
     B.drop_pending_npc_open()
     if eqoa.windows and eqoa.windows.release then
@@ -143,7 +205,7 @@ local function open()
         if session and d.ref == session.ref and d.down then pad_key(d.key) end
     end)
     listen("input.key", function(e)
-        if AL.on_key(e.data) then return end
+        if AL.on_key(e.data) or BM.on_key(e.data) then return end
         if e.data.down and not e.data["repeat"] and e.data.key:lower() == "escape" then
             if B.menu then B.menu, B.menu_rect = nil, nil else close() end
         end
@@ -151,6 +213,8 @@ local function open()
     listen("pointer.pressed", function(e)
         local d = e.data
         if AL.on_pointer(d) then return end
+        -- a press anywhere but the amount box (or the other button) ends the typing
+        if BM.field and not (d.button == "left" and inside(d.x, d.y, BM.rect)) then bm_stop() end
         if B.menu then
             if d.button == "right" then B.menu, B.menu_rect = nil, nil; return end
             if d.button == "left" then
@@ -320,10 +384,12 @@ function draw()
     -- Row 3 (Restock / Bank marked: only when a mark exists and the merchant or banker is near or open) makes the loot log
     -- one line shorter; Row 4 is the three "do it when I get near" choices (always there: off by default)
     local bank_open_now = eqoa.bank.get() and eqoa.bank.get().open
+    local show_money = B.tab == 6 -- the Bank tab carries the tunar row (one log line less keeps the window's height)
     local show_restock = next(HP.keep) ~= nil and (eqoa.merchant.get() ~= nil or B.nearby_npc("merchant", B.DRAW_TTL) ~= nil)
     local show_bank = next(HP.bank) ~= nil and (bank_open_now or B.nearby_npc("bank", B.DRAW_TTL) ~= nil)
     local has_row3 = show_restock or show_bank
     local log_n = has_row3 and LOG_LINES_HELPERS or LOG_LINES
+    if show_money then log_n = math.max(1, log_n - 1) end
     log_shown = log_n
     local bar_y = log_y + log_n * LINE + 4
     local expl_y = bar_y + 18
@@ -336,7 +402,8 @@ function draw()
         or eqoa.loot.get() ~= nil
         or B.nearby_npc("merchant", B.DRAW_TTL) ~= nil
         or (is_bank and not (eqoa.bank.get() and eqoa.bank.get().open) and B.nearby_npc("bank", B.DRAW_TTL) ~= nil)
-    local row3_y = has_ctx_btn and (bar2_y + 18) or bar2_y
+    local money_y = has_ctx_btn and (bar2_y + 18) or bar2_y
+    local row3_y = show_money and (money_y + 18) or money_y
     local row4_y = has_row3 and (row3_y + 18) or row3_y
     local H = row4_y + 17 + PAD
     -- centred in the HUD frame, and on screen wherever the window is sized
@@ -475,11 +542,12 @@ function draw()
     if grid.corpse then
         money_label = "Corpse items"
     elseif grid.bank then
-        money_label = "Bank tunar " .. B.tunar(grid.money)
+        local inv = eqoa.inventory.get()
+        money_label = "Bank tunar " .. B.tunar(grid.money) .. "   Carried " .. B.tunar(inv and inv.money or 0)
     else
         money_label = "Tunar " .. B.tunar(grid.money)
     end
-    text(PAD, info_y, money_label, c.text)
+    text(PAD, info_y, money_label, c.text, W - 2 * PAD - 40)
     local used = grid.used .. "/" .. (grid.capacity or "?")
     text(W - PAD - ui.CalcTextSize(used) / k, info_y, used, c.text)
 
@@ -595,6 +663,53 @@ function draw()
             local lbl = string.format("Sell junk (%d %s)", cnt, cnt == 1 and "item" or "items")
             ctx_btn(PAD, W - 2 * PAD, lbl, cnt > 0 and c.text or c.muted, cnt > 0 and c.junk or c.border, B.start_sell_junk)
         end
+    end
+
+    -- Bank tunar: the amount box, Deposit and Withdraw, and an All for each
+    if show_money then
+        local down = ui.IsMouseDown(0) or ui.IsMouseDown(1)
+        if BM.field and down and not BM.was_down then
+            -- a press on another window lying over this one ends the typing too: the capture is the player's
+            local pt = eqoa.input.pointer()
+            if not (pt and inside(pt.x, pt.y, BM.rect)) then bm_stop() end
+        end
+        BM.was_down = down
+        if BM.field then
+            -- renewed every frame: the capture lapses after about a second
+            eqoa.input.capture_text(true)
+        end
+        local bx, bw = PAD, 76
+        fill(bx, money_y, bw, 16, c.raised)
+        frame(bx, money_y, bw, 16, BM.field and c.white or c.border)
+        if BM.field then text(bx + 4, money_y + 2, BM.text .. "_", c.text, bw - 8)
+        elseif BM.text ~= "" then text(bx + 4, money_y + 2, BM.text, c.text, bw - 8)
+        else text(bx + 4, money_y + 2, "tunar", c.muted, bw - 8) end
+        BM.rect = {x = x0 + bx * k, y = y0 + money_y * k, w = bw * k, h = 16 * k}
+        action_hits[#action_hits + 1] = {
+            label = "Tunar amount", x = BM.rect.x, y = BM.rect.y, w = BM.rect.w, h = BM.rect.h, run = bm_start,
+        }
+        bx = bx + bw + 6
+        local _, carried, banked, amount = bm_numbers()
+        local function mbtn(label, hit_label, dir, amt)
+            local why = bm_why(dir, amt)
+            local w = tw(label) / k + 12
+            fill(bx, money_y, w, 16, c.raised)
+            frame(bx, money_y, w, 16, why == nil and c.worn or c.border)
+            text(bx + 6, money_y + 2, label, why == nil and c.text or c.muted, w - 8)
+            action_hits[#action_hits + 1] = {
+                label = hit_label, x = x0 + bx * k, y = y0 + money_y * k, w = w * k, h = 16 * k,
+                run = function() bm_send(dir, amt) end,
+            }
+            bx = bx + w + 3
+        end
+        mbtn("Deposit", "Deposit tunar", "deposit", amount)
+        mbtn("All", "Deposit all tunar", "deposit", carried)
+        bx = bx + 3
+        mbtn("Withdraw", "Withdraw tunar", "withdraw", amount)
+        mbtn("All", "Withdraw all tunar", "withdraw", banked)
+    else
+        BM.rect = nil
+        if BM.field then bm_stop() end
     end
 
     -- Row 3: the marked-item helpers

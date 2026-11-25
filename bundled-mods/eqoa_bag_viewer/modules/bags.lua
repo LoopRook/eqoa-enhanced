@@ -283,6 +283,7 @@ function M.clear_corpse_hold()
     M.last_close, M.auto_player_open, M.keep_req = nil, nil, nil
     M.auto_take = nil
     M.auto_done = {}
+    M.auto_outcome = {}
     M.auto_left = {}
     M.auto_said = {}
     M.engaged_pos = {}
@@ -1470,6 +1471,7 @@ function M.engaged_recently(id)
 end
 
 function M.on_combat_hit(d)
+    -- a mercenary's hit counts (owner, 2026-11-25): it is on your side and its kill is yours to loot
     if d and d.outgoing and d.kind == "damage" and not d.from_pet and d.defender_id then
         M.mark_engaged(d.defender_id)
     end
@@ -1500,7 +1502,7 @@ function M.in_combat(pl)
 end
 
 -- Auto-loot's decisions go to the game's log (eqoa.log, through eqoa.log.write), one line per corpse and reason, so
--- a play session explains itself: queued, waiting (in combat, walk closer), skipped (not your kill, already looted),
+-- a play session explains itself: queued, waiting (in combat, walk closer), skipped (not your kill, finished with),
 -- the server's answers and the retries, done. `auto_log` keeps the last lines for the tests.
 M.auto_log, M.auto_said = {}, {}
 function M.alog(id, key, text)
@@ -1648,6 +1650,16 @@ local function bag_free()
 end
 M.bag_free = bag_free
 
+-- A corpse Auto-loot is finished with (it will not be asked for again), and what became of it: said when the poll sees
+-- the corpse again. `what` is the outcome in words (what was taken, that nothing was on it, what the server said, what
+-- is left on it): never a claim that it was looted unless it was.
+function M.mark_done(id, what)
+    M.auto_done = M.auto_done or {}
+    M.auto_done[id] = true
+    M.auto_outcome = M.auto_outcome or {}
+    M.auto_outcome[id] = what
+end
+
 -- A take that ended without getting everything it should: asked again (see AUTO_MORE_TRIES), unless the player closed
 -- or stopped it (theirs), or it has been asked enough times. `bags_full`: the rest did not fit the bags: not on the timer
 -- (and not counted): it goes back when there is more free space than there was when it failed (see `tick_auto_loot`).
@@ -1668,8 +1680,7 @@ function M.auto_unfinished(id, text, why, bags_full)
     m.at = os.clock()
     M.auto_more[id] = m
     if m.left <= 0 then
-        M.auto_done = M.auto_done or {}
-        M.auto_done[id] = true
+        M.mark_done(id, string.format("gave up after %d more tries, items are still on it: left alone, use the Loot button", M.AUTO_MORE_TRIES))
         M.alog(id, "moregaveup", string.format("%s; still unfinished after %d more tries (%s): left alone, use the Loot button",
             text, M.AUTO_MORE_TRIES, tostring(why)))
         return
@@ -1706,8 +1717,7 @@ function M.auto_done_line(text, unfinished, bags_full)
         M.alog(id, "done", text .. " (you closed it" .. (c and c.src and (" via " .. c.src) or "") .. ": left alone)")
         return
     end
-    M.auto_done = M.auto_done or {}
-    M.auto_done[id] = true
+    M.mark_done(id, text)
     M.alog(id, "done", text)
 end
 
@@ -1753,7 +1763,8 @@ local function consider_corpse(e, new)
         if M.auto_left and M.auto_left[e.id] then
             M.alog(e.id, "left", "skipped, left alone (you closed it before its items were taken)")
         elseif M.auto_done and M.auto_done[e.id] then
-            M.alog(e.id, "already", "skipped, already looted")
+            local what = M.auto_outcome and M.auto_outcome[e.id]
+            M.alog(e.id, "already", "skipped, Auto-loot has finished with it (" .. (what or "no outcome recorded") .. "); not touched again")
         else
             make_eligible(e)
         end
@@ -1971,8 +1982,7 @@ function M.tick_auto_loot(pl)
                 -- the bags were full and you walked away: not chased
                 M.auto_bags[id] = nil
                 M.eligible_corpses[id] = nil
-                M.auto_done = M.auto_done or {}
-                M.auto_done[id] = true
+                M.mark_done(id, "you left reach with items still on it: left alone")
                 M.alog(id, "bagsdrop", string.format("you left reach (%.0f units) with items still on it: left alone", dist))
             elseif bw then
                 -- waiting for free bag space (strictly more than there was when the take failed)

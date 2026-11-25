@@ -4810,8 +4810,10 @@
       "children": [
         "eqoa.combat.CombatHit.amount",
         "eqoa.combat.CombatHit.attacker_id",
+        "eqoa.combat.CombatHit.by_player",
         "eqoa.combat.CombatHit.color",
         "eqoa.combat.CombatHit.defender_id",
+        "eqoa.combat.CombatHit.from_merc",
         "eqoa.combat.CombatHit.from_pet",
         "eqoa.combat.CombatHit.incoming",
         "eqoa.combat.CombatHit.kind",
@@ -4842,6 +4844,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.combat.CombatHit.by_player",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.combat.CombatHit.color",
       "reason": null,
       "revision": 1,
@@ -4851,6 +4861,14 @@
     {
       "children": [],
       "path": "eqoa.combat.CombatHit.defender_id",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.combat.CombatHit.from_merc",
       "reason": null,
       "revision": 1,
       "round": 2,
@@ -7305,6 +7323,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.combat.hit.data.by_player",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.combat.hit.data.color",
       "reason": null,
       "revision": 1,
@@ -7314,6 +7340,14 @@
     {
       "children": [],
       "path": "eqoa.events.combat.hit.data.defender_id",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.combat.hit.data.from_merc",
       "reason": null,
       "revision": 1,
       "round": 2,
@@ -18644,6 +18678,7 @@
         "eqoa.windows.Session",
         "eqoa.windows.SessionData",
         "eqoa.windows.StartEntry",
+        "eqoa.windows.TalkedTo",
         "eqoa.windows.Window",
         "eqoa.windows.Windows",
         "eqoa.windows.close_session",
@@ -19076,14 +19111,73 @@
     },
     {
       "children": [
+        "eqoa.windows.SessionData.alpha",
+        "eqoa.windows.SessionData.available",
+        "eqoa.windows.SessionData.casting",
+        "eqoa.windows.SessionData.catch",
         "eqoa.windows.SessionData.channel",
+        "eqoa.windows.SessionData.current",
         "eqoa.windows.SessionData.entries",
+        "eqoa.windows.SessionData.fair_from",
+        "eqoa.windows.SessionData.fair_to",
+        "eqoa.windows.SessionData.from",
+        "eqoa.windows.SessionData.inventory",
         "eqoa.windows.SessionData.links",
+        "eqoa.windows.SessionData.list",
+        "eqoa.windows.SessionData.message",
+        "eqoa.windows.SessionData.name",
+        "eqoa.windows.SessionData.no_dye",
         "eqoa.windows.SessionData.offer",
+        "eqoa.windows.SessionData.open",
+        "eqoa.windows.SessionData.options",
+        "eqoa.windows.SessionData.own_out",
+        "eqoa.windows.SessionData.perfect_from",
+        "eqoa.windows.SessionData.perfect_to",
+        "eqoa.windows.SessionData.ready",
         "eqoa.windows.SessionData.reply_to",
-        "eqoa.windows.SessionData.text"
+        "eqoa.windows.SessionData.slots",
+        "eqoa.windows.SessionData.spells",
+        "eqoa.windows.SessionData.state",
+        "eqoa.windows.SessionData.talked_to",
+        "eqoa.windows.SessionData.target",
+        "eqoa.windows.SessionData.text",
+        "eqoa.windows.SessionData.title",
+        "eqoa.windows.SessionData.token",
+        "eqoa.windows.SessionData.waiting"
       ],
       "path": "eqoa.windows.SessionData",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.alpha",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.available",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.casting",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.catch",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -19099,7 +19193,47 @@
     },
     {
       "children": [],
+      "path": "eqoa.windows.SessionData.current",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.windows.SessionData.entries",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.fair_from",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.fair_to",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.from",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.inventory",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -19115,7 +19249,87 @@
     },
     {
       "children": [],
+      "path": "eqoa.windows.SessionData.list",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.message",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.name",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.no_dye",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.windows.SessionData.offer",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.open",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.options",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.own_out",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.perfect_from",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.perfect_to",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.ready",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -19131,7 +19345,71 @@
     },
     {
       "children": [],
+      "path": "eqoa.windows.SessionData.slots",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.spells",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.state",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.talked_to",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.target",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.windows.SessionData.text",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.title",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.token",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.waiting",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -19186,6 +19464,33 @@
     {
       "children": [],
       "path": "eqoa.windows.StartEntry.text",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
+        "eqoa.windows.TalkedTo.id",
+        "eqoa.windows.TalkedTo.name"
+      ],
+      "path": "eqoa.windows.TalkedTo",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.TalkedTo.id",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.TalkedTo.name",
       "reason": null,
       "revision": 1,
       "round": 8,

@@ -5,6 +5,156 @@ in the same push as the changes it describes. The dev release's page shows them
 (`release/notes.sh`, from `.github/workflows/dev.yml`); an edit to this file alone
 is put on the page by `.github/workflows/notes.yml`.
 
+## 2026-11-25 · Healing and power on the DPS meter
+
+- The **DPS meter** can now show **healing per second (HPS)** and **power given per second** beside the DPS, on a server that counts them. Pick **DPS Meter Columns** under **Options → Extended → UI → DPS Meter** (**DPS**, as before; **DPS + HPS**; or **DPS + HPS + Power**), and **DPS Meter Sort** to rank the list and draw its bars by damage, healing or power. Healing counts what your heals actually restored (no overhealing), your pet's and mercenary's heals included; power counts the power you gave others (Clarity, power songs and spells, a shared power tap), not your own.
+- Or type `/dps hps`, `/dps power` or `/dps damage` to rank by one (its column shown), and `/dps columns` to step through the columns.
+
+## 2026-11-25 · Character names up to 15 letters
+
+- A new character's **name can now be up to 15 letters** (it was 12), on a server that takes them. Names still need at least three letters, letters only.
+
+## 2026-11-25 · Focus Target
+
+- New **Focus Target**: target a creature and press **[** (or type **/focus**) to make it your focus. A small window above your target box then shows it all the time: its name in its con colour, its health and how far away it is, while you target other things. Press **]** (or type **/focus target**) to target your focus again in one press. Handy for healers watching the tank, tanks watching a loose add, or anyone keeping an eye on a named monster.
+- Press **[** again on the same target, or with nothing targeted, to let the focus go (or type **/focus clear**). The focus also goes by itself when the creature dies or leaves your view.
+- Both keys can be changed on the **Controls** page (**Set Focus** and **Target Focus**), and a controller button can be given to either; none is set by default. You can move the focus window like the rest of your HUD.
+- Fixed a crash when the graphics driver resets (Windows sometimes resets it, and a reset under several game windows could stop them all): the game now waits a moment for the graphics to come back and carries on where you were, as it already did after a sleep and wake.
+
+## 2026-11-25 · Auto Loot, Attack With Abilities, choose your tracked quests, debuffs in the target window, spell cooldowns after a fast click
+
+- New **Auto Loot** option under **Options → Extended → Other → General** (Off by default): with it on, opening a corpse takes every item on it for you, one after another, as if you had picked each one. **NO TRADE** items are left on the corpse so you never pick one up by accident, and so are Lore items you already carry and anything your pack has no room for: the loot window stays open showing what is left, for you to take or leave. A corpse it empties closes by itself. Coins come as they always do. It never takes from a raid corpse you are the master looter of. Servers that keep the game's own interface turn it off.
+- New **Attack With Abilities** option under **Options → Extended → Other → Combat** (Off by default): with it on, using an attack ability on a monster (a kick, a bash, a taunt, a strike or an attack spell) also starts your auto attack, just as pressing the attack button does, once the server has taken the ability. It never does for heals, buffs or spells on yourself or your group, nor on a friendly target, and does nothing if you are already attacking. With the attack button held to fight (the game's way), it stops when the monster dies, when you change target, or when you press attack and let go. Servers that keep the game's own interface turn it off.
+- **Choose which quests the quest tracker shows**: in the **Quest Journal**, pick a quest and press **□** (Square, or click the □ Untrack button at the bottom) to take it off the tracker under the minimap; press it again to put it back. Quests you untrack show grey in the journal. Every quest is tracked until you untrack it, each character keeps its own choice, and a quest you finish or drop is tracked again if you take it later.
+- Your **debuff icons** on a monster now show in your **target window**, beside its con and health, laid out like the tiny buff icons on your group members' bars: the same size, with the time left on each while **Buff Timers** is on, and its name and time when you hover the mouse over one. Prefer them under the monster's name as before? **Options → Extended → UI → Name Plates → Debuff Icons** now picks **Target Window** (the default), **Name Plate** or **Off**. If you had Debuff Icons on, they are now in the target window; if you had them off, they stay off.
+- Fixed the **Spell Cooldowns** sweep sometimes vanishing when you pressed a spell again right as it came ready: the spell had been cast and was really on its recast, but its icon showed it ready and pressing it did nothing. The icon now keeps the sweep and the lock until the recast is truly over.
+
+## 2026-11-25 · Smoother near the Freeport coach and its Christmas tree
+
+- The frame rate no longer drops near the **Freeport plaza's Christmas decorations** (the coach and the tree): their bulbs are now prepared once instead of every frame. They look the same as before.
+
+## 2026-11-25 · Item icons whole on the quick slots
+
+- The **item icons** on your quick slots now show the whole potion, gem or stone (they were cut off on the sides) and are drawn taller, filling more of the slot.
+
+## 2026-11-25 · Group members' buff names and timers
+
+- The tiny buff icons beside your **group members' bars** now work like your own Buff Window's: hover the mouse over one to see the buff's **name** and how long it has left, and each icon shows its **time left** ("45s", "12m", "2h"), in yellow in its last minute, counting down as you play. The numbers follow **Buff Timers** under **Options → Extended → UI → HUD Extras**, as your own buffs' do. Needs a server that sends them; on one that does not, the icons show as before.
+
+## 2026-11-25 · Your debuffs under the monsters' names
+
+- On a server that sends them, the debuffs, damage over time, roots and snares you (or your pet or mercenary) have on a monster now show as small icons under its name, with the time left on each while **Buff Timers** is on, so you can see when to cast them again. Only your own show, not other players'. **Options → Extended → UI → Name Plates → Debuff Icons** turns them off.
+
+## 2026-11-25 · Typing keeps the HUD, cooldowns on spell icons, HUD layouts, mouseover casting, melee in the Stat Window
+
+- In the **PC** interface, pressing **Enter** to chat no longer hides your HUD: you now type straight into the chat box, with everything else still on screen. To go back to the old full-screen typing window, turn **Inline Keyboard Chat** off under **Options → Extended → UI → Chat**. The Controller interface is unchanged.
+- **Wake on New Chat** (**Options → Extended → UI → Chat**) now wakes a faded chat box only for a line in the **tab you are looking at**: looting, experience and faction lines going to another tab just mark that tab as unread. Pick **Any Tab** on the same row to have every new line wake it, as before.
+- Hovering or clicking a buff in the **Buff Window** now shows its name box **right at the icon** (under it, or over it near the bottom of the screen), drawn on top of your ability bars and kept on screen, instead of under the buff bar where a moved bar could hide it.
+- Fixed a crash in the browser (seen in Firefox after hours with the tab in the background): when the browser takes the game's picture away mid-frame, that frame is now skipped instead of the game stopping.
+- The **item icons** on your quick slots (potions, gems and stones) are now drawn the shape of a spell icon, instead of a wide, short strip that did not fit the ability bar.
+- You can now type the **#** sign in chat and every other text box (it was ignored before). Pasting text with a # in it keeps it too.
+- An **item link's window** that is too short for the item's whole description now says **More** at its foot: press **□** (Square) with the chat history held to page through the rest (it starts over at the top after the end), or scroll the **mouse wheel** over the window.
+- The **minimap** no longer keeps switching between its inside view and the outside map in big halls and caves (seen in the raid dungeon): once it shows the inside view it stays there until you are really out under the sky.
+- **Spell cooldowns on your bars**: after you cast, the spell's icon on your ability bars darkens and clears like a clock hand sweeping round as it gets ready again, with the **seconds left** in its middle. Turn it off with **Spell Cooldowns** under **Options → Extended → UI → HUD Extras**.
+- **Hotkey Label Size %** under **Options → Extended → UI → Interface Size** (PC interface): make the key names on your spell bars smaller, down to 40%. It starts at 100%, as before.
+- **Save your HUD layouts**: type `/hud save fullscreen` (any name) to keep your HUD as it is now, every piece where you put it and its size, and the HUD Scale, then `/hud load fullscreen` to put it back, `/hud list` to see them and `/hud delete <name>` to remove one. Handy for one layout full screen and another for a half-screen window when multiboxing. You can also pick and load a saved layout with **HUD Layouts** under **Options → Extended → UI → HUD Extras**.
+- **Mouseover Casting** (PC interface) under **Options → Extended → Other → Combat**: with it on, a heal or buff cast from your bars goes to your **pet or groupmate (or their merc) under the mouse**, without changing your target. **Mouseover First** always takes the one under the mouse; **Target First** casts at your target when it is friendly and at the one under the mouse otherwise. Off by default.
+- **Capes** now rest on the shoulders of humans (and other races whose capes stood up above them) instead of floating a little above.
+- The **Stat Window** (F4 or `/stats`) now shows your real **offence and defence** on a server that sends them: **Melee**, how much one hit of your main hand does to a creature of your own level (or **Ranged**, one arrow, while a ranged weapon is equipped), and **Taken**, how much a creature of your own level hits you for after your AC and agility. They are the numbers the server's combat rolls use, and they update as your gear, buffs, stats and level change. They appear under your resists once the server has sent them; a server that does not send them shows the window as before.
+
+## 2026-11-24 · Buff names and timers, a Stat Window, item icons on the quick slots
+
+- Hover the mouse over a buff or debuff in the **Buff Window** to see its name and how long it has left, without clicking. Each of your buffs now also shows its **time left** on its icon ("45s", "12m", "2h"), in yellow in its last minute. Turn the numbers off with **Buff Timers** under **Options → Extended → UI → HUD Extras**.
+- New **Stat Window**: press **F4** (or type `/stats`) to show a small panel with your health and power, **HoT** and **PoT**, **AC**, your seven stats (with what your gear and buffs add, in green) and your six resists. It stays up as you play and updates as they change. Press F4 again or click its **X** to close it; type `/hud` to move or resize it. It is also under **Options → Extended → UI → HUD Extras**, and F4 can be changed on the Controls page.
+- Your **item quick slots** (potions and gems) now show the **item you prepared** on them instead of the plain gem or potion picture, on the Utility Bars and on the controller's quick menu, so a Spirit of the Wolf stone and a travel stone no longer look alike. Hover the mouse over a slot on the Utility Bars to see the item's name. To go back to the plain pictures, set **Item Slot Icons** to **Slot** under **Options → Extended → UI → HUD Extras**.
+
+## 2026-11-24 · Smaller HUD and name plates, Follow camera zoom, A/D turning
+
+- **HUD Scale %** under **Options → Extended → UI → Interface Size** now works in the Controller interface too: shrink the whole HUD down to 50% (or grow it to 150%) for more of the world on screen, without hiding it. Each piece shrinks toward its own corner of the screen, and clicking it still works. It starts at 100%, so nothing changes until you move it, and the Controller and PC interfaces each keep their own size.
+- **Nameplate Size %** in the same place now goes down to **30%**, where it stopped at 50%, and now works in the Controller interface too. It starts at 100%, and each interface keeps its own size.
+- The **Follow** camera (Options → Interface → 3rd Person Camera: Follow) now zooms with the **mouse wheel** (or a pinch), out as far as **Camera Distance** under **Extended → Other → Camera** allows. Zoom in past its closest to go into first person. It starts at the same distance as before.
+- New **A/D Keys** row under **Extended → Other → Camera**: **Strafe** (the default, as before) or **Turn**. On Turn, A and D turn your character left and right in first person and the Follow camera, and swing the camera round in the other cameras. While you steer with the mouse they still sidestep. A controller is unchanged.
+
+## 2026-11-24 · Zoom out again after a hill pulls the camera in
+
+- When a hill or wall behind you pulls the third-person camera in close to your character, scrolling the **mouse wheel** out now moves it back out right away, as far as there is room, even when your zoom was already at its widest. Before, the wheel did nothing until you stepped away or went into first person and back.
+
+## 2026-11-24 · Right click loots past your merc and pet
+
+- A **right click** (or a double click) on a corpse opens it even when your pet, your merc, a groupmate or a groupmate's merc stands in front of it: your own side no longer gets in the way. Anything else (a creature, a merchant, another player) still takes the click when it is nearer, as before. Small creatures such as goblins and their corpses are easier to click. A left click still targets whatever is nearest, and the controller's targeting is unchanged.
+
+## 2026-11-24 · Busy chat panes scroll back down
+
+- The mouse wheel reaches the newest line again in a busy chat pane, such as a detached **Combat** pane in a fight: each notch down now passes the lines that came in since the last one, and at the bottom the pane follows live chat again.
+
+## 2026-11-24 · Tab and R1 targeting in the PC interface
+
+- In the PC interface, **Tab** and **R1** pick the next target ahead of your character in the direction the camera looks, so zooming the camera in or out no longer changes which creature comes first. The Controller interface targets from the camera, as the PS2 did.
+
+## 2026-11-24 · Instanced duels in Neriak
+
+- **Community → Duel → Instanced duel** challenges the player you have selected to a private match in a sealed Neriak arena (Heirloom). Both fighters lose their buffs on arrival, a 60-second countdown runs once both have loaded, and everyone is restored to full health and mana at 1. Mind the four lava pockets. When the fight ends, each fighter goes back to where they started. Mr. Moogie's **Recent duels** lists the last ten results.
+
+## 2026-11-24 · Keyboard chat starts on Main
+
+- Press **Chat Expand** (**C** by default) on the keyboard to select **Main** immediately in either interface. While holding it, the first **Tab** moves to the next chat view.
+
+## 2026-11-24 · Chat Tabs settings
+
+- Choose where each kind of chat goes under **Options → Extended → UI → Chat Tabs**. All ten settings are on one page.
+
+## 2026-11-24 · Independent pet panel on PC
+
+- The pet's health and mana panel stays where you put it when a group member or mercenary joins or leaves. Type `/hud` to move the pet and group panels independently.
+
+## 2026-11-24 · Chat history controls
+
+- While holding **Chat Expand** (default **C**), tap **Tab** to cycle through chat tabs and panes from left to right, and use **Up** or **Down** to scroll the selected view one line at a time. In the PC interface each hold starts on **Main**; in the Controller interface it starts on the tab shown, as before.
+- In the PC interface, **Left** and **Right** scroll by the selected pane's configured number of lines. Hold **Shift** with either arrow for its usual item-link or channel action while chat is expanded. Buff navigation and raid prompts still get their arrow shortcuts first.
+- Mouse-wheel scrolling resumes live chat and releases the scrollbar when you reach the newest line.
+
+## 2026-11-24 · Rearrange spell gems on PC
+
+- On the desktop spell bars, hold the left mouse button for two seconds to pick up a gem. Left-click a slot to place it. An occupied slot hands its gem to your cursor. An empty slot completes the move.
+- Left-click empty space to return the gems to their original slots and cancel any unfinished swaps. Right-click empty space to unmemorize the gem you're carrying.
+
+## 2026-11-24 · Resizable PC HUD and chat fading
+
+- Type `/hud` and drag a gold corner arrow to size a HUD piece from 50% to 200%. The minimap, character and target frames, equipment switch bar, chat panes and other pieces each remember their size. Drag the body to move a piece. Click **Lock** at the top to finish.
+- To size all equipped spell rows together, use **F10 → Extended → UI → HUD Layout → Spell Bar Size %**. It adjusts the same setting as the spell bars' corner arrows.
+- Chat tabs sit against the top edge of their pane. **Resize** in the HUD editor changes the pane's width and line count. The corner arrows also scale its text.
+- Under **Extended → UI → Chat**, choose a **Chat Fade Delay** from 1 to 120 seconds, or leave it **Off**. After the delay each idle pane fades over one second. Hover, scroll or type to bring chat back. Enable **Wake on New Chat** if incoming messages should also reveal their pane.
+- PC windows such as the Start menu, Options, Inventory and NPC dialogue no longer show their title bar, zoom, **Pin**, **Reset** and resize corner during play. They keep the size, place and zoom you gave them, and still scroll when they need to. Type `/hud`, then open a window to change its layout again.
+
+## 2026-11-24 · Jump landings
+
+- Gnomes, dwarves, halflings, trolls and ogres no longer stand frozen and slide along the ground after a running jump: their standing landing now lasts as long as a human's, then the run or walk carries straight on.
+
+## 2026-11-23 · Spell gem artwork and PC window scrollbars
+
+- Equipped spells on the PC bars show their colored gem and spell symbol together, using the artwork assigned to each ability.
+- PC windows open with their contents visible. Narrowing a window can show a horizontal scrollbar, and shortening it can show a vertical one. The bars disappear when the contents fit again. The Spell Book list still responds to the mouse wheel.
+- Main and detached PC chat panes show the history scrollbar only while scrolling through more lines than the pane can display.
+- On the PC title screen, scroll through the Controls list with the wheel or arrow keys. The fixed window opens without a scrollbar.
+
+## 2026-11-23 · PC and Controller interfaces
+
+- Choose **PC** or **Controller** at the top of Options. Press **F10** from the title or in the world. In PC mode you can also click **Settings** or press Start on a controller. In Controller mode, use **Start → Options**. Switching saves the choice immediately and restores that interface's layout.
+- PC starts with four ten-slot spell bars at bottom center. Keys **1–9** and **0** activate equipped gems 1–10 on the bottom row. Choose one to four rows in **Extended → UI → HUD → Spell Bar Rows**. The Spell Book can equip up to 40 different gems on supporting servers. Hiding a bar preserves its spells, and a new assignment becomes active when the server confirms it.
+- Where the server supports weapon sets, the independent **Equipment Switch** bar offers your four prepared sets and bare hands. The item quick slots have their own bar.
+- Open **Options → Controls** to bind any visible bar and gem to its own key or combination. For example, assign **Shift+1** to Bar 2, Gem 1 and **Ctrl+2** to Bar 3, Gem 2. Choose **Save Changes**. For browser tab-switch combinations, use the game's fullscreen mode in a browser with keyboard lock.
+- In PC mode, drag the title bar to move Inventory, the Spell Book and other gameplay windows. Drag the bottom-right corner to resize width and height, or use **−** and **+** to scale the contents. Each window remembers its layout. **Pin** locks it and **Reset** restores its default layout after unpinning.
+- In PC chat, select a tab and click **Detach tab** to open it separately. **Dock** brings the same history back. Type `/hud` to drag and resize individual windows or pin a HUD piece in place.
+
+## 2026-11-23 · HUD size and keyboard chat
+
+- In Extended > UI > Interface Size, adjust the HUD and overhead names independently or choose the chat box's width and number of rows. You can also type `/hud` and drag **Resize** on the chat box. Drag the rest of the box to move it.
+- In Extended > UI > Chat, adjust the background opacity or turn on **Inline Keyboard Chat**. Press Enter to type in the chat box, Enter again to send, or Escape to cancel. A controller's chat button opens the usual keyboard.
+- Use `/sa` for Say, `/s` for Shout, `/g` for Group and `/gu` for Guild. Submit a shortcut by itself to select that channel for subsequent messages, or include a message to use it once. Use `/t Name message` for a tell and `/r message` to reply.
+
+## 2026-11-23 · Mercenaries of the newer races show their gear
+- A mercenary of one of the server's own races whose body has no armour of its own (the Jal'Raeth, the gargoyle, the dryad, the merfolk and the others) now shows its armour, its helm and its weapons as a player of that race does. Before, it was drawn bare, holding its weapons in the wrong place or not at all.
+
 ## 2026-11-23 · 180 more hunting camps on the map
 - The map (M) shows about 180 more hunting camps: every sizeable group of creatures the server has that the map was missing, in Tunaria, the Rathe and Odus, each with its creatures' levels (for example the shriek camp in Wktaan's 4th Talon, the Isle of Dread's breath stealers, the Tomb of Kings' Holciel and the Tae Ew of Cazic-Thule), and Zentar's Keep's own hexbones and Bogman Village's rancidbone trolls.
 

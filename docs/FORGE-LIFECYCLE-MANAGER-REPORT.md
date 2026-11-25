@@ -47,7 +47,7 @@ The caller owns the **one Context/platform/shared renderer** and must:
 - Construction discovers metadata but creates no VMs and executes no addon code.
   Legacy defaults remain disabled; explicit persisted intent overrides a native
   manifest's initial enabled value. Missing/empty roots instantiate nothing.
-- At most 16 VMs, including disabled retained environments, are instantiated.
+- At most 256 VMs, including disabled retained environments, are instantiated.
   Fresh compile-before-replace reload also respects this cap: at 16 existing VMs,
   it reports that an instantiated addon must be removed before staging a replacement.
 - First enabled entry executes once, registers callbacks/draws, then receives saved
@@ -85,7 +85,7 @@ and eject select forced retirement. A cleanup exception overrides retention and
 keeps Failed/reload-needed semantics. Failed syntax reload preserves old handles.
 Successful inactive Save/Load/Settings no longer retire their cached allocations;
 explicit ReleaseTexture still collects through the existing post-render boundary.
-Disabled allocations remain charged to the same budgets and 16-VM cap.
+Disabled allocations remain charged to the same budgets and 256-VM cap.
 
 This corrects a native compatibility defect: pinned UiForge
 `ForgeScript::Disable` (forgescript_manager.cpp391-401) retains its environment and

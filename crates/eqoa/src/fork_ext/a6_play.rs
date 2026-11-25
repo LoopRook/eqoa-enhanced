@@ -209,11 +209,21 @@ pub(crate) fn tick(play: &mut Play) {
     if !open_now {
         CHAT_WAS_OPEN.with(|c| c.set(false));
     }
+    stock_inline_chat_hidden(play);
     if !window_takeover::has_activity() && !window_sessions::is_active() {
         return;
     }
     start_menu(play);
     chat_entry(play, fresh);
+}
+
+/// PC interface, Inline Keyboard Chat: the game types into a box drawn inside the chat piece, which a mod that hides
+/// stock chat blanks, so the player would type into nothing. While stock chat is hidden the line falls back to the
+/// game's own edit box (drawn outside the chat piece). A mod that holds Chat Entry diverts the line in `chat_entry`.
+pub(crate) fn stock_inline_chat_hidden(play: &mut Play) {
+    if play.mode == 2 && play.edit.inline_chat && !crate::hud::fork_hud::chat_window_visible() {
+        play.edit.inline_chat = false;
+    }
 }
 
 /// A mod's window of a client-opened kind ends when nobody holds the kind any more (released, disabled, the
@@ -379,8 +389,12 @@ pub(crate) fn dispatch(play: &mut Play, action: &A6Action) -> DispatchOutcome {
         }
         A6Action::ChatLine { route, to, text, links } => chat_line(play, *route, to.as_deref(), text, links),
         A6Action::OpenLink { id, name } => {
+            // the server offers no links (`unsupported`), or the player has turned Item Links off (`unavailable`)
+            if !play.session.item_links_offer {
+                return refuse("unsupported", "this server offers no item links");
+            }
             if !play.links_made() {
-                return refuse("not_ready", "this server offers no item links, or the player has turned them off");
+                return refuse("unavailable", "the player has turned Item Links off");
             }
             // the game's own click on a link: its card opens over play and the server is asked for the item
             play.open_link(*id, name);

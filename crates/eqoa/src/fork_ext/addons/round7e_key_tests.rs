@@ -1424,12 +1424,19 @@ fn mgr_key() -> String {
 
 /// A press and release with the plain-play flag as given; whether the manager asked to toggle.
 fn press_for_manager(rt: &mut Runtime, key: &Key, plain_play: bool) -> bool {
+    press_for_manager_with(rt, NONE, key, plain_play)
+}
+
+/// The same with modifiers held (the manager's default is Shift+F10 since F10 became the game's Settings).
+fn press_for_manager_with(rt: &mut Runtime, mods: (bool, bool, bool), key: &Key, plain_play: bool) -> bool {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static NEXT: AtomicUsize = AtomicUsize::new(12000);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     let _ = take_toggle_request(); // only what THIS press asks
+    input::set_modifiers(mods);
     rt.scripted_key_based(id, key, None, None, ElementState::Pressed, plain_play);
     rt.scripted_key_based(id, key, None, None, ElementState::Released, plain_play);
+    input::set_modifiers(NONE);
     // report it, and leave the request for the frame (`apply_requests`) as the press made it
     let asked = take_toggle_request();
     if asked {
@@ -1455,23 +1462,24 @@ fn f(n: u8) -> Key {
 }
 
 #[test]
-fn round7e_mgr1_a_fresh_install_has_f10_and_it_opens_and_closes_the_manager() {
+fn round7e_mgr1_a_fresh_install_has_shift_f10_and_it_opens_and_closes_the_manager() {
     mgr_reset();
     bindpage::register_manager_row();
-    assert_eq!(mgr_key(), "f10", "the default, one constant");
-    assert_eq!(bindpage::MANAGER_DEFAULT_KEY, "f10");
+    assert_eq!(mgr_key(), "shift+f10", "the default, one constant (F10 is the game's Settings)");
+    assert_eq!(bindpage::MANAGER_DEFAULT_KEY, "shift+f10");
     assert_eq!(bindpage::extra_rows(), 1, "the row is there with no mod enabled");
     let mut rt = runtime();
     assert!(!rt.manager_open());
-    assert!(press_for_manager(&mut rt, &f(10), true), "F10 in the world asks for the manager");
+    assert!(press_for_manager_with(&mut rt, SHIFT, &f(10), true), "Shift+F10 in the world asks for the manager");
     rt.apply_requests();
     assert!(rt.manager_open(), "opened");
     assert!(!take_open_request(), "the Options route's open request is not used");
-    assert!(press_for_manager(&mut rt, &f(10), true));
+    assert!(press_for_manager_with(&mut rt, SHIFT, &f(10), true));
     rt.apply_requests();
     assert!(!rt.manager_open(), "closed again");
-    // control: F9 is not the key
+    // controls: F9 is not the key, and neither is a bare F10 (the game's Settings)
     assert!(!press_for_manager(&mut rt, &f(9), true));
+    assert!(!press_for_manager(&mut rt, &f(10), true), "a bare F10 is the game's, not the manager's");
     let _ = take_toggle_request();
 }
 
@@ -1480,11 +1488,11 @@ fn round7e_mgr1_it_is_not_fired_while_a_menu_or_chat_has_the_keyboard() {
     mgr_reset();
     bindpage::register_manager_row();
     let mut rt = runtime();
-    assert!(!press_for_manager(&mut rt, &f(10), false), "a menu has the keyboard (not plain play)");
+    assert!(!press_for_manager_with(&mut rt, SHIFT, &f(10), false), "a menu has the keyboard (not plain play)");
     input::testing_text_capture(true);
-    assert!(!press_for_manager(&mut rt, &f(10), true), "typing in chat or an editor");
+    assert!(!press_for_manager_with(&mut rt, SHIFT, &f(10), true), "typing in chat or an editor");
     input::testing_text_capture(false);
-    assert!(press_for_manager(&mut rt, &f(10), true), "control: plain play");
+    assert!(press_for_manager_with(&mut rt, SHIFT, &f(10), true), "control: plain play");
 }
 
 #[test]
@@ -1492,7 +1500,7 @@ fn round7e_mgr1_a_key_a_game_control_has_leaves_the_row_empty_and_names_it() {
     mgr_reset();
     let slot = row_named("bar1_slot1").unwrap();
     let mut game = settings::binds();
-    game.bind_key(slot, "f10");
+    game.bind_key(slot, "shift+f10");
     settings::set_binds(game);
     bindpage::register_manager_row();
     assert_eq!(mgr_key(), "", "the default never takes a key in use");
@@ -1501,19 +1509,19 @@ fn round7e_mgr1_a_key_a_game_control_has_leaves_the_row_empty_and_names_it() {
     // a macro's key the same
     mgr_reset();
     let mut game = settings::binds();
-    game.set_trigger(0, None, vec![Input::Key("f10".into())]).unwrap();
+    game.set_trigger(0, None, vec![Input::Key("shift+f10".into())]).unwrap();
     settings::set_binds(game);
     bindpage::register_manager_row();
     assert_eq!(mgr_key(), "");
     // a mod's default for it: the first by name has it (the row's id is `enhanced`)
     mgr_reset();
-    let _alpha = bind("alpha", "f10");
+    let _alpha = bind("alpha", "shift+f10");
     bindpage::register_manager_row();
-    assert_eq!((mgr_key().as_str(), mod_key_of("alpha").as_str()), ("", "f10"), "alpha sorts first");
+    assert_eq!((mgr_key().as_str(), mod_key_of("alpha").as_str()), ("", "shift+f10"), "alpha sorts first");
     mgr_reset();
-    let _zeta = bind("zeta", "f10");
+    let _zeta = bind("zeta", "shift+f10");
     bindpage::register_manager_row();
-    assert_eq!((mgr_key().as_str(), mod_key_of("zeta").as_str()), ("f10", ""), "enhanced sorts first");
+    assert_eq!((mgr_key().as_str(), mod_key_of("zeta").as_str()), ("shift+f10", ""), "enhanced sorts first");
 }
 
 #[test]
@@ -1524,10 +1532,10 @@ fn round7e_mgr1_giving_it_a_key_a_game_control_has_swaps_as_for_a_mod_key() {
     assert_eq!(settings::binds().key(art), Some("f9"));
     capture(&mut ControlsPage::default(), ROWS.len(), "f9");
     assert_eq!(mgr_key(), "f9");
-    assert_eq!(settings::binds().key(art), Some("f10"), "Art took the key the row left");
+    assert_eq!(settings::binds().key(art), Some("shift+f10"), "Art took the key the row left");
     let mut rt = runtime();
     assert!(press_for_manager(&mut rt, &f(9), true), "F9 opens it now");
-    assert!(!press_for_manager(&mut rt, &f(10), true), "F10 does not");
+    assert!(!press_for_manager_with(&mut rt, SHIFT, &f(10), true), "Shift+F10 does not");
     // the client's own keys are refused, as for a mod
     // (F3, F11 and F12 are refused by the page itself before any row is asked)
     refused(ROWS.len(), "alt+enter", "client");
@@ -1540,14 +1548,40 @@ fn round7e_mgr1_a_saved_key_a_game_control_has_is_marked_and_does_nothing() {
     mgr_reset();
     let slot = row_named("bar1_slot1").unwrap();
     let mut game = settings::binds();
-    game.bind_key(slot, "f10");
+    game.bind_key(slot, "shift+f10");
+    settings::set_binds(game);
+    testing::put(MOD_KEYS, b"mod.enhanced.mods_addons=shift+f10\n");
+    bindpage::register_manager_row();
+    assert_eq!(mgr_key(), "shift+f10", "an old saved key is kept as it is");
+    assert!(controls_text(ROWS.len()).contains(&"!".into()), "and marked");
+    let mut rt = runtime();
+    assert!(!press_for_manager_with(&mut rt, SHIFT, &f(10), true), "the game's control wins at press time");
+}
+
+/// Owner decision 2026-11-25: a player whose saved key is the old default F10, which the game now has (Settings),
+/// moves to Shift+F10; one who chose another key keeps it, and so does one who has moved Settings off F10.
+#[test]
+fn round7e_mgr1_a_saved_old_default_f10_moves_to_shift_f10_because_f10_is_the_games_now() {
+    mgr_reset();
+    assert!(settings::binds().row_on("f10").is_some(), "control: F10 is a game control (Settings)");
+    testing::put(MOD_KEYS, b"mod.enhanced.mods_addons=f10\n");
+    bindpage::register_manager_row();
+    assert_eq!(mgr_key(), "shift+f10", "the saved F10 went back to the default");
+    assert!(!String::from_utf8_lossy(&testing::kept(MOD_KEYS).unwrap_or_default()).contains("mods_addons=f10"));
+    // another key the player chose stays
+    mgr_reset();
+    testing::put(MOD_KEYS, b"mod.enhanced.mods_addons=f8\n");
+    bindpage::register_manager_row();
+    assert_eq!(mgr_key(), "f8");
+    // F10 given up by the game (Settings moved to a key nobody had): the player's F10 is his
+    mgr_reset();
+    let settings_row = row_named("settings").unwrap();
+    let mut game = settings::binds();
+    game.bind_key(settings_row, "ctrl+f10");
     settings::set_binds(game);
     testing::put(MOD_KEYS, b"mod.enhanced.mods_addons=f10\n");
     bindpage::register_manager_row();
-    assert_eq!(mgr_key(), "f10", "an old saved key is kept as it is");
-    assert!(controls_text(ROWS.len()).contains(&"!".into()), "and marked");
-    let mut rt = runtime();
-    assert!(!press_for_manager(&mut rt, &f(10), true), "the game's control wins at press time");
+    assert_eq!(mgr_key(), "f10", "F10 is free of the game: kept");
 }
 
 #[test]
@@ -1619,7 +1653,7 @@ fn round7e_mgr2_the_manager_key_does_nothing_where_the_window_would_not_be_usabl
     let space = Key::Named(NamedKey::Space);
     bindpage::set_manager_blocked(true);
     // the bare default key: nothing, and nothing consumed
-    assert!(!press_for_manager(&mut rt, &f(10), true), "blocked: F10 does nothing");
+    assert!(!press_for_manager_with(&mut rt, SHIFT, &f(10), true), "blocked: Shift+F10 does nothing");
     // a combination: not consumed either, so the game still gets it
     assert!(bindpage::set_key(MGR.0, MGR.1, "shift+space"));
     assert!(!press_consumed(&mut rt, SHIFT, &space, None, &[]), "blocked: not consumed");

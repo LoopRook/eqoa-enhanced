@@ -524,7 +524,7 @@ fn a1_pass_waits_for_plain_play_and_is_refused_over_a_game_window() {
     host.execute("held = assert(eqoa.windows.session('bank'))").unwrap();
     p.mode = 13;
     step(&mut p, &host);
-    host.execute("local ok, e = eqoa.windows.pass(held.ref); assert(ok == nil and e.code == 'busy', e and e.code)").unwrap();
+    host.execute("local ok, e = eqoa.windows.pass(held.ref); assert(ok == nil and e.code == 'not_ready', e and e.code)").unwrap();
     p.mode = 0;
     step(&mut p, &host);
     host.execute("assert(eqoa.windows.pass(held.ref))").unwrap();
@@ -602,7 +602,7 @@ fn a1_fix1_pass_is_refused_where_the_game_cannot_open_its_window() {
     // the manual camera (mode 38) is plain play for mod keys, but the game's windows do not open from it
     p.mode = 38;
     step(&mut p, &host);
-    host.execute("local ok, e = eqoa.windows.pass(held.ref); assert(ok == nil and e.code == 'busy', 'pass said ' .. tostring(ok))").unwrap();
+    host.execute("local ok, e = eqoa.windows.pass(held.ref); assert(ok == nil and e.code == 'not_ready', 'pass said ' .. tostring(ok))").unwrap();
     assert!(ws::take_passes().is_empty(), "nothing is queued to be silently cancelled");
     // control: from the game's own camera the same call is accepted and opens the window
     p.mode = 0;

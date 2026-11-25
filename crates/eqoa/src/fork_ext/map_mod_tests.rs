@@ -449,6 +449,20 @@ fn key(host: &Host, key: winit::keyboard::Key) {
     crate::fork_ext::addons::input::route_mod_key(&key, true, false, false, true, false);
     step(host, 0.5);
 }
+/// Map Search's "Clear map guide" has no default key (F4 is the game's Stat Window): a press of F4 clears nothing
+/// (the control), and once the player gives it a key of his own that key clears.
+fn clear_guide_needs_a_key_of_the_players(host: &Host, vm: u64) {
+    use crate::fork_ext::addons::{guides, input};
+    assert_eq!(crate::fork_ext::bindpage::get_key("eqoa_map_search", "clear").as_deref(), Some(""), "no default key");
+    assert!(guides::target_for(vm).is_some(), "a guide is up");
+    key(host, winit::keyboard::Key::Named(winit::keyboard::NamedKey::F4));
+    assert!(guides::target_for(vm).is_some(), "F4 clears nothing: it is the Stat Window's");
+    assert!(crate::fork_ext::bindpage::set_key("eqoa_map_search", "clear", "shift+f4"));
+    input::set_modifiers((false, false, true));
+    key(host, winit::keyboard::Key::Named(winit::keyboard::NamedKey::F4));
+    input::set_modifiers((false, false, false));
+    assert!(guides::target_for(vm).is_none(), "the player's own key clears it");
+}
 fn type_text(host: &Host, text: &str) {
     for c in text.chars() {
         key(host, winit::keyboard::Key::Character(c.to_string().into()));
@@ -532,8 +546,7 @@ fn round4b_search_selects_live_with_dots_follows_and_falls_back_to_known() {
         Some([210., 310.]),
         "lost live entity falls back to nearest recorded spawn"
     );
-    key(&h, Key::Named(NamedKey::F4));
-    assert!(guides::target_for(vm).is_none());
+    clear_guide_needs_a_key_of_the_players(&h, vm);
     key(&h, Key::Named(NamedKey::F2));
     for _ in 0..8 {
         key(&h, Key::Named(NamedKey::Backspace));
@@ -544,7 +557,9 @@ fn round4b_search_selects_live_with_dots_follows_and_falls_back_to_known() {
         .unwrap();
     key(&h, Key::Named(NamedKey::Enter));
     assert_eq!(guides::target_for(vm), Some([210., 310.]));
+    input::set_modifiers((false, false, true));
     key(&h, Key::Named(NamedKey::F4));
+    input::set_modifiers((false, false, false));
     key(&h, Key::Named(NamedKey::F2));
     for _ in 0..13 {
         key(&h, Key::Named(NamedKey::Backspace));
@@ -606,8 +621,7 @@ fn round4b_search_group_departure_places_and_unicode_editor_limit() {
     h.execute("local s=require('search');assert(s.tab==3 and #s.rows>0 and s.rows[1].name:find('(XP camp)',1,true))").unwrap();
     key(&h, Key::Named(NamedKey::Enter));
     assert!(guides::target_for(vm).is_some());
-    key(&h, Key::Named(NamedKey::F4));
-    assert!(guides::target_for(vm).is_none());
+    clear_guide_needs_a_key_of_the_players(&h, vm);
     key(&h, Key::Named(NamedKey::F2));
     for _ in 0..9 {
         key(&h, Key::Named(NamedKey::Backspace));

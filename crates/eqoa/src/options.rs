@@ -22,14 +22,14 @@
 //! as that one is, of four groups (a GM's petitions 1631 and 1634,
 //! 2026-11-11: `GROUPS`): Graphics (Video, World, Lighting, Characters,
 //! natively Textures, Weather), UI (HUD, HUD Layout, Name Plates, Map, Number Colors,
-//! Merc Colors, DPS Meter, Chat), Other (General, Combat, Camera, natively
+//! Merc Colors, DPS Meter, Chat, Chat Tabs), Other (General, Combat, Camera, natively
 //! Sound), Touch Controls (Size & Look, Layout: every row of the touch
 //! screen's pad, a GM's petition 2084) and the Multi-boxing
 //! settings. A group opens a menu of its
 //! categories in the place of the groups' (`CATEGORIES`), the Multi-boxing
-//! settings, a group of one, its page at once; each category opens a page laid
-//! out and driven as the game's pages are, short enough that none scrolls
-//! (`PAGE_MOST`). The rows by the categories they were on before the groups
+//! settings, a group of one, its page at once. Longer category pages take
+//! the menu's place so all their rows fit (`MENU_MOST`). The rows by the
+//! categories they were on before the groups
 //! (where a row went since is said in `ALL_CATEGORIES`):
 //! - Video: Display (natively: Window or Full Screen, the window's own as
 //!   F11 and Alt+Enter toggle it, `display`: it changes at once and stays,
@@ -276,7 +276,7 @@ mod fork_options;
 use crate::bindpage::ControlsPage;
 use crate::macropage::MacrosPage;
 use crate::pointer::{Hits, key, rows_rect};
-use crate::settings::{BRIGHTNESS_STEPS, CAMERA_MAX, CAMERA_MIN, CAMERA_STEP, ClientOptions, ENTITY_SLOTS_GAME, ENTITY_SLOTS_MAX, ENTITY_SLOTS_STEP, ENTITY_VIEW_GAME, ENTITY_VIEW_MAX, ENTITY_VIEW_STEP, Focus, FrameRate, NAME_DISTANCE_GAME, NAME_DISTANCE_MAX, SHADOW_DISTANCE_GAME, SHADOW_DISTANCE_MAX, SHADOW_DISTANCE_STEP, TOUCH_EDGE_MAX, TOUCH_EDGE_STEP, TOUCH_OPACITY_MAX, TOUCH_OPACITY_MIN, TOUCH_OPACITY_STEP, TOUCH_SIZE_MAX, TOUCH_SIZE_MIN, TOUCH_SIZE_STEP, TURN_MAX, TURN_MIN, TURN_STEP};
+use crate::settings::{BRIGHTNESS_STEPS, CAMERA_MAX, CAMERA_MIN, CAMERA_STEP, ClientOptions, ENTITY_SLOTS_GAME, ENTITY_SLOTS_MAX, ENTITY_SLOTS_STEP, ENTITY_VIEW_GAME, ENTITY_VIEW_MAX, ENTITY_VIEW_STEP, Focus, FrameRate, HUD_SCALE_MAX, HUD_SCALE_MIN, NAME_DISTANCE_GAME, NAME_DISTANCE_MAX, NAMEPLATE_MIN, SHADOW_DISTANCE_GAME, SHADOW_DISTANCE_MAX, SHADOW_DISTANCE_STEP, TOUCH_EDGE_MAX, TOUCH_EDGE_STEP, TOUCH_OPACITY_MAX, TOUCH_OPACITY_MIN, TOUCH_OPACITY_STEP, TOUCH_SIZE_MAX, TOUCH_SIZE_MIN, TOUCH_SIZE_STEP, TURN_MAX, TURN_MIN, TURN_STEP};
 use vi::fpu::{Ee, F};
 use vi::ui::{Raster, UI_COLORS, Vui, Window, wide};
 
@@ -482,6 +482,9 @@ pub struct WndOptions {
     /// In the world on a server that keeps no damage meter, that it keeps
     /// none (`Play::agree_dps_meter` sets it), the Combat page's legend's
     pub meter_note: Option<String>,
+    /// And on one whose meter counts damage alone (layout 1), that it does,
+    /// while DPS Meter Columns or Sort is chosen
+    pub meter_heal_note: Option<String>,
     /// In the world on a server that offers no item links, that it has none
     /// (`Play::agree_item_links` sets it), the Chat page's legend's
     pub links_note: Option<String>,
@@ -491,6 +494,9 @@ pub struct WndOptions {
     saved: GameOptions,
     /// the client's own as it opened, put back with them
     saved_client: ClientOptions,
+    /// The separate HUD layout authority, captured for Options' Cancel.
+    saved_spell_bar_scale: u16,
+    spell_bar_scale_edited: bool,
     /// The Save Changes box carries the account's notice (`settings::ACCOUNT_NOTICE`).
     notice: bool,
     /// the keys and buttons as it opened, put back with them
@@ -542,6 +548,10 @@ impl WndOptions {
             return self.macros.point(p);
         }
         let Some(h) = self.hits.at(p) else { return Vec::new() };
+        if self.page == -1 && matches!(h, MODE_PC_HIT | MODE_PAD_HIT) {
+            self.sel = MODE_ROW;
+            return vec![if h == MODE_PC_HIT { key::LEFT } else { key::RIGHT }];
+        }
         let k = h % HIT_ROWS;
         if h < LABEL {
             // a menu: `Prev`/`Next` start the tick's pulse over
@@ -580,6 +590,8 @@ impl WndOptions {
         self.message.visible = false;
         self.saved = *o;
         self.saved_client = crate::settings::client();
+        self.saved_spell_bar_scale = crate::hudlayout::piece_scale_percent(crate::hudlayout::Piece::SpellBars);
+        self.spell_bar_scale_edited = false;
         self.saved_binds = crate::settings::binds();
         crate::fork_ext::bindpage::session_begin();
         self.edit = [(o.no_faction == 0) as u8, (o.no_loot == 0) as u8, o.auto_attack, o.vibration];
@@ -621,6 +633,12 @@ impl WndOptions {
                 self.macros.key(key, false, self.now, &mut Vec::new());
             }
             _ => {}
+        }
+    }
+
+    pub fn scroll_controls(&mut self, lines: f32) {
+        if self.page == 4 && !self.message.visible {
+            self.controls.scroll(lines);
         }
     }
 
@@ -751,6 +769,10 @@ impl WndOptions {
                 crate::settings::set_client(self.saved_client);
                 crate::settings::set_binds(self.saved_binds.clone());
                 crate::fork_ext::bindpage::session_cancel();
+                if self.spell_bar_scale_edited {
+                    crate::hudlayout::set_piece_scale_percent(crate::hudlayout::Piece::SpellBars, self.saved_spell_bar_scale);
+                    self.spell_bar_scale_edited = false;
+                }
                 ups.push(OptionsUp::Volume(0, o.fx_volume));
                 ups.push(OptionsUp::Volume(1, o.music_volume));
                 ups.push(OptionsUp::Apply);
@@ -780,13 +802,15 @@ impl WndOptions {
         }
         self.take_held(o);
         // nothing changed since the window opened or last kept: nothing written
-        if *o == self.saved && crate::settings::client() == self.saved_client && crate::settings::binds() == self.saved_binds {
+        if *o == self.saved && crate::settings::client() == self.saved_client && crate::settings::binds() == self.saved_binds && !self.spell_bar_scale_edited {
             return;
         }
         crate::settings::save(o);
         self.saved = *o;
         self.saved_client = crate::settings::client();
         self.saved_binds = crate::settings::binds();
+        self.saved_spell_bar_scale = crate::hudlayout::piece_scale_percent(crate::hudlayout::Piece::SpellBars);
+        self.spell_bar_scale_edited = false;
     }
 
     /// The row up and down move: the options menu's, Extended's
@@ -802,8 +826,9 @@ impl WndOptions {
 
     /// `Prev`.
     fn prev(&mut self, now: i64, cues: &mut Vec<i32>) {
+        let first = if self.page == -1 { MODE_ROW } else { 0 };
         let at = self.at();
-        if *at > 0 {
+        if *at > first {
             *at -= 1;
             self.window.reset_tick_pulse(now);
             cues.push(11);
@@ -820,7 +845,7 @@ impl WndOptions {
             (-1, _, _) => MENU.len() as i32 - 1,
             (3, None, _) => GROUPS.len() as i32 - 1,
             (3, Some(g), None) => group_categories(g).len() as i32 - 1,
-            (3, _, Some(c)) => fork_options::pages()[c].items.len() as i32 - 1,
+            (3, _, Some(c)) => category(c).items.len() as i32 - 1,
             (page, _, _) => {
                 let mut last = [2, 3, 3];
                 if FEATURES & 0x100 != 0 {
@@ -871,6 +896,10 @@ impl WndOptions {
     /// `numcolor::PALETTE`. A slider (`slider_at`) makes its own
     /// sound, as a volume does; every other row sound 11.
     fn change(&mut self, o: &mut GameOptions, d: i32, cues: &mut Vec<i32>, ups: &mut Vec<OptionsUp>) {
+        if self.page == -1 && self.sel == MODE_ROW {
+            self.choose_ui(d < 0, cues);
+            return;
+        }
         let tracks = if FEATURES & 0x100 != 0 { 10 } else { 3 };
         let step = F::<Ee>::new(0.1);
         let volume = |v: &mut F<Ee>, cues: &mut Vec<i32>| {
@@ -934,6 +963,9 @@ impl WndOptions {
                 match self.item {
                     12 => c.lod = !c.lod,
                     18 => c.screen_shake = !c.screen_shake,
+                    // A/D Keys (petition 2909): Strafe or Turn, the keyboard's
+                    // walk from the next frame (`viewer::controls`)
+                    AD_KEYS => c.ad_turn = !c.ad_turn,
                     19 => c.capture = !c.capture,
                     21 => c.background_sound = !c.background_sound,
                     // Art (`era`): drawn as it moves, the window's (`viewer`
@@ -967,10 +999,31 @@ impl WndOptions {
                     // (`Session::agree_group_effects`), the members' tiny
                     // icons drawn or not (`hud`)
                     GROUP_EFFECTS => c.group_effects = !c.group_effects,
+                    // Debuff Icons (petitions 2997, 3020): Target Window, Name
+                    // Plate, Off; the server told from the next frame
+                    // (`Session::agree_npc_debuffs`), the icons drawn in the
+                    // target box (`hud`) or under the plates (`play`)
+                    NPC_DEBUFFS => c.npc_debuffs = c.npc_debuffs.step(d),
                     // Buff Window: the server told from the next frame
                     // (`Session::agree_buffs`), ours or the game's strip
                     // drawn (`buffwnd`)
                     83 => c.buff_window = !c.buff_window,
+                    // Buff Timers (petition 2924): the time left drawn or not
+                    // on the Buff Window's icons from the next frame
+                    // (`buffwnd::timers`)
+                    BUFF_TIMERS => c.buff_timers = !c.buff_timers,
+                    // Stat Window (petition 2925): the panel drawn or not
+                    // from the next frame (`statwnd`)
+                    STAT_WINDOW => c.stat_window = !c.stat_window,
+                    // Item Slot Icons (petitions 2926, 2928): Item or Slot,
+                    // the quick slots drawn so from the next frame (`hudmenu`)
+                    ITEM_ICONS => c.item_icons = !c.item_icons,
+                    // HUD Layouts (petition 2947): the next name; ✕ loads it (`select`)
+                    HUD_PROFILE => crate::hudlayout::step_picked(d),
+                    // Mouseover Casting (petition 2960): the next cast on
+                    MOUSEOVER_CAST => c.mouseover_cast = c.mouseover_cast.step(d),
+                    // Spell Cooldowns (petition 2946): the bars from the next frame
+                    SPELL_COOLDOWNS => c.spell_cooldowns = !c.spell_cooldowns,
                     // Quest Markers: the server told from the next frame
                     // (`Session::agree_head_marks`), the marks drawn or not
                     // over the NPCs' names (`Play::plates`)
@@ -1093,6 +1146,11 @@ impl WndOptions {
                     70 => c.dps_meter = !c.dps_meter,
                     // DPS Meter Shows: the panel's view from the next frame
                     71 => c.dps_view = c.dps_view.other(),
+                    // DPS Meter Columns: round the DPS alone, with the HPS,
+                    // with the HPS and Power, from the next frame (`dpsmeter`)
+                    DPS_COLUMNS => c.dps_columns = c.dps_columns.step(d),
+                    // DPS Meter Sort: round the columns shown
+                    DPS_SORT => c.dps_sort = c.dps_sort.step(c.dps_columns, d),
                     // Item Links: the server told from the next frame
                     // (`Session::agree_item_links`), the chat box's links drawn
                     // or plain, the windows closed when off (`itemlink`)
@@ -1100,6 +1158,40 @@ impl WndOptions {
                     // Chat Always Shown (ticket 1914): the box from the next
                     // frame (`chat::WndChat::always`)
                     89 => c.chat_always = !c.chat_always,
+                    // HUD Scale: the interface's own (the Controller's,
+                    // petition 2912), the HUD drawn and pointed at so from the
+                    // next frame (`hudlayout::scale`)
+                    HUD_SCALE if c.pc_mode => slide(&mut c.hud_scale, HUD_SCALE_MIN, HUD_SCALE_MAX, 5),
+                    HUD_SCALE => slide(&mut c.controller_hud_scale, HUD_SCALE_MIN, HUD_SCALE_MAX, 5),
+                    // Nameplate Size: the interface's own (the Controller's,
+                    // petition 2908 and the owner's of 2026-11-24)
+                    NAMEPLATE_SCALE if c.pc_mode => slide(&mut c.nameplate_scale, NAMEPLATE_MIN, 200, 5),
+                    NAMEPLATE_SCALE => slide(&mut c.controller_nameplate_scale, NAMEPLATE_MIN, 200, 5),
+                    CHAT_WIDTH => slide(&mut c.chat_width, 50, 125, 5),
+                    CHAT_ROWS => slide(&mut c.chat_rows, 3, 12, 1),
+                    // Hotkey Label Size (petition 2945): the PC bars' key
+                    // names from the next frame (`hudmenu::shortcut_label`)
+                    HOTKEY_LABEL => slide(&mut c.hotkey_label_scale, crate::settings::HOTKEY_LABEL_MIN, 100, 5),
+                    CHAT_OPACITY => slide(&mut c.chat_opacity, 0, 100, 5),
+                    CHAT_FADE_DELAY => slide(&mut c.chat_fade_seconds, 0, 120, 1),
+                    // Wake on New Chat: Off, Active Tab, Any Tab (petition 2953)
+                    CHAT_WAKE_ON_MESSAGE => {
+                        let at = if !c.chat_wake_on_message { 0 } else if c.chat_wake_any_tab { 2 } else { 1 };
+                        let next = (at + d.signum()).rem_euclid(3);
+                        c.chat_wake_on_message = next != 0;
+                        c.chat_wake_any_tab = next == 2;
+                    }
+                    SPELL_BAR_SIZE => {
+                        let piece = crate::hudlayout::Piece::SpellBars;
+                        let old = crate::hudlayout::piece_scale_percent(piece);
+                        let next = (old as i32 + d.signum() * 5).clamp(50, 200) as u16;
+                        if next != old {
+                            crate::hudlayout::set_piece_scale_percent(piece, next);
+                            self.spell_bar_scale_edited = true;
+                            cues.push(11);
+                        } else { cues.push(9); }
+                    }
+                    INLINE_CHAT => c.inline_chat = !c.inline_chat,
                     // Stacked Spell Bars (ticket 1913): from the next frame
                     // (`hudmenu::Stacked`)
                     90 => c.stacked_bars = !c.stacked_bars,
@@ -1142,6 +1234,12 @@ impl WndOptions {
                     // Weapon Swap Back (work board 1581): a weapon set's next
                     // 0x0022 (`gear::use_message`)
                     WEAPON_SWAP_BACK => c.weapon_swap_back = !c.weapon_swap_back,
+                    // Auto Loot (petition 3008): the next corpse opened
+                    // (`Play::auto_loot`)
+                    AUTO_LOOT => c.auto_loot = !c.auto_loot,
+                    // Attack With Abilities (petition 3015): the next attack
+                    // ability (`Play::attack_with_ability`)
+                    ATTACK_ABILITIES => c.attack_abilities = !c.attack_abilities,
                     // R2 Channel Switch: R2's next hold (`Play::chat_channel_step`)
                     R2_CHANNELS => c.r2_channels = !c.r2_channels,
                     // Move Touch Pad: the pad's parts dragged and pinched once
@@ -1179,6 +1277,7 @@ impl WndOptions {
                     // Display: the window's own, carried out on the next
                     // frame (`display`, `viewer`)
                     33 => crate::display::ask(!crate::display::full()),
+                    22 if c.pc_mode => c.pc_action_rows = 1 + (c.pc_action_rows.clamp(1, 4) - 1 + if d < 0 { 3 } else { 1 }) % 4,
                     22 => {
                         let (lo, n) = (crate::settings::ABILITY_BARS_GAME, crate::hudmenu::MAX_BARS as u8 - crate::settings::ABILITY_BARS_GAME + 1);
                         c.ability_bars = lo + (c.ability_bars.saturating_sub(lo).min(n - 1) + if d < 0 { n - 1 } else { 1 }) % n;
@@ -1237,7 +1336,7 @@ impl WndOptions {
             _ => {}
         }
         // (Texture Folder and Reset DPS Meter make their own sound)
-        let inert = (self.item == 26 && cfg!(target_arch = "wasm32")) || self.item == 55 || self.item == 72 || self.item == 77 || self.item == RESET_TOUCH;
+        let inert = (self.item == 26 && cfg!(target_arch = "wasm32")) || self.item == 55 || self.item == 72 || self.item == 77 || self.item == RESET_TOUCH || self.item == CHAT_FADE_DELAY;
         let slides = matches!(self.item, 3 | 4) || slider_at(self.item).is_some();
         if !slides && !inert && ((0..=11).contains(&self.item) || extended(self.item)) {
             cues.push(11);
@@ -1281,6 +1380,10 @@ impl WndOptions {
     /// Extended, over it) and X there a category's page (`page_window`), or
     /// on Save Changes asks (true).
     fn select(&mut self, vui: &Vui, r: &dyn Raster, cues: &mut Vec<i32>) -> bool {
+        if self.page == -1 && self.sel == MODE_ROW {
+            self.choose_ui(!crate::settings::pc_mode(), cues);
+            return false;
+        }
         if self.page == 3 && self.grp.is_none() {
             cues.push(8);
             let g = self.grp_sel.clamp(0, GROUPS.len() as i32 - 1) as usize;
@@ -1291,7 +1394,7 @@ impl WndOptions {
                 Some(c) => self.open_category(vui, r, c),
                 None => {
                     let n = group_categories(g).len();
-                    self.menu_window(vui, r, 5, n, GROUPS[g].1);
+                    Self::extended_window(vui, r, &self.window, &mut self.window5, 300, n, GROUPS[g].1);
                 }
             }
             return false;
@@ -1323,6 +1426,17 @@ impl WndOptions {
         if self.page == 3 && self.cat.is_some() && self.item == 72 {
             crate::dpsmeter::ask_reset();
             cues.push(8);
+            return false;
+        }
+        // HUD Layouts: the one shown loaded (petition 2947)
+        if self.page == 3 && self.cat.is_some() && self.item == HUD_PROFILE {
+            match crate::hudlayout::picked() {
+                Some(name) => {
+                    crate::hudlayout::load_profile(&name);
+                    cues.push(8);
+                }
+                None => cues.push(9),
+            }
             return false;
         }
         // Reset HUD the same; Move HUD turns, as left and right turn it
@@ -1371,7 +1485,7 @@ impl WndOptions {
                 self.grp_sel = 0;
                 self.cat = None;
                 self.cat_sel = 0;
-                self.menu_window(vui, r, 4, GROUPS.len(), EXTENDED);
+                Self::extended_window(vui, r, &self.window, &mut self.window4, 300, GROUPS.len(), EXTENDED);
                 return false;
             }
             4 | 5 => {
@@ -1394,34 +1508,33 @@ impl WndOptions {
         false
     }
 
-    /// One of Extended's menus' windows (4 the groups', 5 a group's
-    /// categories'): as the options menu's (`open`), as tall as its `entries`
-    /// and their legend (`menu_rows`), its bottom where the menu's is: the
-    /// rows past the menu's nine go up, clear of the title's own menu under it.
-    fn menu_window(&mut self, vui: &Vui, r: &dyn Raster, which: u8, entries: usize, title: &str) {
+    /// An Extended menu or long page, as tall as its entries and legend.
+    /// Extra rows grow upward from the Options menu's bottom edge so the
+    /// title screen's menu stays clear.
+    fn extended_window(vui: &Vui, r: &dyn Raster, menu: &Window, w: &mut Window, width: i32, entries: usize, title: &str) {
         let bottom = |w: &Window| w.top_left()[1] + w.size[1];
-        let menu = bottom(&self.window);
-        let w = if which == 4 { &mut self.window4 } else { &mut self.window5 };
         w.close(true);
-        w.init(vui, r, CENTER, 300, menu_rows(entries), 0);
+        w.init(vui, r, CENTER, width, menu_rows(entries), 0);
         w.open(false);
         w.set_title(Some(&wide(title)));
-        w.center[1] -= bottom(w) - menu;
+        w.center[1] += bottom(menu) - bottom(w);
     }
 
-    /// Category `c`'s page open on its first row (`page_window`).
+    /// Category `c`'s page open on its first row.
     fn open_category(&mut self, vui: &Vui, r: &dyn Raster, c: usize) {
         self.cat = Some(c);
         self.row = 0;
-        self.page_window(vui, r, fork_options::pages()[c].items.len() as i32 + 3);
+        let cat = category(c);
+        if cat.items.len() > STANDARD_PAGE_ITEMS {
+            Self::extended_window(vui, r, &self.window, &mut self.window2, 440, cat.items.len(), cat.name);
+        } else {
+            self.page_window(vui, r, menu_rows(cat.items.len()));
+        }
     }
 
-    /// A page's window, 440 wide and `rows` high, an empty title bar, over
-    /// the menu's middle. One of more rows than the game's pages (eight: a
-    /// category of `PAGE_MOST`) goes without their empty title bar (six
-    /// pixels each way) and its top where theirs is, so the options window's
-    /// title tab above it still shows and its bottom stays clear of the
-    /// title's menu under it.
+    /// A standard page's window, 440 wide and `rows` high, over the menu's
+    /// middle. Pages above eight rows share the top of an eight-row page
+    /// and give up the empty title bar so the menus around it stay clear.
     fn page_window(&mut self, vui: &Vui, r: &dyn Raster, rows: i32) {
         self.window2.close(true);
         self.window2.init(vui, r, CENTER, 440, rows, 0);
@@ -1493,9 +1606,12 @@ impl WndOptions {
             1 => self.draw_interface(vui, r, o),
             2 => self.draw_sound(vui, r, o),
             3 => {
-                match self.grp {
-                    Some(g) if lone_category(g).is_none() => self.draw_categories(vui, r, g),
-                    _ => self.draw_groups(vui, r),
+                // A long page has its own title and takes the menu's place.
+                if self.cat.is_none_or(|c| category(c).items.len() <= STANDARD_PAGE_ITEMS) {
+                    match self.grp {
+                        Some(g) if lone_category(g).is_none() => self.draw_categories(vui, r, g),
+                        _ => self.draw_groups(vui, r),
+                    }
                 }
                 if let Some(c) = self.cat {
                     self.draw_category(vui, r, c);
@@ -1525,7 +1641,30 @@ impl WndOptions {
         }
     }
 
-    /// `DrawMenu`: Game, Interface, Sound, the client's Extended, Controls
+    fn choose_ui(&mut self, pc: bool, cues: &mut Vec<i32>) {
+        let was_pc = crate::settings::pc_mode();
+        match crate::settings::set_ui_mode(pc) {
+            Ok(()) => {
+                // A mode switch is immediate; backing out still discards
+                // other options according to the usual Save Changes rules.
+                self.saved_client = self.saved_client.with_interface(crate::settings::client());
+                // Each UI profile owns its HUD layout. A successful switch
+                // accepts the outgoing profile's current scale and starts a
+                // new Cancel baseline on the incoming one.
+                if pc != was_pc {
+                    self.saved_spell_bar_scale = crate::hudlayout::piece_scale_percent(crate::hudlayout::Piece::SpellBars);
+                    self.spell_bar_scale_edited = false;
+                }
+                cues.push(11);
+            }
+            Err(e) => {
+                crate::say(&format!("Could not save the interface selection: {e}"));
+                cues.push(9);
+            }
+        }
+    }
+
+    /// `DrawMenu`: UI Mode, Game, Interface, Sound, Extended, Controls
     /// and Macros, Save Changes, the selected one lit, and the legend two
     /// rows under the last.
     fn draw_menu(&mut self, vui: &Vui, r: &mut dyn Raster) {
@@ -1538,6 +1677,19 @@ impl WndOptions {
             id => vui.words.get(id, vui.language).to_string(),
         };
         let width = self.window.size[0];
+        let mode_focus = self.page == -1 && self.sel == MODE_ROW;
+        let pc = crate::settings::pc_mode();
+        self.window.text_box(vui, r, &wide("Mode"), 30, 0, 76, 1, UI_COLORS[mode_focus as usize], 0);
+        if mode_focus { self.window.tick_r(vui, r, 25, 0, true); }
+        for (name, selected, x, w, hit) in [("PC", pc, 106, 54, MODE_PC_HIT), ("Controller", !pc, 162, 124, MODE_PAD_HIT)] {
+            self.window.draw_frame(vui, r, x, 0, w, 1, if selected { 96 } else { 64 });
+            self.window.text_box(vui, r, &wide(name), x + 2, 0, w - 4, 1, UI_COLORS[selected as usize], 8);
+            if self.page == -1 {
+                let mut bounds = rows_rect(&self.window, vui, r, x, 0, w, 1);
+                bounds[0] = self.window.top_left()[0] + x;
+                self.hits.push(bounds, hit);
+            }
+        }
         for (k, id) in MENU.into_iter().enumerate() {
             let on = self.sel == k as i32;
             let s = if on { format!("|q{}|w", w(id)) } else { w(id) };
@@ -1694,13 +1846,15 @@ impl WndOptions {
     /// under them the Back legend and, beside it, the category's note
     /// (`Note`).
     fn draw_category(&mut self, vui: &Vui, r: &mut dyn Raster, c: usize) {
-        let cat = &fork_options::pages()[c];
+        let cat = category(c);
         self.item = cat.items.get(self.row as usize).copied().unwrap_or(self.item);
         // Output Device's round: the system's devices listed while it shows
         if cat.items.contains(&32) {
             crate::audio::want_listing();
         }
-        let labels: Vec<Vec<u16>> = cat.items.iter().map(|&i| wide(label_of(i))).collect();
+        let labels: Vec<Vec<u16>> = cat.items.iter().map(|&i| {
+            wide(if i == 22 && crate::settings::pc_mode() { "Spell Bar Rows" } else { label_of(i) })
+        }).collect();
         let values: Vec<Option<Vec<u16>>> = cat.items.iter().map(|&i| value_text(vui, i)).collect();
         let paints: Vec<Option<[f32; 4]>> = cat.items.iter().map(|&i| value_paint(i)).collect();
         self.draw_rows_painted(vui, r, &labels, &values, &paints);
@@ -1757,14 +1911,27 @@ impl WndOptions {
                 56 => light_note(&crate::settings::client()),
                 _ => None,
             },
-            Note::Meter => self.meter_note.clone().filter(|_| matches!(self.item, 70..=72)),
-            Note::Links => self.links_note.clone().filter(|_| self.item == 73),
+            Note::Meter => match self.item {
+                DPS_COLUMNS | DPS_SORT => self.meter_note.clone().or_else(|| self.meter_heal_note.clone()),
+                70..=72 => self.meter_note.clone(),
+                _ => None,
+            },
+            Note::Links => match self.item {
+                73 => self.links_note.clone(),
+                CHAT_FADE_DELAY => Some("Off: no fade; otherwise fades after inactivity".to_string()),
+                CHAT_WAKE_ON_MESSAGE => Some(if crate::settings::client().chat_wake_any_tab { "A line for any tab wakes the chat" } else { "A line for the tab shown wakes its pane" }.to_string()),
+                _ => None,
+            },
             Note::TouchLayout => match self.item {
                 MOVE_TOUCH if crate::touch::editing() => Some("Leave the menu, drag a part, pinch to size".to_string()),
                 TOUCH_LAYOUT => Some("Bottom: Start and Select between the sticks".to_string()),
                 _ => None,
             },
-            Note::Hud => (self.item == 76 && crate::hudlayout::unlocked()).then(|| "Leave the menu and drag the pieces".to_string()),
+            Note::Hud => match self.item {
+                76 if crate::hudlayout::unlocked() => Some(if crate::settings::pc_mode() { "Drag, pin or unpin each piece" } else { "Leave the menu and drag the pieces" }.to_string()),
+                SPELL_BAR_SIZE => Some("Also adjustable by dragging in Move HUD".to_string()),
+                _ => None,
+            },
             Note::ChatTabs => Some("Name a tab in chat: /tabname 1 Loot".to_string()),
             Note::Shortcuts => match self.item {
                 SHARED_SHORTCUTS => Some("L2's menus on every character of the account".to_string()),
@@ -1820,6 +1987,10 @@ const MACROS_PAGE: &str = "Macros";
 /// 778, 800), the client's Extended, Controls and Macros, Save Changes
 /// (482).
 const MENU: [i32; 7] = [773, 778, 800, -1, -2, -3, 482];
+// Row zero of the frame was the top margin. Keep the game's menu and page IDs.
+const MODE_ROW: i32 = -1;
+const MODE_PC_HIT: i32 = 400;
+const MODE_PAD_HIT: i32 = 401;
 
 /// The menu's window: a row down, its rows, a row clear, the legend.
 const MENU_ROWS: i32 = MENU.len() as i32 + 3;
@@ -1831,7 +2002,7 @@ const CENTER: [i32; 2] = [320, 246];
 /// Extended's rows, by the item each changes (`change`), and their labels.
 /// A row is drawn by its item (`value_text`, or `slider_at` for a slider)
 /// and shown on the page of the category that lists it (`CATEGORIES`).
-const EXTENDED_ITEMS: [(i32, &str); 104] = [
+const EXTENDED_ITEMS: [(i32, &str); 126] = [
     (12, "Level of Detail"),
     (13, "Brightness"),
     (14, "Frame Rate"),
@@ -1936,6 +2107,28 @@ const EXTENDED_ITEMS: [(i32, &str); 104] = [
     (UTILITY_LAYOUT, "Utility Bar Layout"),
     (HEALTH_NUMBERS, "Health Numbers"),
     (GROUP_EFFECTS, "Group Effects"),
+    (HUD_SCALE, "HUD Scale %"),
+    (NAMEPLATE_SCALE, "Nameplate Size %"),
+    (CHAT_WIDTH, "Chat Width %"),
+    (CHAT_ROWS, "Chat Rows"),
+    (CHAT_OPACITY, "Chat Opacity %"),
+    (INLINE_CHAT, "Inline Keyboard Chat"),
+    (CHAT_FADE_DELAY, "Chat Fade Delay"),
+    (SPELL_BAR_SIZE, "Spell Bar Size %"),
+    (CHAT_WAKE_ON_MESSAGE, "Wake on New Chat"),
+    (AD_KEYS, "A/D Keys"),
+    (BUFF_TIMERS, "Buff Timers"),
+    (STAT_WINDOW, "Stat Window"),
+    (ITEM_ICONS, "Item Slot Icons"),
+    (HOTKEY_LABEL, "Hotkey Label Size %"),
+    (SPELL_COOLDOWNS, "Spell Cooldowns"),
+    (HUD_PROFILE, "HUD Layouts"),
+    (MOUSEOVER_CAST, "Mouseover Casting"),
+    (NPC_DEBUFFS, "Debuff Icons"),
+    (AUTO_LOOT, "Auto Loot"),
+    (ATTACK_ABILITIES, "Attack With Abilities"),
+    (DPS_COLUMNS, "DPS Meter Columns"),
+    (DPS_SORT, "DPS Meter Sort"),
 ];
 
 /// What a page says beside Back while a row the server turns off is chosen
@@ -2009,6 +2202,53 @@ pub(crate) const HEALTH_NUMBERS: i32 = 220;
 /// versions for the buffs group members have"). 230, as Health Numbers' 220;
 /// the server's `qol::PET_EFFECTS` turns it off with Pet Effects.
 pub(crate) const GROUP_EFFECTS: i32 = 230;
+/// Debuff Icons' item (Heirloom petition 2997: "Debuffs cast on evil NPCs
+/// (combat) give an icon under their ID plate with remaining time on the
+/// debuff"). 260, not the next free (sibling lanes may take 258 onwards); the
+/// server's `qol::PET_EFFECTS` turns it off with Pet Effects.
+pub(crate) const NPC_DEBUFFS: i32 = 260;
+/// Auto Loot's item (Heirloom petition 3008), with General's rows (Combat's
+/// page is full). 270, not the next free, as Debuff Icons' 260; the server's
+/// `qol::AUTO_CAST` turns it off with Auto-Cast.
+pub(crate) const AUTO_LOOT: i32 = 270;
+/// Attack With Abilities' item (Heirloom petition 3015), with Combat's rows;
+/// off with Auto-Cast, as Auto Loot.
+pub(crate) const ATTACK_ABILITIES: i32 = 271;
+/// DPS Meter Columns' and DPS Meter Sort's items (Heirloom petition 3030:
+/// "DPS meter should have options to include healing per second, and if
+/// possible power provided per second"). 272 and 273, not the next free, as
+/// Debuff Icons' 260 (270 and 271 were taken by Auto Loot and Attack With
+/// Abilities, built beside them); the server's `qol::DPS_METER` turns them off
+/// with the meter.
+pub(crate) const DPS_COLUMNS: i32 = 272;
+pub(crate) const DPS_SORT: i32 = 273;
+
+const HUD_SCALE: i32 = 240;
+const NAMEPLATE_SCALE: i32 = 241;
+const CHAT_WIDTH: i32 = 242;
+const CHAT_ROWS: i32 = 243;
+const CHAT_OPACITY: i32 = 244;
+const INLINE_CHAT: i32 = 245;
+const CHAT_FADE_DELAY: i32 = 246;
+pub(crate) const SPELL_BAR_SIZE: i32 = 247;
+const CHAT_WAKE_ON_MESSAGE: i32 = 248;
+/// A/D Keys' item (petition 2909). 250, as Interface Size's 240s.
+const AD_KEYS: i32 = 250;
+/// HUD Extras' rows (petitions 2924-2928): Buff Timers (the Buff Window's
+/// time left on each icon), Stat Window (`statwnd`), Item Slot Icons (the
+/// item quick slots' items' own icons, `hudmenu`).
+pub(crate) const BUFF_TIMERS: i32 = 251;
+pub(crate) const STAT_WINDOW: i32 = 252;
+pub(crate) const ITEM_ICONS: i32 = 253;
+/// Spell Cooldowns (petition 2946), with HUD Extras' rows.
+pub(crate) const SPELL_COOLDOWNS: i32 = 255;
+/// Mouseover Casting (petition 2960), with Combat's rows (the PC's).
+pub(crate) const MOUSEOVER_CAST: i32 = 257;
+/// HUD Layouts (petition 2947): the named layouts `/hud save` kept, stepped
+/// through with left and right, the one shown loaded with ✕.
+const HUD_PROFILE: i32 = 256;
+/// Hotkey Label Size % (petition 2945), with the PC's Interface Size rows.
+const HOTKEY_LABEL: i32 = 254;
 
 /// Slow When Not Focused's item (a GM's petition 1634; natively:
 /// a page's pace in the back is the browser's).
@@ -2045,7 +2285,7 @@ enum Note {
     Links,
     /// how the HUD's pieces move while Move HUD is on and chosen (`hudlayout`)
     Hud,
-    /// how a chat tab is named (`/tabname`), on the Chat Tabs pages
+    /// how a chat tab is named (`/tabname`), on the Chat Tabs page
     ChatTabs,
     /// how the touch pad is moved while Move Touch Pad is on and chosen, and
     /// where Button Layout's Bottom puts Select and Start while it is chosen
@@ -2086,7 +2326,7 @@ enum Group {
 /// The groups in their menu's order, and their names.
 const GROUPS: [(Group, &str); 5] = [(Group::Graphics, "Graphics"), (Group::Ui, "UI"), (Group::Other, "Other"), (Group::Touch, "Touch Controls"), (Group::Multibox, "Multi-boxing settings")];
 
-/// Extended's categories, each a page of `PAGE_MOST` rows at most, listed
+/// Extended's categories, each a page of `MENU_MOST` items at most, listed
 /// in its group's menu in this order (2026-11-11, petition 1631: the fifteen
 /// categories of one menu put in three; Characters' name plate rows became
 /// UI's Name Plates, Combat's meter UI's DPS Meter, UI's Update Notices and
@@ -2094,7 +2334,7 @@ const GROUPS: [(Group, &str); 5] = [(Group::Graphics, "Graphics"), (Group::Ui, "
 /// Capture Controller and Sound in Background the Multi-boxing settings',
 /// Controller's touch rows Other's Touch; petition 2084, 2026-11-14: Touch a
 /// group of its own, Touch Controls, its rows Size & Look and Layout).
-const ALL_CATEGORIES: [Category; 25] = [
+const ALL_CATEGORIES: [Category; 26] = [
     Category { name: "Video", items: VIDEO, note: Note::Scale, group: Group::Graphics },
     Category { name: "World", items: &[20, 35, 36, 37, 47, 25], note: Note::None, group: Group::Graphics },
     Category { name: "Lighting", items: &[52, 53, 56, 57, 54, 63], note: Note::Lighting, group: Group::Graphics },
@@ -2109,22 +2349,21 @@ const ALL_CATEGORIES: [Category; 25] = [
     // Minimap Scroll Frame (2026-11-13) here: Map's page was full
     // Spell Bar Opacity (2026-11-13, ticket 1953) here: HUD's page is full
     Category { name: "HUD Layout", items: &[76, 77, 91, SPELL_BAR_OPACITY, SPELL_BAR_LAYOUT, UTILITY_LAYOUT], note: Note::Hud, group: Group::Ui },
-    Category { name: "Name Plates", items: &[27, 34, 85, TARGET_LEVEL], note: Note::None, group: Group::Ui },
+    // Debuff Icons (petition 2997) with the other things drawn at a plate
+    Category { name: "Name Plates", items: &[27, 34, 85, TARGET_LEVEL, NPC_DEBUFFS], note: Note::None, group: Group::Ui },
     Category { name: "Map", items: &[41, 42, 87, 43, 44, 45], note: Note::None, group: Group::Ui },
     Category { name: "Number Colors", items: &crate::numcolor::NUMBER_ITEMS, note: Note::None, group: Group::Ui },
     Category { name: "Merc Colors", items: &crate::numcolor::MERC_ITEMS, note: Note::None, group: Group::Ui },
-    Category { name: "DPS Meter", items: &[70, 71, 72], note: Note::Meter, group: Group::Ui },
-    Category { name: "Chat", items: &[73, 89, R2_CHANNELS], note: Note::Links, group: Group::Ui },
-    Category { name: "General", items: &[29, 38, 84, SHARED_SHORTCUTS, AUTO_SAVE], note: Note::Shortcuts, group: Group::Other },
-    Category { name: "Combat", items: &[78, 79, PETS_PASS, WEAPON_SWAP_BACK], note: Note::None, group: Group::Other },
-    Category { name: "Camera", items: &[15, 17, 18], note: Note::None, group: Group::Other },
+    Category { name: "DPS Meter", items: &[70, 71, DPS_COLUMNS, DPS_SORT, 72], note: Note::Meter, group: Group::Ui },
+    Category { name: "Chat", items: &[73, 89, R2_CHANNELS, INLINE_CHAT, CHAT_OPACITY, CHAT_FADE_DELAY], note: Note::Links, group: Group::Ui },
+    Category { name: "General", items: &[29, 38, 84, SHARED_SHORTCUTS, AUTO_SAVE, AUTO_LOOT], note: Note::Shortcuts, group: Group::Other },
+    Category { name: "Combat", items: &[78, 79, PETS_PASS, WEAPON_SWAP_BACK, MOUSEOVER_CAST, ATTACK_ABILITIES], note: Note::None, group: Group::Other },
+    Category { name: "Camera", items: &[15, 17, 18, AD_KEYS], note: Note::None, group: Group::Other },
     Category { name: "Size & Look", items: &[59, 60, 61, 62], note: Note::Reads, group: Group::Touch },
     Category { name: "Sound", items: &[32], note: Note::Output, group: Group::Other },
     Category { name: "Multi-boxing settings", items: MULTIBOX, note: Note::Reads, group: Group::Multibox },
-    // the chat tabs (2026-11-13, a player's ticket 1951): each kind of line to
-    // Main or a tab of its own, the talk on one page and the game's on another
-    Category { name: "Chat Tabs: Talk", items: &[92, 93, 94, 95, 96], note: Note::ChatTabs, group: Group::Ui },
-    Category { name: "Chat Tabs: Game", items: &[97, 98, 99, 100, 101], note: Note::ChatTabs, group: Group::Ui },
+    // the chat tabs (ticket 1951): each kind of line to Main or a tab of its own
+    Category { name: "Chat Tabs", items: &[92, 93, 94, 95, 96, 97, 98, 99, 100, 101], note: Note::ChatTabs, group: Group::Ui },
     // the touch pad's place and buttons (2026-11-14: Move Touch Pad, Button
     // Layout, petition 2084), its sizes' page full
     Category { name: "Layout", items: &[MOVE_TOUCH, TOUCH_LAYOUT, RESET_TOUCH], note: Note::TouchLayout, group: Group::Touch },
@@ -2135,6 +2374,10 @@ const ALL_CATEGORIES: [Category; 25] = [
     // how they do texture packs like precaching"): Textures' page is full;
     // natively, as Textures (a page's list ends before it)
     Category { name: "Texture Cache", items: &[PACK_PRECACHE, PACK_COMPRESS, PACK_REBUILD], note: Note::Textures, group: Group::Graphics },
+    Category { name: "Interface Size", items: &[HUD_SCALE, NAMEPLATE_SCALE, CHAT_WIDTH, CHAT_ROWS, HOTKEY_LABEL], note: Note::None, group: Group::Ui },
+    // what the HUD tells of its own pieces (petitions 2924-2928): HUD's page
+    // is full
+    Category { name: "HUD Extras", items: &[BUFF_TIMERS, STAT_WINDOW, ITEM_ICONS, SPELL_COOLDOWNS, HUD_PROFILE], note: Note::None, group: Group::Ui },
 ];
 #[cfg(not(target_arch = "wasm32"))]
 const CATEGORIES: &[Category] = &ALL_CATEGORIES;
@@ -2143,13 +2386,31 @@ const CATEGORIES: &[Category] = &ALL_CATEGORIES;
 #[cfg(target_arch = "wasm32")]
 const CATEGORIES: &[Category] = &{
     let a = ALL_CATEGORIES;
-    [a[0], a[1], a[2], a[3], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15], a[16], a[17], a[19], a[20], a[21], a[22], a[23]]
+    [a[0], a[1], a[2], a[3], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15], a[16], a[17], a[19], a[20], a[21], a[22], a[24], a[25]]
 };
 
 /// The categories group `g` lists, by their place in `CATEGORIES`.
+fn category(i: usize) -> Category {
+    let mut cat = fork_options::pages()[i];
+    cat.items = match (crate::settings::pc_mode(), cat.name) {
+        // the Controller's: HUD Scale and Nameplate Size (petitions 2912,
+        // 2908), the chat's sizes the PC's
+        (false, "Interface Size") => &[HUD_SCALE, NAMEPLATE_SCALE],
+        (false, "Chat") => &[73, 89, R2_CHANNELS],
+        (false, "HUD Layout") => &[76, 77, 91, SPELL_BAR_OPACITY, SPELL_BAR_LAYOUT, UTILITY_LAYOUT],
+        // Mouseover Casting is the mouse's (petition 2960)
+        (false, "Combat") => &[78, 79, PETS_PASS, WEAPON_SWAP_BACK, ATTACK_ABILITIES],
+        (true, "Chat") => &[73, 89, INLINE_CHAT, CHAT_OPACITY, CHAT_FADE_DELAY, CHAT_WAKE_ON_MESSAGE],
+        (true, "HUD") => &[22, 30, 40, 58, 83],
+        (true, "HUD Layout") => &[76, 77, 91, SPELL_BAR_OPACITY, UTILITY_LAYOUT, SPELL_BAR_SIZE],
+        _ => cat.items,
+    };
+    cat
+}
+
 fn group_categories(g: usize) -> Vec<usize> {
     let group = GROUPS[g].0;
-    fork_options::pages().iter().enumerate().filter(|(_, c)| c.group == group).map(|(k, _)| k).collect()
+    (0..fork_options::pages().len()).filter(|&i| fork_options::pages()[i].group == group && !category(i).items.is_empty()).collect()
 }
 
 /// The group `g`'s one category when it has only one, its page opened from
@@ -2195,8 +2456,8 @@ fn pack_memory_text(mb: u16) -> String {
     }
 }
 
-/// The most a menu of Extended's lists (a group's categories): its rows and
-/// legend as tall as the fifteen categories' one menu was, which fit.
+/// The most an Extended menu or long page can hold: its rows and legend
+/// are as tall as the original fifteen-category menu, which fit.
 const MENU_MOST: usize = 15;
 
 /// Whether every group's menu holds its categories (`MENU_MOST`).
@@ -2228,16 +2489,15 @@ const fn menu_rows(entries: usize) -> i32 {
     entries as i32 + 3
 }
 
-/// The most rows a category's page holds: six and the legend are as tall as
-/// nine rows, the most the options window has room for (`page_window`), so
-/// no page scrolls.
-const PAGE_MOST: usize = 6;
+/// A standard page fits six items and its legend over the category menu.
+/// Longer pages take the menu's place and can be as tall as it can be.
+const STANDARD_PAGE_ITEMS: usize = 6;
 
-/// Whether every category's page holds its rows (`PAGE_MOST`).
-const fn fits(cats: &[Category]) -> bool {
+/// Whether every category's page holds its rows (`MENU_MOST`).
+const fn pages_fit(cats: &[Category]) -> bool {
     let mut i = 0;
     while i < cats.len() {
-        if cats[i].items.len() > PAGE_MOST {
+        if cats[i].items.len() > MENU_MOST {
             return false;
         }
         i += 1;
@@ -2245,7 +2505,7 @@ const fn fits(cats: &[Category]) -> bool {
     true
 }
 
-const _: () = assert!(fits(CATEGORIES), "a category's page would scroll: give its rows another category");
+const _: () = assert!(pages_fit(CATEGORIES), "a category's page would be too tall");
 
 /// Whether `item` is one of Extended's rows.
 fn extended(item: i32) -> bool {
@@ -2274,9 +2534,11 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
             f => crate::input::focus_name(f),
         }),
         18 => on_off(c.screen_shake),
+        AD_KEYS => wide(if c.ad_turn { "Turn" } else { "Strafe" }),
         19 => on_off(c.capture),
         21 => on_off(c.background_sound),
         SLOW_UNFOCUSED => on_off(c.slow_unfocused[crate::multibox::place()]),
+        22 if c.pc_mode => wide(&c.pc_action_rows.to_string()),
         22 => wide(&c.ability_bars.to_string()),
         25 => wide(match c.art {
             esf::Era::Frontiers => "Frontiers",
@@ -2297,8 +2559,17 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         86 => on_off(c.power_bars),
         HEALTH_NUMBERS => on_off(c.health_numbers),
         GROUP_EFFECTS => on_off(c.group_effects),
+        // Off in the game's word, as an on/off row's
+        NPC_DEBUFFS if c.npc_debuffs == crate::settings::DebuffIcons::Off => on_off(false),
+        NPC_DEBUFFS => wide(c.npc_debuffs.name()),
         88 => wide(if c.raid_mercs { "Shown" } else { "Hidden" }),
         83 => on_off(c.buff_window),
+        BUFF_TIMERS => on_off(c.buff_timers),
+        STAT_WINDOW => on_off(c.stat_window),
+        ITEM_ICONS => wide(if c.item_icons { "Item" } else { "Slot" }),
+        SPELL_COOLDOWNS => on_off(c.spell_cooldowns),
+        MOUSEOVER_CAST => wide(c.mouseover_cast.name()),
+        HUD_PROFILE => wide(&crate::hudlayout::picked().unwrap_or_else(|| "None saved".to_string())),
         85 => on_off(c.head_marks),
         TARGET_LEVEL => on_off(c.target_level),
         84 => on_off(c.loading_tips),
@@ -2319,6 +2590,8 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         64..=69 | 80 | 81 => wide(crate::numcolor::name(c.number_colors[crate::numcolor::row_of_item(item)?])),
         70 => on_off(c.dps_meter),
         71 => wide(c.dps_view.name()),
+        DPS_COLUMNS => wide(c.dps_columns.name()),
+        DPS_SORT => wide(c.dps_sort.fit(c.dps_columns).name()),
         72 => wide("Reset"),
         76 => on_off(crate::hudlayout::unlocked()),
         MOVE_TOUCH => on_off(crate::touch::editing()),
@@ -2327,6 +2600,9 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         77 => wide("Reset"),
         73 => on_off(c.item_links),
         89 => on_off(c.chat_always),
+        CHAT_FADE_DELAY => if c.chat_fade_seconds == 0 { wide("Off") } else { wide(&format!("{} s", c.chat_fade_seconds)) },
+        CHAT_WAKE_ON_MESSAGE => wide(if !c.chat_wake_on_message { "Off" } else if c.chat_wake_any_tab { "Any Tab" } else { "Active Tab" }),
+        INLINE_CHAT => on_off(c.inline_chat),
         PETS_PASS => on_off(c.pets_pass),
         SHARED_SHORTCUTS => on_off(c.shared_shortcuts),
         AUTO_SAVE => on_off(c.auto_save),
@@ -2348,6 +2624,8 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         78 => on_off(c.auto_cast),
         79 => on_off(c.auto_target),
         WEAPON_SWAP_BACK => on_off(c.weapon_swap_back),
+        AUTO_LOOT => on_off(c.auto_loot),
+        ATTACK_ABILITIES => on_off(c.attack_abilities),
         R2_CHANNELS => on_off(c.r2_channels),
         52 => on_off(c.dynamic_lighting),
         38 => wide(if c.loading_longer { "Longer" } else { "Instant" }),
@@ -2416,6 +2694,22 @@ fn slider_at(item: i32) -> Option<(f32, Option<u16>)> {
         62 => (c.touch_edge as f32 / TOUCH_EDGE_MAX as f32, Some(c.touch_edge as u16)),
         57 => (at(c.shadow_distance as f32, SHADOW_DISTANCE_GAME as f32, SHADOW_DISTANCE_MAX as f32), Some(c.shadow_distance)),
         SPELL_BAR_OPACITY => (c.spell_bar_opacity as f32 / 100.0, Some(c.spell_bar_opacity as u16)),
+        SPELL_BAR_SIZE => {
+            let n = crate::hudlayout::piece_scale_percent(crate::hudlayout::Piece::SpellBars);
+            (at(n as f32, 50.0, 200.0), Some(n))
+        }
+        HUD_SCALE => {
+            let v = c.display_ui().hud_scale;
+            (at(v as f32, HUD_SCALE_MIN as f32, HUD_SCALE_MAX as f32), Some(v as u16))
+        }
+        NAMEPLATE_SCALE => {
+            let v = c.display_ui().nameplate_scale;
+            (at(v as f32, NAMEPLATE_MIN as f32, 200.0), Some(v as u16))
+        }
+        CHAT_WIDTH => (at(c.chat_width as f32, 50.0, 125.0), Some(c.chat_width as u16)),
+        CHAT_ROWS => (at(c.chat_rows as f32, 3.0, 12.0), Some(c.chat_rows as u16)),
+        HOTKEY_LABEL => (at(c.hotkey_label_scale as f32, crate::settings::HOTKEY_LABEL_MIN as f32, 100.0), Some(c.hotkey_label_scale as u16)),
+        CHAT_OPACITY => (c.chat_opacity as f32 / 100.0, Some(c.chat_opacity as u16)),
         36 => share_slider(c.flora),
         37 => share_slider(c.environment),
         WEATHER => share_slider(c.weather),
@@ -2467,7 +2761,133 @@ fn words(vui: &Vui, ids: &[i32]) -> Vec<Vec<u16>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pc_fade_and_spell_size_are_discoverable_and_use_existing_settings_lifecycle() {
+        use crate::pointer::testing::{vui, NullRaster};
+        use crate::settings::{self, testing};
+        let piece = crate::hudlayout::Piece::SpellBars;
+        testing::reset(false);
+        crate::hudlayout::testing_reset();
+        let hud = (0..CATEGORIES.len()).find(|&i| CATEGORIES[i].name == "HUD Layout").unwrap();
+        let chat = (0..CATEGORIES.len()).find(|&i| CATEGORIES[i].name == "Chat").unwrap();
+        assert!(!category(hud).items.contains(&SPELL_BAR_SIZE));
+        assert!(!category(chat).items.contains(&CHAT_FADE_DELAY));
+        assert!(!category(chat).items.contains(&CHAT_WAKE_ON_MESSAGE));
+        settings::set_ui_mode(true).unwrap();
+        assert!(category(hud).items.contains(&SPELL_BAR_SIZE));
+        assert!(category(chat).items.contains(&CHAT_FADE_DELAY));
+        assert!(category(chat).items.contains(&CHAT_WAKE_ON_MESSAGE));
+        assert!(category(hud).items.len() <= STANDARD_PAGE_ITEMS);
+        assert!(category(chat).items.len() <= STANDARD_PAGE_ITEMS);
+        let vui = vui();
+        let mut options = GameOptions::default();
+        let mut window = WndOptions::default();
+        let mut cues = Vec::new();
+        let mut ups = Vec::new();
+        let scale = || crate::hudlayout::piece_scale_percent(piece);
+        crate::hudlayout::set_piece_scale_percent(piece, 100);
+        window.open(&vui, &NullRaster, &options);
+        window.item = SPELL_BAR_SIZE;
+        window.change(&mut options, 1, &mut cues, &mut ups);
+        assert_eq!(scale(), 105);
+        assert_eq!(slider_at(SPELL_BAR_SIZE).unwrap().1, Some(105));
+        window.key(&vui, &mut NullRaster, &mut options, key::TRIANGLE, 0, &mut cues, &mut ups);
+        assert_eq!(scale(), 100, "Cancel restores an edited size");
+
+        window.open(&vui, &NullRaster, &options);
+        crate::hudlayout::set_piece_scale_percent(piece, 150);
+        window.key(&vui, &mut NullRaster, &mut options, key::TRIANGLE, 0, &mut cues, &mut ups);
+        assert_eq!(scale(), 150, "Cancel does not revert an unrelated layout change");
+
+        window.open(&vui, &NullRaster, &options);
+        window.item = SPELL_BAR_SIZE;
+        window.change(&mut options, 1, &mut cues, &mut ups);
+        assert_eq!(scale(), 155);
+        window.save_count = 1;
+        window.draw(&vui, &mut NullRaster, &mut options, &mut ups);
+        window.open(&vui, &NullRaster, &options);
+        window.item = SPELL_BAR_SIZE;
+        window.change(&mut options, 1, &mut cues, &mut ups);
+        window.key(&vui, &mut NullRaster, &mut options, key::TRIANGLE, 0, &mut cues, &mut ups);
+        assert_eq!(scale(), 155, "Save makes the edited layout the next Cancel baseline");
+
+        window.open(&vui, &NullRaster, &options);
+        window.item = CHAT_FADE_DELAY;
+        assert_eq!(String::from_utf16_lossy(&value_text(&vui, CHAT_FADE_DELAY).unwrap()), "Off");
+        for expected in 1..=120 {
+            window.change(&mut options, 1, &mut cues, &mut ups);
+            assert_eq!(settings::client().chat_fade_seconds, expected);
+        }
+        assert_eq!(String::from_utf16_lossy(&value_text(&vui, CHAT_FADE_DELAY).unwrap()), "120 s");
+        window.key(&vui, &mut NullRaster, &mut options, key::TRIANGLE, 0, &mut cues, &mut ups);
+        assert_eq!(settings::client().chat_fade_seconds, 0, "Cancel restores fade delay");
+
+        window.open(&vui, &NullRaster, &options);
+        window.item = CHAT_FADE_DELAY;
+        for _ in 0..10 { window.change(&mut options, 1, &mut cues, &mut ups); }
+        window.item = CHAT_WAKE_ON_MESSAGE;
+        window.change(&mut options, 1, &mut cues, &mut ups);
+        assert!(settings::client().chat_wake_on_message);
+        window.save_count = 1;
+        window.draw(&vui, &mut NullRaster, &mut options, &mut ups);
+        let saved = String::from_utf8(testing::kept("client.opt").expect("Save Changes wrote client options")).unwrap();
+        assert!(saved.contains("chat_fade_seconds=10\n"), "fade delay persisted: {saved}");
+        assert!(saved.contains("chat_wake_on_message=on\n"), "wake choice persisted: {saved}");
+
+        window.open(&vui, &NullRaster, &options);
+        window.item = SPELL_BAR_SIZE;
+        window.change(&mut options, 1, &mut cues, &mut ups);
+        assert_eq!(scale(), 160);
+        window.choose_ui(true, &mut cues);
+        assert!(window.spell_bar_scale_edited, "reselecting the same mode is not a profile switch");
+        window.choose_ui(false, &mut cues);
+        assert!(!window.spell_bar_scale_edited);
+        let controller_scale = scale();
+        window.key(&vui, &mut NullRaster, &mut options, key::TRIANGLE, 0, &mut cues, &mut ups);
+        assert_eq!(scale(), controller_scale, "Cancel cannot alter the controller layout");
+        settings::set_ui_mode(true).unwrap();
+        assert_eq!(scale(), 160, "switching profile accepts the outgoing PC layout");
+        assert_eq!(settings::client().chat_fade_seconds, 10, "the PC chat delay is restored with its profile");
+        assert!(settings::client().chat_wake_on_message, "the PC wake choice is restored with its profile");
+        testing::reset(false);
+        crate::hudlayout::testing_reset();
+    }
     use super::*;
+
+    #[test]
+    fn first_row_switches_profiles_by_pad_keyboard_and_pointer() {
+        use crate::pointer::{key, testing::{NullRaster, vui}};
+        use crate::settings;
+        settings::testing::reset(false);
+        let mut w = WndOptions::default();
+        let (vui, mut r, mut o) = (vui(), NullRaster, GameOptions::default());
+        let (mut cues, mut ups) = (Vec::new(), Vec::new());
+        w.open(&vui, &r, &o);
+        assert_eq!((w.sel, w.page, settings::pc_mode()), (0, -1, false), "opens on Game, as the game's menu: X there never switches the mode");
+        w.key(&vui, &mut r, &mut o, key::UP, 0, &mut cues, &mut ups);
+        assert_eq!(w.sel, MODE_ROW, "the mode row is above Game");
+        w.key(&vui, &mut r, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+        assert!(settings::pc_mode());
+        w.key(&vui, &mut r, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups);
+        assert!(settings::pc_mode(), "leaving the menu keeps the explicit choice");
+        w.open(&vui, &r, &o);
+        w.draw(&vui, &mut r, &o, &mut ups);
+        let button = rows_rect(&w.window, &vui, &r, 162, 0, 124, 1);
+        let y = (button[1] + 4) as f32;
+        let left = w.window.top_left()[0];
+        assert_eq!(w.point([(left + 159) as f32, y]), [key::LEFT], "right edge of PC");
+        assert!(w.point([(left + 161) as f32, y]).is_empty(), "gap between buttons");
+        let click = w.point([(left + 163) as f32, y]);
+        assert_eq!(click, [key::RIGHT]);
+        w.key(&vui, &mut r, &mut o, click[0], 0, &mut cues, &mut ups);
+        assert!(!settings::pc_mode());
+        let size = CATEGORIES.iter().position(|c| c.name == "Interface Size").unwrap();
+        assert_eq!(category(size).items, &[HUD_SCALE, NAMEPLATE_SCALE], "the Controller's: HUD Scale and Nameplate Size (petitions 2912, 2908)");
+        w.key(&vui, &mut r, &mut o, 17, 0, &mut cues, &mut ups);
+        assert_eq!(category(size).items, &[HUD_SCALE, NAMEPLATE_SCALE, CHAT_WIDTH, CHAT_ROWS, HOTKEY_LABEL]);
+        w.key(&vui, &mut r, &mut o, 13, 0, &mut cues, &mut ups);
+        assert!(!settings::pc_mode());
+    }
 
     /// The four held settings change only when saved; the live ones at
     /// Auto Attack is on from the start (the user's choice); everything else
@@ -2707,7 +3127,7 @@ mod tests {
             keys.extend(std::iter::repeat_n(key::DOWN, at));
             keys.push(key::CROSS);
         }
-        let row = CATEGORIES[c].items.iter().position(|&i| i == item).unwrap();
+        let row = category(c).items.iter().position(|&i| i == item).unwrap();
         keys.extend(std::iter::repeat_n(key::DOWN, row));
         keys
     }
@@ -3026,6 +3446,25 @@ mod tests {
         assert!(settings::pet_effects() && settings::power_bars(), "moving no other row");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(settings::group_effects(), "and back: two values");
+        goto!(NPC_DEBUFFS);
+        assert_eq!(w.item, NPC_DEBUFFS, "Debuff Icons");
+        assert_eq!(settings::debuff_icons(), settings::DebuffIcons::Target, "the target box by default (petition 3020)");
+        assert_eq!(value_text(&vui, NPC_DEBUFFS), Some(wide("Target Window")));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::debuff_icons(), cues.last()), (settings::DebuffIcons::Plate, Some(&11)), "then under the creatures' plates");
+        assert_eq!(value_text(&vui, NPC_DEBUFFS), Some(wide("Name Plate")));
+        assert!(settings::npc_debuffs(), "still asked of the server");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::npc_debuffs(), cues.last()), (false, Some(&11)), "off: the game's plates and box");
+        assert_eq!(value_text(&vui, NPC_DEBUFFS), Some(wide(vui.words.get(552, vui.language))));
+        assert!(settings::group_effects() && settings::pet_effects(), "moving no other row");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!(settings::debuff_icons(), settings::DebuffIcons::Target, "round to the target box: three values");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert_eq!(settings::debuff_icons(), settings::DebuffIcons::Off, "and back");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert_eq!(settings::debuff_icons(), settings::DebuffIcons::Target);
         goto!(88);
         assert_eq!(w.item, 88, "Raid Mercenaries");
         assert_eq!((settings::raid_mercs(), value_text(&vui, 88)), (false, Some(wide("Hidden"))), "Hidden by default");
@@ -3410,6 +3849,37 @@ mod tests {
         assert_eq!((settings::dps_view(), value_text(&vui, 71), cues.last()), (crate::dpsmeter::View::Overall, Some(wide("Overall")), Some(&11)), "Overall");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::dps_view(), crate::dpsmeter::View::Fight, "and back: two values");
+        // DPS Meter Columns (Heirloom petition 3030): the DPS alone by default,
+        // round three values; DPS Meter Sort round those the columns show
+        {
+            use crate::dpsmeter::{Columns, Metric};
+            press(&mut w, &mut o, key::DOWN, &mut cues);
+            assert_eq!((w.item, value_text(&vui, DPS_COLUMNS)), (DPS_COLUMNS, Some(wide("DPS"))), "DPS Meter Columns, the DPS alone");
+            press(&mut w, &mut o, key::DOWN, &mut cues);
+            assert_eq!((w.item, value_text(&vui, DPS_SORT)), (DPS_SORT, Some(wide("DPS"))), "DPS Meter Sort, by damage");
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!(settings::client().dps_sort, Metric::Damage, "the DPS alone: nothing else to sort by");
+            press(&mut w, &mut o, key::UP, &mut cues);
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!((settings::dps_columns(), value_text(&vui, DPS_COLUMNS), cues.last()), (Columns::Hps, Some(wide("DPS + HPS")), Some(&11)));
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!((settings::dps_columns(), value_text(&vui, DPS_COLUMNS)), (Columns::All, Some(wide("DPS + HPS + Power"))));
+            press(&mut w, &mut o, key::DOWN, &mut cues);
+            for want in [Metric::Healing, Metric::Power, Metric::Damage] {
+                press(&mut w, &mut o, key::RIGHT, &mut cues);
+                assert_eq!((settings::dps_sort(), value_text(&vui, DPS_SORT)), (want, Some(wide(want.name()))));
+            }
+            press(&mut w, &mut o, key::LEFT, &mut cues);
+            assert_eq!(settings::dps_sort(), Metric::Power, "left: back round");
+            press(&mut w, &mut o, key::UP, &mut cues);
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!((settings::dps_columns(), settings::dps_sort(), value_text(&vui, DPS_SORT)), (Columns::Dps, Metric::Damage, Some(wide("DPS"))), "round to the DPS alone: by damage");
+            assert_eq!(w.page_note(w.cat.unwrap()), None, "no note off a server");
+            w.meter_heal_note = Some("This server's meter counts damage alone".into());
+            assert_eq!(w.page_note(w.cat.unwrap()).as_deref(), Some("This server's meter counts damage alone"), "on the columns' row");
+            w.meter_heal_note = None;
+            press(&mut w, &mut o, key::DOWN, &mut cues);
+        }
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.item, value_text(&vui, 72)), (72, Some(wide("Reset"))), "Reset DPS Meter");
         assert!(!crate::dpsmeter::take_reset(), "none asked yet");
@@ -3446,6 +3916,86 @@ mod tests {
         assert_eq!((settings::weapon_swap_back(), cues.last()), (true, Some(&11)), "on");
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(!settings::weapon_swap_back(), "and back");
+        // Auto Loot Off by default (petition 3008), two values
+        goto!(AUTO_LOOT);
+        assert_eq!(w.item, AUTO_LOOT, "Auto Loot");
+        assert!(!settings::auto_loot(), "off by default");
+        assert_eq!(value_text(&vui, AUTO_LOOT), Some(wide(vui.words.get(552, vui.language))));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::auto_loot(), cues.last()), (true, Some(&11)), "on");
+        assert_eq!(value_text(&vui, AUTO_LOOT), Some(wide(vui.words.get(551, vui.language))));
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(!settings::auto_loot(), "and back");
+        // Attack With Abilities Off by default (petition 3015), two values
+        goto!(ATTACK_ABILITIES);
+        assert_eq!(w.item, ATTACK_ABILITIES, "Attack With Abilities");
+        assert!(!settings::attack_abilities(), "off by default");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::attack_abilities(), cues.last()), (true, Some(&11)), "on");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(!settings::attack_abilities(), "and back");
+        // Buff Timers On by default (petition 2924), two values
+        goto!(BUFF_TIMERS);
+        assert_eq!(w.item, BUFF_TIMERS, "Buff Timers");
+        assert!(settings::buff_timers(), "on by default");
+        assert_eq!(value_text(&vui, BUFF_TIMERS), Some(wide(vui.words.get(551, vui.language))));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::buff_timers(), value_text(&vui, BUFF_TIMERS), cues.last()), (false, Some(wide(vui.words.get(552, vui.language))), Some(&11)), "off");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(settings::buff_timers(), "and back");
+        // Stat Window Off by default (petition 2925), two values
+        goto!(STAT_WINDOW);
+        assert_eq!(w.item, STAT_WINDOW, "Stat Window");
+        assert!(!settings::stat_window(), "off by default");
+        assert_eq!(value_text(&vui, STAT_WINDOW), Some(wide(vui.words.get(552, vui.language))));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::stat_window(), value_text(&vui, STAT_WINDOW), cues.last()), (true, Some(wide(vui.words.get(551, vui.language))), Some(&11)), "on");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(!settings::stat_window(), "and back");
+        // Item Slot Icons Item by default (petitions 2926, 2928), two values
+        goto!(ITEM_ICONS);
+        assert_eq!(w.item, ITEM_ICONS, "Item Slot Icons");
+        assert!(settings::item_icons(), "Item by default");
+        assert_eq!(value_text(&vui, ITEM_ICONS), Some(wide("Item")));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::item_icons(), value_text(&vui, ITEM_ICONS), cues.last()), (false, Some(wide("Slot")), Some(&11)), "Slot");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(settings::item_icons(), "and back");
+        // A/D Keys Strafe by default (petition 2909), two values
+        goto!(AD_KEYS);
+        assert_eq!(w.item, AD_KEYS, "A/D Keys");
+        assert!(!settings::ad_turn(), "Strafe by default");
+        assert_eq!(value_text(&vui, AD_KEYS), Some(wide("Strafe")));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::ad_turn(), value_text(&vui, AD_KEYS), cues.last()), (true, Some(wide("Turn")), Some(&11)), "Turn");
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert!(!settings::ad_turn(), "and back");
+        // HUD Scale in the Controller interface (petition 2912): its own
+        // scale, 100 by default, in steps of 5, the PC's left as it was
+        goto!(HUD_SCALE);
+        assert_eq!((w.item, settings::pc_mode()), (HUD_SCALE, false), "HUD Scale, Controller");
+        assert_eq!(slider_at(HUD_SCALE).and_then(|s| s.1), Some(100));
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        let c = settings::client();
+        assert_eq!((c.controller_hud_scale, c.hud_scale, c.display_ui().hud_scale, cues.last()), (95, 100, 95, Some(&11)), "smaller");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!(settings::client().controller_hud_scale, 100, "and back");
+        // Nameplate Size in the Controller interface too (petition 2908, the
+        // owner's of 2026-11-24): its own, down to 30, the PC's left as it was
+        goto!(NAMEPLATE_SCALE);
+        assert_eq!((w.item, settings::pc_mode()), (NAMEPLATE_SCALE, false), "Nameplate Size, Controller");
+        assert_eq!(slider_at(NAMEPLATE_SCALE).and_then(|s| s.1), Some(100));
+        for _ in 0..20 {
+            press(&mut w, &mut o, key::LEFT, &mut cues);
+        }
+        let c = settings::client();
+        assert_eq!((c.controller_nameplate_scale, c.nameplate_scale, c.display_ui().nameplate_scale, cues.last()), (30, 100, 30, Some(&9)), "30 at the least, the end's sound");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!(settings::client().controller_nameplate_scale, 35);
+        for _ in 0..13 {
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+        }
+        assert_eq!(settings::client().controller_nameplate_scale, 100, "and back");
         // R2 Channel Switch Off by default (the server owner, 2026-11-18), two values
         goto!(R2_CHANNELS);
         assert_eq!(w.item, R2_CHANNELS, "R2 Channel Switch");
@@ -3660,7 +4210,7 @@ mod tests {
                 assert!(w.window5.top_left()[1] > 24, "{gname}: its title tab on the picture");
             }
             for (k, &c) in cats.iter().enumerate() {
-                let cat = &CATEGORIES[c];
+                let cat = category(c);
                 if !lone {
                     keys(&mut w, key::CROSS, &mut cues);
                 }
@@ -3688,7 +4238,7 @@ mod tests {
             }
             keys(&mut w, key::DOWN, &mut cues);
         }
-        assert_eq!(pages, CATEGORIES.len(), "every category's page reached");
+        assert_eq!(pages, (0..CATEGORIES.len()).filter(|&i| !category(i).items.is_empty()).count(), "every visible category reached");
         assert_eq!(cues.last(), Some(&9), "no group past the last");
         assert!(!w.back(&mut cues), "the groups go back to the menu");
         assert_eq!((w.page, w.sel), (-1, 3));
@@ -3701,7 +4251,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn each_group_holds_its_kind() {
-        let of = |g: usize| group_categories(g).into_iter().map(|c| (CATEGORIES[c].name, CATEGORIES[c].items.iter().map(|&i| label_of(i)).collect::<Vec<_>>())).collect::<Vec<_>>();
+        crate::settings::testing::reset(false);
+        let of = |g: usize| group_categories(g).into_iter().map(category).map(|c| (c.name, c.items.iter().map(|&i| label_of(i)).collect::<Vec<_>>())).collect::<Vec<_>>();
         let textures: Vec<&str> = if cfg!(target_os = "android") { vec!["Texture Packs", "Texture Pack Memory", "Dump Textures"] } else { vec!["Texture Packs", "Texture Pack Memory", "Dump Textures", "Texture Folder"] };
         assert_eq!(
             of(0),
@@ -3723,23 +4274,24 @@ mod tests {
                 ("HUD", vec!["Ability Bars", "Stacked Spell Bars", "Text", "HUD", "Pet Effects", "Buff Window"]),
                 ("Group & Raid", vec!["Raid List", "Power Bars", "Health Numbers", "Group Effects", "Raid Mercenaries"]),
                 ("HUD Layout", vec!["Move HUD", "Reset HUD", "Minimap Scroll Frame", "Spell Bar Opacity", "Spell Bar Layout", "Utility Bar Layout"]),
-                ("Name Plates", vec!["Name Distance", "Overlapping Names", "Quest Markers", "Target Level"]),
+                ("Name Plates", vec!["Name Distance", "Overlapping Names", "Quest Markers", "Target Level", "Debuff Icons"]),
                 ("Map", vec!["Map", "Minimap", "Map Pointer", "Map Markers", "Quest Helper", "Quest Tracker"]),
                 ("Number Colors", n[..6].to_vec()),
                 ("Merc Colors", n[6..8].to_vec()),
-                ("DPS Meter", vec!["DPS Meter", "DPS Meter Shows", "Reset DPS Meter"]),
+                ("DPS Meter", vec!["DPS Meter", "DPS Meter Shows", "DPS Meter Columns", "DPS Meter Sort", "Reset DPS Meter"]),
                 ("Chat", vec!["Item Links", "Chat Always Shown", "R2 Channel Switch"]),
-                ("Chat Tabs: Talk", vec!["Say", "Tells", "Group", "Guild", "Shouts"]),
-                ("Chat Tabs: Game", vec!["Combat", "Loot", "Rolls", "Experience", "System"]),
+                ("Chat Tabs", vec!["Say", "Tells", "Group", "Guild", "Shouts", "Combat", "Loot", "Rolls", "Experience", "System"]),
+                ("Interface Size", vec!["HUD Scale %", "Nameplate Size %"]),
+                ("HUD Extras", vec!["Buff Timers", "Stat Window", "Item Slot Icons", "Spell Cooldowns", "HUD Layouts"]),
             ],
             "UI: what is drawn over the world"
         );
         assert_eq!(
             of(2),
             vec![
-                ("General", vec!["Update Notices", "Loading Screens", "Loading Tips", "Same Shortcuts", "Auto Save Options"]),
-                ("Combat", vec!["Auto-Cast", "Auto Target", "Pets Pass Through", "Weapon Swap Back"]),
-                ("Camera", vec!["Camera Distance", "Camera Turn Speed", "Screen Shake"]),
+                ("General", vec!["Update Notices", "Loading Screens", "Loading Tips", "Same Shortcuts", "Auto Save Options", "Auto Loot"]),
+                ("Combat", vec!["Auto-Cast", "Auto Target", "Pets Pass Through", "Weapon Swap Back", "Attack With Abilities"]),
+                ("Camera", vec!["Camera Distance", "Camera Turn Speed", "Screen Shake", "A/D Keys"]),
                 ("Sound", vec!["Output Device"]),
             ],
             "Other: the rest"
@@ -3787,8 +4339,7 @@ mod tests {
 
     /// Extended's rows are its categories' between them, every one on one
     /// page and none twice, each with its label, no page more than
-    /// `PAGE_MOST`; the controls: a table missing a row, and a page of
-    /// seven, fail.
+    /// `MENU_MOST`.
     #[test]
     fn every_row_on_one_page_and_no_page_scrolls() {
         let listed = |cats: &[Category]| {
@@ -3796,20 +4347,32 @@ mod tests {
             v.sort();
             v
         };
-        // (an Android app has no Texture Folder: `TEXTURES`)
-        let all: Vec<i32> = EXTENDED_ITEMS.iter().map(|&(i, _)| i).filter(|&i| !(cfg!(target_os = "android") && i == 55)).collect();
-        assert_eq!(listed(CATEGORIES), all);
-        assert!(fits(CATEGORIES));
-        assert!(menus_fit(CATEGORIES));
+        // Check the menus the player can actually open in each profile.
+        crate::settings::testing::reset(false);
+        let mut available = Vec::new();
+        for pc in [false, true] {
+            crate::settings::set_ui_mode(pc).unwrap();
+            let categories: Vec<_> = (0..CATEGORIES.len()).map(category).filter(|c| !c.items.is_empty()).collect();
+            let rows = listed(&categories);
+            assert!(rows.windows(2).all(|pair| pair[0] != pair[1]), "duplicate row, pc={pc}");
+            assert!(pages_fit(&categories) && menus_fit(&categories));
+            available.extend(rows);
+        }
+        available.sort();
+        available.dedup();
+        // An Android app has no Texture Folder.
+        let all: Vec<i32> = EXTENDED_ITEMS.iter().map(|&(i, _)| i)
+            .filter(|&i| !(cfg!(target_os = "android") && i == 55)).collect();
+        assert_eq!(available, all);
         assert!(EXTENDED_ITEMS.iter().all(|&(i, l)| !l.is_empty() && label_of(i) == l));
         let short = [Category { name: "Video", items: &[13, 20], note: Note::None, group: Group::Graphics }];
         assert_ne!(listed(&short), all, "the control: rows left out");
-        let seven = [Category { name: "Video", items: &[13, 20, 14, 26, 25, 12, 15], note: Note::None, group: Group::Graphics }];
-        assert!(!fits(&seven), "the control: a page that would scroll");
-        assert!(!menus_fit(&seven), "the control: groups with no category");
+        let long = [Category { name: "Video", items: &[13; MENU_MOST + 1], note: Note::None, group: Group::Graphics }];
+        assert!(!pages_fit(&long), "the control: a page too tall for the window");
+        assert!(!menus_fit(&long), "the control: groups with no category");
     }
 
-    /// A category's page of `PAGE_MOST` rows, a row more than the game's
+    /// A page of `STANDARD_PAGE_ITEMS` items, one row more than the game's
     /// eight-row pages, keeps its top where theirs is (the Interface page's:
     /// under the options window's title tab) and, without their empty title
     /// bar, ends less than a row lower; the control: centred as the game's
@@ -3829,7 +4392,7 @@ mod tests {
         assert_eq!(w.window2.rows, 9, "Interface: nine rows (Vibration, the client's Profanity Filter)");
         w.page_window(&vui, &r, 8);
         let (top8, h8) = (w.window2.top_left()[1], w.window2.size[1]);
-        w.page_window(&vui, &r, PAGE_MOST as i32 + 3);
+        w.page_window(&vui, &r, menu_rows(STANDARD_PAGE_ITEMS));
         let (top9, h9) = (w.window2.top_left()[1], w.window2.size[1]);
         assert_eq!((w.window2.rows, w.window2.title_h), (9, 18), "a row more, no title bar");
         assert_eq!(top9, top8, "the top where an eight-row page's is");
@@ -4036,8 +4599,9 @@ mod tests {
         assert_eq!(w.point([slider + 2.0, y(&w, 1)]), down(1, key::LEFT));
         assert_eq!(w.point([frame + 110.0, y(&w, 2)]), down(2, key::RIGHT), "Screen Shake's value");
         assert_eq!(w.point([frame + 20.0, y(&w, 2)]), down(2, key::LEFT));
-        assert!(w.point([frame + 110.0, y(&w, 3)]).is_empty(), "the row under the last: nothing");
-        assert!(w.point([slider + 70.0, y(&w, 4)]).is_empty(), "the legend's row: nothing");
+        assert_eq!(w.point([frame + 110.0, y(&w, 3)]), down(3, key::RIGHT), "A/D Keys' value (petition 2909)");
+        assert!(w.point([frame + 110.0, y(&w, 4)]).is_empty(), "the row under the last: nothing");
+        assert!(w.point([slider + 70.0, y(&w, 5)]).is_empty(), "the legend's row: nothing");
         // Video: Display's value, Brightness at 5 of 10 (its knob mid-bar),
         // Frame Rate's value
         go(&mut w, &vui, &mut o, "Video");
@@ -4079,6 +4643,12 @@ mod tests {
         crate::settings::set_client(ClientOptions { name_distance: 200, ..crate::settings::client() });
         w.draw(&vui, &mut r, &o, &mut ups);
         assert_eq!(w.point([slider + 110.0, y(&w, 0)]), vec![key::LEFT], "left of the knob at 200");
+        go(&mut w, &vui, &mut o, "Chat Tabs");
+        assert_eq!(w.window2.title.chars(), wide("Chat Tabs"));
+        let bottom = |window: &Window| window.top_left()[1] + window.size[1];
+        assert!(w.window2.top_left()[1] > 24, "the page and its title fit on screen");
+        assert_eq!(bottom(&w.window2), bottom(&w.window), "keeps the title screen's menu clear");
+        assert_eq!(w.point([frame + 110.0, y(&w, 9)]), down(9, key::RIGHT), "System's value on the last row");
         // Multi-boxing settings (its page straight from the groups):
         // Controller Focus's halves, Capture Controller's
         go(&mut w, &vui, &mut o, "Multi-boxing settings");
@@ -4116,8 +4686,9 @@ mod tests {
         assert_eq!(CATEGORIES[by_name("Lighting")].note, Note::Lighting);
         assert_eq!(CATEGORIES[by_name("DPS Meter")].note, Note::Meter);
         assert_eq!(CATEGORIES[by_name("Chat")].note, Note::Links);
+        assert_eq!(CATEGORIES[by_name("Chat Tabs")].note, Note::ChatTabs);
         assert_eq!(CATEGORIES[by_name("HUD Layout")].note, Note::Hud);
-        assert!(CATEGORIES.iter().filter(|c| c.note != Note::None).count() == if cfg!(target_arch = "wasm32") { 12 } else { 15 }, "the notes only");
+        assert_eq!(CATEGORIES.iter().filter(|c| c.note != Note::None).count(), if cfg!(target_arch = "wasm32") { 11 } else { 14 }, "the notes only");
         assert_eq!(CATEGORIES.iter().find(|c| c.name == "Texture Cache").map(|c| c.note), if cfg!(target_arch = "wasm32") { None } else { Some(Note::Textures) });
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -4213,13 +4784,13 @@ mod tests {
         for k in [key::DOWN, key::DOWN, key::DOWN, key::CROSS] {
             w.key(&vui, &mut NullRaster, &mut o, k, 0, &mut cues, &mut ups);
         }
-        let off_rows = [44, 45, 85, TARGET_LEVEL, 70, 71, 72, 64, 65, 66, 67, 68, 69, 80, 81, 86, HEALTH_NUMBERS, 83, 58, GROUP_EFFECTS, 78, 79, 22, 90, SPELL_BAR_LAYOUT, UTILITY_LAYOUT];
+        let off_rows = [44, 45, 85, TARGET_LEVEL, 70, 71, 72, 64, 65, 66, 67, 68, 69, 80, 81, 86, HEALTH_NUMBERS, 83, BUFF_TIMERS, STAT_WINDOW, 58, GROUP_EFFECTS, NPC_DEBUFFS, 78, 79, 22, 90, SPELL_BAR_LAYOUT, UTILITY_LAYOUT, SPELL_BAR_SIZE, ITEM_ICONS, SPELL_COOLDOWNS, MOUSEOVER_CAST, AUTO_LOOT, ATTACK_ABILITIES, DPS_COLUMNS, DPS_SORT];
         qol::set_off(0xFFF);
         for &(item, _) in EXTENDED_ITEMS.iter() {
             assert_eq!(qol::item_off(item, TARGET_LEVEL), off_rows.contains(&item), "row {item}");
         }
         let off_text = Some(wide(vui.words.get(552, vui.language)));
-        for item in [44, TARGET_LEVEL, 70, 86, HEALTH_NUMBERS, 83, 58, GROUP_EFFECTS, 78, 90, SPELL_BAR_LAYOUT, UTILITY_LAYOUT] {
+        for item in [44, TARGET_LEVEL, 70, 86, HEALTH_NUMBERS, 83, BUFF_TIMERS, STAT_WINDOW, 58, GROUP_EFFECTS, NPC_DEBUFFS, 78, AUTO_LOOT, ATTACK_ABILITIES, 90, SPELL_BAR_LAYOUT, UTILITY_LAYOUT] {
             for k in path_to(&w, item) {
                 w.key(&vui, &mut NullRaster, &mut o, k, 0, &mut cues, &mut ups);
                 w.draw(&vui, &mut NullRaster, &o, &mut ups);
@@ -4236,6 +4807,7 @@ mod tests {
         }
         assert_eq!(value_text(&vui, 64), Some(wide("Default")), "a number's colour the game's");
         assert_eq!(value_text(&vui, 22), Some(wide("2")), "the game's two bars");
+        assert_eq!(value_text(&vui, ITEM_ICONS), Some(wide("Slot")), "the game's slot icons");
         // the Map, the Minimap and Item Links: off by default here, said, and
         // turned
         for item in [41, 42, 73] {

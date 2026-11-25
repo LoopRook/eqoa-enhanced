@@ -602,10 +602,14 @@ fn a4_every_hud_piece_drops_quads_bounds_and_clicks_when_hidden() {
                     bar: 0.5,
                     own: i == 0,
                     left: false,
+                    ..Default::default()
                 })
                 .collect(),
             pet: None,
+            pet_rates: [0.0; 3],
             first: 0,
+            columns: crate::dpsmeter::Columns::Dps,
+            sort: Default::default(),
         }),
         ..Default::default()
     };
@@ -750,6 +754,7 @@ fn a4_wheel_captures_stop_when_raid_list_or_dps_meter_hidden() {
             bar: 0.5,
             own: i == 1,
             left: false,
+            ..Default::default()
         })
         .collect();
     let s = HudState {
@@ -761,7 +766,10 @@ fn a4_wheel_captures_stop_when_raid_list_or_dps_meter_hidden() {
             dps: 1000.0,
             rows: meter_rows,
             pet: None,
+            pet_rates: [0.0; 3],
             first: 0,
+            columns: crate::dpsmeter::Columns::Dps,
+            sort: Default::default(),
         }),
         ..Default::default()
     };

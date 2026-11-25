@@ -325,7 +325,7 @@ eqoa.events.on("combat.hit", function(ev)
     local out, inc = h.outgoing, h.incoming
     if not (out or inc) then return end
     local big = false
-    if out and not inc then
+    if out and not inc and h.by_player ~= false then
         -- the game does not mark critical hits; one well above your usual hit is drawn bigger
         if samples >= 4 and h.amount >= avg * 1.6 then big = true end
         avg = samples == 0 and h.amount or (avg * 0.9 + h.amount * 0.1)

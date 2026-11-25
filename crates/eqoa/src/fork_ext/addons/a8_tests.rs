@@ -126,8 +126,8 @@ fn state(question: bool) -> serde_json::Value {
             ],
             "tools": [{"name": long, "have": false}, {"name": long, "have": true}],
         },
-        "tray": (0..4).map(|i| json!({"slot": i + 1, "id": 900 + i, "name": long})).collect::<Vec<_>>(),
-        "items": (0..20).map(|i| json!({"slot": i + 1, "id": 900 + i, "name": long, "quantity": 99999, "in_tray": 4})).collect::<Vec<_>>(),
+        "tray": (0..4).map(|i| json!({"slot": i + 1, "id": (900 + i).to_string(), "name": long})).collect::<Vec<_>>(),
+        "items": (0..20).map(|i| json!({"slot": i + 1, "id": (900 + i).to_string(), "name": long, "quantity": 99999, "in_tray": 4})).collect::<Vec<_>>(),
         "question": question.then(|| json!({"text": words, "recipe": 4242})),
         "notice": json!({"text": words, "seq": 1}),
     })
@@ -145,7 +145,7 @@ fn a8_every_name_needs_its_own_declaration_and_a_mod_without_it_gets_nothing() {
     // each action
     for name in native_a8::NAMES {
         bare.execute(&format!(
-            "local r, e = eqoa.actions.{name}({{slot = 1, id = 1}}); assert(r == nil and e ~= nil and (e.code == 'not_declared' or e.code == 'permission_denied'), '{name}: ' .. tostring(e and e.code))"
+            "local r, e = eqoa.actions.{name}({{slot = 1, id = '1'}}); assert(r == nil and e ~= nil and (e.code == 'not_declared' or e.code == 'permission_denied'), '{name}: ' .. tostring(e and e.code))"
         ))
         .unwrap();
     }
@@ -173,12 +173,12 @@ fn a8_arguments_are_checked_before_anything_is_queued() {
         ("eqoa.actions.craft_inspect(nil)", "invalid_argument"),
         ("eqoa.actions.craft_inspect(2^40)", "invalid_argument"),
         ("eqoa.actions.craft_tray_add(5)", "invalid_argument"),
-        ("eqoa.actions.craft_tray_add({slot = 0, id = 3})", "invalid_argument"),
+        ("eqoa.actions.craft_tray_add({slot = 0, id = '3'})", "invalid_argument"),
         ("eqoa.actions.craft_tray_add({slot = 1})", "invalid_argument"),
         ("eqoa.actions.craft_tray_remove({id = 1})", "invalid_argument"),
         ("eqoa.actions.craft_fill(7)", "invalid_argument"),
         ("eqoa.actions.craft_fill({5})", "invalid_argument"),
-        ("eqoa.actions.craft_fill({{slot=1,id=1},{slot=1,id=1},{slot=1,id=1},{slot=1,id=1},{slot=1,id=1}})", "out_of_range"),
+        ("eqoa.actions.craft_fill({{slot=1,id='1'},{slot=1,id='1'},{slot=1,id='1'},{slot=1,id='1'},{slot=1,id='1'}})", "out_of_range"),
         ("eqoa.actions.craft_keep('yes')", "invalid_argument"),
         ("eqoa.actions.craft_keep()", "invalid_argument"),
         ("eqoa.actions.craft_combine(1)", "invalid_argument"),
@@ -191,7 +191,7 @@ fn a8_arguments_are_checked_before_anything_is_queued() {
     h.execute(
         r#"
         assert(eqoa.actions.craft_list(5)); assert(eqoa.actions.craft_inspect(12))
-        assert(eqoa.actions.craft_tray_add({slot = 2, id = 3})); assert(eqoa.actions.craft_tray_remove({slot = 2, id = 3}))
+        assert(eqoa.actions.craft_tray_add({slot = 2, id = '3'})); assert(eqoa.actions.craft_tray_remove({slot = 2, id = '3'}))
         assert(eqoa.actions.craft_fill({})); assert(eqoa.actions.craft_keep(false))
         "#,
     )

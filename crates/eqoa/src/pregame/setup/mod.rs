@@ -205,6 +205,12 @@ impl Setup {
         self.keys.push((key, down));
     }
 
+    pub fn scroll(&mut self, lines: f32) {
+        if self.focus == Some(Focus::Options) && crate::settings::pc_mode() {
+            self.options_wnd.scroll_controls(lines);
+        }
+    }
+
     /// A pointer at frame point `p`: the keys the window with the focus asks for.
     pub fn point(&mut self, p: [f32; 2]) -> Vec<i32> {
         match self.focus {
@@ -399,8 +405,9 @@ impl Setup {
     /// macOS's Settings… (⌘,): the title's Options at the next frame, if the
     /// title's menu has the keys then.
     #[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
-    pub fn ask_options(&mut self) {
-        self.options_asked = true;
+    pub fn ask_options(&mut self) -> bool {
+        self.options_asked = self.focus == Some(Focus::Title);
+        self.options_asked
     }
 
     pub fn frame(&mut self, cx: &mut Ctx) -> Next {
@@ -912,7 +919,7 @@ mod tests {
         let mut run = Run::new(Some("192.0.2.1"));
         run.frames(5);
         assert_ne!(run.s.focus, Some(Focus::Title), "the legal screen first");
-        run.s.ask_options();
+        assert!(!run.s.ask_options());
         run.frame();
         assert!(!run.s.options_visible, "not over the legal screen");
         run.s.state = 2;
@@ -920,7 +927,7 @@ mod tests {
         run.frames(32);
         assert_eq!(run.s.focus, Some(Focus::Title));
         assert!(!run.s.options_visible, "the earlier asking was let go");
-        run.s.ask_options();
+        assert!(run.s.ask_options());
         run.frame();
         assert_eq!(run.s.focus, Some(Focus::Options));
         assert!(run.s.options_visible);

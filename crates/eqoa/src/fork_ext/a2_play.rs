@@ -346,7 +346,7 @@ pub(crate) fn accept_offer(play: &mut Play, session: &str) -> Result<(), String>
 /// The game's own keys on the dialog, put in the game's window for this one call. Returns whether the game sent
 /// something to the server.
 fn press(play: &mut Play, item: &Item, option: usize) -> Result<bool, DispatchOutcome> {
-    let busy = || refuse("busy", "another game window is up: answer when it is closed");
+    let busy = || refuse("not_ready", "another game window is up: answer when it is closed");
     match item {
         Item::Text { text, .. } => {
             if play.mode != 0 {

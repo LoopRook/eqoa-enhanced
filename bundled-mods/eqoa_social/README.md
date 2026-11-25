@@ -1,6 +1,6 @@
 # EQOA Social
 
-Off by default. Enable it in Mods & Addons (F10); before you enable it, the list shows **Provides: Friends (Shift+F), Guild (Shift+G)**, **Replaces game windows: Friend Request, Guild Invite**, what actions it can send, and which actions ask you first.
+Off by default. Enable it in Mods & Addons (Shift+F10); before you enable it, the list shows **Provides: Friends (Shift+F), Guild (Shift+G)**, **Replaces game windows: Friend Request, Guild Invite**, what actions it can send, and which actions ask you first.
 
 A Social window of its own on two keys (**Shift+F** for Friends, **Shift+G** for Guild; both have rows on the Controls page so you can move them). Press the key again, press **Escape**, or click the window's **x** to close it. It sits over play so your character can keep walking, and with the mod off every game social window is unchanged.
 

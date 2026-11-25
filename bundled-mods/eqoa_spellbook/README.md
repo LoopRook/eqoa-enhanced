@@ -1,6 +1,6 @@
 # EQOA Spellbook
 
-Off by default. Enable it in Mods & Addons (F10); it shows **Provides: Spellbook window (Shift+K)** before you do.
+Off by default. Enable it in Mods & Addons (Shift+F10); it shows **Provides: Spellbook window (Shift+K)** before you do.
 
 A Spellbook window of its own, on its own key: **Shift+K** (the Controls page has a **Spellbook** row, so you can
 move it; a key the game, a macro or another mod already has leaves the row empty and says why). Press the key again,

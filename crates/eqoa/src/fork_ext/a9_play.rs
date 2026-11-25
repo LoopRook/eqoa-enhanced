@@ -245,7 +245,7 @@ fn clear_tips() {
 }
 
 fn item_row(play: &Play, slot: usize, it: &NetItem, theirs: bool) -> Json {
-    json!({"slot": slot, "id": it.item.id, "name": it.item.name, "quantity": it.quantity.max(1), "text": tip_text(play, it, theirs)})
+    json!({"slot": slot, "id": it.item.id.to_string(), "name": it.item.name, "quantity": it.quantity.max(1), "text": tip_text(play, it, theirs)})
 }
 
 fn bag_row(play: &Play, slot: usize, it: &NetItem, room: bool) -> Json {
@@ -253,7 +253,7 @@ fn bag_row(play: &Play, slot: usize, it: &NetItem, room: bool) -> Json {
     let no_trade = it.item.no_trade > 0;
     json!({
         "slot": slot,
-        "id": it.item.id,
+        "id": it.item.id.to_string(),
         "name": it.item.name,
         "quantity": it.quantity.max(1),
         "worn": worn,
@@ -407,7 +407,7 @@ fn smith_state(play: &Play) -> Option<Json> {
             let condition = if it.item.max_hp == 0 { 1.0 } else { (it.cur_hp as f64 / it.item.max_hp as f64).clamp(0.0, 1.0) };
             json!({
                 "slot": i + 1,
-                "id": it.item.id,
+                "id": it.item.id.to_string(),
                 "inventory_key": it.inv_index,
                 "name": it.item.name,
                 "quantity": it.quantity.max(1),
@@ -1367,7 +1367,7 @@ fn dispatch_inner(play: &mut Play, action: &A9Action) -> DispatchOutcome {
         A9Action::BlacksmithRepair { slot, id, key } => repair(play, *slot, *id, *key),
         A9Action::BlacksmithClose => {
             let Some(h) = local(|l| l.smith.clone()).filter(|h| holds(TakeoverKind::Blacksmith) && Some(h.hold.vm) == caller()) else {
-                return refuse("not_ready", "hold the 'blacksmith' window first (eqoa.windows.takeover) and wait for the smith");
+                return refuse("window_closed", "hold the 'blacksmith' window first (eqoa.windows.takeover) and wait for the smith");
             };
             let _ = h;
             smith_pass::close_smith(play);
@@ -1388,10 +1388,10 @@ fn dispatch_inner(play: &mut Play, action: &A9Action) -> DispatchOutcome {
 
 fn trade_answer(play: &mut Play, accept: bool) -> DispatchOutcome {
     let Some(h) = local(|l| l.ask.clone()).filter(|h| Some(h.vm) == caller() && holds(TakeoverKind::TradeAsk)) else {
-        return refuse("not_ready", "no trade request is held: hold 'trade_ask' (eqoa.windows.takeover) and wait for one");
+        return refuse("window_closed", "no trade request is held: hold 'trade_ask' (eqoa.windows.takeover) and wait for one");
     };
     if play.npcw.trade_state.with == u32::MAX {
-        return refuse("not_ready", "the request is gone");
+        return refuse("window_closed", "the request is gone");
     }
     if accept && local(|l| l.wager.is_some()) {
         return refuse("busy", "a duel wager is open: finish it before a trade");
@@ -1430,10 +1430,10 @@ fn trade_answer(play: &mut Play, accept: bool) -> DispatchOutcome {
 
 fn duel_answer(play: &mut Play, accept: bool) -> DispatchOutcome {
     let Some(h) = local(|l| l.invite.clone()).filter(|h| Some(h.hold.vm) == caller() && holds(TakeoverKind::DuelInvite)) else {
-        return refuse("not_ready", "no duel invitation is held: hold 'duel_invite' (eqoa.windows.takeover) and wait for one");
+        return refuse("window_closed", "no duel invitation is held: hold 'duel_invite' (eqoa.windows.takeover) and wait for one");
     };
     if h.hold.since.elapsed() >= h.life {
-        return refuse("not_ready", "the invitation has run out");
+        return refuse("window_closed", "the invitation has run out");
     }
     let name = play.dump.player.name.clone();
     let list = if accept { play.duel.part.accept(h.rec.id, &name) } else { play.duel.part.decline(h.rec.id, &name) };
@@ -1464,7 +1464,7 @@ fn which(play: &Play) -> Option<Which> {
 
 fn exchange(play: &mut Play, action: &A9Action) -> DispatchOutcome {
     let Some(w) = which(play) else {
-        return refuse("not_ready", "no trade or duel wager is held: hold 'trade' or 'duel' (eqoa.windows.takeover) and wait for it to open");
+        return refuse("window_closed", "no trade or duel wager is held: hold 'trade' or 'duel' (eqoa.windows.takeover) and wait for it to open");
     };
     let (mine_acc, _) = match w {
         Which::Trade => trade_pass::trade_marks(play),
@@ -1726,7 +1726,7 @@ fn repair(play: &mut Play, slot: usize, id: i64, key: Option<u32>) -> DispatchOu
             return refuse("busy", "another mod holds the blacksmith window");
         }
         None if play.mode != 19 || window_takeover::is_taken(TakeoverKind::Blacksmith) => {
-            return refuse("not_ready", "no blacksmith is open: wait for the smith (or hold 'blacksmith' with eqoa.windows.takeover)");
+            return refuse("window_closed", "no blacksmith is open: wait for the smith (or hold 'blacksmith' with eqoa.windows.takeover)");
         }
         _ => {}
     }

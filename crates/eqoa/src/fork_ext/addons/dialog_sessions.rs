@@ -545,6 +545,12 @@ pub(crate) fn refresh_window(id: &str, data: Value) {
     window_sessions::set_data(id, data);
 }
 
+/// A mod is showing a dialog, an invitation, an offer or a server window now (`a11_play::mod_window_up`): the game's
+/// mode reads 0 meanwhile.
+pub(crate) fn any_up() -> bool {
+    is_busy() && with(|s| s.slot.is_some() || s.offer.is_some() || !s.wins.is_empty())
+}
+
 /// The held server windows (a11 reads and ends them).
 pub(crate) fn windows() -> Vec<Active> {
     if !is_busy() {

@@ -639,19 +639,54 @@ pub const OP_PET_EFFECTS_DATA: u16 = 0x7E33;
 /// the tiny icons beside their bars (jibrish, 2026-11-22: "add very small / tiny
 /// icon versions for the buffs group members have"; `Play::member_effects`,
 /// `hud::member_effects_pieces`). A u32 after the opcode, both ways, as
-/// [`OP_PET_EFFECTS`]: offered once the player is in the world, answered 1 to
-/// have them and 0 to stop, at once and whenever that changes
-/// (`agree_group_effects`, the Extended page's Group Effects). CLIENT shows no
-/// one's effects but the player's own (channel 0x43), so a PS2 ignores the
-/// offer and is sent none; nothing is asked of a server that made no offer.
+/// [`OP_PET_EFFECTS`]: offered once the player is in the world (the newest
+/// version of [`OP_GROUP_EFFECTS_DATA`] the server sends: 1, 2 from
+/// 2026-11-25), answered with the version this client reads (the offer's, at
+/// most [`GROUP_EFFECTS_VERSION`]) to have them and 0 to stop, at once and
+/// whenever that changes (`agree_group_effects`, the Extended page's Group
+/// Effects). CLIENT shows no one's effects but the player's own (channel
+/// 0x43), so a PS2 ignores the offer and is sent none; nothing is asked of a
+/// server that made no offer.
 pub const OP_GROUP_EFFECTS: u16 = 0x7EC0;
+/// The newest version of [`OP_GROUP_EFFECTS_DATA`] this client reads: 2, each
+/// icon's time left and name with it (Heirloom petition 2962, Graga: "the buff
+/// icons of group members should reveal the buff when mouse hovering and have
+/// timers like the new buff timers").
+pub const GROUP_EFFECTS_VERSION: u32 = 2;
 /// The members' effects, from a server the client asked ([`OP_GROUP_EFFECTS`]),
 /// whenever they change: a u8 count of members, then each its u32 id (as the
 /// group's roster names it, [`Session::power_of`]'s ids) and a u8 count of
 /// icons, each a u32 (a DictID, as channel 0x43's), in the order they went on
-/// (what the member's own buff window shows, at most 16). Each is the whole
+/// (what the member's own buff window shows, at most 16); in version 2 each
+/// icon followed by its u32 milliseconds left as the server made the message
+/// (0: no end) and its name (a u8 byte count and UTF-8). Each is the whole
 /// set: a member it leaves out has none.
 pub const OP_GROUP_EFFECTS_DATA: u16 = 0x7EC1;
+/// go-eqoa-server's own: the harmful effects the player (its pet, its mercs) has
+/// on the creatures the client draws, for the icons under their name plates
+/// (Heirloom petition 2997: "Debuffs cast on evil NPCs (combat) give an icon
+/// under their ID plate with remaining time on the debuff (so you know when to
+/// refresh)"; `Play::plates`, `play::debuff_quads`). A u32 after the opcode, both
+/// ways, as [`OP_GROUP_EFFECTS`]: offered once the player is in the world,
+/// answered 1 to have them and 0 to stop, at once and whenever that changes
+/// (`agree_npc_debuffs`, the Extended page's Debuff Icons). CLIENT's name plates
+/// carry a name alone, so a PS2 ignores the offer and is sent none; nothing is
+/// asked of a server that made no offer.
+pub const OP_NPC_DEBUFFS: u16 = 0x7EC2;
+/// The creatures' effects, from a server the client asked ([`OP_NPC_DEBUFFS`]),
+/// whenever they change: a u8 count of creatures, then each its u32 id (as the
+/// entity channels name it), a u8 count of effects and per effect its u32 icon
+/// (a DictID, as channel 0x43's), a u8 whose ([`NPC_DEBUFF_MINE`],
+/// [`NPC_DEBUFF_PET`], [`NPC_DEBUFF_MERC`]), its u32 milliseconds left as the
+/// server made the message (0: no end) and its name (a u8 byte count and
+/// UTF-8), in the order they went on. Each is the whole set: a creature it
+/// leaves out has none of the player's.
+pub const OP_NPC_DEBUFFS_DATA: u16 = 0x7EC3;
+/// Whose an effect of [`OP_NPC_DEBUFFS_DATA`] is: the player's own, its pet's,
+/// one of its mercs'.
+pub const NPC_DEBUFF_MINE: u8 = 0;
+pub const NPC_DEBUFF_PET: u8 = 1;
+pub const NPC_DEBUFF_MERC: u8 = 2;
 /// go-eqoa-server's own: what made each figure, for the Extended page's Number
 /// Colors (`Play::damage_indication`; the user, 2026-11-09: "we can add the
 /// number colors to extended menu"). The offer, server to client once the
@@ -674,13 +709,21 @@ pub const NUMBER_TAGS_LAYOUT: u8 = 2;
 /// go-eqoa-server's own: a damage meter, who in the player's group did how much
 /// damage in the fight and how fast (`dpsmeter`, the Extended page's DPS Meter;
 /// the server owner, 2026-11-10: "lets add dps meters, will work solo, group,
-/// raid"). The offer, server to client once the player is in the world: a u8, 1,
-/// [`OP_DPS_METER_DATA`]'s layout. CLIENT has no such case, so a PS2 ignores it;
-/// nothing is asked of a server that made no offer.
+/// raid"). The offer, server to client once the player is in the world: a u8,
+/// the newest [`OP_DPS_METER_DATA`] layout it writes (1, damage alone; 2 since
+/// 2026-11-25, healing and power too). CLIENT has no such case, so a PS2
+/// ignores it; nothing is asked of a server that made no offer.
 pub const OP_DPS_METER_OFFER: u16 = 0x7E3A;
 /// The answer to [`OP_DPS_METER_OFFER`], client to server, at once and whenever
-/// it changes (`agree_dps_meter`): a u8, 1 to be sent the meter, 0 to stop.
+/// it changes (`agree_dps_meter`): a u8, the layout to be sent the meter in (the
+/// offer's, at most [`DPS_METER_LAYOUT`]), 0 to stop. A server of layout 1
+/// alone reads any answer but 0 as 1.
 pub const OP_DPS_METER_ANSWER: u16 = 0x7E3B;
+/// The newest DPS meter layout this client reads: 2, each line's healing and
+/// the power it gave beside its damage (go-eqoa-server, Heirloom petition 3030:
+/// "DPS meter should have options to include healing per second, and if
+/// possible power provided per second").
+pub const DPS_METER_LAYOUT: u8 = 2;
 /// The meter, from a server the client asked: the fight of the player's group
 /// at most once a second while it changes, and once more as it ends (the server
 /// ends it 10 s after the group's last damage). [`DpsMeter`] has the layout.
@@ -689,14 +732,17 @@ pub const OP_DPS_METER_DATA: u16 = 0x7E3C;
 /// fight under way (nothing more is sent of it) and numbers its next another.
 pub const OP_DPS_METER_RESET: u16 = 0x7E3D;
 
-/// A fight on the meter ([`OP_DPS_METER_DATA`]): u8 layout (1), u32 its number
-/// (another number, another fight), u8 1 when it is over (its last message), u32
-/// its length in ms (from its first damage to its latest), u32 the damage of all
-/// its lines, u16 how many lines it has, u16 the player's own line's place among
-/// them (1 the most damage), u8 how many this message holds, then each
-/// [`DpsLine`].
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A fight on the meter ([`OP_DPS_METER_DATA`]): u8 layout (1 or 2), u32 its
+/// number (another number, another fight), u8 1 when it is over (its last
+/// message), u32 its length in ms (from its first damage to its latest), u32 the
+/// damage of all its lines, u16 how many lines it has, u16 the player's own
+/// line's place among them (1 the most damage); layout 2: u32 the healing of all
+/// its lines, u32 their power given, u16 the player's own place by healing, u16
+/// by power; then u8 how many lines this message holds, and each [`DpsLine`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DpsMeter {
+    /// The layout it came in: 1 has no healing or power (each 0).
+    pub layout: u8,
     pub fight: u32,
     pub over: bool,
     pub length_ms: u32,
@@ -708,12 +754,20 @@ pub struct DpsMeter {
     pub count: u16,
     /// The player's own line's place among all of them, 1 the most damage.
     pub place: u16,
+    /// Layout 2: the healing and the power given of every line, and the
+    /// player's own places by each (1 the most).
+    pub heal_total: u32,
+    pub power_total: u32,
+    pub heal_place: u16,
+    pub power_place: u16,
     pub lines: Vec<DpsLine>,
 }
 
 /// A line of the meter: u8 flags (1 the player's own, 2 no longer in its group),
-/// u8 class, u32 damage (its pet's included), u32 its pet's share of that, and
-/// its name (a u8 byte count and UTF-8).
+/// u8 class, u32 damage (its pet's included), u32 its pet's share of that;
+/// layout 2: u32 its healing (what its heals restored, its pet's and merc's
+/// included), u32 their share of that, u32 the power it gave others; and its
+/// name (a u8 byte count and UTF-8).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DpsLine {
     pub own: bool,
@@ -721,24 +775,34 @@ pub struct DpsLine {
     pub class: u8,
     pub damage: u32,
     pub pet: u32,
+    pub heal: u32,
+    pub heal_pet: u32,
+    pub power: u32,
     pub name: String,
 }
 
-/// [`OP_DPS_METER_DATA`]'s body, or None when it is short or of another layout.
+/// [`OP_DPS_METER_DATA`]'s body, or None when it is short or of a layout this
+/// client does not read.
 fn read_dps_meter(r: &mut Reader) -> Option<DpsMeter> {
-    if r.u8() != 1 {
+    let layout = r.u8();
+    if !(1..=DPS_METER_LAYOUT).contains(&layout) {
         return None;
     }
     let (fight, over, length_ms, total, count, place) = (r.u32(), r.u8() == 1, r.u32(), r.u32(), r.u16(), r.u16());
+    let mut m = DpsMeter { layout, fight, over, length_ms, total, count, place, ..DpsMeter::default() };
+    if layout >= 2 {
+        (m.heal_total, m.power_total, m.heal_place, m.power_place) = (r.u32(), r.u32(), r.u16(), r.u16());
+    }
     let n = r.u8() as usize;
-    let mut lines = Vec::with_capacity(n);
+    m.lines = Vec::with_capacity(n);
     for _ in 0..n {
         let (flags, class, damage, pet) = (r.u8(), r.u8(), r.u32(), r.u32());
+        let (heal, heal_pet, power) = if layout >= 2 { (r.u32(), r.u32(), r.u32()) } else { (0, 0, 0) };
         let len = r.u8() as usize;
         let name = String::from_utf8_lossy(r.bytes(len)).into_owned();
-        lines.push(DpsLine { own: flags & 1 != 0, left: flags & 2 != 0, class, damage, pet, name });
+        m.lines.push(DpsLine { own: flags & 1 != 0, left: flags & 2 != 0, class, damage, pet, heal, heal_pet, power, name });
     }
-    (!r.error).then_some(DpsMeter { fight, over, length_ms, total, count, place, lines })
+    (!r.error).then_some(m)
 }
 /// go-eqoa-server's own, no retail message: a raid's windows (`raid`; a
 /// GM's petitions 1448 and 1451: the leader's mark, the loot rolls' pop-up,
@@ -815,15 +879,73 @@ fn read_pet_effects(r: &mut Reader) -> Option<Vec<PetEffect>> {
     (!r.error).then_some(out)
 }
 
-/// [`OP_GROUP_EFFECTS_DATA`]'s body, each member's id and icons, or None when
+/// One effect on a group member ([`OP_GROUP_EFFECTS_DATA`]): its icon, and
+/// from a version 2 set its milliseconds left ([`crate::buffs::NO_END`]: no
+/// end, or a version 1 set's, which carries none) and its name (empty in
+/// version 1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemberEffect {
+    pub icon: u32,
+    pub left_ms: u32,
+    pub name: String,
+}
+
+/// One of the player's effects on a creature ([`OP_NPC_DEBUFFS_DATA`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct NpcDebuff {
+    /// Its icon's DictID (UI.CSF's 32x32 surfaces).
+    pub icon: u32,
+    /// Whose it is ([`NPC_DEBUFF_MINE`], ...).
+    pub whose: u8,
+    /// What was left of it when the server sent it, in ms; [`crate::buffs::NO_END`]
+    /// for none (the wire's 0).
+    pub left_ms: u32,
+    pub name: String,
+}
+
+/// [`OP_NPC_DEBUFFS_DATA`]'s body, each creature's id and effects, or None when
 /// it is short.
-fn read_group_effects(r: &mut Reader) -> Option<Vec<(u32, Vec<u32>)>> {
+fn read_npc_debuffs(r: &mut Reader) -> Option<Vec<(u32, Vec<NpcDebuff>)>> {
     let n = r.u8() as usize;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         let id = r.u32();
         let k = r.u8() as usize;
-        out.push((id, (0..k).map(|_| r.u32()).collect()));
+        let mut fx = Vec::with_capacity(k);
+        for _ in 0..k {
+            let (icon, whose, left) = (r.u32(), r.u8(), r.u32());
+            let len = r.u8() as usize;
+            let name = String::from_utf8_lossy(r.bytes(len)).into_owned();
+            fx.push(NpcDebuff { icon, whose, left_ms: if left == 0 { crate::buffs::NO_END } else { left }, name });
+        }
+        out.push((id, fx));
+    }
+    (!r.error).then_some(out)
+}
+
+/// [`OP_GROUP_EFFECTS_DATA`]'s body in `version` (1 icons, 2 times and
+/// names too), each member's id and effects, or None when it is short.
+fn read_group_effects(r: &mut Reader, version: u32) -> Option<Vec<(u32, Vec<MemberEffect>)>> {
+    let n = r.u8() as usize;
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        let id = r.u32();
+        let k = r.u8() as usize;
+        let mut fx = Vec::with_capacity(k);
+        for _ in 0..k {
+            let icon = r.u32();
+            let (mut left_ms, mut name) = (crate::buffs::NO_END, String::new());
+            if version >= 2 {
+                left_ms = match r.u32() {
+                    0 => crate::buffs::NO_END,
+                    ms => ms,
+                };
+                let len = r.u8() as usize;
+                name = String::from_utf8_lossy(r.bytes(len)).into_owned();
+            }
+            fx.push(MemberEffect { icon, left_ms, name });
+        }
+        out.push((id, fx));
     }
     (!r.error).then_some(out)
 }
@@ -1590,19 +1712,33 @@ pub struct Session {
     pub pet_effects: Vec<PetEffect>,
     pub pet_effects_at: u32,
     /// The same for the group members' effects ([`OP_GROUP_EFFECTS`],
-    /// [`OP_GROUP_EFFECTS_DATA`]): each member's id and its icons
-    /// (`effects_of`).
+    /// [`OP_GROUP_EFFECTS_DATA`]): each member's id and its effects
+    /// (`effects_of`), counted down from when they came; and the version the
+    /// server offered and the one this client answered, which its sets are in.
     pub group_effects_offer: bool,
     group_effects_asked: Option<bool>,
-    pub group_effects: Vec<(u32, Vec<u32>)>,
+    pub group_effects: Vec<(u32, Vec<MemberEffect>)>,
+    pub group_effects_at: u32,
+    group_effects_offered: u32,
+    group_effects_version: u32,
+    /// The same for the player's effects on creatures ([`OP_NPC_DEBUFFS`],
+    /// [`OP_NPC_DEBUFFS_DATA`]): each creature's id and its effects, and when
+    /// (the session's clock) the set came, their time left counted down from
+    /// then (`npc_debuffs_left`).
+    pub npc_debuffs_offer: bool,
+    npc_debuffs_asked: Option<bool>,
+    pub npc_debuffs: Vec<(u32, Vec<NpcDebuff>)>,
+    pub npc_debuffs_at: u32,
     /// Whether the server offered the number tags ([`OP_NUMBER_TAGS_OFFER`])
     /// on this connection, and what it was last told (none since the offer).
     pub number_tags_offer: bool,
     /// The layout the offer named ([`OP_NUMBER_TAGS_OFFER`]).
     number_tags_layout: u8,
     number_tags_asked: Option<bool>,
-    /// The same for the damage meter ([`OP_DPS_METER_OFFER`]).
+    /// The same for the damage meter ([`OP_DPS_METER_OFFER`]), and the newest
+    /// layout it offered (2: healing and power too).
     pub dps_meter_offer: bool,
+    pub dps_meter_layout: u8,
     dps_meter_asked: Option<bool>,
     /// Whether the server offered the raid's windows ([`OP_RAID_OFFER`]) on
     /// this connection, and what it was last told (none since the offer).
@@ -1619,6 +1755,13 @@ pub struct Session {
     buffs_asked: Option<bool>,
     pub buffs: Vec<crate::buffs::Line>,
     pub buffs_at: u32,
+    /// Whether the server offered the Stat Window's offence and defence
+    /// figures ([`crate::statfig::OP_OFFER`]) on this connection, what it was
+    /// last told (none since the offer), and the figures it last sent
+    /// ([`crate::statfig::OP_FIGURES`]).
+    pub stat_figures_offer: bool,
+    stat_figures_asked: Option<bool>,
+    pub stat_figures: crate::statfig::Figures,
     /// Whether the server offered the quest marks over the NPCs' heads
     /// ([`crate::headmarks::OP_OFFER`]) on this connection, what it was last
     /// told (none since the offer), and the marks it last sent
@@ -1836,10 +1979,18 @@ impl Session {
             group_effects_offer: false,
             group_effects_asked: None,
             group_effects: Vec::new(),
+            group_effects_at: 0,
+            group_effects_offered: 0,
+            group_effects_version: 1,
+            npc_debuffs_offer: false,
+            npc_debuffs_asked: None,
+            npc_debuffs: Vec::new(),
+            npc_debuffs_at: 0,
             number_tags_offer: false,
             number_tags_layout: 0,
             number_tags_asked: None,
             dps_meter_offer: false,
+            dps_meter_layout: 0,
             dps_meter_asked: None,
             raid_offer: false,
             raid_asked: None,
@@ -1849,6 +2000,9 @@ impl Session {
             buffs_asked: None,
             buffs: Vec::new(),
             buffs_at: 0,
+            stat_figures_offer: false,
+            stat_figures_asked: None,
+            stat_figures: Default::default(),
             head_marks_offer: false,
             head_marks_asked: None,
             head_marks: Default::default(),
@@ -2151,8 +2305,9 @@ impl Session {
 
     /// Group Effects: a server that offered the members' effects
     /// ([`OP_GROUP_EFFECTS`]) is told whether to send them (`want`), as
-    /// [`Session::agree_pet_effects`] tells it of the pet's. Off, the set it
-    /// sent is forgotten.
+    /// [`Session::agree_pet_effects`] tells it of the pet's: wanted, with the
+    /// version it reads (the offer's, at most [`GROUP_EFFECTS_VERSION`]: a
+    /// server offering 1 is answered 1). Off, the set it sent is forgotten.
     pub fn agree_group_effects(&mut self, want: bool) {
         if !want {
             self.group_effects.clear();
@@ -2161,13 +2316,63 @@ impl Session {
             return;
         }
         self.group_effects_asked = Some(want);
-        self.send_op_int(OP_GROUP_EFFECTS, want as u32);
+        let version = self.group_effects_offered.clamp(1, GROUP_EFFECTS_VERSION);
+        if want {
+            self.group_effects_version = version;
+        }
+        self.send_op_int(OP_GROUP_EFFECTS, if want { version } else { 0 });
     }
 
-    /// The icons of the effects on group member `id` (as the roster names it)
-    /// the server last sent, in their order; none for a member it sent none of.
-    pub fn effects_of(&self, id: u32) -> &[u32] {
-        self.group_effects.iter().find(|(i, _)| *i == id).map_or(&[], |(_, icons)| icons.as_slice())
+    /// Debuff Icons: a server that offered the player's effects on creatures
+    /// ([`OP_NPC_DEBUFFS`]) is told whether to send them (`want`), as
+    /// [`Session::agree_group_effects`] tells it of the members'. Off, the set
+    /// it sent is forgotten.
+    pub fn agree_npc_debuffs(&mut self, want: bool) {
+        if !want {
+            self.npc_debuffs.clear();
+        }
+        if !self.npc_debuffs_offer || self.npc_debuffs_asked == Some(want) {
+            return;
+        }
+        self.npc_debuffs_asked = Some(want);
+        self.send_op_int(OP_NPC_DEBUFFS, want as u32);
+    }
+
+    /// The player's effects on creature `id` (as the entity channels name it)
+    /// the server last sent that are not over at `now` (`now`'s clock): each its
+    /// icon and the ms left of it ([`crate::buffs::NO_END`] for no end), in their
+    /// order; none for a creature it sent none of.
+    pub fn npc_debuffs_left(&self, id: u32, now: u32) -> Vec<(u32, u32)> {
+        self.npc_debuffs_of(id, now).into_iter().map(|e| (e.icon, e.left_ms)).collect()
+    }
+
+    /// [`Session::npc_debuffs_left`] whole: each effect as the server sent it
+    /// (its name too, for the target box's, petition 3020), its `left_ms` what
+    /// is left of it at `now`.
+    pub fn npc_debuffs_of(&self, id: u32, now: u32) -> Vec<NpcDebuff> {
+        let Some((_, fx)) = self.npc_debuffs.iter().find(|(i, _)| *i == id) else { return Vec::new() };
+        let gone = now.wrapping_sub(self.npc_debuffs_at);
+        // a clock read before the set came (none: it is read after) counts as no time gone
+        let gone = if (gone as i32) < 0 { 0 } else { gone };
+        fx.iter()
+            .filter(|e| e.left_ms == crate::buffs::NO_END || e.left_ms > gone)
+            .map(|e| NpcDebuff { left_ms: if e.left_ms == crate::buffs::NO_END { e.left_ms } else { e.left_ms - gone }, ..e.clone() })
+            .collect()
+    }
+
+    /// The effects on group member `id` (as the roster names it) the server
+    /// last sent that are not over at `now` (`now`'s clock), in their order,
+    /// each with what is left of it then (one with no end, or from a version 1
+    /// set, [`crate::buffs::NO_END`]); none for a member it sent none of.
+    pub fn effects_of(&self, id: u32, now: u32) -> Vec<MemberEffect> {
+        let gone = now.wrapping_sub(self.group_effects_at);
+        // a clock read before the set came counts as no time gone
+        let gone = if (gone as i32) < 0 { 0 } else { gone };
+        let Some((_, fx)) = self.group_effects.iter().find(|(i, _)| *i == id) else { return Vec::new() };
+        fx.iter()
+            .filter(|e| e.left_ms == crate::buffs::NO_END || e.left_ms > gone)
+            .map(|e| MemberEffect { left_ms: if e.left_ms == crate::buffs::NO_END { e.left_ms } else { e.left_ms - gone }, ..e.clone() })
+            .collect()
     }
 
     /// Number Colors: a server that offered the number tags
@@ -2196,7 +2401,7 @@ impl Session {
         }
         self.dps_meter_asked = Some(want);
         let mut w = Writer::op(OP_DPS_METER_ANSWER);
-        w.u8(want as u8);
+        w.u8(if want { self.dps_meter_layout.clamp(1, DPS_METER_LAYOUT) } else { 0 });
         self.send(&w.data);
     }
 
@@ -2264,6 +2469,22 @@ impl Session {
             return None;
         }
         self.head_marks.get(&id).copied()
+    }
+
+    /// The Stat Window's figures: a server that offered them
+    /// ([`crate::statfig::OP_OFFER`]) is told whether to send them (`want`:
+    /// the window open), at once and whenever that changes, and afresh at
+    /// another offer; one that made no offer is told nothing. Off, the
+    /// figures it sent are forgotten.
+    pub fn agree_stat_figures(&mut self, want: bool) {
+        if !want {
+            self.stat_figures = Default::default();
+        }
+        if !self.stat_figures_offer || self.stat_figures_asked == Some(want) {
+            return;
+        }
+        self.stat_figures_asked = Some(want);
+        self.send(&crate::statfig::answer(want));
     }
 
     /// Whether the server sends the buff window's set (offered and asked).
@@ -2724,17 +2945,25 @@ impl Session {
                 self.pet_effects_asked = None;
                 self.pet_effects.clear();
                 self.group_effects_offer = false;
+                self.group_effects_offered = 0;
                 self.group_effects_asked = None;
                 self.group_effects.clear();
+                self.npc_debuffs_offer = false;
+                self.npc_debuffs_asked = None;
+                self.npc_debuffs.clear();
                 self.buffs_offer = false;
                 self.buffs_asked = None;
                 self.buffs.clear();
+                self.stat_figures_offer = false;
+                self.stat_figures_asked = None;
+                self.stat_figures = Default::default();
                 self.head_marks_offer = false;
                 self.head_marks_asked = None;
                 self.head_marks.clear();
                 self.number_tags_offer = false;
                 self.number_tags_asked = None;
                 self.dps_meter_offer = false;
+                self.dps_meter_layout = 0;
                 self.dps_meter_asked = None;
                 self.item_links_offer = false;
                 self.item_links_asked = None;
@@ -3413,15 +3642,33 @@ impl Session {
             // the members' effects offered (again at every world entry), as
             // the pet's: told afresh what the client wants (`agree_group_effects`)
             OP_GROUP_EFFECTS => {
-                r.u32();
+                let offered = r.u32();
                 if !r.error {
                     self.group_effects_offer = true;
+                    self.group_effects_offered = offered;
                     self.group_effects_asked = None;
                 }
             }
             OP_GROUP_EFFECTS_DATA => {
-                if let Some(set) = read_group_effects(&mut r) {
+                if let Some(set) = read_group_effects(&mut r, self.group_effects_version) {
                     self.group_effects = set;
+                    self.group_effects_at = self.now();
+                }
+            }
+            // the player's effects on creatures offered (again at every world
+            // entry), as the members': told afresh what the client wants
+            // (`agree_npc_debuffs`)
+            OP_NPC_DEBUFFS => {
+                r.u32();
+                if !r.error {
+                    self.npc_debuffs_offer = true;
+                    self.npc_debuffs_asked = None;
+                }
+            }
+            OP_NPC_DEBUFFS_DATA => {
+                if let Some(set) = read_npc_debuffs(&mut r) {
+                    self.npc_debuffs = set;
+                    self.npc_debuffs_at = self.now();
                 }
             }
             // the number tags offered (again at every world entry): told
@@ -3437,9 +3684,10 @@ impl Session {
             // the damage meter offered (again at every world entry): told
             // afresh whether the client wants it (`agree_dps_meter`)
             OP_DPS_METER_OFFER => {
-                r.u8();
+                let layout = r.u8();
                 if !r.error {
                     self.dps_meter_offer = true;
+                    self.dps_meter_layout = layout;
                     self.dps_meter_asked = None;
                 }
             }
@@ -3475,6 +3723,21 @@ impl Session {
                     self.buffs_asked = None;
                 }
             }
+            // the Stat Window's figures offered (again at every world entry),
+            // in the layout this client reads: told afresh whether its window
+            // is open (`agree_stat_figures`); another layout is no offer
+            crate::statfig::OP_OFFER => {
+                let layout = r.u8();
+                if !r.error && layout == crate::statfig::LAYOUT {
+                    self.stat_figures_offer = true;
+                    self.stat_figures_asked = None;
+                }
+            }
+            crate::statfig::OP_FIGURES => match crate::statfig::read(&m.data[2.min(m.data.len())..]) {
+                Some(f) if self.stat_figures_asked == Some(true) => self.stat_figures = f,
+                Some(_) => {}
+                None => eprintln!("net: stat figures of {} bytes not read", m.data.len()),
+            },
             // the quest marks over the NPCs' heads offered (again at every
             // world entry), in the layout this client reads: told afresh
             // whether the client wants them (`agree_head_marks`); another
@@ -5396,6 +5659,7 @@ mod tests {
         s.agree_group_effects(true);
         assert_eq!(answers(&mut s), [(251, vec![0xC0, 0x7E, 1, 0, 0, 0])], "asked once");
 
+        let icons = |s: &Session, id: u32| -> Vec<u32> { s.effects_of(id, s.group_effects_at).iter().map(|e| e.icon).collect() };
         let member = |m: &mut Vec<u8>, id: u32, icons: &[u32]| {
             m.extend_from_slice(&id.to_le_bytes());
             m.push(icons.len() as u8);
@@ -5407,12 +5671,13 @@ mod tests {
         member(&mut m, 100_001, &[0xA1B2_C3D4, 0x0BAD_F00D]);
         member(&mut m, 0x8000_1234, &[]);
         deliver(&mut s, drdp::TYPE_GUARANTEED, m.clone());
-        assert_eq!(s.effects_of(100_001), [0xA1B2_C3D4, 0x0BAD_F00D], "in their order");
-        assert_eq!(s.effects_of(0x8000_1234), [] as [u32; 0], "a bare member");
-        assert_eq!(s.effects_of(7), [] as [u32; 0], "the control: one it left out has none");
+        assert_eq!(icons(&s, 100_001), [0xA1B2_C3D4, 0x0BAD_F00D], "in their order");
+        assert!(s.effects_of(100_001, s.group_effects_at + 3_600_000).iter().all(|e| e.left_ms == crate::buffs::NO_END && e.name.is_empty()), "version 1: no time, no name, never over");
+        assert_eq!(icons(&s, 0x8000_1234), [] as [u32; 0], "a bare member");
+        assert_eq!(icons(&s, 7), [] as [u32; 0], "the control: one it left out has none");
         deliver(&mut s, drdp::TYPE_GUARANTEED, m[..m.len() - 3].to_vec());
         assert_eq!(s.group_effects.len(), 2, "a short set is not taken");
-        assert_eq!(s.effects_of(100_001).len(), 2, "and the last kept");
+        assert_eq!(icons(&s, 100_001).len(), 2, "and the last kept");
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xC1, 0x7E, 0]);
         assert!(s.group_effects.is_empty(), "out of the group: an empty set");
         deliver(&mut s, drdp::TYPE_GUARANTEED, m);
@@ -5426,6 +5691,121 @@ mod tests {
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xC0, 0x7E, 1, 0, 0, 0]);
         s.agree_group_effects(true);
         assert_eq!(answers(&mut s), [(251, vec![0xC0, 0x7E, 1, 0, 0, 0])], "its offer answered");
+    }
+
+
+    // Version 2 of the members' effects (petition 2962): an offer of 2
+    // answered 2, a set read with each icon's time left and name (0: no end),
+    // counted down from when it came and an effect over left out, one with no
+    // end kept; a short version 2 set not taken. The control: a server
+    // offering 1 is answered 1 (above, `group_effects_offer_answer_and_set`),
+    // and an offer past what this client reads is answered with its newest.
+    #[test]
+    fn group_effects_version_2_names_and_times() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(_, d)| d.starts_with(&[0xC0, 0x7E])).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xC0, 0x7E, 2, 0, 0, 0]);
+        s.agree_group_effects(true);
+        assert_eq!(answers(&mut s), [(251, vec![0xC0, 0x7E, 2, 0, 0, 0])], "offered 2, answered 2");
+
+        let fx = |m: &mut Vec<u8>, icon: u32, left: u32, name: &str| {
+            m.extend_from_slice(&icon.to_le_bytes());
+            m.extend_from_slice(&left.to_le_bytes());
+            m.push(name.len() as u8);
+            m.extend_from_slice(name.as_bytes());
+        };
+        let mut m = vec![0xC1, 0x7E, 1];
+        m.extend_from_slice(&100_001u32.to_le_bytes());
+        m.push(3);
+        fx(&mut m, 0xA1B2_C3D4, 90_000, "Courage");
+        fx(&mut m, 0x0BAD_F00D, 5_000, "Breeze");
+        fx(&mut m, 0x99, 0, "Marked");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, m.clone());
+        let at = s.group_effects_at;
+        let e = s.effects_of(100_001, at);
+        assert_eq!(e.iter().map(|e| (e.icon, e.left_ms, e.name.as_str())).collect::<Vec<_>>(),
+            [(0xA1B2_C3D4, 90_000, "Courage"), (0x0BAD_F00D, 5_000, "Breeze"), (0x99, crate::buffs::NO_END, "Marked")], "names and times, 0 no end");
+        let later = s.effects_of(100_001, at + 6_000);
+        assert_eq!(later.iter().map(|e| (e.icon, e.left_ms)).collect::<Vec<_>>(), [(0xA1B2_C3D4, 84_000), (0x99, crate::buffs::NO_END)], "counted down, Breeze over");
+        assert_eq!(s.effects_of(100_001, at.wrapping_sub(1_000))[0].left_ms, 90_000, "a clock before the set: no time gone");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, m[..m.len() - 2].to_vec());
+        assert_eq!(s.effects_of(100_001, at).len(), 3, "a short set not taken, the last kept");
+
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xC0, 0x7E, 9, 0, 0, 0]);
+        s.agree_group_effects(true);
+        assert_eq!(answers(&mut s), [(251, vec![0xC0, 0x7E, 2, 0, 0, 0])], "offered 9: answered the newest it reads");
+    }
+
+    // The player's effects on creatures (go-eqoa-server's 0x7EC2/0x7EC3):
+    // nothing asked with no offer (the control); an offer answered once; a set
+    // read whole (the wire's 0 as no end), each creature's effects counted down
+    // from when it came, one over left out, a creature it left out with none; a
+    // short set not taken; off, stopped and forgotten; a new connection asks
+    // nothing until it is offered again.
+    #[test]
+    fn npc_debuffs_offer_answer_and_set() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(_, d)| d.starts_with(&[0xC2, 0x7E])).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        s.agree_npc_debuffs(true);
+        assert_eq!(answers(&mut s), [], "no offer, nothing asked");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xC2, 0x7E, 1, 0, 0, 0]);
+        s.agree_npc_debuffs(true);
+        s.agree_npc_debuffs(true);
+        assert_eq!(answers(&mut s), [(251, vec![0xC2, 0x7E, 1, 0, 0, 0])], "asked once");
+
+        let fx = |m: &mut Vec<u8>, icon: u32, whose: u8, left: u32, name: &str| {
+            m.extend_from_slice(&icon.to_le_bytes());
+            m.push(whose);
+            m.extend_from_slice(&left.to_le_bytes());
+            m.push(name.len() as u8);
+            m.extend_from_slice(name.as_bytes());
+        };
+        let mut m = vec![0xC3, 0x7E, 2];
+        m.extend_from_slice(&0x0133_E8A0u32.to_le_bytes());
+        m.push(3);
+        fx(&mut m, 0xA1B2_C3D4, NPC_DEBUFF_MINE, 50_000, "Weaken");
+        fx(&mut m, 0x0BAD_F00D, NPC_DEBUFF_PET, 900, "Pet Rot");
+        fx(&mut m, 0x0000_0042, NPC_DEBUFF_MERC, 0, "Forever");
+        m.extend_from_slice(&0x0200_0001u32.to_le_bytes());
+        m.push(0);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, m.clone());
+        let at = s.npc_debuffs_at;
+        let no_end = crate::buffs::NO_END;
+        assert_eq!(s.npc_debuffs[0].1[0].name, "Weaken");
+        assert_eq!(s.npc_debuffs_left(0x0133_E8A0, at), [(0xA1B2_C3D4, 50_000), (0x0BAD_F00D, 900), (0x42, no_end)], "as it came, 0 no end");
+        assert_eq!(s.npc_debuffs_left(0x0133_E8A0, at.wrapping_add(400)), [(0xA1B2_C3D4, 49_600), (0x0BAD_F00D, 500), (0x42, no_end)], "counted down");
+        assert_eq!(s.npc_debuffs_left(0x0133_E8A0, at.wrapping_add(900)), [(0xA1B2_C3D4, 49_100), (0x42, no_end)], "one over");
+        assert_eq!(s.npc_debuffs_left(0x0133_E8A0, at.wrapping_sub(5)), [(0xA1B2_C3D4, 50_000), (0x0BAD_F00D, 900), (0x42, no_end)], "a clock from before it: no time gone");
+        assert_eq!(s.npc_debuffs_left(0x0200_0001, at), [], "a bare creature");
+        assert_eq!(s.npc_debuffs_left(7, at), [], "the control: one it left out has none");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, m[..m.len() - 3].to_vec());
+        assert_eq!(s.npc_debuffs.len(), 2, "a short set is not taken");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xC3, 0x7E, 0]);
+        assert!(s.npc_debuffs.is_empty(), "every effect over: an empty set");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, m);
+        s.agree_npc_debuffs(false);
+        assert_eq!(answers(&mut s), [(251, vec![0xC2, 0x7E, 0, 0, 0, 0])], "and stopped");
+        assert!(s.npc_debuffs.is_empty(), "off: the set forgotten");
+
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        s.agree_npc_debuffs(true);
+        assert_eq!(answers(&mut s), [], "a new connection: nothing asked before its offer");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xC2, 0x7E, 1, 0, 0, 0]);
+        s.agree_npc_debuffs(true);
+        assert_eq!(answers(&mut s), [(251, vec![0xC2, 0x7E, 1, 0, 0, 0])], "its offer answered");
     }
 
     // The number tags (go-eqoa-server's 0x7E38/0x7E39): nothing asked with no
@@ -5779,6 +6159,7 @@ mod tests {
         m.extend_from_slice(&body);
         let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m.clone());
         let want = DpsMeter {
+            layout: 1,
             fight: 0x0102_0304,
             over: true,
             length_ms: 1500,
@@ -5786,17 +6167,51 @@ mod tests {
             count: 2,
             place: 1,
             lines: vec![
-                DpsLine { own: true, left: false, class: 3, damage: 1000, pet: 0, name: "Dab".into() },
-                DpsLine { own: false, left: true, class: 10, damage: 300, pet: 120, name: "Jib".into() },
+                DpsLine { own: true, left: false, class: 3, damage: 1000, pet: 0, name: "Dab".into(), ..Default::default() },
+                DpsLine { own: false, left: true, class: 10, damage: 300, pet: 120, name: "Jib".into(), ..Default::default() },
             ],
+            ..Default::default()
         };
         assert!(matches!(&ev[..], [Event::DpsMeter(got)] if *got == want), "{ev:?}");
         let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m[..m.len() - 1].to_vec());
         assert!(!ev.iter().any(|e| matches!(e, Event::DpsMeter(_))), "cut short: {ev:?}");
         let mut other = m.clone();
-        other[2] = 2;
+        other[2] = 3;
         let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, other);
         assert!(!ev.iter().any(|e| matches!(e, Event::DpsMeter(_))), "another layout: {ev:?}");
+
+        // layout 2 (go-eqoa-server's TestDPSMeterLayoutTwoOnTheWire's bytes):
+        // the healing and power of all, the own places by each, each line's
+        // healing, its pet's share and its power
+        let body2 = [
+            2, 4, 3, 2, 1, 1, 0xDC, 5, 0, 0, 0x14, 5, 0, 0, 2, 0, 1, 0, 0xB6, 3, 0, 0, 40, 0, 0, 0, 2, 0, 2, 0, 2, //
+            1, 3, 0xE8, 3, 0, 0, 0, 0, 0, 0, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, b'D', b'a', b'b', //
+            2, 9, 0x2C, 1, 0, 0, 0x78, 0, 0, 0, 0x84, 3, 0, 0, 100, 0, 0, 0, 40, 0, 0, 0, 3, b'J', b'i', b'b',
+        ];
+        let mut m2 = vec![0x3C, 0x7E];
+        m2.extend_from_slice(&body2);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m2.clone());
+        let want2 = DpsMeter {
+            layout: 2,
+            fight: 0x0102_0304,
+            over: true,
+            length_ms: 1500,
+            total: 1300,
+            count: 2,
+            place: 1,
+            heal_total: 950,
+            power_total: 40,
+            heal_place: 2,
+            power_place: 2,
+            lines: vec![
+                DpsLine { own: true, left: false, class: 3, damage: 1000, pet: 0, heal: 50, heal_pet: 0, power: 0, name: "Dab".into() },
+                DpsLine { own: false, left: true, class: 9, damage: 300, pet: 120, heal: 900, heal_pet: 100, power: 40, name: "Jib".into() },
+            ],
+        };
+        assert!(matches!(&ev[..], [Event::DpsMeter(got)] if *got == want2), "layout 2: {ev:?}");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m2[..m2.len() - 1].to_vec());
+        assert!(!ev.iter().any(|e| matches!(e, Event::DpsMeter(_))), "layout 2 cut short: {ev:?}");
+
 
         // the offer again (the next world entry): told afresh
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x3A, 0x7E, 1]);
@@ -5806,6 +6221,63 @@ mod tests {
         assert!(!s.dps_meter_offer, "a new connection: no offer");
         s.agree_dps_meter(true);
         assert!(!s.reset_dps_meter());
+        assert_eq!(answers(&mut s), [], "a new connection: nothing asked before its offer");
+    }
+
+    // The DPS meter's answer names the layout offered, at most this client's
+    // newest (DPS_METER_LAYOUT): a server of layout 1 is answered 1, of 2 2, of
+    // a later one 2; off is 0 whatever was offered. A fresh connection each.
+    #[test]
+    fn dps_meter_answer_names_the_layout_offered() {
+        for (offer, answer) in [(1u8, 1u8), (2, 2), (9, DPS_METER_LAYOUT)] {
+            let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+            deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x3A, 0x7E, offer]);
+            assert_eq!(s.dps_meter_layout, offer);
+            s.agree_dps_meter(true);
+            s.flush();
+            let got: Vec<_> = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(_, d)| d.len() >= 2 && d[1] == 0x7E && d[0] == 0x3B).collect();
+            assert_eq!(got, [(251, vec![0x3B, 0x7E, answer])], "offered {offer}");
+        }
+    }
+
+    // The Stat Window's figures (go-eqoa-server's 0x7E84/0x7E85): nothing
+    // asked with no offer; an offer of another layout is none; an offer
+    // answered with whether the window is open, again only when that changes;
+    // the figures taken only while asked, forgotten when closed; a new
+    // connection asks nothing until it is offered again.
+    #[test]
+    fn stat_figures_offer_answer_and_figures() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(_, d)| d.len() >= 2 && d[1] == 0x7E && d[0] == 0x84).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        let figures = vec![0x85, 0x7E, 4, 1, 12, 0, 0, 0, 2, 31, 0, 0, 0, 5, 4, 0, 0, 0, 6, 17, 0, 0, 0];
+        s.agree_stat_figures(true);
+        assert_eq!(answers(&mut s), [], "no offer, nothing asked");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x84, 0x7E, 2]);
+        assert!(!s.stat_figures_offer, "another layout is no offer");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x84, 0x7E, 1]);
+        assert!(s.stat_figures_offer);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, figures.clone());
+        assert!(!s.stat_figures.any(), "not asked: not taken");
+        s.agree_stat_figures(false);
+        assert_eq!(answers(&mut s), [(251, vec![0x84, 0x7E, 0])], "closed: told at once, 0");
+        s.agree_stat_figures(true);
+        s.agree_stat_figures(true);
+        assert_eq!(answers(&mut s), [(251, vec![0x84, 0x7E, 1])], "open: asked once");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, figures.clone());
+        assert_eq!((s.stat_figures.melee, s.stat_figures.ranged, s.stat_figures.defence), (Some([12, 31]), None, Some([4, 17])));
+        s.agree_stat_figures(false);
+        assert!(!s.stat_figures.any(), "closed: forgotten");
+        assert_eq!(answers(&mut s), [(251, vec![0x84, 0x7E, 0])]);
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert!(!s.stat_figures_offer, "a new connection: no offer");
+        s.agree_stat_figures(true);
         assert_eq!(answers(&mut s), [], "a new connection: nothing asked before its offer");
     }
 
