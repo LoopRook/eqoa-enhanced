@@ -1359,9 +1359,9 @@ mod mods {
         let page = r.p.bank.auction.page as i64;
         r.p.bank_opcode(0x1206, &page_reply(page, &[(501, 1, 400)]));
         r.settle();
-        r.tap(60.0, 96.0);
+        r.tap(60.0, 114.0);
         let n = sent().len();
-        r.tap(256.0, 248.0);
+        r.tap(256.0, 266.0);
         assert_eq!(sent().len(), n, "negative control: the click alone bids nothing; {}", r.why());
         let q = confirm::current_for_test().expect("the question is up");
         assert!(!q.yes && q.text.contains("Bid 10 tunar") && q.text.contains("buyout is 400"), "{}", q.text);
@@ -1372,7 +1372,7 @@ mod mods {
         // answered; buy now asks with its price
         r.p.bank.state = 0;
         r.settle();
-        r.tap(330.0, 248.0);
+        r.tap(330.0, 266.0);
         let q = confirm::current_for_test().expect("the buy now question is up");
         assert!(q.text.contains("Buy out") && q.text.contains("400"), "{}", q.text);
         assert_eq!(sent().len(), n + 1);
@@ -1936,5 +1936,238 @@ mod mods {
         assert_eq!(sent().len(), n + 2, "the text typed meanwhile was kept; {}", r.why());
         let last = sent().last().unwrap().clone();
         assert!(last.windows(3).any(|w| w == b"Cat"), "the second mail is to Cat: {last:?}");
+    }
+
+    // ---- owner's 2026-11-25 round: bank tunar in the Bag Viewer, class and race in the Auction, the header columns ----
+
+    /// A control of the Auction window, by label (window pixels).
+    fn au_hit(r: &Rig, label: &str) -> (f64, f64) {
+        bv_point(r, &format!("for _, h in ipairs(require('eqoa_auction_state').hits) do if h.label == '{label}' then return h.x + h.w / 2, h.y + h.h / 2 end end error('no control {label}')"))
+    }
+
+    fn au_query(kind: i32, p9c: u32, pa0: u32, pb4: i32) -> Query {
+        Query {
+            kind,
+            text: String::new(),
+            name: String::new(),
+            p9c,
+            pa0,
+            pa4: 1,
+            pa8: crate::s2::get().auction_max_level,
+            pac: 0,
+            pb0: 0x7FFF_FFFF,
+            pb4,
+            pb8: -1,
+            pbc: true,
+        }
+    }
+
+    #[test]
+    fn owner1125_auction_class_race_and_type_pickers_put_their_values_in_the_search() {
+        // (the picker's button, the row to pick (None: the first wear slot), what the game's own form would send)
+        for case in 0..3 {
+            let mut r = auction_rig_mod();
+            let mut want = r.p.bank.auction.clone();
+            let (button, pick, query) = match case {
+                0 => ("Class: Any class", "pick Cleric".to_string(), au_query(0, 1 << 9, 0xFFFF_FFFF, -2)),
+                1 => ("Race: Any race", "pick Dwarf".to_string(), au_query(0, 0xFFFF_FFFF, 1 << 4, -2)),
+                _ => {
+                    let (x, y) = au_hit(&r, "Type: Any type");
+                    r.press_px(x, y, "left", false);
+                    let first = state_of(&r, "return require('eqoa_auction_state').opts[2].label");
+                    r.press_px(x, y, "left", false); // the same button again closes the list
+                    ("Type: Any type", format!("pick {first}"), au_query(2, 0xFFFF_FFFF, 0xFFFF_FFFF, 1))
+                }
+            };
+            let (x, y) = au_hit(&r, button);
+            r.press_px(x, y, "left", false);
+            if case == 0 {
+                let labels = state_of(&r, "local t = {} for _, o in ipairs(require('eqoa_auction_state').opts) do t[#t + 1] = o.label end return table.concat(t, ',')");
+                assert!(labels.starts_with("Any class,"), "{labels}");
+                for name in ["Alchemist", "Bard", "Cleric", "Warrior", "Wizard"] {
+                    assert!(labels.contains(name), "{name} in {labels}");
+                }
+                assert_eq!(labels.split(',').filter(|l| !l.starts_with("Any") && !l.starts_with("My")).count(), 15, "{labels}");
+            }
+            let (x, y) = au_hit(&r, &pick);
+            r.press_px(x, y, "left", false);
+            let (x, y) = au_hit(&r, "Search");
+            r.press_px(x, y, "left", false);
+            let expected = want.search(query);
+            assert_eq!(sent(), vec![expected], "case {case} ({button} -> {pick}): the game form's own bytes; {}", r.why());
+        }
+    }
+
+    #[test]
+    fn owner1125_auction_header_columns_fit_their_titles_and_values_on_every_tab() {
+        let mut r = auction_rig_mod();
+        // the tabs: Search is the first, My lots and My bids the others (their own clicks)
+        for (tab, x) in [("search", 28.0), ("lots", 112.0), ("bids", 196.0)] {
+            r.tap(x, 28.0);
+            r.frames(2);
+            let ok = state_of(
+                &r,
+                &format!(
+                    "local L = require('eqoa_auction_state').layout['{tab}']; if not L then return 'no layout' end; \
+                     for i, c in ipairs(L) do \
+                       if c.w + 1e-6 < c.title_w or c.w + 1e-6 < c.value_w then return 'column ' .. i .. ' narrower than its text' end \
+                       if L[i + 1] and c.x + c.w > L[i + 1].x then return 'column ' .. i .. ' runs into the next' end \
+                     end; \
+                     if L.name_w < 40 then return 'no room for the name' end; return 'ok'"
+                ),
+            );
+            assert_eq!(ok, "ok", "{tab}: {}", r.why());
+        }
+        // the Search tab's own title that ran into the next one: wider than the 60 pixels it used to get
+        r.tap(28.0, 28.0);
+        r.frames(2);
+        assert_eq!(state_of(&r, "return tostring(require('eqoa_auction_state').layout.search[2].w > 60)"), "true");
+    }
+
+    fn bm_hit(r: &Rig, label: &str) -> (f64, f64) {
+        bv_point(r, &format!("for _, h in ipairs(require('bags').action_hits) do if h.label == '{label}' then return h.x + h.w / 2, h.y + h.h / 2 end end error('no action {label}')"))
+    }
+
+    fn bm_text(r: &Rig) -> String {
+        state_of(r, "return require('bank_money_state').text")
+    }
+
+    fn bm_result(r: &Rig) -> String {
+        state_of(r, "local x = require('bags').result; return x and x.text or ''")
+    }
+
+    fn bm_amounts(r: &Rig) -> String {
+        state_of(r, "return eqoa.inventory.get().money .. '/' .. eqoa.bank.get().money")
+    }
+
+    fn bm_calls(r: &Rig) -> String {
+        state_of(r, "return table.concat(bm_calls, ',')")
+    }
+
+    /// The Bag Viewer on its Bank tab with a banker near, carrying 1000 tunar and banking 500; `open`: the bank is open.
+    fn bank_money_rig(open: bool) -> Rig {
+        let mut r = rig_with("eqoa_bag_viewer", 318.0, 300.0, "shift+b", "b", |p| {
+            banker(p);
+            p.dump.player.p34 = 1000;
+            p.dump.player.p38 = 500;
+            p.dump.bank.items = net::dump::ItemList { p04: 0, items: vec![item(700_001, "Gold Ring", 21, 1)] };
+        });
+        r.settle();
+        r.host.execute("require('bags').select(6)").unwrap();
+        for _ in 0..6 {
+            r.settle();
+        }
+        if open {
+            bank_money_open(&mut r);
+        }
+        r.host
+            .execute(
+                "bm_calls = {}; local a = eqoa.actions; local real = a.bank_money; \
+                 a.bank_money = function(d, n) bm_calls[#bm_calls + 1] = d .. ':' .. n; return real(d, n) end",
+            )
+            .unwrap();
+        r
+    }
+
+    fn bank_money_open(r: &mut Rig) {
+        let (x, y) = bm_hit(r, "Open bank");
+        r.press_px(x, y, "left", false);
+        r.settle();
+        r.p.bank_opcode(0x124D, &[]);
+        for _ in 0..6 {
+            r.settle();
+        }
+        assert_eq!(state_of(r, "return tostring(eqoa.bank.get().open)"), "true", "the bank is open; {}", r.why());
+    }
+
+    fn bm_type(r: &mut Rig, text: &str) {
+        let (x, y) = bm_hit(r, "Tunar amount");
+        r.press_px(x, y, "left", false);
+        for _ in 0..12 {
+            r.key("backspace", "");
+        }
+        r.type_text(text);
+    }
+
+    #[test]
+    fn owner1125_bank_money_deposit_and_withdraw_send_the_typed_amount_and_refuse_too_much() {
+        let mut r = bank_money_rig(true);
+        assert_eq!(bm_amounts(&r), "1000/500", "carried and banked, from the game's own state");
+        // an empty box: nothing is sent, the reason is shown
+        let (x, y) = bm_hit(&r, "Deposit tunar");
+        r.press_px(x, y, "left", false);
+        assert_eq!(bm_calls(&r), "", "an empty amount sends nothing");
+        assert!(bm_result(&r).contains("type an amount"), "{}", bm_result(&r));
+        // digits only
+        bm_type(&mut r, "1a2");
+        assert_eq!(bm_text(&r), "12", "letters are not taken");
+        // more than is carried: refused with the reason, nothing sent
+        bm_type(&mut r, "2000");
+        let (x, y) = bm_hit(&r, "Deposit tunar");
+        r.press_px(x, y, "left", false);
+        assert_eq!(bm_calls(&r), "", "more than carried sends nothing");
+        assert!(bm_result(&r).contains("you carry only 1,000"), "{}", bm_result(&r));
+        let (x, y) = bm_hit(&r, "Withdraw tunar");
+        r.press_px(x, y, "left", false);
+        assert_eq!(bm_calls(&r), "", "more than banked sends nothing");
+        assert!(bm_result(&r).contains("the bank holds only 500"), "{}", bm_result(&r));
+        // 250: the deposit goes, with that amount
+        bm_type(&mut r, "250");
+        let (x, y) = bm_hit(&r, "Deposit tunar");
+        r.press_px(x, y, "left", false);
+        assert_eq!(bm_calls(&r), "deposit:250", "{}", r.why());
+        assert_eq!(r.p.bank.state, 1, "the game's own 0x1255 went out; {}", r.why());
+        // the server's answer: the bank now holds 750 and the pack 750 (the game's own money events)
+        let mut w = Writer::default();
+        w.signed(750);
+        r.p.bank_opcode(0x1253, &w.data);
+        r.p.bags_tunar(750);
+        for _ in 0..3 {
+            r.settle();
+        }
+        assert_eq!(bm_amounts(&r), "750/750");
+        assert!(bm_result(&r).contains("Deposit 250 tunar"), "{}", bm_result(&r));
+        // the bank may have closed with the answer: open it again if so, then take everything out with All
+        if state_of(&r, "return tostring(eqoa.bank.get().open)") != "true" {
+            bank_money_open(&mut r);
+        }
+        let (x, y) = bm_hit(&r, "Withdraw all tunar");
+        r.press_px(x, y, "left", false);
+        assert_eq!(bm_calls(&r), "deposit:250,withdraw:750", "All withdraws the whole bank balance; {}", r.why());
+    }
+
+    #[test]
+    fn owner1125_bank_money_is_greyed_with_a_reason_while_the_bank_is_not_open() {
+        let mut r = bank_money_rig(false);
+        assert_eq!(state_of(&r, "return tostring(eqoa.bank.get().open)"), "false");
+        bm_type(&mut r, "10");
+        let (x, y) = bm_hit(&r, "Deposit tunar");
+        r.press_px(x, y, "left", false);
+        assert_eq!(bm_calls(&r), "", "a closed bank sends nothing");
+        assert!(bm_result(&r).contains("bank window is not open"), "{}", bm_result(&r));
+        let (x, y) = bm_hit(&r, "Withdraw all tunar");
+        r.press_px(x, y, "left", false);
+        assert_eq!(bm_calls(&r), "");
+        assert!(bm_result(&r).contains("bank window is not open"), "{}", bm_result(&r));
+    }
+
+    #[test]
+    fn owner1125_the_amount_box_takes_the_keyboard_only_while_typed_in() {
+        let mut r = bank_money_rig(true);
+        let other = Host::with_test_capabilities(&["eqoa.input.claim"]).unwrap();
+        let free = |o: &Host| -> bool { o.lua.load("local t = eqoa.input.claim('Enter', true); if t then eqoa.input.release(t) end; return t ~= nil").eval().unwrap() };
+        assert!(free(&other), "control: Enter is free before the box is used");
+        let (x, y) = bm_hit(&r, "Tunar amount");
+        r.press_px(x, y, "left", false);
+        r.frames(1);
+        assert!(!free(&other), "Enter is the Bag Viewer's while the amount is typed in");
+        r.key("escape", "");
+        assert!(free(&other), "Escape ended the typing: Enter is the game's again");
+        r.press_px(x, y, "left", false);
+        assert!(!free(&other));
+        // a click elsewhere in the window ends it too
+        let (gx, gy) = bag_slot(&r, 2);
+        r.press_px(gx, gy, "left", false);
+        assert!(free(&other), "a click elsewhere ended the typing");
     }
 }
