@@ -1650,8 +1650,10 @@ mod mods {
         // the client talks to the banker; the server's reply opens the bank hidden for the Bag Viewer
         r.settle();
         r.p.bank_opcode(0x124D, &[]);
-        r.settle();
-        r.frames(4);
+        // the game steps, as it does all the time: the form asks the client for what can be put up
+        for _ in 0..6 {
+            r.settle();
+        }
         assert_eq!(state_of(&r, "return tostring(require('auction_list').form and require('auction_list').form.mode)"), "form", "the form is up; {}", r.why());
         // the lowest price is filled in and shown; List it asks the client's question with it
         let n = sent().len();
@@ -1676,8 +1678,10 @@ mod mods {
         r.press_px(mx, my, "left", false);
         r.settle();
         r.p.bank_opcode(0x124D, &[]);
-        r.settle();
-        r.frames(4);
+        // the game steps, as it does all the time: the form asks the client for what can be put up
+        for _ in 0..6 {
+            r.settle();
+        }
         // a price under the item's value is not sent: the form says so
         let (px, py) = form_hit(&r, "price");
         r.press_px(px, py, "left", false);
@@ -1729,8 +1733,10 @@ mod mods {
         r.press_px(mx, my, "left", false);
         r.settle();
         r.p.bank_opcode(0x124D, &[]);
-        r.settle();
-        r.frames(4);
+        // the game steps, as it does all the time: the form asks the client for what can be put up
+        for _ in 0..6 {
+            r.settle();
+        }
         assert_eq!(state_of(&r, "return tostring(require('auction_list').form and require('auction_list').form.mode)"), "form", "the first form; {}", r.why());
         assert!(ws::any_open_of(&["auction_search"]), "the group opened the session itself");
         let n = sent().len();
@@ -1770,8 +1776,10 @@ mod mods {
         r.press_px(mx, my, "left", false);
         r.settle();
         r.p.bank_opcode(0x124D, &[]);
-        r.settle();
-        r.frames(4);
+        // the game steps, as it does all the time: the form asks the client for what can be put up
+        for _ in 0..6 {
+            r.settle();
+        }
         // a question of another mod is already up: the sale is refused busy; the form stays with its reason
         r.p.bank.state = 3;
         let (lx, ly) = form_hit(&r, "List it");
