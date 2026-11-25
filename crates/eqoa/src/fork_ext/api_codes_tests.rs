@@ -218,5 +218,6 @@ fn codes_held_for_now_is_busy() {
     assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
     p.fish.part.state = crate::fishing::state::WAITING;
     assert!(matches!(super::a11_play::dispatch(&mut p, &A11Action::FishCast), DispatchOutcome::Completed { .. }), "the control");
+    p.fish.wnd.cast(0); // the window's own meter starts (its next frame), as in the A11 test
     assert_eq!(code(super::a11_play::dispatch(&mut p, &A11Action::FishCast)), "busy", "A11: a cast under way");
 }
