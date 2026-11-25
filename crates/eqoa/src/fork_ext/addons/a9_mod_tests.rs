@@ -562,6 +562,29 @@ fn click_points(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, 
     out
 }
 
+/// Moves the pointer along a scan until the item is hovered, and stops there (for items whose whole rectangle is not
+/// the point of the test: the coin box takes its focus from the first place it is reached).
+fn hover_first(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, window: &str, label: &str) -> (f32, f32) {
+    let w = window_ptr(window).unwrap_or_else(|| panic!("window {window:?} is not drawn"));
+    let (pos, size, seed) = unsafe { ((*w).Pos, (*w).Size, (*w).ID) };
+    let label_c = std::ffi::CString::new(label).unwrap();
+    let want = unsafe { sys::igImHashStr(label_c.as_ptr(), 0, seed) };
+    let mut y = pos.y + 2.0;
+    while y < pos.y + size.y {
+        let mut x = pos.x + 2.0;
+        while x < pos.x + size.x {
+            ctx.io_mut().add_mouse_pos_event([x, y]);
+            frames(host, bridge, ctx, 1);
+            if unsafe { (*sys::igGetCurrentContext()).HoveredId } == want {
+                return (x, y);
+            }
+            x += 6.0;
+        }
+        y += 4.0;
+    }
+    panic!("no place in {window:?} hovers {label:?}");
+}
+
 /// Moves the pointer to the item's centre (a place that really hovers it).
 fn hover_item(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, window: &str, label: &str) -> (f32, f32) {
     let scan = hovered_points(host, bridge, ctx, window, label);
@@ -587,7 +610,7 @@ fn a9_trade_mod_set_button_sends_what_was_typed_by_a_real_click() {
     hold(vm, TakeoverKind::Trade);
     frames(&host, &bridge, &mut ctx, 3);
     // the coin box: click it, type 500
-    hover_item(&host, &bridge, &mut ctx, TRADE_WIN, "##coins");
+    hover_first(&host, &bridge, &mut ctx, TRADE_WIN, "##coins");
     click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Left);
     for c in "500".chars() {
         ctx.io_mut().add_input_character(c);
@@ -596,7 +619,7 @@ fn a9_trade_mod_set_button_sends_what_was_typed_by_a_real_click() {
     assert_eq!(host.lua.load("return require('tradeui').state.money_text").eval::<String>().unwrap(), "500");
     assert!(queued().is_empty(), "typing offers nothing");
     // the click on Set: the box loses the keyboard on the press, the button fires on the release
-    hover_item(&host, &bridge, &mut ctx, TRADE_WIN, "Set##coins_set");
+    hover_first(&host, &bridge, &mut ctx, TRADE_WIN, "Set##coins_set");
     click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Left);
     assert_eq!(queued(), vec!["trade_money"], "Set sends the offer");
     assert_eq!(host.lua.load("return require('tradeui').state.last_money_sent").eval::<i64>().unwrap(), 500, "the typed amount, not the current offer (120)");
