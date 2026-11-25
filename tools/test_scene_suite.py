@@ -54,7 +54,7 @@ class SceneSuiteToolTests(unittest.TestCase):
     def test_scene_ids_select_by_digit_prefix(self):
         wanted = {"5"}
         for number, picked in (("5a", True), ("5b", True), ("6", False), ("1", False)):
-            self.assertEqual(number in wanted or number.rstrip("abc") in wanted, picked)
+            self.assertEqual(number in wanted or number.rstrip("abcd") in wanted, picked)
 
     def test_screenshot_checks_tell_a_window_from_the_world(self):
         try:
@@ -83,6 +83,36 @@ class SceneSuiteToolTests(unittest.TestCase):
         self.assertEqual(ss.hud_stats(chr(10).join([line, line.replace("hud 0.40", "hud 0.60")])), 0.5)
         self.assertEqual(ss.hud_stats(line.replace(", hud 0.40", "")), 0.0)
         self.assertIsNone(ss.hud_stats("no perf lines"))
+
+    def test_green_marks_are_counted_and_a_plain_panel_has_none(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow is not installed")
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            plain, marked = Path(d) / "plain.png", Path(d) / "marked.png"
+            Image.new("RGB", (100, 40), (17, 17, 17)).save(plain)
+            img = Image.new("RGB", (100, 40), (17, 17, 17))
+            img.paste(Image.new("RGB", (60, 20), (40, 170, 60)), (20, 10))
+            img.save(marked)
+            box = (0, 0, 100, 40)
+            self.assertEqual(ss.green_pixels(plain, box), 0)          # negative control: no mark
+            self.assertEqual(ss.green_pixels(marked, box), 60 * 20)
+            self.assertIsNone(ss.green_pixels(Path(d) / "missing.png", box))
+
+    def test_the_handin_fixture_writes_one_give_step_with_the_answers_as_lines(self):
+        import sqlite3
+        import scenes
+        db = sqlite3.connect(":memory:")
+        db.execute("CREATE TABLE quests (questid, name, enabled, giver, source)")
+        db.execute("CREATE TABLE queststeps (questid, step, kind, target, items, count, journal, answer, says, waiting, reminder)")
+        db.execute("CREATE TABLE charquests (serverid, questid, step, count, done, slot, updated, picks)")
+        scenes.handin_seed("Hand over the Bracer Test", "Goodbye")(db)
+        row = db.execute("SELECT kind, items, journal, answer FROM queststeps").fetchone()
+        self.assertEqual(row, ("give", "8570", "Bracer Test", "Hand over the Bracer Test" + chr(10) + "Goodbye"))
+        self.assertEqual(db.execute("SELECT questid, step FROM charquests").fetchall(), [(990001, 1)])
 
 
 if __name__ == "__main__":
