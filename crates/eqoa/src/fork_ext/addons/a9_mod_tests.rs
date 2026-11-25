@@ -549,7 +549,7 @@ fn click_points(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, 
         let mut sorted = hits.clone();
         sorted.sort_by(|a, b| ((a.0 - tx).powi(2) + (a.1 - ty).powi(2)).total_cmp(&((b.0 - tx).powi(2) + (b.1 - ty).powi(2))));
         let mut found = None;
-        for (x, y) in sorted.into_iter().take(40) {
+        for (x, y) in sorted {
             ctx.io_mut().add_mouse_pos_event([x, y]);
             frames(host, bridge, ctx, 1);
             if unsafe { (*sys::igGetCurrentContext()).HoveredId } == scan.want {
