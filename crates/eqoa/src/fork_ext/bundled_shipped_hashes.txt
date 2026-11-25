@@ -85,3 +85,5 @@ ba957a91125d65bbc19e81b69e683973385aa4708b8c1c20906a8b5e5698ac0e  eqoa_dialogs/R
 d5269a72fb01d16ae5c8306804dfbde09e062f4a5a7118a52695612e8c807650  eqoa_frames/README.md
 e3ddfd3c80423d38be253fb771a3a916db3c8fb549f9b33c77156693545db688  eqoa_quest_journal/README.md
 f777a717fe50065ca1e171f8b97c7c7a7ddd1ca1fc92f18bc7cbd7482c2a5b1a  eqoa_mail/README.md
+# Before the 2026-11-25 delta-review fixes (invitation end reasons).
+2f08831fa01738734c15b0fd8e73cd70de9da839bc025b86ea87c1d2d229bd3f  eqoa_dialogs/main.lua

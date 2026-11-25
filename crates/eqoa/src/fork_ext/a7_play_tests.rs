@@ -777,6 +777,8 @@ fn a7_friend_request_mod_off_control_takeover_45s_timeout_and_confirmed_accept()
     assert_eq!(recorded(&p), vec![expected_accept], "Yes sends exact Buddies::accept bytes");
     assert_eq!(p.buddies.request, u32::MAX, "request id cleared after accept");
     host.execute("assert(eqoa.social.friend_request() == nil and eqoa.windows.session('friend_request') == nil)").unwrap();
+    step(&mut p, &host);
+    host.execute("assert(ev[#ev] == 'closed:friend_request:accepted', ev[#ev])").unwrap();
 
     // 6. Explicit refuse sends exact Buddies::refuse(2) bytes immediately
     clear_recorded(&mut p);
@@ -789,6 +791,9 @@ fn a7_friend_request_mod_off_control_takeover_45s_timeout_and_confirmed_accept()
     ask(&mut p, &host, "return eqoa.actions.friend_refuse()");
     assert_eq!(recorded(&p), vec![expected_refuse]);
     host.execute("assert(eqoa.social.friend_request() == nil)").unwrap();
+    // the session says "declined", the one word every yes/no request uses (negative control: it said "refused")
+    step(&mut p, &host);
+    host.execute("assert(ev[#ev] == 'closed:friend_request:declined', ev[#ev])").unwrap();
 
     // 7. pass() hands back to the native mode 17 box
     clear_recorded(&mut p);
@@ -877,6 +882,17 @@ fn a7_guild_invite_mod_off_control_takeover_45s_timeout_confirm_and_drop_cleanup
     step(&mut p, &host);
     assert_eq!(recorded(&p), vec![expected_join], "Yes sends exact Cmds::join bytes");
     host.execute("assert(eqoa.guild.invite() == nil)").unwrap();
+    step(&mut p, &host);
+    host.execute("assert(ev[#ev] == 'closed:guild_invite:accepted', ev[#ev])").unwrap();
+
+    // 4b. Refusing ends the session "declined"
+    clear_recorded(&mut p);
+    deliver_op(&mut p, 0x057A, pkt_057a(507, "Tor", "Dawn Watch"));
+    super::health_redraw(&mut p, false, false);
+    step(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.guild_refuse()");
+    step(&mut p, &host);
+    host.execute("assert(ev[#ev] == 'closed:guild_invite:declined', ev[#ev])").unwrap();
 
     // 5. Leaving the world (Play dropped with quit=true) refuses any held invite so server never waits
     clear_recorded(&mut p);

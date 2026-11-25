@@ -922,7 +922,7 @@ A **session** is one opening of a window a mod shows. It is the handle that belo
 | `"death"` | the character died | held kinds, questions |
 | `"walked_away"` | the player moved 25 units from where it began | dialogs, hidden corpse, merchant and bank, fishing |
 | `"idle"` | the mod had not looked at it for 120 seconds | dialogs, offers, A11 windows |
-| `"answered"` | an answer was sent through `dialog_answer` or `close_window` | dialogs, offers, A11 windows |
+| `"answered"` | an answer was sent through `dialog_answer` or `close_window` | dialogs with several answers, plain closes, A11 windows |
 | `"server"` | the server closed the window | A11 windows |
 | `"withdrawn"` | the server withdrew the invitation | `group_invite` |
 | `"ended"` | a newer session of the same kind took its place, or its holder went | held kinds |
@@ -930,12 +930,11 @@ A **session** is one opening of a window a mod shows. It is the handle that belo
 | `"command"` | a menu command ran | `start_menu` |
 | `"timeout"` | nobody answered within 45 seconds and the client refused it | friend request, guild invitation, trade request, duel invitation |
 | `"in_guild"` | the invitation was refused: the player is already in a guild | guild invitation |
-| `"refused"` | it was refused | friend request, guild invitation |
-| `"accepted"`, `"declined"` | it was accepted or declined | friend request, guild invitation, trade request, duel invitation |
+| `"accepted"`, `"declined"` | the player (or the mod, for an invitation it may answer) said Yes or No | group invitation, resurrection and summons offers, friend request, guild invitation, trade request, duel invitation |
 | `"cancelled"`, `"completed"`, `"gone"` | a trade request or wager was cancelled, a wager was completed, or a duel invitation was withdrawn | trade, duel |
 | `"focus_lost"` | the controller is the game's again (a `phase = "changed"` event, not an end) | focused windows |
 
-**Two words for an answer, on purpose.** `"answered"` is for the windows whose answer is a choice among options or a close (a dialog's option, an offer's Yes or No, a mercenary or dye window's close): it says that an answer was sent, not which. `"accepted"` and `"declined"` are for the requests whose whole answer is Yes or No and that the client tells apart (friends, guild, trade, duel). One word each, and a mod handles both in the one place it handles an ended session.
+**Two words for an answer, on purpose.** Every request whose whole answer is Yes or No ends `"accepted"` or `"declined"`: the group invitation, the resurrection and summons offers, the friend request, the guild invitation, the trade request and the duel invitation. `"answered"` is for the windows whose answer is a choice among options or a close (a dialog's option, a mercenary or dye window's close): it says that an answer was sent, not which. One word each, and a mod handles both in the one place it handles an ended session. (Before this was settled, a group invitation and the two offers ended `"answered"` and a refused friend request or guild invitation `"refused"`; none of that was in a release.)
 
 **What ends a session.** The mod (`close_session`), the character leaving the world (a zone, a logout: `reason = "left_world"`), death, the player's switch **Use the game's windows** (every mod window closes at once, a question it asked is answered No, and the held corpse, merchant and bank are the game's again), the mod being disabled or reloaded or stopped by an error (nobody is told; a mod whose `render` or `windows.key` handler fails also loses the controller and its windows at once, and every mod window ends when the addon runtime stops on an error), the client leaving the world for the game's own screens (a logout, a lost connection: `reason = "left_world"`), and a `pass`. A world change (a zone, a teleport, a new world entry, a lost connection) also ends every held session (a corpse, merchant, bank, dialog, offer, request, trade or other window the mod holds), a question and the controller's focus (`reason = "zoning"`), and every takeover claim (see "Taking over a window"). Each is told to the owning mod as `windows.session` with `phase = "closed"` and its `reason`, after `world.leaving`; a mod closes its window when it hears it.
 
@@ -994,7 +993,7 @@ A mod can take over what NPCs say and the game's yes/no offers, and show them in
 - Offers: 1 is Yes, 2 is No. Declining is always sent at once. **Accepting a `group_invite` is sent at once** (a mod may accept it today). **Accepting a `revive_offer` or `summon_offer` is not sent**: the call completes with `detail = {asked=true, confirm=<id>}` once the client has put its own "Are you sure?" on the screen (§8, the same question as `destroy`), and only the player's own Yes there sends it. The mod hears the end as `confirm.closed` with `kind = "revive_offer"` or `"summon_offer"`.
 - The result is `sent`, never `confirmed`. An answer is never replayed. `stale_handle` for a `ref` of a session that has ended, `out_of_range` for an option outside the dialog, `not_ready` while another game window is up and the game cannot take the answer (try again when it closes).
 - `eqoa.actions.close_window(ref)` ends a session without choosing: Done for a `text_dialog`, the game's own "no choice" (Escape) for a `response_dialog`, No for an offer.
-- The session ends with `reason = "answered"` once an answer was sent.
+- The session ends once an answer was sent: `reason = "answered"` for a `text_dialog` or `response_dialog`, `"accepted"` for an invitation or offer answered Yes (1) and `"declined"` for one answered No (2) or closed.
 
 **Pass.** `eqoa.windows.pass(ref)` hands the dialog or offer to the game: its own window opens with the same dialog, as if no mod held the kind, and the player answers it there (`reason = "passed"`). The claim stays for the next one. A mod that does not recognise a dialog passes it at once: the player sees the game's window, unchanged. If the game has another window up, the dialog waits for it in the game's own queue.
 
