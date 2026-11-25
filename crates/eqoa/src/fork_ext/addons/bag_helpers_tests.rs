@@ -51,6 +51,17 @@ eqoa = {
     talk = function(entity, opts) TALKS[#TALKS + 1] = {kind = opts and opts.kind} return "talk" .. #TALKS end,
     sell = function(ref, qty) SELLS[#SELLS + 1] = {ref = ref, qty = qty} return "sell" .. #SELLS end,
     batch = function(spec) BATCHES[#BATCHES + 1] = spec return "batch" .. #BATCHES end,
+    -- the client's own group sale: recorded as a one-merchant "batch" of its whole stacks, so the sale's steps read the same
+    sell_many = function(refs)
+      local steps = {}
+      for _, ref in ipairs(refs) do
+        local q = 1
+        for _, it in ipairs(INV_ITEMS) do if it.ref == ref then q = it.quantity or 1 end end
+        steps[#steps + 1] = {kind = "sell", item = ref, count = q}
+      end
+      BATCHES[#BATCHES + 1] = {steps = steps, require_window = "merchant", sell_many = true}
+      return "batch" .. #BATCHES
+    end,
     chat = function(text) SENT_CHAT[#SENT_CHAT + 1] = text return "chat" end,
     cancel = function() end,
     stop_batch = function() return true end,
@@ -482,32 +493,17 @@ fn line5_sell_by_hand_asks_first_for_quick_slotted_no_trade_and_non_ordinary_ite
         put_npcs(3.0, nil)
         open_merchant({})
     "#;
-    // each risky item: the first click asks (nothing is sold), No keeps it, Yes sells it
-    for (idx, id, why) in [
-        (1, 30, "quick-slotted"),
-        (2, 31, "no-trade"),
-        (3, 32, "not an ordinary item"),
-        (5, 34, "quick-slotted, no-trade and not an ordinary item"),
-    ] {
+    // 2026-11-25: the client asks (`eqoa.actions.sell` puts the game's own question to the player where the game's
+    // merchant window asks), so the mod makes ONE call and asks nothing of its own: the player is asked once, not twice
+    for (idx, id) in [(1, 30), (2, 31), (3, 32), (5, 34)] {
         let lua = world();
         run(&lua, setup);
         run(&lua, &format!("local it = INV_ITEMS[{idx}]; B.build_menu(it); ROW = nil; for _, r in ipairs(B.menu.rows) do if r.label:find('^Sell 1') then ROW = r end end"));
         assert!(boolean(&lua, "ROW ~= nil and ROW.enabled"), "{id}: Sell 1 is offered");
         run(&lua, "B.trigger_menu(ROW)");
-        assert_eq!(int(&lua, "#SELLS"), 0, "{id}: the first click sells nothing");
-        assert_eq!(int(&lua, "#TALKS"), 0);
-        assert!(boolean(&lua, "B.menu ~= nil and B.menu.asking == true"), "{id}: a question is up");
-        let title = string(&lua, "B.menu.title");
-        let yes = string(&lua, "B.menu.rows[1].text");
-        assert!(title.contains(&string(&lua, &format!("INV_ITEMS[{idx}].name"))) && title.ends_with('?'), "{title}");
-        assert!(yes.contains(why), "the question says why: {yes}");
-        // No keeps it
-        run(&lua, "B.trigger_menu(B.menu.rows[2])");
-        assert_eq!(int(&lua, "#SELLS"), 0, "{id}: No sells nothing");
-        // Yes sells it, by the one action
-        run(&lua, &format!("B.build_menu(INV_ITEMS[{idx}]); for _, r in ipairs(B.menu.rows) do if r.label:find('^Sell 1') then ROW = r end end; B.trigger_menu(ROW); B.trigger_menu(B.menu.rows[1])"));
-        assert_eq!(int(&lua, "#SELLS"), 1, "{id}: Yes sells it");
+        assert_eq!(int(&lua, "#SELLS"), 1, "{id}: the click makes the one call (the client asks)");
         assert_eq!(int(&lua, "SELLS[1].qty"), 1);
+        assert!(boolean(&lua, "not (B.menu ~= nil and B.menu.asking == true)"), "{id}: the mod asks no question of its own");
     }
     // an ordinary item sells at once, with no question
     let lua = world();
@@ -515,12 +511,8 @@ fn line5_sell_by_hand_asks_first_for_quick_slotted_no_trade_and_non_ordinary_ite
     run(&lua, "B.build_menu(INV_ITEMS[4]); for _, r in ipairs(B.menu.rows) do if r.label:find('^Sell stack') then ROW = r end end; B.trigger_menu(ROW)");
     assert_eq!(int(&lua, "#SELLS"), 1, "a misc item that is neither quick-slotted nor no-trade sells at once, as in the game");
     assert_eq!(int(&lua, "SELLS[1].qty"), 3);
-
-    // negative control: with the question switched off the first click sells the quick-slotted potion
-    let bad = mutated(&[("if row.confirm and not row.confirmed and row.run", "if false and row.run")]);
-    run(&bad, setup);
-    run(&bad, "B.build_menu(INV_ITEMS[1]); for _, r in ipairs(B.menu.rows) do if r.label:find('^Sell 1') then ROW = r end end; B.trigger_menu(ROW)");
-    assert_eq!(int(&bad, "#SELLS"), 1, "negative control: no question, the potion is sold on the first click");
+    // negative control: the mod's own question (the old behaviour, which asked a second time) is gone
+    assert!(boolean(&lua, "B.ask_to_sell == nil"), "no second question");
 }
 
 #[test]

@@ -1138,11 +1138,9 @@ fn round6b_bag_viewer_merchant_bank_and_corpse_menus_and_captures_body() {
     bv.click((sx, sy));
     bv.play.bags_broker_tick();
     bv.frames(2);
-    // A0: the potions are quick-slotted and not an ordinary item, so the menu asks first and nothing is sent yet
+    // the potions are quick-slotted and not an ordinary item: the CLIENT asks (once; the menu asks nothing), nothing sent yet
     assert!(!bv.play.bags_shop_pending(), "the question comes before the sale");
-    let (yx, yy, yen, _, _) = bv.menu_row("Sell stack").expect("the question's Yes row");
-    assert!(yen);
-    bv.click((yx, yy));
+    bv_say_yes(&mut bv);
     bv.play.bags_broker_tick();
     bv.frames(2);
     assert!(bv.play.bags_shop_pending(), "Sell stack dispatches merchant 0x004B");
@@ -1302,6 +1300,7 @@ fn round6c_bag_viewer_junk_marks_and_auto_loot_choice_persist_across_reload_and_
 
 #[test]
 fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot() {
+    // (2026-11-25: Sell junk is one `sell_many` call; the Stop button and the batch's progress are gone with the batch)
     big_stack(round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_body)
 }
 fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_body() {
@@ -1359,6 +1358,7 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_b
     bv.click((bx, by));
     bv.frames(1);
     bv.play.bags_broker_tick();
+    bv.play.bags_broker_tick(); // the call is made on one game step, the first stack goes out on the next
     bv.frames(2);
     assert!(bv.play.bags_shop_pending(), "step 1 dispatched");
     let sends_after_s1 = bv.play.bags_sends_lost();
@@ -1366,20 +1366,21 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_b
     bv.frames(1);
     assert_eq!(bv.play.bags_sends_lost(), sends_after_s1, "step 2 waits for step 1 server reply");
 
-    // Server confirms step 1 (Rat Pelt at inv slot 1) -> progress shows 1 of 4 -> click Stop!
+    // Server confirms step 1 (Rat Pelt at inv slot 1); the merchant is then closed -> the run stops cleanly. (A sale in the
+    // client's hands (`sell_many`) has no Stop button: the player's own answer to its question ends it, and so does the
+    // merchant going away.)
     bv.play.bags_sell_confirm(1, 2);
     bv.frames(2);
-    let (sx, sy, slbl) = bv.action_hit("Stop").unwrap();
-    assert_eq!(slbl, "Stop");
-    bv.click((sx, sy));
+    bv.play.bags_close_merchant();
     bv.play.bags_broker_tick();
-    let stopped_tex = bv.frames(2);
-    bv_r6_png(&rm_pixels(&bv.gpu, &stopped_tex), bv.win, "r6-junk-stopped.png");
+    bv.frames(3);
     let (res, ok) = bv.result_text().unwrap();
     assert_eq!(ok, Some(false));
-    assert_eq!(res, "Sold 1 junk item for 20 tunar; Sell junk stopped after 1 of 4: stopped"); // fix round 2: the real final line
+    assert!(res.starts_with("Sold 1 junk item") && res.contains("Sell junk stopped after"), "{res}");
 
-    // Start batch for remaining 3 junk items, confirm step 1, then close merchant -> stops cleanly!
+    // The merchant again: 3 junk items left; start, confirm step 1, then zone -> stops cleanly without replay!
+    bv.play.bags_open_merchant(44);
+    bv.frames(2);
     let (bx, by, lbl2) = bv.action_hit("Sell junk (").unwrap();
     assert!(lbl2.starts_with("Sell junk (3 items, "), "{lbl2}");
     bv.click((bx, by));
@@ -1387,29 +1388,12 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_b
     bv.frames(2);
     bv.play.bags_sell_confirm(1, 1);
     bv.frames(2);
-    bv.play.bags_close_merchant();
-    bv.play.bags_broker_tick();
-    bv.frames(2);
-    let (res, ok) = bv.result_text().unwrap();
-    assert_eq!(ok, Some(false));
-    assert_eq!(res, "Sold 1 junk item for 20 tunar; Sell junk stopped after 1 of 3: merchant closed");
-
-    // Remaining 2 junk items: start batch, confirm step 1, then zone -> stops cleanly without replay!
-    bv.play.bags_open_merchant(44);
-    bv.frames(2);
-    let (bx, by, lbl3) = bv.action_hit("Sell junk (").unwrap();
-    assert!(lbl3.starts_with("Sell junk (2 items, "), "{lbl3}");
-    bv.click((bx, by));
-    bv.play.bags_broker_tick();
-    bv.frames(2);
-    bv.play.bags_sell_confirm(1, 1);
-    bv.frames(2);
     bv.play.bags_zone();
     bv.play.bags_broker_tick();
-    bv.frames(2);
+    bv.frames(3);
     let (res, ok) = bv.result_text().unwrap();
     assert_eq!(ok, Some(false));
-    assert!(res.contains("Sell junk stopped after 1 of 2: zone"), "{res}");
+    assert!(res.contains("Sell junk stopped after"), "{res}");
 
     // Corpse open: mark Rat Pelt (id 2001) as junk, switch to Corpse tab, capture r6-junk-corpse.png.
     bv.play.bags_target_corpse(5001, "a decaying skeleton");
@@ -2620,7 +2604,7 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     assert_eq!(
         super::super::runtime::autonomous_action_label(&entry.metadata.requested_capabilities)
             .as_deref(),
-        Some("Actions: can act on its own (open_loot, talk, loot, loot_all, sell, buy, bank_move, use_item, equip, quick_slot, batch, link_item, hide_look, repair items (spends your coin))"),
+        Some("Actions: can act on its own (open_loot, talk, loot, loot_all, sell, buy, bank_move, use_item, equip, quick_slot, batch, sell_many, link_item, hide_look, repair items (spends your coin))"),
         "L7: the label names exactly the actions the mod uses, not all of them"
     );
 
@@ -2715,7 +2699,8 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     bv.play.bags_merchant_packet(9002);
     assert_eq!(bv.play.mode, 0, "native merchant window must stay closed");
     bv.frames(2);
-    bv.play.bags_broker_tick(); // dispatches step 1 sell
+    bv.play.bags_broker_tick(); // makes the sell_many call
+    bv.play.bags_broker_tick(); // the first stack goes out
     assert!(bv.play.bags_shop_pending(), "sell step sent silently");
     bv.play.bags_sell_confirm(7, 1);
     bv.frames(2);
@@ -3918,6 +3903,14 @@ fn round65_fix4_item6_out_of_range_buttons_grey_out_and_the_reach_is_learned_bod
     bv.click((x, y));
     bv.play.bags_broker_tick();
     bv.frames(2);
+    bv.play.bags_broker_tick();
+    if super::super::confirm::is_open() {
+        // the junk is something the game's merchant window asks about: the client asks once, the player's Yes sells
+        bv_say_yes(&mut bv);
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+        bv.frames(2);
+    }
     assert!(bv.play.bags_sends_lost() > sends || bv.play.bags_shop_pending(), "the sell goes out from an open shop");
     bv.clean();
     super::super::window_takeover::reset_all_for_test();
@@ -4892,15 +4885,6 @@ fn round7c_bag_viewer_sells_single_items_near_a_merchant_body() {
         assert!(enabled, "{label} offered near a merchant with no window open: {reason:?}");
         let sends = bv.play.bags_sends_lost();
         bv.click((x, y));
-        if asks {
-            // A0: a quick-slotted or not ordinary item is asked about first: nothing goes out until Yes
-            bv.frames(2);
-            bv.play.bags_broker_tick();
-            assert_eq!(bv.play.bags_sends_lost(), sends, "{row}: the question comes before anything is sent");
-            let (yx, yy, yen, _, _) = bv.menu_row(row).expect("the question's Yes row");
-            assert!(yen);
-            bv.click((yx, yy));
-        }
         bv.play.bags_broker_tick();
         assert!(bv.play.bags_sends_lost() > sends, "{row} talks to the merchant first");
         assert_eq!(bv.play.target, 9002);
@@ -4908,6 +4892,13 @@ fn round7c_bag_viewer_sells_single_items_near_a_merchant_body() {
         assert_eq!(bv.play.mode, 0, "the merchant's answer stays hidden (mode 10 is its window)");
         bv.frames(2);
         bv.play.bags_broker_tick();
+        if asks {
+            // a quick-slotted or not ordinary item: once the merchant is open the CLIENT asks, nothing goes out until Yes
+            assert!(!bv.play.bags_shop_pending(), "{row}: the question comes before the sale");
+            bv_say_yes(&mut bv);
+            bv.frames(2);
+            bv.play.bags_broker_tick();
+        }
         assert!(bv.play.bags_shop_pending(), "{row}: the sale went out");
         bv.play.bags_sell_confirm(inv_slot, n);
         bv.play.bags_merchant_packet(9002);
@@ -4939,9 +4930,8 @@ fn round7c_bag_viewer_sells_single_items_near_a_merchant_body() {
     bv.frames(2);
     bv.play.bags_broker_tick();
     assert_eq!(bv.play.bags_sends_lost(), sends, "the question comes before the sale");
-    let (yx, yy, yen, _, _) = bv.menu_row("Sell 1").expect("the question's Yes row");
-    assert!(yen);
-    bv.click((yx, yy));
+    bv_say_yes(&mut bv);
+    bv.frames(2);
     bv.play.bags_broker_tick();
     assert!(bv.play.bags_shop_pending(), "sold through the open window");
     assert!(bv.play.bags_sends_lost() > sends);
@@ -4993,13 +4983,7 @@ fn round7c_bag_viewer_second_sell_before_the_merchant_answers_is_refused_body() 
         assert!(enabled);
         bv.click((x, y));
         bv.frames(1);
-        if asks {
-            // A0: the potion is quick-slotted: the question first, then Yes
-            let (yx, yy, yen, _, _) = bv.menu_row("Sell 1").expect("the question's Yes row");
-            assert!(yen);
-            bv.click((yx, yy));
-            bv.frames(1);
-        }
+        let _ = asks;
     };
     // Sell 1 of the potions: its talk goes out, no answer yet
     click_sell(&mut bv, 2, true);
@@ -5013,6 +4997,10 @@ fn round7c_bag_viewer_second_sell_before_the_merchant_answers_is_refused_body() 
     // the merchant answers: the potion is the one sold
     bv.play.bags_merchant_packet(9002);
     assert_eq!(bv.play.mode, 0);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    // the potion is quick-slotted: the client's own question comes up now that the merchant is open
+    bv_say_yes(&mut bv);
     bv.frames(2);
     bv.play.bags_broker_tick();
     assert!(bv.play.bags_shop_pending(), "the first item's sale went out");
@@ -5406,4 +5394,23 @@ fn a_hidden_loot_session_that_ends_without_a_packet_is_gone_on_the_next_drawn_fr
     // (No negative control: with the item lists read on steps only the list was gone as well, so this scenario does not
     // tell the two apart; the lists are still read every drawn frame, as before the 30 Hz gate.)
     assert!(loot_list_after_release(true), "the list must be gone on the next drawn frame");
+}
+
+/// The player's own Yes to the client's question (Right, then Enter): nothing a mod calls can do this. The question
+/// comes up on the game step after the call, and the sale goes out on the one after the Yes.
+fn bv_say_yes(bv: &mut Bv) {
+    use winit::keyboard::{Key, NamedKey};
+    for _ in 0..4 {
+        if super::super::confirm::is_open() {
+            break;
+        }
+        bv.play.bags_broker_tick();
+        bv.frames(1);
+    }
+    assert!(super::super::confirm::is_open(), "the client's own question is up");
+    assert!(super::super::confirm::key(&Key::Named(NamedKey::ArrowRight)));
+    assert!(super::super::confirm::key(&Key::Named(NamedKey::Enter)));
+    bv.play.bags_broker_tick();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
 }
