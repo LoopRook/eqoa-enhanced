@@ -326,6 +326,11 @@ pub(crate) fn tick(play: &mut Play, game_step: bool) {
 }
 
 fn resume_merc(play: &mut Play) {
+    if play.is_dead() {
+        // at death the game closes open windows (`msg_005e` -> `set_mode_0`): nothing waiting opens while dead or after
+        LOCAL.with(|l| l.borrow_mut().merc_waits.clear());
+        return;
+    }
     let waits = LOCAL.with(|l| l.borrow().merc_waits.clone());
     if waits.is_empty() {
         return;
@@ -341,6 +346,10 @@ fn resume_merc(play: &mut Play) {
             continue;
         }
         let kind = if mode == items { TakeoverKind::MercItems } else { TakeoverKind::MercSpells };
+        if up(kind) {
+            // a fresh mod session already holds this kind: a stale passed wait must not open natively over it
+            continue;
+        }
         if window_takeover::is_taken(kind) && !bypass {
             // a mod holds the window: it is the mod's session, not the game's window (a hidden session does not matter)
             hold_window(play, kind);
@@ -381,9 +390,9 @@ fn resume_fishing(play: &mut Play) {
     if !LOCAL.with(|l| l.borrow().fish_wait) {
         return;
     }
-    if play.fish.part.state == crate::fishing::state::OFF {
+    if play.is_dead() || play.fish.part.state == crate::fishing::state::OFF || up(TakeoverKind::Fishing) {
         LOCAL.with(|l| l.borrow_mut().fish_wait = false);
-    } else if play.mode == 0 && !hidden_held() && !up(TakeoverKind::Fishing) {
+    } else if play.mode == 0 && !hidden_held() {
         LOCAL.with(|l| l.borrow_mut().fish_wait = false);
         open_fishing_window(play);
     }
@@ -412,6 +421,13 @@ fn window_data(play: &Play, kind: TakeoverKind) -> Json {
 }
 
 fn hold_window(play: &mut Play, kind: TakeoverKind) {
+    // a fresh session supersedes any earlier waiting/passed native open of the same kind
+    match kind {
+        TakeoverKind::MercItems => LOCAL.with(|l| l.borrow_mut().merc_waits.retain(|(m, _)| *m != crate::play::mercplay::ITEMS_MODE)),
+        TakeoverKind::MercSpells => LOCAL.with(|l| l.borrow_mut().merc_waits.retain(|(m, _)| *m != crate::play::mercplay::SPELLS_MODE)),
+        TakeoverKind::Fishing => LOCAL.with(|l| l.borrow_mut().fish_wait = false),
+        _ => {}
+    }
     let pos = play.self_at.map(|(p, _)| p);
     let data = window_data(play, kind);
     if matches!(kind, TakeoverKind::MercItems | TakeoverKind::MercSpells) {
@@ -476,7 +492,7 @@ pub(crate) fn post_event(play: &mut Play) {
                 play.merc.book_open = false;
                 play.merc.keys.clear();
             }
-            LOCAL.with(|l| l.borrow_mut().merc_waits.retain(|(m, bypass)| *m != mode || *bypass));
+            LOCAL.with(|l| l.borrow_mut().merc_waits.retain(|(m, _)| *m != mode));
             hold_window(play, kind);
         }
     }
@@ -513,6 +529,14 @@ fn end_window(kind: TakeoverKind, reason: &str) {
 /// have shown it.
 pub(crate) fn give_window(play: &mut Play, kind: TakeoverKind) {
     sync_world();
+    if play.is_dead() {
+        if kind == TakeoverKind::DyePicker
+            && let Some(o) = LOCAL.with(|l| l.borrow_mut().dye.take())
+        {
+            play.session.send(&net::dyepick::cancelled(o.token));
+        }
+        return;
+    }
     match kind {
         TakeoverKind::MercItems | TakeoverKind::MercSpells => {
             // whatever the last state's flags say, the game's window opens (it waits for plain play, as the dye picker
