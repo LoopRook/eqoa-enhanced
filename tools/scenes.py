@@ -6,6 +6,9 @@ centred). Mod windows are checked by what the client logs where the mod or the g
 what is on the screen (`ss.dark_fraction`) where nothing is logged.
 """
 
+from contextlib import closing
+import sqlite3
+
 import local_scene as ls
 import scene_suite as ss
 
@@ -431,33 +434,50 @@ def realquest_scenes(suite):
     ]
 
 
-def choice_scene(suite, number, name, *, questid, quest, giver, level, tclass, key, answer, expect_pick, spell):
+def choice_option(suite, questid, step, index):
+    """(answer words, spell id or None) of one option of a real choice step, read from the server's own rows."""
+    import json
+    with closing(sqlite3.connect((suite.install / "eqoa-server" / "eqoa.db").as_uri() + "?mode=ro", uri=True)) as db:
+        choices = json.loads(db.execute("SELECT choices FROM queststeps WHERE questid = ? AND step = ?", (questid, step)).fetchone()[0])
+    option = choices["options"][index]
+    return option["answer"], (int(option["spells"]) if option.get("spells") else None)
+
+
+def choice_scene(suite, number, name, *, questid, giver, level, tclass, index, step=1, complete=True, records_pick=True, riddle_first=False):
     """A REAL choice step (rows unchanged). Auto mode is ON: the mod must leave the choice to the player, whose key
-    sends the pick; the server records it. The control presses nothing: if the mod answered for the player the control
-    would record a pick and fail to fail."""
+    (option number index+1) sends the pick; the server records it. The control presses nothing: if the mod answered for
+    the player the control would record a pick and fail to fail."""
+    answer, spell = choice_option(suite, questid, step, index)
+    expect_pick = f"{step}:{index}"
+
     def seed(db):
-        db.execute("INSERT INTO charquests (serverid,questid,step,count,done,slot,updated,picks) VALUES (2,?,1,0,0,0,'','')", (questid,))
+        db.execute("INSERT INTO charquests (serverid,questid,step,count,done,slot,updated,picks) VALUES (2,?,?,0,0,0,'','')", (questid, step))
         db.execute("UPDATE characters SET level=?, tclass=? WHERE charName='Lsgm'", (level, tclass))
 
     def checks(run_dir, log):
         server = suite.server_since()
         (run_dir / "mod-dump.txt").write_text(chr(10).join(ln for ln in log.splitlines() if "Dialog window: DUMP" in ln), encoding="utf-8")
         row = suite.char_quest(questid)
-        return [
-            (f'the server recorded the pick "{answer}" (server log)', f'Quests: Lsgm picked "{answer}"' in server),
-            (f"charquests.picks is {expect_pick!r} (database row: {row})", row is not None and row[2] == expect_pick),
-            (f"the step was completed (the quest advanced past step 1 or is done): {row}", row is not None and (row[0] != 1 or row[1] == 1)),
-            (f"the option's spell {spell} was given to the character (database)", suite.has_spell(spell)),
-            ("the mod never answered by itself", "automatically" not in log),
-        ]
+        out = [(f'the server recorded the pick "{answer}" (server log)', f'Quests: Lsgm picked "{answer}"' in server)]
+        if records_pick:
+            out.append((f"charquests.picks is {expect_pick!r} (database row: {row})", row is not None and row[2] == expect_pick))
+        if complete:
+            out.append((f"the step was completed (the quest advanced past step {step} or is done): {row}",
+                        row is not None and (row[0] != step or row[1] == 1)))
+        if spell:
+            out.append((f"the option's spell {spell} was given to the character (database)", suite.has_spell(spell)))
+        out.append(("the mod never answered by itself", "automatically" not in log))
+        return out
 
     return ss.Scene(
         number, name, mods=("eqoa_dialogs",), options={"eqoa_dialogs": {"auto_answer": True}}, fresh_db=True, seed=seed,
         patch=DUMP_PATCH,
         env={"EQOA_SAY": f"#testmode@5000;#goto {giver}@8000", "EQOA_TARGET": f"{giver}@16500", "EQOA_PLAY_KEYS": "q@18000",
-             "EQOA_MOD_KEYS": f"{key}@21000;enter@24000"},
+             "EQOA_MOD_KEYS": (f"enter@20000;{index + 1}@22500;enter@25000" if riddle_first else f"{index + 1}@21000;enter@24000")},
         control_env={"EQOA_MOD_KEYS": ""},
-        quit_after=28, shots="20000=1-the-choice.png,22500=2-after-pick.png,26000=3-end.png",
+        quit_after=29,
+        shots=("19500=0-the-riddle.png,21500=1-the-choice.png,24000=2-after-pick.png,27000=3-end.png" if riddle_first
+               else "20000=1-the-choice.png,22500=2-after-pick.png,26000=3-end.png"),
         expect=[("the giver was hailed", rf"script: target {giver}: true"),
                 ("the mod took the choice (response dialog)", r"takeover: response_dialog session started for the mod")],
         extra=checks,
@@ -466,12 +486,14 @@ def choice_scene(suite, number, name, *, questid, quest, giver, level, tclass, k
 
 def choice_scenes(suite):
     return [
-        choice_scene(suite, "10c", 'REAL choice 100955 "The Alchemist\'s Reward, Level 30": 2 options, the player takes the SECOND, auto on',
-                     questid=100955, quest="The Alchemist's Reward", giver="Erilous Skypyre", level=30, tclass=14, key="2",
-                     answer="Moradhim Cocktail", expect_pick="1:1", spell=700336),
-        choice_scene(suite, "10d", 'REAL choice 101136 "The Shaman\'s Epic Reward": 6 options (the most any real step has), the player takes the SIXTH, auto on',
-                     questid=101136, quest="The Shaman's Epic Reward", giver="Ediopolus", level=60, tclass=8, key="6",
-                     answer="Ascended Ethereal Healing", expect_pick="1:5", spell=906750),
+        choice_scene(suite, "10c", "REAL class path choice 100951 \"The Paladin's Reward, Level 30\": 6 options, the player takes the SECOND, auto on",
+                     questid=100951, giver="Sir Arik Lightfire", level=30, tclass=2, index=1),
+        choice_scene(suite, "10d", "REAL choice 101136 \"The Shaman's Epic Reward\": 6 options, the player takes the SIXTH, auto on",
+                     questid=101136, giver="Ediopolus", level=60, tclass=8, index=5),
+        choice_scene(suite, "10e", "REAL riddle choice 101298 \"The Manticores' Riddles\" step 1: the player answers, the mod never does, auto on",
+                     questid=101298, giver="Sektamoot", level=53, tclass=0, index=1, complete=False, records_pick=False, riddle_first=True),
+        choice_scene(suite, "10f", "REAL level 20 class choice 100020 \"Tillian Bracelets\" (class 9, last step, 3 options, the third gives a spell), auto on",
+                     questid=100020, giver="Tessarina Starshimmer", level=20, tclass=9, index=2, step=8),
     ]
 
 
