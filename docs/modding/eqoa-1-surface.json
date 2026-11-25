@@ -4801,8 +4801,10 @@
       "children": [
         "eqoa.combat.CombatHit.amount",
         "eqoa.combat.CombatHit.attacker_id",
+        "eqoa.combat.CombatHit.by_player",
         "eqoa.combat.CombatHit.color",
         "eqoa.combat.CombatHit.defender_id",
+        "eqoa.combat.CombatHit.from_merc",
         "eqoa.combat.CombatHit.from_pet",
         "eqoa.combat.CombatHit.incoming",
         "eqoa.combat.CombatHit.kind",
@@ -4833,6 +4835,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.combat.CombatHit.by_player",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.combat.CombatHit.color",
       "reason": null,
       "revision": 1,
@@ -4842,6 +4852,14 @@
     {
       "children": [],
       "path": "eqoa.combat.CombatHit.defender_id",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.combat.CombatHit.from_merc",
       "reason": null,
       "revision": 1,
       "round": 2,
@@ -7296,6 +7314,14 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.combat.hit.data.by_player",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.combat.hit.data.color",
       "reason": null,
       "revision": 1,
@@ -7305,6 +7331,14 @@
     {
       "children": [],
       "path": "eqoa.events.combat.hit.data.defender_id",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.combat.hit.data.from_merc",
       "reason": null,
       "revision": 1,
       "round": 2,

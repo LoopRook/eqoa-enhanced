@@ -1024,8 +1024,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.combat.CombatHit` | supported | 2 |  |
 | `eqoa.combat.CombatHit.amount` | supported | 2 |  |
 | `eqoa.combat.CombatHit.attacker_id` | supported | 2 |  |
+| `eqoa.combat.CombatHit.by_player` | supported | 2 |  |
 | `eqoa.combat.CombatHit.color` | supported | 2 |  |
 | `eqoa.combat.CombatHit.defender_id` | supported | 2 |  |
+| `eqoa.combat.CombatHit.from_merc` | supported | 2 |  |
 | `eqoa.combat.CombatHit.from_pet` | supported | 2 |  |
 | `eqoa.combat.CombatHit.incoming` | supported | 2 |  |
 | `eqoa.combat.CombatHit.kind` | supported | 2 |  |
@@ -1265,8 +1267,10 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.chat.message.data.time` | supported | 2 |  |
 | `eqoa.events.combat.hit.data.amount` | supported | 2 |  |
 | `eqoa.events.combat.hit.data.attacker_id` | supported | 2 |  |
+| `eqoa.events.combat.hit.data.by_player` | supported | 2 |  |
 | `eqoa.events.combat.hit.data.color` | supported | 2 |  |
 | `eqoa.events.combat.hit.data.defender_id` | supported | 2 |  |
+| `eqoa.events.combat.hit.data.from_merc` | supported | 2 |  |
 | `eqoa.events.combat.hit.data.from_pet` | supported | 2 |  |
 | `eqoa.events.combat.hit.data.incoming` | supported | 2 |  |
 | `eqoa.events.combat.hit.data.kind` | supported | 2 |  |
