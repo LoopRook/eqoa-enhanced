@@ -3400,6 +3400,7 @@
         "eqoa.auction.State.results",
         "eqoa.auction.State.revision",
         "eqoa.auction.State.sellable",
+        "eqoa.auction.State.stacks",
         "eqoa.auction.State.tunar",
         "eqoa.auction.State.uncertain"
       ],
@@ -3508,6 +3509,14 @@
     {
       "children": [],
       "path": "eqoa.auction.State.sellable",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.auction.State.stacks",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -21037,7 +21046,7 @@
   "metadata": {
     "client_version": "0.7.0",
     "commit": "unstamped local build",
-    "generated_utc": "2026-11-24",
+    "generated_utc": "2026-11-25",
     "platform": "windows-x86_64"
   },
   "schema_version": 1
