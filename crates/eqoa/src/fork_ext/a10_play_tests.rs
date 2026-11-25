@@ -1945,7 +1945,7 @@ mod mods {
         bv_point(r, &format!("for _, h in ipairs(require('eqoa_auction_state').hits) do if h.label == '{label}' then return h.x + h.w / 2, h.y + h.h / 2 end end error('no control {label}')"))
     }
 
-    fn au_query(kind: i32, p9c: u32, pa0: u32, pb4: i32) -> Query {
+    fn au_query(kind: u8, p9c: u32, pa0: u32, pb4: i32) -> Query {
         Query {
             kind,
             text: String::new(),
