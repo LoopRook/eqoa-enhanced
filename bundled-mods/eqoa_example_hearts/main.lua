@@ -21,7 +21,11 @@ end)
 eqoa.events.on("world.leaving", release)
 eqoa.events.on("disabling", release)
 eqoa.events.on("state.reset", function() release() end)
+-- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
+local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
+
 eqoa.events.on("render", function()
+    if map_up() then return end
     local player = eqoa.player.get()
     if not player or not player.hp or player.hp.maximum <= 0 then release(); return end
     if not claim then claim = eqoa.hud.hide("health") end

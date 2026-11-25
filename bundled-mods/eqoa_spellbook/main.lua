@@ -30,8 +30,22 @@ local icons = { tex = {}, due = {}, frame = 0 }
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
+-- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
+local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
+local GATED = { render = true, ["input.key"] = true, ["pointer.pressed"] = true, ["pointer.wheel"] = true, ["windows.key"] = true, ["input.pad"] = true }
 local function listen(name, fn)
-    local token = eqoa.events.on(name, fn)
+    local inner = fn
+    if GATED[name] then
+        inner = function(e)
+            if map_up() then
+                -- the keyboard is the game's under its map: a box being typed in lets go at once
+                if name == "render" and state.on_map then state.on_map() end
+                return
+            end
+            return fn(e)
+        end
+    end
+    local token = eqoa.events.on(name, inner)
     if token then state.tokens[#state.tokens + 1] = token end
 end
 
@@ -170,6 +184,7 @@ local function focus(on)
     state.focus = on
     if not on then eqoa.input.capture_text(false) end
 end
+state.on_map = function() focus(false) end
 
 local function set_query(q)
     state.query, state.rows, state.scroll = q, nil, 0
@@ -613,3 +628,6 @@ function draw()
     ui.SetWindowFontScale(1)
     ui.End()
 end
+
+-- what a test reads
+spellbook_probe = { state = state }

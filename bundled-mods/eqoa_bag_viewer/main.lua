@@ -21,8 +21,13 @@ local tokens, escape, tab_hits, slot_hits, menu_hits, action_hits, log_rect, gri
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
 -- The window stops listening to everything but loot while it is closed.
+-- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
+local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
+local GATED = { render = true, ["input.key"] = true, ["pointer.pressed"] = true, ["pointer.wheel"] = true, ["windows.key"] = true, ["input.pad"] = true }
 local function listen(name, fn)
-    local token = eqoa.events.on(name, fn)
+    local inner = fn
+    if GATED[name] then inner = function(e) if map_up() then return end return fn(e) end end
+    local token = eqoa.events.on(name, inner)
     if token then tokens[#tokens + 1] = token end
 end
 

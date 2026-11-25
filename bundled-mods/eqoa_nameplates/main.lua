@@ -10,6 +10,8 @@
 -- scales its text), so it needs no font file; the window takes no clicks, so the game still gets every one.
 
 local ui = eqoa.imgui
+-- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
+local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
 
 local DEFAULTS = {
     players = true, npcs = true, creatures = true,
@@ -436,6 +438,8 @@ eqoa.events.on("render", function()
     end
     frame_no = frame_no + 1
     now_time = ui.GetTime()
+    -- under the game's full map: no plates, numbers or settings window (the game's own are still hidden by the claims)
+    if map_up() then return end
     draw_layer(player)
     settings_window()
 end)

@@ -5211,3 +5211,46 @@ fn a0_bag_viewer_helper_switches_marks_and_buttons_are_drawn_and_clickable_body(
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
 }
+
+/// 2026-11-24, owner's screenshot: with the game's full map up (M) the Bags window stayed on top of it. Under the map the
+/// window draws nothing and takes no click; when the map closes it is drawn again, on the same tab. Auto-loot's poll is not
+/// this window and keeps running (it is not drawing). Control: the same click, map closed, does select the tab.
+#[test]
+fn hide_under_map_bag_viewer_draws_nothing_and_takes_no_click_under_the_game_map() {
+    big_stack(hide_under_map_bag_viewer_body)
+}
+fn hide_under_map_bag_viewer_body() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { return };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_full_pack(20));
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    let draws = |bv: &Bv| bv.eval::<i64>("require('bags').draws");
+    let tab = |bv: &Bv| bv.eval::<i64>("require('bags').tab");
+    let start = draws(&bv);
+    bv.frames(3);
+    assert!(draws(&bv) > start, "control: the open window is drawn every frame");
+    let tab_start = tab(&bv);
+    let second = bv.tab(2);
+    // the map comes up
+    bv.play.map.open = true;
+    bv.frames(2);
+    let hidden_at = draws(&bv);
+    bv.frames(5);
+    assert_eq!(draws(&bv), hidden_at, "under the map the window draws nothing");
+    bv.click(second);
+    bv.frames(1);
+    assert_eq!(tab(&bv), tab_start, "and a click where its tab was selects nothing");
+    // the map closes: drawn again, the click now works (control)
+    bv.play.map.open = false;
+    bv.frames(3);
+    assert!(draws(&bv) > hidden_at, "the window comes back");
+    assert!(bv.is_open(), "still open, as it was");
+    bv.click(second);
+    bv.frames(1);
+    assert_ne!(tab(&bv), tab_start, "control: the same click with the map closed picks the tab");
+    bv.clean();
+}
