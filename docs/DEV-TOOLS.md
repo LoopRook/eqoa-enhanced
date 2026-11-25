@@ -284,6 +284,8 @@ screenshot checks (without it those checks FAIL with that reason, never pass sil
 | 5b | The same three items, Destroy... then Right and Enter (Yes) on the game's question: `Destroyed 3 of 3`, 1 item left in the database. |
 | 6 | Six drags of the chat window by its grip (`press l`, `move`, `release l`): no `stall:` line in the client log, and the window really moved. |
 | 7 | 60 s at the start spot with `EQOA_PERF=1` (Chat, Bag Viewer, Start Menu and Dialog Window on): median fps, cpu ms/frame and hud ms of the 5 s windows (the first, which includes loading, is dropped) are appended to `scene-suite-history.json` beside the local server folder (`--history <file>` to move it, `--no-history` to skip) with the build name (git commit, a `+local` mark when the tree has uncommitted changes, and the exe's hash). Each run prints the change against the previous recorded run. Compare runs only on a quiet PC: other builds share the CPU. |
+| 8a-8d | Quest hand-in with the Dialog Window mod. The runner writes a fixture quest into the disposable database only: "Bracer Test" from Commander Nothard, one give step that takes a militia bracer (`#giveitem 8570`). 8a: with the bracer held the server asks, the option has the green frame and **Hand in** button, a click sends it, the server log says `Quests: Lsgm finished "Bracer Test"` and the bracer is gone from the database. 8b: without the bracer the server says only his words (no question, no button, quest not finished). 8c: with **Answer quest hand-ins automatically** on, one real answer (a Goodbye beside it does not count) is answered by the mod itself. 8d: auto on but two real answers: only marked, never sent. |
+| 9 | The local server is stopped and started again 4 s later under a client in the world: the client logs `play: disconnected (reason 10)` (after the player says something unanswered) and ends cleanly. Re-entering the world in the same run is SKIP: the scripted client has no reconnect path. |
 
 Each scene checks log lines (the client's `chat:`, `takeover:`, `script:` lines and the mods' own `addon <id>: [info]`
 lines) in order, lines that must never appear, and screenshots (the share of dark pixels where a mod's panel sits, or
@@ -298,6 +300,12 @@ Say line instead of a Tell line. 4: the Bag Viewer's pointer claim switched off.
 6: the drag pressed inside the window instead of on its grip. The edited-mod controls run a copy of the mod's `main.lua`
 in the run's own scratch mods folder (the client keeps a player-edited file); nothing in `bundled-mods/` changes. The
 stall assertion itself is checked in `test_scene_suite.py` against a log that contains a `stall:` line.
+
+**Hand-in findings.** On this local server the game's journal lists each quest by its current step's journal line, not
+by the quest's name, and the mod marks an option only when it names a journal entry, so on this server the mark appears
+only for a quest whose step line is the title (the fixture does that: `journal` = `Bracer Test`). A retail server's
+journal titles are not checked here. Seed fixtures are written with `Scene.seed`, a mod's saved switches with
+`Scene.options` (e.g. `auto_answer`), and a server restart with `Scene.restart_at`.
 
 **What it cannot tell you.** How anything feels (a frame that is slow only on the owner's PC, mouse feel, a hitch the
 offscreen path does not have), anything that needs a live server's data (the real shard's menus, merchants, quests,

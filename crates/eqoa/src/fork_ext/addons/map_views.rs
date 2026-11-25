@@ -243,6 +243,11 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                         ));
                     }
                 };
+                let keep = match field("keep") {
+                    Value::Nil => false,
+                    Value::Boolean(b) => b,
+                    _ => return Err(("invalid_argument", "keep must be true or false".into())),
+                };
                 Ok(super::action_broker::ActionKind::SetWaypoint {
                     vm,
                     addon: addon.to_owned(),
@@ -250,6 +255,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     x,
                     z,
                     label,
+                    keep,
                 })
             })
         })?,
