@@ -459,7 +459,7 @@ def main(argv=None):
     try:
         suite.start_server()
         for scene in build_scenes(suite):
-            if wanted and scene.number not in wanted and scene.number.rstrip("abc") not in wanted:
+            if wanted and scene.number not in wanted and scene.number.rstrip("abcd") not in wanted:
                 continue
             if args.control and not (scene.control_patch or scene.control_env or scene.restart_at):
                 continue

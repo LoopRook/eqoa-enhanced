@@ -54,7 +54,7 @@ class SceneSuiteToolTests(unittest.TestCase):
     def test_scene_ids_select_by_digit_prefix(self):
         wanted = {"5"}
         for number, picked in (("5a", True), ("5b", True), ("6", False), ("1", False)):
-            self.assertEqual(number in wanted or number.rstrip("abc") in wanted, picked)
+            self.assertEqual(number in wanted or number.rstrip("abcd") in wanted, picked)
 
     def test_screenshot_checks_tell_a_window_from_the_world(self):
         try:
