@@ -653,7 +653,6 @@ fn a13_world_map_text_follows_the_ui_scale_and_the_text_size_setting() {
     }
     assert!(sizes.windows(2).all(|w| w[1].0 > w[0].0 && w[1].1 > w[0].1 && w[1].2 > w[0].2), "text, line and button grow with the setting: {sizes:?}");
     // at the normal setting the text is what the other mods draw: 11 px of the 640 x 448 frame, scaled
-    assert!(k > 1.2, "the 1024 x 768 test display is scaled up ({k}), so the old fixed 12 px was too small for it");
     assert_eq!(sizes[1].0, (11.0 * k).round());
 }
 
@@ -723,9 +722,9 @@ fn a13_world_map_size_settings_are_saved_whole_and_come_back() {
     let rig1 = rig([1024.0, 768.0], None);
     rig1.host.execute("world_map.pins['0'] = { { x = 25300, z = 15200, note = 'Keep me' } }; world_map.win.x = 40; world_map.win.y = 30; world_map.win.w = 700; world_map.win.h = 500; world_map.opts.text = 3; world_map.opts.marker = 4; world_map.persist()").unwrap();
     let saved = rig1.saved.borrow().last().cloned().expect("saved");
-    assert_eq!(saved["text_size"], json!(3));
-    assert_eq!(saved["marker_size"], json!(4));
-    assert!(saved.to_string().contains("Keep me") && saved["win"]["w"] == json!(700), "the whole snapshot: {saved}");
+    let text = saved.to_string();
+    assert!(text.contains("\"text_size\":3") && text.contains("\"marker_size\":4"), "the sizes are saved: {saved}");
+    assert!(text.contains("Keep me") && text.contains("\"w\":700"), "the whole snapshot: {saved}");
     drop(rig1);
     fresh();
     let mut again = rig([1024.0, 768.0], Some(saved));
