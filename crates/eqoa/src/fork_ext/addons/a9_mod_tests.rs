@@ -324,6 +324,8 @@ fn a9_bag_viewer_repair_lists_costs_asks_once_for_all_and_repairs_one_at_a_time(
     host.execute("local R = require('repair'); R.repair_one(R.damaged(eqoa.blacksmith.get())[1])").unwrap();
     assert_eq!(queued(), vec!["blacksmith_repair"]);
     sent_ok(&host);
+    // the smith's read after the send: its repair is pending, the item still damaged
+    native_a9::publish(View::Smith, Some(smith_state(&[(1, 50), (2, 70), (3, 0)], true, 500)), None);
     frames(&host, &bridge, &mut ctx, 2);
     assert!(host.lua.load("return require('repair').run ~= nil").eval::<bool>().unwrap(), "sent is not repaired: the run waits for the list");
     native_a9::publish(View::Smith, Some(smith_state(&[(1, 0), (2, 70), (3, 0)], false, 450)), None);
