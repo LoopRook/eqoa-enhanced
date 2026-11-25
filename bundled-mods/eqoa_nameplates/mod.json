@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "runtime": "lua",
+  "api": "eqoa/1",
+  "id": "eqoa_nameplates",
+  "name": "EQOA Name Plates",
+  "entry": "main.lua",
+  "entryMode": "once",
+  "enabled": false,
+  "replaces": [
+    "hud.name_plates",
+    "hud.damage_numbers"
+  ],
+  "capabilities": [
+    "eqoa.player.get",
+    "eqoa.target.info",
+    "eqoa.group.get",
+    "eqoa.entities.list",
+    "eqoa.camera.project",
+    "eqoa.camera.project_entity",
+    "eqoa.hud.hide",
+    "eqoa.hud.show",
+    "eqoa.entities.find",
+    "eqoa.log.write",
+    "eqoa.options.button",
+    "eqoa.settings.load",
+    "eqoa.settings.save",
+    "eqoa.settings.on_save",
+    "eqoa.settings.on_load",
+    "eqoa.events.on",
+    "eqoa.imgui"
+  ]
+}
