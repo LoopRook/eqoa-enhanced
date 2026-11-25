@@ -2097,7 +2097,10 @@ function M.on_action_result(d)
     -- completes later, when the merchant has answered
     if d.ok == true and d.state == "completed" and d.phase == "dispatch" and d.kind == "sell" then
         -- the client put its own question to the player; the answer is `confirm.closed` (`sell_closed`)
-        M.result = {text = label .. ": answer the question on the screen", ok = nil}
+        -- (the answer may already have been heard when this result is: then the result line is the answer's)
+        if eqoa.windows.confirm() ~= nil then
+            M.result = {text = label .. ": answer the question on the screen", ok = nil}
+        end
         M.sell_hold, M.held_for_req, M.last_req = M.held_for_req, nil, nil
         M.dirty()
         return
