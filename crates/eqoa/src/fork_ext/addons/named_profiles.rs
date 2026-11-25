@@ -1117,23 +1117,3 @@ mod tests {
         assert_eq!(class_role(255), DEFAULT);
     }
 }
-
-#[cfg(test)]
-mod probe_tmp {
-    use super::*;
-    #[test]
-    fn probe_tmp_prepare_cost_on_a_copy_of_the_owners_profiles() {
-        let Ok(dir) = std::env::var("EQOA_PROBE_DIR") else { return };
-        let store = Store::new(Some(PathBuf::from(&dir)));
-        let doc = store.read("Default").unwrap();
-        for round in 0..4 {
-            let t = std::time::Instant::now();
-            let path = store.path("Default").unwrap();
-            let bytes = store.prepare(&path, &doc).unwrap();
-            eprintln!("PROBE round {round}: prepare (quota for {} mods, {} bytes) took {:?}", doc.addons.len(), bytes.len(), t.elapsed());
-        }
-        let t = std::time::Instant::now();
-        store.write("Default", &doc).unwrap();
-        eprintln!("PROBE full sync write took {:?}", t.elapsed());
-    }
-}
