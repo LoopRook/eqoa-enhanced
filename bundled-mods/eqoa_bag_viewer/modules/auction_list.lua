@@ -72,7 +72,8 @@ end
 -- the sellable entry of the exact bank row (slot and id, as the rest of the client names an item)
 local function sellable_for(a, it)
     for _, s in ipairs(a.sellable) do
-        if s.id == it.id and (it.index == nil or s.slot == it.index) then return s end
+        -- an item's id reads as text in the bag record, as a number in the auction's
+        if tostring(s.id) == tostring(it.id) and (it.index == nil or s.slot == it.index) then return s end
     end
     return nil
 end
