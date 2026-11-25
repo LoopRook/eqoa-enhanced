@@ -495,21 +495,14 @@ fn window_ptr(name_part: &str) -> Option<*mut sys::ImGuiWindow> {
     None
 }
 
-/// Moves the pointer to the CENTRE of the item `label` of the window (or child) whose name contains `window`: the
-/// item's whole rectangle is found as every place Dear ImGui says it is hovered, and the pointer goes to the middle
-/// of that, where a player clicks. A thin strip that is hovered (an item another one lies over) fails the size check.
-fn hover_item(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, window: &str, label: &str) -> (f32, f32) {
-    let (x, y, _, h) = hover_rect(host, bridge, ctx, window, label);
-    let _ = h;
-    (x, y)
-}
-
-fn hover_rect(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, window: &str, label: &str) -> (f32, f32, f32, f32) {
+/// Every place (sampled every few pixels) where Dear ImGui says the item `label` of the window (or child) whose name
+/// contains `window` is hovered: its drawn rectangle as the player can reach it.
+fn hovered_points(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, window: &str, label: &str) -> Vec<(f32, f32)> {
     let w = window_ptr(window).unwrap_or_else(|| panic!("window {window:?} is not drawn"));
     let (pos, size, seed) = unsafe { ((*w).Pos, (*w).Size, (*w).ID) };
     let label_c = std::ffi::CString::new(label).unwrap();
     let want = unsafe { sys::igImHashStr(label_c.as_ptr(), 0, seed) };
-    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    let mut hits = Vec::new();
     let mut y = pos.y + 2.0;
     while y < pos.y + size.y {
         let mut x = pos.x + 2.0;
@@ -517,23 +510,42 @@ fn hover_rect(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, wi
             ctx.io_mut().add_mouse_pos_event([x, y]);
             frames(host, bridge, ctx, 1);
             if unsafe { (*sys::igGetCurrentContext()).HoveredId } == want {
-                x0 = x0.min(x);
-                x1 = x1.max(x);
-                y0 = y0.min(y);
-                y1 = y1.max(y);
+                hits.push((x, y));
             }
             x += 5.0;
         }
         y += 3.0;
     }
-    assert!(x0 <= x1, "no place in {window:?} hovers {label:?}");
-    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
-    // a button is about a line tall: a hovered strip of a few pixels is an item that something else lies over
-    assert!(y1 - y0 >= 10.0, "{label:?} is hovered over only {:.0}px of height ({y0:.0} to {y1:.0}): it is covered", y1 - y0);
-    ctx.io_mut().add_mouse_pos_event([cx, cy]);
-    frames(host, bridge, ctx, 2);
-    assert_eq!(unsafe { (*sys::igGetCurrentContext()).HoveredId }, want, "the centre of {label:?} must hover it");
-    (cx, cy, x1 - x0, y1 - y0)
+    hits
+}
+
+/// The points a player clicks on a button: its centre and four points inside its corners, each one a place that
+/// really hovers it. A button something else lies over hovers only a thin strip: its height fails the size check.
+fn click_points(hits: &[(f32, f32)], label: &str) -> Vec<(f32, f32)> {
+    assert!(!hits.is_empty(), "no place hovers {label:?}");
+    let x0 = hits.iter().map(|p| p.0).fold(f32::MAX, f32::min);
+    let x1 = hits.iter().map(|p| p.0).fold(f32::MIN, f32::max);
+    let y0 = hits.iter().map(|p| p.1).fold(f32::MAX, f32::min);
+    let y1 = hits.iter().map(|p| p.1).fold(f32::MIN, f32::max);
+    assert!(y1 - y0 >= 10.0, "{label:?} is hovered over only {:.0}px of height: it is covered by something", y1 - y0);
+    let near = |tx: f32, ty: f32| *hits.iter().min_by(|a, b| ((a.0 - tx).powi(2) + (a.1 - ty).powi(2)).total_cmp(&((b.0 - tx).powi(2) + (b.1 - ty).powi(2)))).unwrap();
+    let (w, h) = (x1 - x0, y1 - y0);
+    vec![
+        near((x0 + x1) / 2.0, (y0 + y1) / 2.0),
+        near(x0 + w * 0.15, y0 + h * 0.15),
+        near(x1 - w * 0.15, y0 + h * 0.15),
+        near(x0 + w * 0.15, y1 - h * 0.15),
+        near(x1 - w * 0.15, y1 - h * 0.15),
+    ]
+}
+
+/// Moves the pointer to the item's centre (a place that really hovers it).
+fn hover_item(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, window: &str, label: &str) -> (f32, f32) {
+    let hits = hovered_points(host, bridge, ctx, window, label);
+    let (x, y) = click_points(&hits, label)[0];
+    ctx.io_mut().add_mouse_pos_event([x, y]);
+    frames(host, bridge, ctx, 1);
+    (x, y)
 }
 
 fn click(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, button: dear_imgui_rs::MouseButton) {
@@ -619,16 +631,45 @@ fn a9_trade_mod_buttons_work_in_the_middle_and_empty_enter_and_double_clicks_off
     native_a9::publish(View::Trade, Some(open_state(false)), None);
     hold(vm, TakeoverKind::Trade);
     frames(&host, &bridge, &mut ctx, 3);
-    // a click in the MIDDLE of Offer (row 2) and of All (row 1): both buttons take it over their whole height
-    let (_, _, _, h) = hover_rect(&host, &bridge, &mut ctx, "##bags", "Offer##offer_2");
-    assert!(h >= 10.0, "the whole button hovers ({h:.0}px)");
-    hover_item(&host, &bridge, &mut ctx, "##bags", "Offer##offer_2");
-    click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Left);
-    assert_eq!(queued(), vec!["trade_add"], "a click in the middle of Offer offers");
-    host.execute("require('tradeui').state.last_offer = nil").unwrap();
-    hover_item(&host, &bridge, &mut ctx, "##bags", "All##all_1");
-    click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Left);
-    assert_eq!(queued(), vec!["trade_add", "trade_add"], "a click in the middle of All offers the stack");
+    // every click point of Offer (row 2) and of All (row 1), across the drawn rectangle: centre and four corners
+    for (label, rows_left) in [("Offer##offer_2", 5usize), ("All##all_1", 5usize)] {
+        let hits = hovered_points(&host, &bridge, &mut ctx, "##bags", label);
+        let points = click_points(&hits, label);
+        assert_eq!(points.len(), rows_left);
+        for (n, (x, y)) in points.into_iter().enumerate() {
+            host.execute("require('tradeui').state.last_offer = nil").unwrap();
+            let before = queued().len();
+            ctx.io_mut().add_mouse_pos_event([x, y]);
+            frames(&host, &bridge, &mut ctx, 1);
+            click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Left);
+            assert_eq!(queued().len(), before + 1, "{label}: a click at point {n} ({x:.0}, {y:.0}) of its rectangle offers");
+        }
+    }
+    // negative control: a full-line row drawn first and a button after it (what the window used to do) leaves the
+    // button only a thin strip, which the same measurement rejects
+    host.execute(
+        r#"
+        eqoa.events.on("render", function()
+            local ui = eqoa.imgui
+            ui.SetNextWindowPos(500, 500, ImGuiCond.Always)
+            ui.SetNextWindowSize(300, 0, ImGuiCond.Always)
+            if ui.Begin("ctl##eqoa_ctl", nil, ImGuiWindowFlags.NoSavedSettings) then
+                ui.Selectable("row##ctl_row", false)
+                ui.SameLine()
+                ui.Button("Btn##ctl_btn")
+            end
+            ui.End()
+        end)
+        "#,
+    )
+    .unwrap();
+    frames(&host, &bridge, &mut ctx, 3);
+    let covered = hovered_points(&host, &bridge, &mut ctx, "eqoa_ctl", "Btn##ctl_btn");
+    let ys: Vec<f32> = covered.iter().map(|p| p.1).collect();
+    let height = if ys.is_empty() { 0.0 } else { ys.iter().cloned().fold(f32::MIN, f32::max) - ys.iter().cloned().fold(f32::MAX, f32::min) };
+    assert!(height < 10.0, "control: a button under a full-line row is hovered over only a strip ({height:.0}px)");
+    ctx.io_mut().add_mouse_pos_event([5.0, 5.0]);
+    frames(&host, &bridge, &mut ctx, 2);
 
     // Enter in an emptied coin box offers nothing; Enter with digits does, and the text is not typed again
     action_broker::reset_all_for_test();
