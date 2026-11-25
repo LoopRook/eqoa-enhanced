@@ -41,6 +41,14 @@ local function stop_typing()
     eqoa.input.capture_text(false)
 end
 
+-- The bank is let go when a listing ends, unless the Bank tab is showing it or a bank batch or open is running.
+local function release_bank()
+    if B.tab == 6 or B.batch_id or B.pending_open or B.held_for_req then return end
+    B.release_takeover("bank")
+end
+
+L.stop_typing = stop_typing -- for the full-map rule (the map's gate lets go of the typing and the Enter claim)
+
 function L.close()
     stop_typing()
     if L.session then eqoa.windows.close_session(L.session) end
@@ -53,6 +61,7 @@ function L.on_session(d)
         stop_typing()
         L.session, L.form, L.queue, L.run = nil, nil, nil, nil
         L.hits, L.rect = {}, nil
+        release_bank()
     end
 end
 
@@ -99,7 +108,7 @@ end
 local function start_form(it, group)
     local ok, why = ensure()
     if not ok then say("List on auction: " .. tostring(why), false); L.run = nil; return end
-    L.form = { waiting = true, it = it, group = group, frames = 0, mode = "wait" }
+    L.form = { waiting = true, it = it, group = group, frames = 0, since = os.clock(), mode = "wait" }
 end
 
 -- Each frame: a form waiting for the client's reading of the auction takes it when it comes.
@@ -119,7 +128,8 @@ local function resolve_wait()
             if not L.form.stacks then L.form.count = 1 end
             return
         end
-        if f.frames > 3 then
+        -- a few drawn frames AND about a second: the snapshot is republished on game steps (30 Hz), not on drawn frames
+        if f.frames > 3 and os.clock() - (f.since or 0) >= 1 then
             L.skip(f, now.name .. " cannot be put up at the auction (no trade, no rent, or a stack this server will not take)")
         end
         return
@@ -140,6 +150,7 @@ function L.finish()
     stop_typing()
     local run = L.run
     L.form, L.run, L.queue, L.hits, L.rect = nil, nil, nil, {}, nil
+    release_bank()
     if run and run.total > 1 then
         say(string.format("Listing done: %d of %d put up%s%s", run.sent, run.total,
             run.skipped > 0 and (", " .. run.skipped .. " skipped") or "",
@@ -159,14 +170,15 @@ end
 -- "List on auction..." of one bank item: the bank is opened as Withdraw opens it, then the form.
 function L.begin(it)
     if L.busy() then say("List on auction: finish the one in front of you first", false); return end
-    L.run = { total = 1, at = 1, sent = 0, skipped = 0, failed = 0 }
-    L.queue = nil
-    local function go() start_form(it, nil) end
+    -- the run starts only when the bank is open: a refused, unanswered or stopped open leaves nothing held
+    local function go()
+        L.run = { total = 1, at = 1, sent = 0, skipped = 0, failed = 0 }
+        L.queue = nil
+        start_form(it, nil)
+    end
     local bank = eqoa.bank.get()
     if bank and bank.open then go(); return end
-    local req, err = B.open_talk_npc("bank", "List on auction", go)
-    if not req then L.run = nil end
-    return req, err
+    return B.open_talk_npc("bank", "List on auction", go)
 end
 
 -- A group of bank items, one form after the other.
@@ -174,13 +186,14 @@ function L.start_group(items)
     if L.busy() then say("List on auction: finish the one in front of you first", false); return end
     local queue = {}
     for _, it in ipairs(items) do queue[#queue + 1] = it end
-    L.run = { total = #queue, at = 0, sent = 0, skipped = 0, failed = 0 }
-    L.queue = queue
-    local function go() L.next_item() end
+    local function go()
+        L.run = { total = #queue, at = 0, sent = 0, skipped = 0, failed = 0 }
+        L.queue = queue
+        L.next_item()
+    end
     local bank = eqoa.bank.get()
     if bank and bank.open then go(); return end
-    local req = B.open_talk_npc("bank", "List on auction", go)
-    if not req then L.run, L.queue = nil, nil end
+    B.open_talk_npc("bank", "List on auction", go)
 end
 
 -- ---------------------------------------------------------------- sending
@@ -197,6 +210,18 @@ end
 local function send(f)
     local why = limits_say(f)
     if why then f.msg = why; return end
+    -- the row is looked up again by its identity: if it is not exactly the one shown, nothing else is put up
+    local now = current(f.it)
+    local a = eqoa.auction.get()
+    local matches = 0
+    for _, s in ipairs(a and a.sellable or {}) do
+        if tostring(s.id) == tostring(f.s.id) and s.slot == f.s.slot then matches = matches + 1 end
+    end
+    local s = now and a and sellable_for(a, now)
+    if not (s and matches == 1 and s.slot == f.s.slot and tostring(s.id) == tostring(f.s.id)) then
+        f.msg = "The item has changed since the form opened: Cancel and open it again"
+        return
+    end
     stop_typing()
     local req, err = L.sell_action({
         slot = f.s.slot, id = f.s.id, count = f.stacks and f.count or 1,

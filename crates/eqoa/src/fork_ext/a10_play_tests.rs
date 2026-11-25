@@ -1794,4 +1794,145 @@ mod mods {
         r.press_px(lx, ly, "left", false);
         assert!(confirm::is_open(), "the same item asks now");
     }
+
+    // ---- the recheck fix round (N1, N3, N4, N5) ----
+
+    fn taken_bank(r: &Rig) -> String {
+        state_of(r, "return tostring(eqoa.windows.taken('bank'))")
+    }
+
+    /// List on auction... of the first bank row, up to the client's talk to the banker (not yet answered).
+    fn click_list_on_auction(r: &mut Rig) {
+        let (x, y) = bag_slot(r, 1);
+        r.press_px(x, y, "left", false);
+        let (mx, my) = menu_row(r, "List on auction...");
+        r.press_px(mx, my, "left", false);
+        r.settle();
+    }
+
+    #[test]
+    fn fix_n1_a_bank_open_that_is_refused_or_stopped_leaves_nothing_held_and_listing_works_again() {
+        let mut r = bag_rig();
+        click_list_on_auction(&mut r);
+        assert_eq!(state_of(&r, "return tostring(require('bags').pending_open ~= nil)"), "true", "the open is waiting; {}", r.why());
+        assert_eq!(taken_bank(&r), "true", "the bank is taken for the open");
+        // the server refuses the open (the same call the client's result takes)
+        r.host.execute("local B = require('bags'); B.on_action_result({request_id = B.pending_open.req, ok = false, reason = 'too far', kind = 'talk'})").unwrap();
+        r.settle();
+        assert_eq!(state_of(&r, "return tostring(require('auction_list').busy())"), "false", "no run is left standing; {}", r.why());
+        assert_eq!(taken_bank(&r), "false", "the bank is let go");
+        // listing works again: the same click opens the bank once more
+        click_list_on_auction(&mut r);
+        assert_eq!(state_of(&r, "return tostring(require('bags').pending_open ~= nil)"), "true", "a new open; {}", r.why());
+        // Stop while it waits
+        r.host.execute("require('bags').stop_batch()").unwrap();
+        r.settle();
+        assert_eq!(state_of(&r, "return tostring(require('auction_list').busy())"), "false", "{}", r.why());
+        assert_eq!(taken_bank(&r), "false", "stopped: the bank is let go");
+        click_list_on_auction(&mut r);
+        assert_eq!(state_of(&r, "return tostring(require('bags').pending_open ~= nil)"), "true", "and again; {}", r.why());
+    }
+
+    #[test]
+    fn fix_n3_a_tab_change_during_a_listing_still_lets_the_bank_go_when_it_ends() {
+        let mut r = bag_rig();
+        click_list_on_auction(&mut r);
+        r.p.bank_opcode(0x124D, &[]);
+        for _ in 0..6 {
+            r.settle();
+        }
+        let (lx, ly) = form_hit(&r, "List it");
+        r.press_px(lx, ly, "left", false);
+        assert!(confirm::is_open(), "the question; {}", r.why());
+        say_yes();
+        r.settle();
+        // the player goes to another tab while the sale settles: the release is dropped for now
+        r.host.execute("require('bags').select(1)").unwrap();
+        r.settle();
+        assert_eq!(taken_bank(&r), "true", "held while the sale settles");
+        r.p.bank.state = 0;
+        for _ in 0..40 {
+            r.settle();
+        }
+        assert_eq!(state_of(&r, "return tostring(require('auction_list').busy())"), "false", "{}", r.why());
+        assert_eq!(taken_bank(&r), "false", "the listing ended: the hidden bank is let go; {}", r.why());
+    }
+
+    #[test]
+    fn fix_n5_list_it_refuses_a_row_that_is_no_longer_the_one_shown() {
+        let mut r = bag_rig();
+        click_list_on_auction(&mut r);
+        r.p.bank_opcode(0x124D, &[]);
+        for _ in 0..6 {
+            r.settle();
+        }
+        assert_eq!(state_of(&r, "return tostring(require('auction_list').form and require('auction_list').form.mode)"), "form", "{}", r.why());
+        // the bank row the form was opened for is now another item (same place)
+        r.p.dump.bank.items.items[0] = item(700_009, "Copper Ring", 21, 1);
+        for _ in 0..4 {
+            r.settle();
+        }
+        let n = sent().len();
+        let (lx, ly) = form_hit(&r, "List it");
+        r.press_px(lx, ly, "left", false);
+        r.settle();
+        assert!(!confirm::is_open(), "no question for another item; {}", r.why());
+        assert_eq!(sent().len(), n);
+        let msg = state_of(&r, "return require('auction_list').form.msg or ''");
+        assert!(msg.contains("changed"), "a plain message: {msg}");
+        assert_eq!(state_of(&r, "return require('auction_list').form.mode"), "form", "the form stays for Cancel");
+    }
+
+    #[test]
+    fn fix_n4_closing_mail_before_the_answer_never_leaves_the_sent_mail_to_go_twice() {
+        let mut r = mail_rig(|_| {});
+        r.p.mail_recv(&inbox_reply(&[header(11, "Ann", "One")]));
+        r.settle();
+        r.tap(110.0, 28.0);
+        writes(&mut r, "Bob", "Hi", "yo");
+        let n = sent().len();
+        r.tap(30.0, 304.0);
+        assert_eq!(sent().len(), n + 1, "the mail went; {}", r.why());
+        // Escape closes the window before the answer; the server then takes the mail
+        r.key("escape", "");
+        r.p.mail_recv(&[1, 1]);
+        r.settle();
+        // reopened: the draft is not the sent mail, and a click on Send sends nothing
+        CORE.with(|c| {
+            c.borrow_mut().emit("input.key", json!({"key": "m", "combo": "shift+m", "down": true, "repeat": false, "synthetic": false, "text": ""}))
+        });
+        native_events::dispatch(&r.host).unwrap();
+        r.settle();
+        // (opening asks for the inbox again: count from here)
+        let m = sent().len();
+        r.tap(110.0, 28.0);
+        r.tap(30.0, 304.0);
+        assert_eq!(sent().len(), m, "never a second send of the same mail; {}", r.why());
+    }
+
+    #[test]
+    fn fix_n4_text_typed_while_a_send_is_pending_is_kept_when_the_mail_goes() {
+        let mut r = mail_rig(|_| {});
+        r.p.mail_recv(&inbox_reply(&[header(11, "Ann", "One")]));
+        r.settle();
+        r.tap(110.0, 28.0);
+        writes(&mut r, "Bob", "Hi", "yo");
+        let n = sent().len();
+        r.tap(30.0, 304.0);
+        assert_eq!(sent().len(), n + 1, "the first mail went; {}", r.why());
+        // the name is changed while the first waits for its answer
+        r.tap(30.0, 58.0);
+        r.key("backspace", "");
+        r.key("backspace", "");
+        r.key("backspace", "");
+        r.type_text("Cat");
+        r.key("escape", "");
+        r.p.mail_recv(&[1, 1]);
+        r.settle();
+        // the form still holds the new mail (the old code emptied it): Send now sends it
+        r.tap(30.0, 304.0);
+        assert_eq!(sent().len(), n + 2, "the text typed meanwhile was kept; {}", r.why());
+        let last = sent().last().unwrap().clone();
+        assert!(last.windows(3).any(|w| w == b"Cat"), "the second mail is to Cat: {last:?}");
+    }
 }

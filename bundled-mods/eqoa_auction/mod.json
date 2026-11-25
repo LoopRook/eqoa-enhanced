@@ -28,6 +28,7 @@
     "eqoa.input.claim_pointer",
     "eqoa.input.capture_text",
     "eqoa.events.on",
+    "eqoa.map.get",
     "eqoa.imgui"
   ],
   "commands": [

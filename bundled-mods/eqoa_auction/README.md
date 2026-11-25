@@ -27,3 +27,9 @@ mod off. Putting an item up for sale is done from the Bag Viewer (see its README
 If the server does not answer a request in 15 seconds the window says so and does not repeat it: look again before
 trying it again. It uses the window session of `eqoa/1` (`auction_search`) and the `eqoa.auction.get` read; when you
 zone, die, turn the mod off or switch on **Use the game's windows**, the client closes it for you.
+
+## Known gaps
+
+- With the game's full map open this window hides itself and takes no clicks or keys; it comes back as it was.
+- A click on another window lying over the box you are typing in does not end the typing.
+- A refused "My lots" asks for "My bids" without saying so.

@@ -21,8 +21,24 @@ local state = {
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
+-- While the game's own full map is up this window draws nothing and takes no click, key or wheel; it lets go of the
+-- typing and of Escape/Enter, and takes them again when the map is shut.
+local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
+local GATED = { render = true, ["input.key"] = true, ["pointer.pressed"] = true, ["pointer.wheel"] = true }
+local on_map -- set below (needs stop_typing)
 local function listen(name, fn)
-    local token = eqoa.events.on(name, fn)
+    local inner = fn
+    if GATED[name] then
+        inner = function(e)
+            if map_up() then
+                if name == "render" then on_map() end
+                return
+            end
+            if name == "render" and state.escape == nil and state.open then state.escape = eqoa.input.claim("Escape", true) end
+            return fn(e)
+        end
+    end
+    local token = eqoa.events.on(name, inner)
     if token then state.tokens[#state.tokens + 1] = token end
 end
 
@@ -69,10 +85,32 @@ end
 
 local close, draw, begin_await
 
+-- The mail that went (or is being asked about) is remembered as it was: closing the window or a reply that comes
+-- later empties the form only if it still holds exactly that mail, and never a fresh one typed meanwhile.
+local function snap()
+    return { to = state.to, subject = state.subject, body = state.body, tunar = state.tunar,
+        slot = state.attach and state.attach.slot, id = state.attach and state.attach.id, count = state.attach and state.attach.count }
+end
+local function same_draft(a)
+    if not a then return false end
+    local b = snap()
+    for k, v in pairs(a) do if b[k] ~= v then return false end end
+    for k, v in pairs(b) do if a[k] ~= v then return false end end
+    return true
+end
+local function empty_draft()
+    state.to, state.subject, state.body, state.tunar, state.attach = "", "", "", "", nil
+end
+
 local function stop_typing()
     state.field = nil
     if state.enter then eqoa.input.release(state.enter); state.enter = nil end
     eqoa.input.capture_text(false)
+end
+
+on_map = function()
+    if state.field or state.enter then stop_typing() end
+    if state.escape then eqoa.input.release(state.escape); state.escape = nil end
 end
 
 local function start_typing(field)
@@ -117,10 +155,10 @@ local function on_confirm(d)
             begin_await()
         elseif d.answer == "yes" then
             say("Not sent (" .. tostring(d.detail and d.detail.reason) .. ")", false)
-            state.await = nil
+            state.await, state.inflight = nil, nil
         else
             say("Not sent", true)
-            state.await = nil
+            state.await, state.inflight = nil, nil
         end
     end
 end
@@ -137,18 +175,19 @@ local function watch_send(m)
     if a.seen or m.status ~= a.status0 then
         if failed then
             say(STATUS[m.status], false)
-            state.await = nil
+            state.await, state.inflight = nil, nil
             return
         elseif m.status == "idle" then
             say("Mail sent", true)
-            state.to, state.subject, state.body, state.tunar, state.attach = "", "", "", "", nil
-            state.await = nil
+            -- only the mail that went is emptied: text typed or a reply started meanwhile stays
+            if same_draft(state.inflight) then empty_draft() end
+            state.await, state.inflight = nil, nil
             return
         end
     end
     if a.frames > 600 then
         say("The server has not said whether the mail went: look before sending it again", false)
-        state.await = nil
+        state.await, state.inflight = nil, nil
     end
 end
 
@@ -164,14 +203,15 @@ local function open(page)
     end
     state.tab = page == "compose" and "write" or "inbox"
     if not open_session(state.tab) then return end
-    state.open, state.result, state.last_req, state.scroll, state.sel, state.field = true, nil, nil, 0, nil, nil
+    state.open, state.result, state.last_req, state.scroll, state.sel, state.field = true, state.notice, nil, 0, nil, nil
+    state.notice = nil
     listen("render", draw)
     listen("action.result", function(e)
         local r = e.data
         if r and state.last_req ~= nil and r.request_id == state.last_req and r.ok == false then
             say(r.reason or r.code or "Refused", false)
             -- a send the client refused is not waiting for any answer: Send is there again
-            state.await = nil
+            state.await, state.inflight = nil, nil
         end
     end)
     listen("confirm.closed", function(e) on_confirm(e.data) end)
@@ -257,6 +297,14 @@ function close(from_client)
         for _, ref in pairs(state.sessions) do eqoa.windows.close_session(ref) end
     end
     stop_typing()
+    -- a mail that is on its way (or waiting for the player's Yes) is not left in the form to go again
+    if state.inflight then
+        if same_draft(state.inflight) then
+            empty_draft()
+            state.notice = "A mail was being sent when this window closed: look in the server's answer before sending it again"
+        end
+        state.inflight = nil
+    end
     state.sessions, state.open, state.await = {}, false, nil
     state.hits, state.row_hits, state.rect, state.m, state.picking = {}, {}, nil, nil, false
 end
@@ -531,12 +579,11 @@ function draw()
                 return eqoa.actions.mail_send({ to = state.to, subject = state.subject, body = state.body,
                     tunar = tunar > 0 and tunar or nil, item = item })
             end)
+            if req then state.inflight = snap() end
             if req and not carries() then begin_await()
             elseif req then say("Answer the question on the screen", nil) end
         end)
-        button(PAD + 68, by, 52, "Clear", true, function()
-            state.to, state.subject, state.body, state.tunar, state.attach = "", "", "", "", nil
-        end)
+        button(PAD + 68, by, 52, "Clear", true, empty_draft)
         if carries() and several_names() then
             text(PAD + 128, by + 2, "A mail that carries something goes to one name", col.warn, W - PAD - 134)
         end

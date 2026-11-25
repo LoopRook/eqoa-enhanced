@@ -35,3 +35,11 @@ it for you. Nothing is sent twice, and the game's own Mail windows cannot be ope
 say the game's window is busy while one is). After a send the window waits for the server's answer (the form empties only
 when the mail went, and Send is off meanwhile), so a mail is never sent twice by a click on a stale message. It
 has no controller use (mouse and keyboard only).
+
+## Known gaps
+
+- With the game's full map open this window hides itself and takes no clicks or keys; it comes back as it was.
+- Closing the window while a mail is on its way empties the form (the mail may have gone) and says so; look at the server's answer before sending it again.
+- A click on another window lying over the box you are typing in does not end the typing.
+- The Item picker's rows also take a right-click.
+- Waits for the server's answer count drawn frames, so they are shorter at high frame rates.

@@ -21,8 +21,24 @@ local state = {
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
+-- While the game's own full map is up this window draws nothing and takes no click, key or wheel; it lets go of the
+-- typing and of Escape/Enter, and takes them again when the map is shut.
+local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
+local GATED = { render = true, ["input.key"] = true, ["pointer.pressed"] = true, ["pointer.wheel"] = true }
+local on_map -- set below (needs stop_typing)
 local function listen(name, fn)
-    local token = eqoa.events.on(name, fn)
+    local inner = fn
+    if GATED[name] then
+        inner = function(e)
+            if map_up() then
+                if name == "render" then on_map() end
+                return
+            end
+            if name == "render" and state.escape == nil and state.open then state.escape = eqoa.input.claim("Escape", true) end
+            return fn(e)
+        end
+    end
+    local token = eqoa.events.on(name, inner)
     if token then state.tokens[#state.tokens + 1] = token end
 end
 
@@ -56,6 +72,11 @@ local function stop_typing()
     state.field = nil
     if state.enter then eqoa.input.release(state.enter); state.enter = nil end
     eqoa.input.capture_text(false)
+end
+
+on_map = function()
+    if state.field or state.enter then stop_typing() end
+    if state.escape then eqoa.input.release(state.escape); state.escape = nil end
 end
 
 local function start_typing(field)
