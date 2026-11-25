@@ -545,6 +545,7 @@ impl Play {
     pub fn roll_wheel(&mut self, at: (f64, f64), size: (u32, u32), lines: f32) -> bool {
         let f = render::ui::frame_from_window(size, [at.0 as f32, at.1 as f32]);
         let f = crate::hudlayout::local_point(crate::hudlayout::Piece::RaidPrompts, f, crate::hudlayout::Beyond::of(size));
+        if fork_win::roll_taken() { return false; }
         self.rolls_shown() && !self.search.open && !crate::hideui::hidden() && self.raid.rolls.wheel(f, lines)
     }
 
@@ -553,6 +554,7 @@ impl Play {
     pub fn rolls_cover(&self, at: [f32; 2], size: (u32, u32)) -> bool {
         let f = render::ui::frame_from_window(size, at);
         let f = crate::hudlayout::local_point(crate::hudlayout::Piece::RaidPrompts, f, crate::hudlayout::Beyond::of(size));
+        if fork_win::roll_taken() { return false; }
         self.rolls_shown() && !self.search.open && !crate::hideui::hidden() && self.raid.rolls.covers(f)
     }
 

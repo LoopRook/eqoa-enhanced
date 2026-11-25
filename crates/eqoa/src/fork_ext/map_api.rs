@@ -187,8 +187,16 @@ impl Map {
             crate::hudlayout::Piece::Minimap,
             crate::hudlayout::Beyond::of(window),
         );
-        let outer = mini::window_rect_moved(window, mini::FRAME, moved);
-        let inner = mini::window_rect_moved(window, mini::inner(), moved);
+        // HUD Scale (and the PC's per-piece size): the minimap is scaled about its moved corner, as `mini.rs` does
+        let mut hud = crate::hudlayout::scale(crate::hudlayout::Piece::Minimap, crate::hudlayout::Beyond::of(window));
+        hud.origin = [hud.origin[0] + moved[0], hud.origin[1] + moved[1]];
+        let pixels = render::ui::HudScale { origin: render::ui::window_from_frame(window, hud.origin), ..hud };
+        let scaled = |r: [f32; 4]| {
+            let (a, b) = (pixels.point([r[0], r[1]]), pixels.point([r[2], r[3]]));
+            [a[0], a[1], b[0], b[1]]
+        };
+        let outer = scaled(mini::window_rect_moved(window, mini::FRAME, moved));
+        let inner = scaled(mini::window_rect_moved(window, mini::inner(), moved));
         let k = (inner[2] - inner[0]) / (mini::inner()[2] - mini::inner()[0]) as f32;
         let scale = if self.indoor.inside() {
             self.indoor.scale()

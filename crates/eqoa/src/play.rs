@@ -6447,11 +6447,11 @@ impl Play {
         use crate::hudlayout::{Beyond, Piece, local_point};
         let b = Beyond::of(size);
         // on a buff (`buffwnd`, petition 1809): taken off, as a right click
-        if self.buff_hold(local_point(Piece::Effects, f, b)) {
+        if crate::hud::fork_hud::active_effects_visible() && self.buff_hold(local_point(Piece::Effects, f, b)) {
             return true;
         }
         let piece = if self.hud_menus.stacked { Piece::SpellBars } else { Piece::QuickMenus };
-        self.auto_point(local_point(piece, f, b))
+        crate::hud::fork_hud::hud_menu_visible(&self.hud_menus) && self.auto_point(local_point(piece, f, b))
     }
 
     /// Long presses are wanted in play (`hud_hold`): auto-cast on, or the
@@ -6661,6 +6661,7 @@ impl Play {
     /// its lines in play or in its history, and so none of the mouse's gesture;
     /// anywhere else any selection clears, and the press goes on as ever.
     pub fn chat_press(&mut self, at: (f64, f64), size: (u32, u32), left: bool) -> bool {
+        if !crate::hud::fork_hud::chat_window_visible() { return false; } // a mod hid the stock chat and its panes
         let lines = ((self.mode == 0 && !self.search.open) || self.mode == 33) && !crate::hideui::hidden();
         let scrolling = self.mode == 33;
         let frame = render::ui::frame_from_window(size, [at.0 as f32, at.1 as f32]);
@@ -6807,6 +6808,7 @@ impl Play {
             self.links.wheel(f, lines);
             return true;
         }
+        if !crate::hud::fork_hud::chat_window_visible() { return false; } // a mod hid the stock chat and its panes
         let held = self.mode == 33;
         let now = self.session.now();
         self.wnd_chat.as_mut().is_some_and(|c| {

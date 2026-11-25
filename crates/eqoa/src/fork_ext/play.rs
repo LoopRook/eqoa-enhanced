@@ -66,6 +66,9 @@ mod native_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "a4_hud_tests.rs"]
 mod a4_hud_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "sync_fix_tests.rs"]
+mod sync_fix_tests;
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy)]
 struct CachedCycleView {
@@ -904,7 +907,10 @@ pub(crate) fn begin_iteration(_play: &mut Play, _game_step: bool) {
         } else {
             0
         };
-        let pet_y = if _play.group.raid.is_empty() {
+        // the PC interface draws the pet at its own place (`hud.rs` PC_PET_AT), not under the group or raid
+        let pet_y = if crate::settings::pc_mode() {
+            93
+        } else if _play.group.raid.is_empty() {
             93 + ((_play.group.count() as i32 - 1) * 48).max(0)
         } else {
             let below = if has_pet {
