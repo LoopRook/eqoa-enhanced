@@ -937,3 +937,318 @@ fn a11_r2_small_things() {
     hidden_fishing_step(&mut p, zero);
     assert!(sent(&mut p).is_empty());
 }
+
+// ---- fix round 3 ---------------------------------------------------------------------------------------------------------
+
+/// HIGH 1: `Drop for Play` (`fork_hooks::dropped`) must clear both A10 and A11 state on native (a bad merge had moved
+/// `a10_play::dropped()` out of `dropped()` into a wasm stub). Negative control: without `a10_play::dropped()` in
+/// `dropped()`, `native_a10::current_mail()` and `current_auction()` remain `Some` after `drop(p)`.
+#[test]
+fn a11_r3_play_drop_clears_a10_and_a11_snapshots() {
+    use crate::fork_ext::addons::native_a10;
+    let p = ready();
+    native_a10::publish_mail(serde_json::json!({"revision": 0, "status": "idle", "entries": []}));
+    native_a10::publish_auction(serde_json::json!({"revision": 0, "pending": "none", "results": []}));
+    native_a11::publish(Read::Merc, serde_json::json!({"revision": 0, "available": true}));
+    assert!(native_a10::current_mail().is_some());
+    assert!(native_a10::current_auction().is_some());
+    assert!(native_a11::current(Read::Merc).is_some());
+    drop(p);
+    assert!(native_a10::current_mail().is_none(), "Drop for Play must clear A10 mail snapshot");
+    assert!(native_a10::current_auction().is_none(), "Drop for Play must clear A10 auction snapshot");
+    assert!(native_a11::current(Read::Merc).is_none(), "Drop for Play must clear A11 snapshot");
+}
+
+/// HIGH 2: `LOCAL` (`dye`, `merc_waits`, `fish_wait`, `fish_sent`) and `native_a11` published reads are cleared on
+/// every `Event::Teleport` (including same-world, where `world_change` is never set), `Event::WorldEntry` (including
+/// when `viewer.rs` calls `take_world_change()` before `Play::frame`), and `Event::Disconnected`, both when mods
+/// listen (`interested == true`) and when none do (`interested == false`), and `session_ended` / `give_back` does not
+/// refill waiting lists afterwards. Negative control: polling `play.world_change.is_some()` in `tick` leaves `LOCAL`
+/// and `eqoa.dye.get()` stale on same-world teleports and after `take_world_change()`.
+#[test]
+fn a11_r3_world_entry_teleport_and_disconnect_clear_local_and_reads() {
+    use net::session::Event;
+
+    for (label, interested, kind) in [
+        ("same-world teleport (interested)", true, "teleport"),
+        ("same-world teleport (uninterested)", false, "teleport"),
+        ("cross-world WorldEntry after take_world_change", true, "world_entry"),
+        ("disconnect", true, "disconnect"),
+    ] {
+        let (mut p, host) = rig();
+        p.player.world = 1;
+        // Hold MercItems, MercSpells, DyePicker, and Fishing; pass MercItems and Fishing behind mode 13 so
+        // `merc_waits` and `fish_wait` are populated while MercSpells and DyePicker remain held sessions.
+        hold(&host, TakeoverKind::MercItems);
+        hold(&host, TakeoverKind::MercSpells);
+        hold(&host, TakeoverKind::DyePicker);
+        hold(&host, TakeoverKind::Fishing);
+
+        merc_open_held(&mut p, crate::play::mercplay::ITEMS_MODE, &host);
+        merc_open_held(&mut p, crate::play::mercplay::SPELLS_MODE, &host);
+        let d_bytes = dye_open(0x1111_2222, true);
+        pre_event(&p, &dye_packet(d_bytes.clone()));
+        p.dyepick_opcode(&d_bytes);
+        post_event(&mut p);
+        assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
+        post_event(&mut p);
+        step(&mut p, &host);
+
+        // Set `fish_sent` via a cancel so `LOCAL.fish_sent` is populated too.
+        p.fish.part.state = state::WAITING;
+        assert!(matches!(dispatch(&mut p, &A11Action::FishCancel), DispatchOutcome::Completed { .. }));
+        assert!(LOCAL.with(|l| l.borrow().fish_sent.is_some()), "{label}: fish_sent primed");
+
+        // Pass MercItems and Fishing under mode 13 -> fills `merc_waits` and `fish_wait`; MercSpells + DyePicker stay held.
+        p.mode = 13;
+        host.execute(
+            "assert(eqoa.windows.pass(eqoa.windows.session('mercenary_items').ref)); \
+             assert(eqoa.windows.pass(eqoa.windows.session('fishing').ref))",
+        )
+        .unwrap();
+        step(&mut p, &host);
+        assert!(
+            LOCAL.with(|l| {
+                let l = l.borrow();
+                !l.merc_waits.is_empty() && l.fish_wait && l.dye.is_some() && l.fish_sent.is_some()
+            }),
+            "{label}: all LOCAL fields populated before event"
+        );
+        assert!(native_a11::current(Read::Merc).is_some(), "{label}: merc published");
+        assert!(native_a11::current(Read::Dye).is_some(), "{label}: dye published");
+        assert!(native_a11::current(Read::Fishing).is_some(), "{label}: fishing published");
+
+        if !interested {
+            native_core::fixture_demand(false);
+        }
+
+        let ev = match kind {
+            "teleport" => Event::Teleport { world: 1, pos: [10.0, 0.0, 10.0], hpr: [0.0; 3], token: 7 },
+            "world_entry" => Event::WorldEntry {
+                self_id: 0x100,
+                player: net::session::Player { world: 2, ..Default::default() },
+                dump: Default::default(),
+            },
+            _ => Event::Disconnected(3),
+        };
+
+        // Real event path (`Play::frame` loop): begin_game_event -> game handler effect -> divert_event -> end_game_event.
+        let cap = super::super::begin_game_event(&p, &ev);
+        match kind {
+            "teleport" => {
+                // Same-world teleport: `msg_00b2` sets `mode = 0`, never sets `world_change`.
+                p.mode = 0;
+            }
+            "world_entry" => {
+                p.mode = 0;
+                p.world_change = Some((
+                    "world2".to_string(),
+                    crate::play::Spawn { pos: [0.0; 3], heading: 0.0, placing: crate::play::Placing::AsGiven },
+                ));
+                // `viewer.rs:6543` takes `world_change` before `Play::frame` calls `begin_iteration` -> `a11_play::tick`.
+                let taken = p.take_world_change();
+                assert!(taken.is_some(), "{label}: viewer took world_change");
+                assert!(p.world_change.is_none());
+            }
+            _ => {
+                p.disconnected = Some(3);
+            }
+        }
+        super::super::divert_event(&mut p);
+        super::super::end_game_event(&p, cap);
+
+        // Immediately cleared on the event itself (before the next tick).
+        assert!(
+            LOCAL.with(|l| {
+                let l = l.borrow();
+                l.dye.is_none() && l.merc_waits.is_empty() && !l.fish_wait && l.fish_sent.is_none()
+            }),
+            "{label}: LOCAL must be cleared on the event"
+        );
+        assert!(native_a11::current(Read::Merc).is_none(), "{label}: merc read cleared");
+        assert!(native_a11::current(Read::Dye).is_none(), "{label}: dye read cleared");
+        assert!(native_a11::current(Read::Fishing).is_none(), "{label}: fishing read cleared");
+
+        if !interested {
+            native_core::fixture_demand(true);
+        }
+
+        // Next frame: `a2_play::tick` and `a11_play::tick` must NOT refill waiting lists or reopen old windows.
+        step(&mut p, &host);
+        if kind != "disconnect" {
+            assert_eq!(p.mode, 0, "{label}: old waiting merc/fishing windows must not open in the new zone");
+        } else {
+            assert!(native_a11::current(Read::Merc).is_none(), "{label}: merc read stays cleared while disconnected");
+            assert!(native_a11::current(Read::Dye).is_none(), "{label}: dye read stays cleared while disconnected");
+            assert!(native_a11::current(Read::Fishing).is_none(), "{label}: fishing read stays cleared while disconnected");
+        }
+        assert!(
+            LOCAL.with(|l| {
+                let l = l.borrow();
+                l.dye.is_none() && l.merc_waits.is_empty() && !l.fish_wait && l.fish_sent.is_none()
+            }),
+            "{label}: waiting lists must stay empty after tick (session_ended/give_back did not refill them)"
+        );
+        host.execute(
+            "assert(eqoa.dye.get() == nil); \
+             assert(eqoa.windows.session('dye_picker') == nil); \
+             assert(eqoa.windows.session('mercenary_spells') == nil)",
+        )
+        .unwrap();
+
+        if kind != "disconnect" {
+            // A fresh native dye picker in the new zone must work (not rejected as stale_handle against old 0x1111_2222).
+            open_dye(&mut p, 0x3333_4444, true);
+            assert_eq!(p.mode, crate::play::dyeplay::MODE, "{label}: new native dye picker opens");
+            let (ok, code) = ask(&mut p, &host, "return eqoa.actions.dye_cancel(0x33334444)");
+            assert!(ok, "{label}: new dye picker token must be accepted, got {code}");
+        }
+    }
+}
+
+/// MEDIUM 3: a passed merc window waiting in `merc_waits` must not open natively over a newly held session started
+/// when a fresh `OPEN` arrives in dialog mode 7 or 9. Negative control: keeping `(mode, true)` in `merc_waits` when
+/// `post_event` starts the new session and not checking `up(kind)` in `resume_merc` opens native `ITEMS_MODE` (61)
+/// over the mod's active session when mode returns to 0.
+#[test]
+fn a11_r3_passed_merc_window_does_not_open_over_a_fresh_session() {
+    let (mut p, host) = rig();
+    hold(&host, TakeoverKind::MercItems);
+    merc_open_held(&mut p, crate::play::mercplay::ITEMS_MODE, &host);
+    // NPC response dialog is up (`mode == 7`, where `merc_win_may_open()` is true): pass queues `(61, true)`.
+    p.mode = 7;
+    host.execute("assert(eqoa.windows.pass(eqoa.windows.session('mercenary_items').ref))").unwrap();
+    step(&mut p, &host);
+    assert!(!session_ok(&host, "mercenary_items"));
+    assert!(LOCAL.with(|l| l.borrow().merc_waits.contains(&(crate::play::mercplay::ITEMS_MODE, true))));
+    // While `mode == 7`, a fresh OPEN arrives -> `mercplay` opens mode 61, `post_event` takes it for the mod and
+    // restores `mode = 7`.
+    let pkt = net::session::Event::Opcode {
+        op: net::mercwin::OP_MERC_WINDOW_STATE,
+        data: window_body(OPEN, 1, "Kel", &merc_items()),
+    };
+    pre_event(&p, &pkt);
+    assert!(p.merc_win_opcode(net::mercwin::OP_MERC_WINDOW_STATE, &window_body(OPEN, 1, "Kel", &merc_items())));
+    post_event(&mut p);
+    step(&mut p, &host);
+    assert_eq!(p.mode, 7, "post_event restored the NPC dialog mode");
+    assert!(session_ok(&host, "mercenary_items"), "fresh session started for the mod");
+    assert!(LOCAL.with(|l| l.borrow().merc_waits.is_empty()), "stale passed wait dropped when fresh session started");
+    // NPC dialog closes -> `mode = 0`: the old passed wait must NOT open native ITEMS_MODE over the active session.
+    p.mode = 0;
+    step(&mut p, &host);
+    assert_eq!(p.mode, 0, "native merc window must not open over the newly held session");
+    assert!(session_ok(&host, "mercenary_items"), "fresh mod session remains active");
+}
+
+/// MEDIUM 4: waiting merc and fishing windows (`merc_waits`, `fish_wait`) are cleared at death (matching the game's
+/// `msg_005e` -> `set_mode_0`, which closes open windows rather than reopening them) and never open on a dead
+/// character. Negative control: without the `play.is_dead()` check in `resume_merc`/`resume_fishing`, mode becomes
+/// 61/36 while dead.
+#[test]
+fn a11_r3_waiting_windows_do_not_open_on_a_dead_character() {
+    let dead_cam = || crate::death::DeathCam::new([0.0; 3], [0.0, 0.0, 1.0], [0.0; 3]);
+
+    // Case A: merc window waiting behind a hidden bank session when the character dies.
+    let mut p = ready();
+    hide_a_session(&mut p);
+    open_merc(&mut p);
+    assert!(LOCAL.with(|l| l.borrow().merc_waits.contains(&(crate::play::mercplay::ITEMS_MODE, false))));
+    p.death = Some(dead_cam());
+    window_takeover::set_hidden_inactive(TakeoverKind::Bank);
+    tick(&mut p, true);
+    assert_eq!(p.mode, 0, "waiting merc window must not open while dead");
+    assert!(LOCAL.with(|l| l.borrow().merc_waits.is_empty()), "waiting merc window is cleared at death");
+    // Standing up afterwards does not pop up the pre-death waiting window.
+    p.death = None;
+    tick(&mut p, true);
+    assert_eq!(p.mode, 0, "cleared pre-death wait does not reopen later");
+
+    // Case B: passed merc window and passed fishing window waiting behind mode 13 when death clears mode to 0.
+    let (mut p, host) = rig();
+    hold(&host, TakeoverKind::MercItems);
+    hold(&host, TakeoverKind::Fishing);
+    merc_open_held(&mut p, crate::play::mercplay::ITEMS_MODE, &host);
+    assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
+    post_event(&mut p);
+    step(&mut p, &host);
+    p.mode = 13;
+    host.execute(
+        "assert(eqoa.windows.pass(eqoa.windows.session('mercenary_items').ref)); \
+         assert(eqoa.windows.pass(eqoa.windows.session('fishing').ref))",
+    )
+    .unwrap();
+    step(&mut p, &host);
+    assert!(LOCAL.with(|l| !l.borrow().merc_waits.is_empty() && l.borrow().fish_wait));
+    // Character dies (`msg_005e` sets death and clears mode to 0).
+    p.death = Some(dead_cam());
+    p.mode = 0;
+    step(&mut p, &host);
+    assert_eq!(p.mode, 0, "neither passed merc nor passed fishing opens on a dead character");
+    assert!(LOCAL.with(|l| l.borrow().merc_waits.is_empty() && !l.borrow().fish_wait), "both waits cleared at death");
+}
+
+/// LOW 5: (a) `TakeoverKind::parse` error text lists the four A11 kinds; (b) `eqoa.actions.dialog_answer(ref, 1)` on
+/// an A11 session returns `unsupported` (matching spec §7), not `out_of_range`; (c) `dye_pick` and `dye_no_dye`
+/// confirms carry `session_kind = "dye_picker"` so ending the session (`pass` / `close_window`) cancels the open
+/// confirm instead of letting it fire on a native picker with the same token.
+#[test]
+fn a11_r3_low_parse_errors_dialog_answer_and_dye_confirm_session() {
+    // (a) parse error messages name all four A11 kinds
+    for (bad, want_code) in [("inventory", "unsupported"), ("not_a_window_kind", "invalid_argument")] {
+        let err = TakeoverKind::parse(bad).expect_err("expected parse error");
+        assert_eq!(err.0, want_code);
+        for k in ["'mercenary_items'", "'mercenary_spells'", "'dye_picker'", "'fishing'"] {
+            assert!(err.1.contains(k), "parse({bad:?}) error should name {k}: {}", err.1);
+        }
+    }
+
+    // (b) `dialog_answer(ref, 1)` on A11 sessions returns `unsupported`
+    let (mut p, host) = rig();
+    p.session.dye_picker_version = 2;
+    hold(&host, TakeoverKind::MercItems);
+    hold(&host, TakeoverKind::DyePicker);
+    hold(&host, TakeoverKind::Fishing);
+    merc_open_held(&mut p, crate::play::mercplay::ITEMS_MODE, &host);
+    let d1 = dye_open(0x1234, true);
+    pre_event(&p, &dye_packet(d1.clone()));
+    p.dyepick_opcode(&d1);
+    post_event(&mut p);
+    assert!(p.fishing_opcode(crate::fishing::OP_IN, &[1]));
+    post_event(&mut p);
+    step(&mut p, &host);
+    for kind in ["mercenary_items", "dye_picker", "fishing"] {
+        let (ok, code) = ask(&mut p, &host, &format!("return eqoa.actions.dialog_answer(eqoa.windows.session('{kind}').ref, 1)"));
+        assert!(!ok && code == "unsupported", "dialog_answer on {kind} must return unsupported, got {code}");
+    }
+
+    // (c) dye_pick confirm is tied to the `"dye_picker"` session: `pass` cancels it before the native picker opens
+    let (ok, _) = ask(&mut p, &host, "return eqoa.actions.dye_pick(0x1234, 0xFF0000FF)");
+    assert!(ok && confirm::is_open(), "dye_pick opened confirm");
+    sent(&mut p);
+    host.execute("closed = {}; assert(eqoa.windows.pass(eqoa.windows.session('dye_picker').ref))").unwrap();
+    step(&mut p, &host);
+    assert!(!confirm::is_open(), "passing the dye_picker session must cancel its open confirm");
+    host.execute("assert(#closed >= 1 and closed[#closed].kind == 'dye_pick' and closed[#closed].answer == 'passed')").unwrap();
+    // Native picker now opens with the same token 0x1234: pressing Yes keys must NOT fire the cancelled confirm.
+    let (v, mut r) = (vui(), NullRaster);
+    p.run_dyepick(&v, &mut r);
+    assert_eq!(p.mode, crate::play::dyeplay::MODE);
+    assert!(!confirm::key(&Key::Named(NamedKey::ArrowRight)), "no confirm open to answer");
+    step(&mut p, &host);
+    assert!(sent_op(&mut p, 0x96, 0x7E).is_empty(), "cancelled confirm must not answer the native picker");
+    p.dyepick_done(PickerUp::Cancel);
+    sent(&mut p);
+
+    // Same for `dye_no_dye` cancelled on `close_window`
+    let d2 = dye_open(0x5678, true);
+    pre_event(&p, &dye_packet(d2.clone()));
+    p.dyepick_opcode(&d2);
+    post_event(&mut p);
+    step(&mut p, &host);
+    let (ok, _) = ask(&mut p, &host, "return eqoa.actions.dye_no_dye(0x5678)");
+    assert!(ok && confirm::is_open(), "dye_no_dye opened confirm");
+    let (ok, _) = ask(&mut p, &host, "return eqoa.actions.close_window(eqoa.windows.session('dye_picker').ref)");
+    assert!(ok);
+    assert!(!confirm::is_open(), "closing the dye_picker session must cancel its open dye_no_dye confirm");
+}

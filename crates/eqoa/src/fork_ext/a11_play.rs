@@ -64,7 +64,7 @@ thread_local! {
     static LOCAL: RefCell<Local> = RefCell::new(Local::default());
 }
 
-fn clear_world_local(l: &mut Local, gen: u64) {
+fn clear_world_local(l: &mut Local, epoch: u64) {
     l.logged = None;
     l.fish_sent = None;
     l.merc_waits.clear();
@@ -73,16 +73,16 @@ fn clear_world_local(l: &mut Local, gen: u64) {
     l.dye = None;
     l.pre_dye_event = false;
     l.pre_dye_close = None;
-    l.world_gen = gen;
+    l.world_gen = epoch;
 }
 
 /// Drops local state if `window_takeover::release_all` ran since the last call.
 fn sync_world() {
-    let gen = native_a11::world_gen();
+    let epoch = native_a11::world_gen();
     LOCAL.with(|l| {
         let mut l = l.borrow_mut();
-        if l.world_gen != gen {
-            clear_world_local(&mut l, gen);
+        if l.world_gen != epoch {
+            clear_world_local(&mut l, epoch);
         }
     });
 }
@@ -90,8 +90,8 @@ fn sync_world() {
 /// Called from `begin_game_event` on every `WorldEntry`, `Teleport` and `Disconnected` (same-world included), right
 /// after `api_capture` / `window_takeover::release_all` ended any held sessions with `"zoning"`.
 pub(crate) fn world_changed() {
-    let gen = native_a11::world_gen();
-    LOCAL.with(|l| clear_world_local(&mut l.borrow_mut(), gen));
+    let epoch = native_a11::world_gen();
+    LOCAL.with(|l| clear_world_local(&mut l.borrow_mut(), epoch));
     native_a11::clear_all();
 }
 
@@ -155,8 +155,8 @@ pub(crate) fn blocked(what: &'static str) -> bool {
 
 /// The world is let go: nothing of these windows is left to read.
 pub(crate) fn dropped() {
-    let gen = native_a11::world_gen();
-    LOCAL.with(|l| *l.borrow_mut() = Local { world_gen: gen, ..Local::default() });
+    let epoch = native_a11::world_gen();
+    LOCAL.with(|l| *l.borrow_mut() = Local { world_gen: epoch, ..Local::default() });
     native_a11::clear_all();
 }
 
@@ -694,8 +694,8 @@ pub(crate) fn hidden_fishing_step(play: &mut Play, place: (vi::vect::Vect3<vi::f
 
 #[cfg(test)]
 pub(crate) fn reset_for_test() {
-    let gen = native_a11::world_gen();
-    LOCAL.with(|l| *l.borrow_mut() = Local { world_gen: gen, ..Local::default() });
+    let epoch = native_a11::world_gen();
+    LOCAL.with(|l| *l.borrow_mut() = Local { world_gen: epoch, ..Local::default() });
     native_a11::clear_all();
 }
 
