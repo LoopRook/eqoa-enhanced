@@ -735,6 +735,6 @@ fn a13_world_map_size_settings_are_saved_whole_and_come_back() {
     // a bad value falls back to Normal
     drop(again);
     fresh();
-    let bad = rig([1024.0, 768.0], Some(json!({"version": 1, "text_size": 99, "marker_size": "x"})));
+    let bad = rig([1024.0, 768.0], Some(json!({"table": [["version", 1], ["text_size", 99], ["marker_size", "x"]]})));
     assert_eq!((bad.lua_f64("world_map.opts.text"), bad.lua_f64("world_map.opts.marker")), (2.0, 2.0));
 }
