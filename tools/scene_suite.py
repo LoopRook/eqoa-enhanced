@@ -260,6 +260,17 @@ class Suite:
             return db.execute("SELECT COALESCE(SUM(1), 0) FROM charinventory JOIN characters USING (serverid) "
                               "WHERE charName = ? AND patternid = ?", (ls.CHARACTER, pattern_id)).fetchone()[0]
 
+    def char_quest(self, questid):
+        """(step, done, picks) of the character's row for a quest in the live database copy, or None."""
+        with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True)) as db:
+            return db.execute("SELECT step, done, picks FROM charquests JOIN characters USING (serverid) "
+                              "WHERE charName = ? AND questid = ?", (ls.CHARACTER, questid)).fetchone()
+
+    def has_spell(self, spellid):
+        with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True)) as db:
+            return db.execute("SELECT COUNT(*) FROM spells JOIN characters USING (serverid) WHERE charName = ? AND spellid = ?",
+                              (ls.CHARACTER, spellid)).fetchone()[0] > 0
+
     def inventory(self):
         """(rows, stack sum, tunar) of the character in the live database copy."""
         with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True)) as db:

@@ -431,6 +431,50 @@ def realquest_scenes(suite):
     ]
 
 
+def choice_scene(suite, number, name, *, questid, quest, giver, level, tclass, key, answer, expect_pick, spell):
+    """A REAL choice step (rows unchanged). Auto mode is ON: the mod must leave the choice to the player, whose key
+    sends the pick; the server records it. The control presses nothing: if the mod answered for the player the control
+    would record a pick and fail to fail."""
+    def seed(db):
+        db.execute("INSERT INTO charquests (serverid,questid,step,count,done,slot,updated,picks) VALUES (2,?,1,0,0,0,'','')", (questid,))
+        db.execute("UPDATE characters SET level=?, tclass=? WHERE charName='Lsgm'", (level, tclass))
+
+    def checks(run_dir, log):
+        server = suite.server_since()
+        (run_dir / "mod-dump.txt").write_text(chr(10).join(ln for ln in log.splitlines() if "Dialog window: DUMP" in ln), encoding="utf-8")
+        row = suite.char_quest(questid)
+        return [
+            (f'the server recorded the pick "{answer}" (server log)', f'Quests: Lsgm picked "{answer}"' in server),
+            (f"charquests.picks is {expect_pick!r} (database row: {row})", row is not None and row[2] == expect_pick),
+            (f"the step was completed (the quest advanced past step 1 or is done): {row}", row is not None and (row[0] != 1 or row[1] == 1)),
+            (f"the option's spell {spell} was given to the character (database)", suite.has_spell(spell)),
+            ("the mod never answered by itself", "automatically" not in log),
+        ]
+
+    return ss.Scene(
+        number, name, mods=("eqoa_dialogs",), options={"eqoa_dialogs": {"auto_answer": True}}, fresh_db=True, seed=seed,
+        patch=DUMP_PATCH,
+        env={"EQOA_SAY": f"#testmode@5000;#goto {giver}@8000", "EQOA_TARGET": f"{giver}@16500", "EQOA_PLAY_KEYS": "q@18000",
+             "EQOA_MOD_KEYS": f"{key}@21000;enter@24000"},
+        control_env={"EQOA_MOD_KEYS": ""},
+        quit_after=28, shots="20000=1-the-choice.png,22500=2-after-pick.png,26000=3-end.png",
+        expect=[("the giver was hailed", rf"script: target {giver}: true"),
+                ("the mod took the choice (response dialog)", r"takeover: response_dialog session started for the mod")],
+        extra=checks,
+    )
+
+
+def choice_scenes(suite):
+    return [
+        choice_scene(suite, "10c", 'REAL choice 100955 "The Alchemist\'s Reward, Level 30": 2 options, the player takes the SECOND, auto on',
+                     questid=100955, quest="The Alchemist's Reward", giver="Erilous Skypyre", level=30, tclass=14, key="2",
+                     answer="Moradhim Cocktail", expect_pick="1:1", spell=700336),
+        choice_scene(suite, "10d", 'REAL choice 101136 "The Shaman\'s Epic Reward": 6 options (the most any real step has), the player takes the SIXTH, auto on',
+                     questid=101136, quest="The Shaman's Epic Reward", giver="Ediopolus", level=60, tclass=8, key="6",
+                     answer="Ascended Ethereal Healing", expect_pick="1:5", spell=906750),
+    ]
+
+
 def make_scenes(suite):
     return [dialog_scene(), start_menu_scene(), chat_scene(), overlap_scene(), sell_scene(suite), destroy_scene(suite),
-            drag_scene(), perf_scene(), *handin_scenes(suite), restart_scene(suite), *realquest_scenes(suite)]
+            drag_scene(), perf_scene(), *handin_scenes(suite), restart_scene(suite), *realquest_scenes(suite), *choice_scenes(suite)]
