@@ -323,16 +323,20 @@ impl Store {
         Ok(())
     }
     fn prepare(&self, path: &Path, doc: &Document) -> Result<Vec<u8>, String> {
-        // reads every profile once for each mod's quota: said if it is slow
+        // reads every other profile once, then checks each mod against that: said if it is slow
         let _probe = super::stall_probe::scope("profile checks (quota of every mod)");
         Document::parse(doc.json())?;
         let addons = self.root()?.parent().ok_or("missing addon storage root")?;
-        for (key, value) in &doc.addons {
-            super::sandbox::check_settings_quota(
-                &addons.join(format!("{key}-files")),
-                path,
-                value,
-            )?;
+        if !doc.addons.is_empty() {
+            let known = super::sandbox::profile_usage(addons, Some(path))?;
+            for (key, value) in &doc.addons {
+                super::sandbox::check_settings_quota_known(
+                    &addons.join(format!("{key}-files")),
+                    path,
+                    value,
+                    Some(&known),
+                )?;
+            }
         }
         encode_json(&doc.json())
     }
@@ -810,6 +814,39 @@ mod tests {
         ] {
             valid_name(name).unwrap();
         }
+    }
+    /// The owner's freezes (2026-11-24): a save read and parsed every other profile once for each mod in it. Each other
+    /// profile is read once now, however many mods are saved, and the quota is still each mod's own.
+    #[test]
+    fn mod_profiles_a_save_reads_each_other_profile_once_and_keeps_each_mods_quota() {
+        let scratch = Scratch::new();
+        let store = Store::new(Some(scratch.0.clone()));
+        let mut doc = Document::empty();
+        for n in 0..12 {
+            doc.addons.insert(format!("{n:064x}"), serde_json::json!(n));
+        }
+        for name in ["Default", "Tank", "Healer", "Melee"] {
+            store.create(name, &doc).unwrap();
+        }
+        super::super::sandbox::take_profile_reads_for_test();
+        store.write("Tank", &doc).unwrap();
+        assert_eq!(super::super::sandbox::take_profile_reads_for_test(), 3, "the three other profiles, once each");
+        // control: the check of one mod on its own reads them all, which a save must not do for each mod
+        let addons = store.root().unwrap().parent().unwrap().to_path_buf();
+        let path = store.path("Tank").unwrap();
+        for (key, value) in &doc.addons {
+            super::super::sandbox::check_settings_quota(&addons.join(format!("{key}-files")), &path, value).unwrap();
+        }
+        assert_eq!(super::super::sandbox::take_profile_reads_for_test(), 12 * 3, "control: once for each mod");
+        // two other profiles hold 9 MiB each of one mod: that mod's next save is refused, a save without it is not
+        let big = format!("{:064x}", 0);
+        for name in ["Healer", "Melee"] {
+            let text = serde_json::json!({"schemaVersion": 1, "addons": {big.clone(): "x".repeat(9 * 1024 * 1024)}});
+            fs::write(store.path(name).unwrap(), serde_json::to_vec(&text).unwrap()).unwrap();
+        }
+        assert!(store.write("Tank", &doc).unwrap_err().contains("16 MiB"));
+        doc.addons.remove(&big);
+        store.write("Tank", &doc).unwrap();
     }
     #[test]
     fn mod_profiles_corrupt_file_is_never_overwritten_or_deleted() {
