@@ -177,3 +177,16 @@ fn a13_the_surface_names_are_supported() {
     )
     .unwrap();
 }
+
+#[test]
+fn a13_a_waypoint_set_with_keep_stays_when_the_mod_goes_and_one_without_it_goes() {
+    use super::map_waypoint;
+    map_waypoint::reset_for_test();
+    map_waypoint::placed(1, "a", 0, [1.0, 2.0], None, true);
+    map_waypoint::placed(2, "b", 1, [3.0, 4.0], None, false);
+    map_waypoint::release_vm(1);
+    map_waypoint::release_vm(2);
+    let gone = map_waypoint::take_released(|world| Some(if world == 0 { [1.0, 2.0] } else { [3.0, 4.0] }));
+    assert_eq!(gone, vec![1], "only the pin without keep is taken away; the kept one stays the player's");
+    map_waypoint::reset_for_test();
+}
