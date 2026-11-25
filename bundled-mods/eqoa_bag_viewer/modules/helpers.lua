@@ -227,7 +227,7 @@ function H.menu_rows(it, add)
         add("Keep up to " .. math.max(H.owned(it.id), 1) .. " (Restock)", true, nil, function() H.start_keep(it) end, true)
     end
     if H.is_banked(it) then
-        add("Stop banking this", true, nil, function() H.set_bank(it, false) end, true)
+        add("Unmark bank", true, nil, function() H.set_bank(it, false) end, true)
     else
         add("Bank this", not it.equipped, it.equipped and "cannot bank an equipped item" or nil,
             function() H.set_bank(it, true) end, true)

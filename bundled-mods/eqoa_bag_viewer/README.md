@@ -67,7 +67,7 @@ exactly as before, and a helper acts only on its button or on its own switch.
 - **Restock**: an item's menu has **Keep up to N (Restock)** (N starts at what the bags hold; the menu steps it by 5). Near
   a merchant, **Restock (N)** buys up to N of each kept item that merchant sells, counting everything of that kind in the
   pack, never more than N. It stops, and says why, when money or bag space runs out.
-- **Bank marked**: **Bank this** in an item's menu; near a banker, **Bank marked (N)** deposits the marked stacks (never worn
+- **Bank marked**: **Bank this** in an item's menu (a marked item's menu says **Unmark bank** instead, which takes the mark off); near a banker, **Bank marked (N)** deposits the marked stacks (never worn
   ones) and says so when the bank is full.
 - **Do it when I get near**: three switches under the buttons (Sell junk, Restock, Bank), kept for each character, off by
   default. A helper acts once per approach (it arms again after you have been out of the NPC's reach by 5 more units),
@@ -101,7 +101,8 @@ A plain click works as before and clears the selection. The line under the grid 
 selected item for one menu titled **"N items selected"**:
 
 - **Mark as junk** and **Unmark** (marking asks once, with the same Yes or No as a single item, when some of the items are
-  equipment, potions or other things the game's merchant would ask about), **Mark to bank**.
+  equipment, potions or other things the game's merchant would ask about), **Mark to bank**, and **Unmark bank (N)**, which shows
+  when any selected item (even a worn one) carries the bank mark and takes it off from all of them.
 - **Sell (N)** at a merchant and **Put in bank (N)** at a banker: greyed with the reason when none is near ("no merchant nearby",
   "too far from the merchant"; the same reach rules as the other buttons, and a second click tries anyway). They go item by item
   at the game's own pace, never faster than the game's own single actions: one batch at a time, each item looked up again by its
