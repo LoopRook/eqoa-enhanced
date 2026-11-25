@@ -1228,6 +1228,16 @@ fn restart_walk(edit: Edit) -> Option<Rig> {
     Some(r)
 }
 
+/// What EQOA Dialogs holds: round A2's NPC dialogs and offers. `TakeoverKind::DIALOGS` also has round A11's server
+/// windows, which that mod does not take.
+const NPC_DIALOGS: [TakeoverKind; 5] = [
+    TakeoverKind::TextDialog,
+    TakeoverKind::ResponseDialog,
+    TakeoverKind::GroupInvite,
+    TakeoverKind::ReviveOffer,
+    TakeoverKind::SummonOffer,
+];
+
 #[test]
 fn a6_after_the_server_restarts_and_the_player_stays_every_mod_works_without_a_relogin() {
     let Some(mut r) = restart_walk(None) else { return };
@@ -1242,7 +1252,7 @@ fn a6_after_the_server_restarts_and_the_player_stays_every_mod_works_without_a_r
     // what was open is closed, and the mod knows it (a new menu is not a toggle of a stale one)
     assert!(r.menu_session().is_none(), "the menu that was up ended with the world");
     assert!(window_takeover::is_taken(TakeoverKind::StartMenu) && window_takeover::is_taken(TakeoverKind::ChatEntry));
-    assert!(TakeoverKind::DIALOGS.iter().all(|k| window_takeover::is_taken(*k)), "Dialogs holds its kinds again");
+    assert!(NPC_DIALOGS.iter().all(|k| window_takeover::is_taken(*k)), "Dialogs holds its kinds again");
     assert!(window_takeover::is_taken(TakeoverKind::FriendRequest) && window_takeover::is_taken(TakeoverKind::GuildInvite), "Social holds its kinds again");
     // the Start key is the mod's
     r.escape();
@@ -1397,7 +1407,7 @@ fn a6_dialogs_get_their_claim_back_from_each_of_the_two_events_and_not_without_t
         let mut r = Rig::new(&img, &words, None, true);
         r.more.push(start_mod(&bundled_edited("eqoa_dialogs", Some(edit))));
         // what the mod's first frame does (this rig runs no render frames): it holds its kinds
-        for kind in TakeoverKind::DIALOGS {
+        for kind in NPC_DIALOGS {
             window_takeover::takeover(r.more[0].vm, "eqoa_dialogs", kind, window_takeover::TakeoverScope::All).unwrap();
         }
         let _ = r.p.forge_snapshot(None);
