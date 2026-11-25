@@ -585,15 +585,15 @@ fn a7_lfg_gated_on_non_live_and_wire_parity_on_live_server() {
     let host = host_all();
     step(&mut p, &host);
 
-    // Negative control: non-live server -> available=false, all lfg calls refuse with unavailable and send nothing
+    // Negative control: non-live server -> available=false, all lfg calls refuse with unsupported (the server does not offer the feature: section 1's table) and send nothing
     clear_recorded(&mut p);
     host.execute("assert(eqoa.lfg.get().available == false)").unwrap();
     ask(&mut p, &host, "return eqoa.lfg.search()");
-    host.execute("assert(results[1] and results[1].ok == false and results[1].code == 'unavailable')").unwrap();
+    host.execute("assert(results[1] and results[1].ok == false and results[1].code == 'unsupported')").unwrap();
     ask(&mut p, &host, "return eqoa.lfg.register()");
-    host.execute("assert(results[1] and results[1].ok == false and results[1].code == 'unavailable')").unwrap();
+    host.execute("assert(results[1] and results[1].ok == false and results[1].code == 'unsupported')").unwrap();
     ask(&mut p, &host, "return eqoa.lfg.unregister()");
-    host.execute("assert(results[1] and results[1].ok == false and results[1].code == 'unavailable')").unwrap();
+    host.execute("assert(results[1] and results[1].ok == false and results[1].code == 'unsupported')").unwrap();
     assert!(recorded(&p).is_empty(), "non-live server must send nothing for LFG");
 
     // Server enables live features via 0x07F5 (word 0 bit 0 = 1)

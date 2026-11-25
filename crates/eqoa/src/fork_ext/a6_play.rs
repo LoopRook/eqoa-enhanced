@@ -379,8 +379,12 @@ pub(crate) fn dispatch(play: &mut Play, action: &A6Action) -> DispatchOutcome {
         }
         A6Action::ChatLine { route, to, text, links } => chat_line(play, *route, to.as_deref(), text, links),
         A6Action::OpenLink { id, name } => {
+            // the server offers no links (`unsupported`), or the player has turned Item Links off (`unavailable`)
+            if !play.session.item_links_offer {
+                return refuse("unsupported", "this server offers no item links");
+            }
             if !play.links_made() {
-                return refuse("not_ready", "this server offers no item links, or the player has turned them off");
+                return refuse("unavailable", "the player has turned Item Links off");
             }
             // the game's own click on a link: its card opens over play and the server is asked for the item
             play.open_link(*id, name);

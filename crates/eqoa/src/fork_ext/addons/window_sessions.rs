@@ -247,7 +247,7 @@ pub(crate) fn open(
             return Ok(existing.clone());
         }
         if s.sessions.iter().filter(|x| x.vm == vm).count() >= MAX_PER_VM {
-            return Err(("busy", "this mod has too many windows open".into()));
+            return Err(("quota", "this mod has too many windows open".into()));
         }
         s.next_id += 1;
         s.next_revision += 1;
@@ -628,7 +628,7 @@ pub(crate) fn pass(vm: u64, id: &str) -> std::result::Result<(), (&'static str, 
         // round A13: the game's own map opens for the mod's map session (`a13_play::pass`)
         return with(|s| {
             if !s.env.plain || !s.env.passable {
-                return Err(("busy", "the game's map cannot open now: another window or box is up, or the camera is manual".into()));
+                return Err(("not_ready", "the game's map cannot open now: another window or box is up, or the camera is manual".into()));
             }
             if !s.passes.contains(&(vm, TakeoverKind::Map)) {
                 s.passes.push((vm, TakeoverKind::Map));
@@ -647,7 +647,7 @@ pub(crate) fn pass(vm: u64, id: &str) -> std::result::Result<(), (&'static str, 
     };
     with(|s| {
         if !s.env.plain || !s.env.passable {
-            return Err(("busy", "the game's window cannot open now: another window or box is up, or the camera is manual".into()));
+            return Err(("not_ready", "the game's window cannot open now: another window or box is up, or the camera is manual".into()));
         }
         if !s.passes.contains(&(vm, kind)) {
             s.passes.push((vm, kind));

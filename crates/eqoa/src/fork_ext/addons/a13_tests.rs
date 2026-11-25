@@ -103,9 +103,9 @@ fn a13_pass_queues_the_games_map_and_is_busy_while_a_window_is_up() {
     h.execute("s = eqoa.windows.session('map'); ok, err = eqoa.windows.pass(s.ref); assert(ok == true, err and err.message)").unwrap();
     assert_eq!(ws::take_passes(), vec![(vm, TakeoverKind::Map)]);
     ws::cancel_pass(vm, TakeoverKind::Map);
-    // a game window is up: busy, nothing queued (negative control for the queue above)
+    // a game window is up: not_ready (section 1), nothing queued (negative control for the queue above)
     ws::set_env(ws::Env { plain: false, ..Default::default() });
-    h.execute("ok, err = eqoa.windows.pass(s.ref); assert(ok == nil and err.code == 'busy', tostring(err and err.code))").unwrap();
+    h.execute("ok, err = eqoa.windows.pass(s.ref); assert(ok == nil and err.code == 'not_ready', tostring(err and err.code))").unwrap();
     assert!(ws::take_passes().is_empty());
     // a window the mod opened itself still has nothing to pass (the older rule is unchanged)
     ws::set_env(ws::Env::default());

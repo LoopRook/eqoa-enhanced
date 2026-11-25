@@ -344,12 +344,12 @@ fn dispatch_inner(play: &mut Play, action: &A8Action) -> DispatchOutcome {
     }
     if !caller_holds_window() {
         return refuse(
-            "not_ready",
+            "window_closed",
             "open a crafting window first (eqoa.windows.open_session 'recipe_book' or 'experiment'): the game's server replies are read only while one is open",
         );
     }
     if game_window_up(play) {
-        return refuse("busy", "the game's own crafting window is up");
+        return refuse("not_ready", "the game's own crafting window is up");
     }
     sync_open(play);
     refresh_items(play);

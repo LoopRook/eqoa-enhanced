@@ -310,7 +310,7 @@ fn a9_trade_request_is_held_hidden_answered_like_the_window_and_times_out() {
     lua_ok(&host, "assert(results[1].ok == true and results[1].detail.sent == true and eqoa.windows.session('trade_ask') == nil)");
     clear_recorded(&mut p);
     ask(&mut p, &host, "return eqoa.actions.trade_answer(true)");
-    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready')");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'window_closed')");
     assert!(recorded(&p).is_empty(), "nothing is sent twice");
 
     // No, on a new request
@@ -719,11 +719,11 @@ fn a9_a_duel_invitation_nobody_answers_is_declined_and_acting_needs_the_hold() {
     assert_eq!(p.mode, 43, "control: nobody holds duel_invite, so the game's own invitation is up");
     clear_recorded(&mut p);
     ask(&mut p, &host, "return eqoa.actions.duel_answer(true)");
-    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready')");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'window_closed')");
     ask(&mut p, &host, "return eqoa.actions.trade_add({slot = 1, id = '1'})");
-    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready')");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'window_closed')");
     ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({slot = 1, id = '1'})");
-    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready')");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'window_closed')");
     assert!(recorded(&p).is_empty(), "nothing was sent for the game's own window");
 }
 
@@ -847,7 +847,7 @@ fn a9_blacksmith_lists_repairs_like_the_window_and_refuses_what_the_game_does() 
     step(&mut p, &host);
     lua_ok(&host, "assert(eqoa.blacksmith.get() == nil)");
     ask(&mut p, &host, "return eqoa.actions.blacksmith_repair({inventory_key = 1})");
-    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready', 'control: no smith open')");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'window_closed', 'control: no smith open')");
     deliver(&mut p, 0x0061, 4242u32.to_le_bytes().to_vec());
     assert_eq!(p.mode, 19, "the game's own window");
     step(&mut p, &host);
@@ -1011,7 +1011,7 @@ fn a9_h2_a_queued_invitation_is_held_once_and_declined_for_real() {
     }
     assert_eq!((p.mode, recorded(&p).len()), (0, 1), "it does not come back, and is not answered twice");
     ask(&mut p, &host, "return eqoa.actions.duel_answer(true)");
-    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'not_ready')");
+    lua_ok(&host, "assert(results[1].ok == false and results[1].code == 'window_closed')");
     // control: with no holder the game shows the queued invitation (the step the review named)
     let mut q = ready();
     let host_q = host_all();

@@ -256,17 +256,17 @@ fn a8_actions_need_the_mods_own_window_and_wait_for_the_games_own_to_go() {
     let (mut p, host) = rig();
     // no window: refused, nothing sent (the control for the line below, where the same call works)
     let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.craft_list(3)");
-    assert!(!ok && code == "not_ready", "{code}");
+    assert!(!ok && code == "window_closed", "the window the action needs is not open (section 1's table): {code}");
     assert!(sent().is_empty());
     open(&mut p, &host, "recipe_book");
     let (ok, code, reason) = act(&mut p, &host, "return eqoa.actions.craft_list(3)");
     assert!(ok, "{code} {reason}");
     assert_eq!(sent().len(), 1);
-    // the game's own crafting window up: refused busy
+    // the game's own crafting window up: refused not_ready (a game window is in the way: section 1's table)
     p.craft.pending = 0;
     p.mode = 37;
     let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.craft_list(2)");
-    assert!(!ok && code == "busy", "{code}");
+    assert!(!ok && code == "not_ready", "{code}");
     assert_eq!(sent().len(), 1);
 }
 

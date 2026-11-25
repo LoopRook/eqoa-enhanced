@@ -485,12 +485,12 @@ fn dispatch_inner(play: &mut Play, action: &A10Action) -> DispatchOutcome {
 fn mail_ready(play: &Play, kind: &str) -> Result<(), DispatchOutcome> {
     if !caller_holds(kind) {
         return Err(refuse(
-            "not_ready",
+            "window_closed",
             format!("open the mail window first (eqoa.windows.open_session '{kind}'): the gram client is read only while one is open"),
         ));
     }
     if game_mail_up(play) {
-        return Err(refuse("busy", "the game's own mail window is up"));
+        return Err(refuse("not_ready", "the game's own mail window is up"));
     }
     if play.mail.grams.state > 0 {
         return Err(refuse("busy", "the last mail request has not been answered yet"));
@@ -656,15 +656,15 @@ fn mail_send(play: &mut Play, action: &A10Action) -> DispatchOutcome {
 fn auction_ready(play: &Play) -> Result<(), DispatchOutcome> {
     if !caller_holds(AUCTION_KIND) {
         return Err(refuse(
-            "not_ready",
+            "window_closed",
             "open the auction window first (eqoa.windows.open_session 'auction_search'): the game's search pages are read only while one is open",
         ));
     }
     if game_auction_up(play) {
-        return Err(refuse("busy", "the game's own auction or bank window is up"));
+        return Err(refuse("not_ready", "the game's own auction or bank window is up"));
     }
     if !offered(play) {
-        return Err(refuse("not_ready", "the bank does not offer the auction on this server"));
+        return Err(refuse("unsupported", "the bank does not offer the auction on this server"));
     }
     request_free(play)
 }
@@ -871,16 +871,16 @@ fn auction_sell(play: &mut Play, action: &A10Action) -> DispatchOutcome {
         return refuse("unsupported", "not a sale");
     };
     if !caller_holds("bank") {
-        return refuse("not_ready", "selling is a page of the bank window: hold the bank first (eqoa.windows.takeover 'bank')");
+        return refuse("window_closed", "selling is a page of the bank window: hold the bank first (eqoa.windows.takeover 'bank')");
     }
     if !offered(play) {
-        return refuse("not_ready", "the bank does not offer the auction on this server");
+        return refuse("unsupported", "the bank does not offer the auction on this server");
     }
     if game_auction_up(play) {
-        return refuse("busy", "the game's own auction or bank window is up");
+        return refuse("not_ready", "the game's own auction or bank window is up");
     }
     if matches!(window_takeover::hidden_bank_session(), None | Some(u32::MAX)) {
-        return refuse("not_ready", "the banker is not known: the bank must be open for the sale to name it");
+        return refuse("window_closed", "the banker is not known: the bank must be open for the sale to name it");
     }
     if let Err(e) = request_free(play) {
         return e;

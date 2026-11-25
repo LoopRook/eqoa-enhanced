@@ -334,7 +334,7 @@ fn a11_the_dye_picker_echoes_its_token_and_asks_before_a_colour() {
     assert!(!p.dyepick.picker.open && p.mode == 0, "the picker is down, as after its OK");
     // a second pick after the picker is down has nothing to answer
     let (ok, code) = ask(&mut p, &host, "return eqoa.actions.dye_pick(0xAABBCCDD, 0x336699FF)");
-    assert!(!ok && code == "not_ready", "{code}");
+    assert!(!ok && code == "window_closed", "{code}");
 }
 
 #[test]
@@ -448,7 +448,7 @@ fn a11_fishing_requests_are_the_windows_own_bytes_and_not_repeated() {
 #[test]
 fn a11_fishing_cast_is_the_windows_own_key_never_a_chosen_power() {
     let mut p = ready();
-    assert!(matches!(dispatch(&mut p, &A11Action::FishCast), DispatchOutcome::Refused { code: "not_ready", .. }), "no window");
+    assert!(matches!(dispatch(&mut p, &A11Action::FishCast), DispatchOutcome::Refused { code: "window_closed", .. }), "no window");
     fishing(&mut p);
     p.fish.part.state = state::WAITING;
     assert!(matches!(dispatch(&mut p, &A11Action::FishRelease), DispatchOutcome::Refused { code: "not_ready", .. }), "nothing cast yet");
@@ -481,6 +481,7 @@ fn a11_the_reads_say_what_the_windows_hold() {
         assert(m.available == true and m.own_out == true and m.inventory.open == false and m.inventory.name == 'Kel')
         assert(#m.inventory.records == 3 and m.inventory.records[2].kind == 'carried' and m.inventory.records[2].id == 9)
         assert(m.inventory.records[3].kind == 'stock' and m.spells.spells[1].id == '950')
+        assert(type(m.inventory.records[2].item_id) == 'string' and #m.spells.slots == 10 and type(m.spells.slots[1]) == 'string', 'item and spell ids are Id strings')
         local f = eqoa.fishing.get()
         assert(f.open == true and f.state == 'waiting' and f.casting == false and f.perfect_from == 56 and f.perfect_to == 63)
         "#,

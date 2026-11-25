@@ -867,7 +867,7 @@ fn picker_open(play: &Play, token: u32) -> Result<net::dyepick::Open, DispatchOu
         return Ok(o);
     }
     let Some(o) = play.dyepick.open.clone().filter(|_| play.dyepick.picker.open && play.mode == crate::play::dyeplay::MODE) else {
-        return Err(refuse("not_ready", "no dye picker is up"));
+        return Err(refuse("window_closed", "no dye picker is up"));
     };
     if o.token != token {
         return Err(refuse("stale_handle", "that is not the token of the picker now up (eqoa.dye.get().token)"));
@@ -931,7 +931,7 @@ fn dispatch_fishing(play: &mut Play, action: &A11Action) -> DispatchOutcome {
     use crate::fishing::{state, sub_msg};
     let held = up(TakeoverKind::Fishing);
     if play.mode != 36 && !held {
-        return refuse("not_ready", "no fishing window is up");
+        return refuse("window_closed", "no fishing window is up");
     }
     // a mod that acts is showing its window
     if let Some(a) = dialog_sessions::windows().into_iter().find(|a| a.item.kind() == TakeoverKind::Fishing) {

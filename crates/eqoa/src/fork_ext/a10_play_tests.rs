@@ -349,7 +349,7 @@ fn a10_the_games_own_mail_window_up_means_busy_and_no_mod_window_changes_nothing
     open(&mut p, &host, "mail_inbox");
     assert!(sent().is_empty() && p.mail.grams.state == 0, "the game's window owns the gram client");
     let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.mail_refresh()");
-    assert!(!ok && code == "busy", "{code}");
+    assert!(!ok && code == "not_ready", "{code}");
     assert!(sent().is_empty());
     // the game's window gone: the same call goes (the control)
     p.mode = 0;
@@ -361,7 +361,7 @@ fn a10_the_games_own_mail_window_up_means_busy_and_no_mod_window_changes_nothing
     step(&mut p, &host);
     lua_ok(&host, "assert(eqoa.mail.get() == nil)");
     let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.mail_refresh()");
-    assert!(!ok && code == "not_ready", "{code}");
+    assert!(!ok && code == "window_closed", "{code}");
 }
 
 // ---- the auction ----
@@ -699,12 +699,12 @@ fn a10_selling_needs_the_mods_own_bank_and_the_bank_offering_the_auction_and_the
     let (mut p, host) = rig();
     p.dump.bank.items = net::dump::ItemList { p04: 0, items: vec![item(700_001, "Gold Ring", 21, 1)] };
     let (ok, code, reason) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = '700001', price = 100, buyout = 300, hours = 12})");
-    assert!(!ok && code == "not_ready" && reason.contains("hold the bank"), "{code} {reason}");
+    assert!(!ok && code == "window_closed" && reason.contains("hold the bank"), "{code} {reason}");
     // the bank offers no auction: refused (the control: it works in the next block)
     let (mut p, host) = bank_rig();
     p.dump.bank.p78cc = false;
     let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = '700001', price = 100, buyout = 300, hours = 12})");
-    assert!(!ok && code == "not_ready", "{code}");
+    assert!(!ok && code == "unsupported", "{code}");
     p.dump.bank.p78cc = true;
     let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = '700001', price = 100, buyout = 300, hours = 12})");
     assert!(ok);
@@ -718,7 +718,7 @@ fn a10_selling_needs_the_mods_own_bank_and_the_bank_offering_the_auction_and_the
     confirm::reset_for_test();
     p.mode = 11;
     let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_sell({slot = 1, id = '700001', price = 100, buyout = 300, hours = 12})");
-    assert!(!ok && code == "busy", "{code}");
+    assert!(!ok && code == "not_ready", "{code}");
 }
 
 #[test]
@@ -728,7 +728,7 @@ fn a10_actions_are_offered_only_where_the_bank_offers_the_auction() {
     open(&mut p, &host, "auction_search");
     lua_ok(&host, "assert(eqoa.auction.get().offered == false)");
     let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_search()");
-    assert!(!ok && code == "not_ready", "{code}");
+    assert!(!ok && code == "unsupported", "{code}");
     assert!(sent().is_empty());
     p.dump.bank.p78cc = true;
     let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_search()");
@@ -798,7 +798,7 @@ fn a10_the_games_own_auction_window_up_is_busy_and_no_mod_window_leaves_everythi
     let (mut p, host) = auction_rig();
     p.mode = 39;
     let (ok, code, _) = act(&mut p, &host, "return eqoa.actions.auction_search()");
-    assert!(!ok && code == "busy", "{code}");
+    assert!(!ok && code == "not_ready", "{code}");
     assert!(sent().is_empty());
     p.mode = 0;
     // the capability: a mod without it reads nothing
