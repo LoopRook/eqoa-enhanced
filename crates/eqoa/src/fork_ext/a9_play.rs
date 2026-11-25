@@ -720,8 +720,8 @@ pub(crate) fn pre_event(play: &Play, event: &net::session::Event) {
         // the server must still hear a refusal for what is held: noted now, sent by the next step
         let owed: Vec<Owed> = local(|l| {
             let mut v = Vec::new();
-            if let Some(h) = &l.ask {
-                v.push(Owed::Trade(h.other));
+            if l.ask.is_some() {
+                v.push(Owed::Trade(play.npcw.trade_state.partner));
             }
             if l.trade.is_some() {
                 v.push(Owed::Trade(play.npcw.trade_state.partner));
