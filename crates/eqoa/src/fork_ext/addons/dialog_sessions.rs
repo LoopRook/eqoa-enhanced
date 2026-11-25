@@ -553,6 +553,14 @@ pub(crate) fn windows() -> Vec<Active> {
     with(|s| s.wins.clone())
 }
 
+/// Whether a window of `kind` is currently held or queued to be given back (`a11_play` orphaned-dye check at death).
+pub(crate) fn tracks_window(kind: TakeoverKind) -> bool {
+    if !is_busy() {
+        return false;
+    }
+    with(|s| s.wins.iter().any(|a| a.item.kind() == kind) || s.give_back.iter().any(|i| i.kind() == kind))
+}
+
 /// The invitation `id` was withdrawn by the server while parked or showing.
 pub(crate) fn invite_gone(id: u32) {
     if !is_busy() {

@@ -168,8 +168,9 @@ pub(crate) fn begin_game_event(play: &Play, event: &net::session::Event) -> Game
             | net::session::Event::Disconnected(_)
     ) {
         // round A11: clear `a11_play::LOCAL` right after `api_capture` / `window_takeover::release_all` has ended any
-        // held sessions (same-world teleports and respawns never set `play.world_change`)
-        a11_play::world_changed();
+        // held sessions (same-world teleports and respawns never set `play.world_change`); on world entry / teleport,
+        // queue Cancel for any held dye picker just as the native picker cancels when mode becomes 0
+        a11_play::world_changed(!matches!(event, net::session::Event::Disconnected(_)));
     }
     let a7 = a7_play::begin_event(play, event);
     if let net::session::Event::MasterLoot(m) = event {

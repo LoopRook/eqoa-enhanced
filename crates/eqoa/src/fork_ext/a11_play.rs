@@ -51,6 +51,8 @@ struct Local {
     pre_fish_event: bool,
     /// The dye picker a mod holds (its Open as the server sent it).
     dye: Option<net::dyepick::Open>,
+    /// A held dye picker's token whose Cancel (`net::dyepick::cancelled`) is owed after zoning/teleport.
+    dye_cancel_owed: Option<u32>,
     /// What the game looked like when the packet now being handled arrived.
     pre_mode: i32,
     pre_dye_event: bool,
@@ -64,13 +66,20 @@ thread_local! {
     static LOCAL: RefCell<Local> = RefCell::new(Local::default());
 }
 
-fn clear_world_local(l: &mut Local, epoch: u64) {
+fn clear_world_local(l: &mut Local, epoch: u64, owe_dye_cancel: bool) {
     l.logged = None;
     l.fish_sent = None;
     l.merc_waits.clear();
     l.fish_wait = false;
     l.pre_fish_event = false;
-    l.dye = None;
+    if owe_dye_cancel {
+        if let Some(o) = l.dye.take() {
+            l.dye_cancel_owed = Some(o.token);
+        }
+    } else {
+        l.dye = None;
+        l.dye_cancel_owed = None;
+    }
     l.pre_dye_event = false;
     l.pre_dye_close = None;
     l.world_gen = epoch;
@@ -82,16 +91,28 @@ fn sync_world() {
     LOCAL.with(|l| {
         let mut l = l.borrow_mut();
         if l.world_gen != epoch {
-            clear_world_local(&mut l, epoch);
+            clear_world_local(&mut l, epoch, true);
         }
     });
 }
 
+/// Sends a Cancel owed for a held dye picker that was open when zoning/teleporting (matching native `run_dyepick`).
+fn flush_owed_dye_cancel(play: &mut Play) {
+    let token = LOCAL.with(|l| l.borrow_mut().dye_cancel_owed.take());
+    if let Some(t) = token
+        && play.disconnected.is_none()
+        && !play.quit
+        && play.session.self_id.is_some()
+    {
+        play.session.send(&net::dyepick::cancelled(t));
+    }
+}
+
 /// Called from `begin_game_event` on every `WorldEntry`, `Teleport` and `Disconnected` (same-world included), right
 /// after `api_capture` / `window_takeover::release_all` ended any held sessions with `"zoning"`.
-pub(crate) fn world_changed() {
+pub(crate) fn world_changed(connected: bool) {
     let epoch = native_a11::world_gen();
-    LOCAL.with(|l| clear_world_local(&mut l.borrow_mut(), epoch));
+    LOCAL.with(|l| clear_world_local(&mut l.borrow_mut(), epoch, connected));
     native_a11::clear_all();
 }
 
@@ -101,7 +122,7 @@ fn up(kind: TakeoverKind) -> bool {
 }
 
 fn hidden_held() -> bool {
-    TakeoverKind::ALL.iter().any(|k| window_takeover::is_hidden_active(*k))
+    TakeoverKind::ALL.iter().any(|k| window_takeover::is_hidden_active(*k)) || super::a9_play::hidden_active()
 }
 
 /// The server opens a mercenary window (`mode`) while a hidden session holds the game: it waits.
@@ -296,12 +317,20 @@ fn fishing_state(play: &Play) -> Option<Json> {
 /// `eqoa.fishing.get`.
 pub(crate) fn tick(play: &mut Play, game_step: bool) {
     sync_world();
+    flush_owed_dye_cancel(play);
     if !play.in_world_now() || play.world_change.is_some() {
         native_a11::clear_all();
         return;
     }
     resume_merc(play);
     resume_fishing(play);
+    // If a mod went away or released in the same step the character died, `dialog_sessions::death()` wiped `give_back`
+    // before `give_window` ran; cancel and drop any orphaned dye token so it does not linger.
+    if !dialog_sessions::tracks_window(TakeoverKind::DyePicker)
+        && let Some(o) = LOCAL.with(|l| l.borrow_mut().dye.take())
+    {
+        play.session.send(&net::dyepick::cancelled(o.token));
+    }
     if game_step {
         tick_windows(play);
     }
@@ -466,6 +495,7 @@ pub(crate) fn pre_event(play: &Play, event: &net::session::Event) {
 /// back, as A2 does for a dialog), and a close from the server ends the mod's session.
 pub(crate) fn post_event(play: &mut Play) {
     sync_world();
+    flush_owed_dye_cancel(play);
     let (pre, dye_open, dye_close) = LOCAL.with(|l| {
         let mut l = l.borrow_mut();
         // any answer of the fishing server lets the one-request guard go, even one that changes nothing (a full pack)
