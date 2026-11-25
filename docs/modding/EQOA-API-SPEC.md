@@ -877,8 +877,8 @@ A **session** is one opening of a window a mod shows. It is the handle that belo
 |---|---|---|
 | `start_menu` | `entries` | `StartEntry[]` (The Start menu and the chat line, round A6) |
 | `chat_entry` | `text`, `channel`, `reply_to`, `links`, `offer` | `text`, `channel` and `reply_to` strings (`reply_to` may be nil), `links` as `ChatLink[]`, `offer` as `LinkOffer?` (round A6) |
-| `text_dialog` | `text`, `talked_to` | string; `{id:uint, name:string}?` (round A2) |
-| `response_dialog` | `text`, `options`, `talked_to` | string; `string[]`; `{id:uint, name:string}?` (round A2) |
+| `text_dialog` | `text`, `talked_to` | string; `eqoa.windows.TalkedTo = {id:uint, name:string}`, or nil (round A2) |
+| `response_dialog` | `text`, `options`, `talked_to` | string; `string[]`; `eqoa.windows.TalkedTo`, or nil (round A2) |
 | `group_invite` | `name`, `text` | strings: who invites, and the game's sentence (round A2) |
 | `revive_offer`, `summon_offer` | `text`, `from` | strings (round A2) |
 | `mercenary_items` | `available`, `own_out`, `waiting`, `inventory` | what `eqoa.merc.get()` returns, without `revision` and `spells` (round A11) |
