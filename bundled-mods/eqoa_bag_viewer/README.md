@@ -62,8 +62,11 @@ exactly as before, and a helper acts only on its button or on its own switch.
   is No).
 - **Sell junk** (near a merchant, or with the merchant open): one click sells every stack marked as junk, gear and potions
   included. The one exception is an item you are wearing right now: it is kept, and a "Kept 1 junk item: you are wearing
-  it" line says so. The count on the button is what will really be sold. The line "Sold N junk items for X tunar" gives the
-  game's own quote for the stacks the server confirmed.
+  it" line says so. The count on the button is what will really be sold. When some of the junk is something the game's own
+  merchant window would ask about (a quick-slotted or no-trade stack, or one that is not an ordinary Misc item), the game's
+  own question comes up ONCE for the whole sale ("Sell these N items for T tunar?", a line for each such stack, starting on
+  **No**); Yes sells everything, No sells nothing. When none is, it sells at once. The line "Sold N junk items for X tunar"
+  gives the game's own quote for the stacks that were sent.
 - **Restock**: an item's menu has **Keep up to N (Restock)** (N starts at what the bags hold; the menu steps it by 5). Near
   a merchant, **Restock (N)** buys up to N of each kept item that merchant sells, counting everything of that kind in the
   pack, never more than N. It stops, and says why, when money or bag space runs out.
@@ -72,9 +75,10 @@ exactly as before, and a helper acts only on its button or on its own switch.
 - **Do it when I get near**: three switches under the buttons (Sell junk, Restock, Bank), kept for each character, off by
   default. A helper acts once per approach (it arms again after you have been out of the NPC's reach by 5 more units),
   never while any game window or session of any kind is up, a batch is running, or you are in a fight.
-- **Sell 1 / Sell stack** in an item's menu ask first (Yes / No) for a quick-slotted, no-trade or not ordinary item (the four
-  cases in which the game's own merchant window asks; `eqoa.actions.sell` does not ask, so the mod does), naming the item
-  and why.
+- **Sell 1 / Sell stack** in an item's menu: for a quick-slotted, no-trade or not ordinary item the game's own question
+  comes up (the cases in which the game's own merchant window asks; `eqoa.actions.sell` asks the player itself since the
+  client's 2026-11-25 change, so the mod no longer asks a second time), starting on **No**, naming the item and what you
+  get. An ordinary Misc item sells at once, as in the game.
 - Marks and the switches are saved in `helpers.cfg` (private files of the mod): `keep:<id>=<n>`, `bank:<id>`,
   `auto:<character>:<helper>=1`. The lines the helpers say go to the result line and the game's log (`addon eqoa_bag_viewer:
   [info] bag helpers: ...`); `eqoa/1` has no way yet to put a line in the chat window without sending it to the server.
@@ -103,11 +107,14 @@ selected item for one menu titled **"N items selected"**:
 - **Mark as junk** and **Unmark** (marking asks once, with the same Yes or No as a single item, when some of the items are
   equipment, potions or other things the game's merchant would ask about), **Mark to bank**.
 - **Sell (N)** at a merchant and **Put in bank (N)** at a banker: greyed with the reason when none is near ("no merchant nearby",
-  "too far from the merchant"; the same reach rules as the other buttons, and a second click tries anyway). They go item by item
-  at the game's own pace, never faster than the game's own single actions: one batch at a time, each item looked up again by its
-  own identity before its turn, so a stack that moved, emptied or changed while the run goes is skipped, not acted on by its
-  slot. A refused item does not stop the rest, and a stack that grew since you selected it is sold only as far as you selected it. The result line says what happened, for example "Sold 4 of 5: Rusty Sword was
-  refused; 1 moved or gone; 1 worn item kept" (the reasons go to the game's log).
+  "too far from the merchant"; the same reach rules as the other buttons, and a second click tries anyway). **Sell (N)** is one call to the client (`eqoa.actions.sell_many`): where
+  any selected item is one the game's merchant window would ask about, the game's own question comes up once for them all
+  (starting on **No**), and the mod asks nothing of its own. The stacks then go one at a time at the game's own pace, each
+  looked up again by its own identity before its turn, so a stack that moved, emptied or changed while the run goes is
+  skipped, not acted on by its slot. A stack that grew since you selected it is skipped too (the client sells whole stacks
+  only). **Put in bank (N)** still goes item by item as a batch, and a refused item does not stop the rest. The result line
+  says what happened, for example "Sold 4 of 5: 1 moved or gone; 1 worn item kept" (the reasons go to the game's log). The
+  count is what was sent to the merchant.
 - **Destroy...** puts the game's own question on the screen once, starting on **No**, listing the items (the first 12, then
   "...and N more", so Yes and No stay on the screen); nothing is destroyed without your own Yes. The items are then destroyed
   one at a time. It is greyed while a merchant window is open ("close the merchant first") and while another group action is

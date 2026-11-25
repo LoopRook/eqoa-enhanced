@@ -120,7 +120,7 @@ local function open()
     if B.char_dirty then B.sync_character() end
     B.scan_reset()
     listen("render", draw)
-    listen("inventory.changed", B.dirty)
+    listen("inventory.changed", function() B.release_sell_hold(); B.dirty() end)
     listen("bank.changed", function(e) B.on_bank_changed(e.data) end)
     listen("loot.changed", function(e) B.on_loot_changed(e.data) end)
     listen("merchant.changed", function(e) B.on_merchant_changed(e.data) end)
@@ -269,6 +269,10 @@ eqoa.events.on("batch.progress", function(e)
 end)
 eqoa.events.on("batch.result", function(e)
     if not B.open then B.on_batch_result(e.data) end
+end)
+-- a helper's sale (Sell junk) ends with the client's `confirm.closed`, whether or not the window is open
+eqoa.events.on("confirm.closed", function(e)
+    if not B.open then B.on_confirm_closed(e.data) end
 end)
 eqoa.events.on("world.leaving", function(e)
     if e.data and e.data.reason == "disconnect" then B.on_disconnect() end

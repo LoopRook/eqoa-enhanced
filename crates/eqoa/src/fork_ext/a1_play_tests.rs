@@ -703,6 +703,7 @@ fn a1_sell_asks_in_the_three_cases_the_game_asks_and_only_the_players_yes_sells(
 
 #[test]
 fn a1_sell_a_misc_item_sells_at_once_and_a_worn_one_is_still_refused() {
+    {
     let (mut p, host) = rig_sell();
     let sent = p.session.sends_lost;
     ask(&mut p, &host, &sell_one(2, 5));
@@ -710,10 +711,13 @@ fn a1_sell_a_misc_item_sells_at_once_and_a_worn_one_is_still_refused() {
     pump(&mut p, &host);
     assert!(p.npcw.shop.pending && p.session.sends_lost > sent, "it sells at once");
     // the worn sword: refused as before, no question
+    }
+    {
     let (mut p, host) = rig_sell();
     ask(&mut p, &host, &sell_one(1, 1));
     host.execute("assert(results[1].ok == false and results[1].code == 'not_ready', tostring(results[1] and results[1].code))").unwrap();
     assert!(!confirm::is_open());
+    }
 }
 
 #[test]
@@ -749,6 +753,7 @@ fn a1_sell_a_yes_sells_only_what_the_player_was_asked_about() {
 
 #[test]
 fn a1_sell_no_merchant_is_window_closed_and_a_batch_step_cannot_ask() {
+    {
     let (mut p, host) = rig_sell();
     p.mode = 0;
     p.npcw.shop.id = None;
@@ -756,6 +761,8 @@ fn a1_sell_no_merchant_is_window_closed_and_a_batch_step_cannot_ask() {
     host.execute("assert(results[1].ok == false and results[1].code == 'window_closed', tostring(results[1] and results[1].code))").unwrap();
     assert!(!confirm::is_open());
     // a batch step that the game would ask about is refused: a batch has nobody to ask
+    }
+    {
     let (mut p, host) = rig_sell();
     let sent = p.session.sends_lost;
     ask(
@@ -768,6 +775,8 @@ fn a1_sell_no_merchant_is_window_closed_and_a_batch_step_cannot_ask() {
     assert!(!confirm::is_open() && !p.npcw.shop.pending && p.session.sends_lost == sent, "no sale, no question from a batch");
     host.execute("local found = false; for _, r in ipairs(results) do if r.ok == false and r.code == 'not_ready' then found = true end end; assert(found, 'the step is refused not_ready')").unwrap();
     // a batch step the game does not ask about still sells
+    }
+    {
     let (mut p, host) = rig_sell();
     ask(
         &mut p,
@@ -777,6 +786,7 @@ fn a1_sell_no_merchant_is_window_closed_and_a_batch_step_cannot_ask() {
     pump(&mut p, &host);
     pump(&mut p, &host);
     assert!(p.npcw.shop.pending, "a misc item still sells from a batch");
+    }
 }
 
 #[test]
@@ -845,7 +855,7 @@ fn a1_sell_many_asks_once_for_a_mixed_batch_and_a_yes_sells_in_order() {
         merchant_answers(&mut p, name);
         pump(&mut p, &host);
         if i < 3 {
-            assert_eq!(p.session.sends_lost, sent + 2 + i as u64, "{name} answered: the next stack goes out");
+            assert_eq!(p.session.sends_lost, sent + 2 + i as u32, "{name} answered: the next stack goes out");
         }
     }
     host.execute(
@@ -876,6 +886,7 @@ fn a1_sell_many_with_nothing_to_ask_sells_at_once_and_says_when_it_is_done() {
 
 #[test]
 fn a1_sell_many_refuses_a_worn_stack_and_no_merchant_and_skips_what_changed() {
+    {
     let (mut p, host) = rig_sell();
     let sent = p.session.sends_lost;
     ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[2].ref, inv.items[1].ref})");
@@ -884,18 +895,24 @@ fn a1_sell_many_refuses_a_worn_stack_and_no_merchant_and_skips_what_changed() {
     pump(&mut p, &host);
     assert_eq!(p.session.sends_lost, sent, "one worn stack refuses the whole call: nothing sold");
     // no merchant open
+    }
+    {
     let (mut p, host) = rig_sell();
     p.mode = 0;
     p.npcw.shop.id = None;
     ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[3].ref})");
     host.execute("assert(results[1].ok == false and results[1].code == 'window_closed', tostring(results[1] and results[1].code))").unwrap();
     // argument errors are destroy_many's
+    }
+    {
     let (mut p, host) = rig_sell();
     ask(&mut p, &host, "return eqoa.actions.sell_many({})");
     host.execute("assert(last_err ~= nil and last_err.code == 'invalid_argument')").unwrap();
     ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[2].ref, inv.items[2].ref})");
     host.execute("assert(last_err ~= nil and last_err.code == 'invalid_argument', 'the same item twice')").unwrap();
     // an item that changed before its turn is skipped and counted
+    }
+    {
     let (mut p, host) = rig_sell();
     ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[3].ref, inv.items[6].ref})");
     yes();
@@ -908,6 +925,8 @@ fn a1_sell_many_refuses_a_worn_stack_and_no_merchant_and_skips_what_changed() {
     assert_eq!(p.session.sends_lost, before, "what changed is never sold");
     host.execute("assert(closed[1].detail.sent_count == 1 and closed[1].detail.total == 2 and closed[1].detail.skipped[1] == 'Bone Chip')").unwrap();
     // and the merchant leaving ends the run, counting what was not sold
+    }
+    {
     let (mut p, host) = rig_sell();
     ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[3].ref, inv.items[6].ref})");
     yes();
@@ -917,4 +936,5 @@ fn a1_sell_many_refuses_a_worn_stack_and_no_merchant_and_skips_what_changed() {
     p.npcw.shop.id = None;
     pump(&mut p, &host);
     host.execute("assert(closed[1].detail.sent_count == 1 and closed[1].detail.reason == 'the merchant window closed' and closed[1].detail.skipped[1] == 'Bone Chip')").unwrap();
+    }
 }
