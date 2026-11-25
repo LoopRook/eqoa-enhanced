@@ -2055,7 +2055,7 @@ function M.on_action_result(d)
         if d.ok == false then
             M.on_batch_result({batch_id = M.SELL_MANY, ok = false, completed = 0, total = M.batch_total, state = "stopped",
                 code = d.code, reason = d.reason or d.code or "refused"})
-        elseif d.detail and rawget(d.detail, "asked") then
+        elseif eqoa.windows.confirm() ~= nil then
             M.result = {text = "Sell: answer the question on the screen", ok = nil}
         end
         M.dirty()
@@ -2093,7 +2093,9 @@ function M.on_action_result(d)
     end
     if M.last_req == nil or d.request_id ~= M.last_req then return end
     local label = M.pending_label or d.kind
-    if d.ok == true and d.detail and rawget(d.detail, "asked") == true then
+    -- a sale that completes at the call (phase "dispatch") is the client's question put to the player: an unasked sale
+    -- completes later, when the merchant has answered
+    if d.ok == true and d.state == "completed" and d.phase == "dispatch" and d.kind == "sell" then
         -- the client put its own question to the player; the answer is `confirm.closed` (`sell_closed`)
         M.result = {text = label .. ": answer the question on the screen", ok = nil}
         M.sell_hold, M.held_for_req, M.last_req = M.held_for_req, nil, nil
