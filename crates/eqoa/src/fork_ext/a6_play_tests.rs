@@ -1072,3 +1072,58 @@ fn a6_the_pad_drives_the_mods_menu_and_keeps_the_character_still() {
     assert!(r.menu_session().is_none(), "the pad's triangle closed the menu");
     assert!(ws::sessions_for_test().iter().all(|s| !ws::is_focused(&s.id)), "no focus is left behind");
 }
+
+impl Rig {
+    /// A world is left and the next one entered, as the client does it (`api_capture`: `Core::reset`, then the new
+    /// world's state published), and the mods are told.
+    fn change_world(&mut self, reason: &str) {
+        native_core::CORE.with(|c| c.borrow_mut().reset(reason));
+        self.step();
+        native_core::CORE.with(|c| {
+            c.borrow_mut().publish(native_core::View { in_world: true, phase: "world", world_id: Some(7), ..Default::default() })
+        });
+        self.step();
+    }
+}
+
+/// Owner audit 2026-11-24 (World Map review, C1): after a zone, the Start key opened the game's menu and Enter the game's
+/// chat line, because the Start Menu and Chat mods claimed once at load and the client lets go of every claim when a
+/// world is left. Through the real keys: Escape and Enter still go to the mods after each kind of world change, and so
+/// does a mod's hotkey. The negative control is the old Lua on disk (run recorded in the report).
+#[test]
+fn a6_start_key_and_enter_still_go_to_the_mods_after_each_kind_of_world_change() {
+    let Some((img, words)) = disc_menu() else {
+        eprintln!("SKIP a6 world change: no disc");
+        return;
+    };
+    for reason in ["zone", "respawn", "disconnect"] {
+        let mut r = Rig::new(&img, &words, None, true);
+        // before: the mods have both
+        r.escape();
+        r.step();
+        assert!(r.menu_session().is_some(), "{reason}: Escape opens the mod's menu before the change");
+        r.escape();
+        r.step();
+        r.change_world(reason);
+        assert_eq!(r.p.mode, 0);
+        // Escape: the mod's menu, not the game's
+        r.escape();
+        r.step();
+        assert!(r.menu_session().is_some(), "{reason}: Escape opens the mod's Start menu in the new world (mode {})", r.p.mode);
+        assert_eq!(r.p.mode, 0, "{reason}: the game's own menu did not open");
+        r.escape();
+        r.step();
+        assert!(r.menu_session().is_none());
+        // Enter: the chat mod's line, not the game's
+        r.enter();
+        r.step();
+        assert!(r.chat_line().is_some(), "{reason}: Enter opens the Chat mod's line in the new world (mode {})", r.p.mode);
+        assert_eq!(r.p.mode, 0, "{reason}: the game's own chat box did not open");
+        let line = r.chat_line().unwrap();
+        ws::close(r.chat.vm, &line.id, "test").unwrap();
+        r.step();
+        // another mod's hotkey
+        assert!(r.key("k", "shift+k", b'K'));
+        assert!(ws::get(r.hot.vm, "spellbook").is_some(), "{reason}: Shift+K opens the Spellbook in the new world");
+    }
+}

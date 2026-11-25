@@ -47,7 +47,7 @@ local state = {
     guild = nil,
     who = nil,
     lfg = nil,
-    takeover_attempted = false,
+    takeover_attempted = false, prompt_warned = {}, claim_frames = 0,
 }
 
 local function say(text, ok)
@@ -91,7 +91,8 @@ end
 local function claim_prompts()
     for _, kind in ipairs({ "friend_request", "guild_invite" }) do
         local ok, err = eqoa.windows.takeover(kind, { scope = "all" })
-        if not ok and err and err.code ~= "unavailable" then
+        if not ok and err and err.code ~= "unavailable" and not state.prompt_warned[kind] then
+            state.prompt_warned[kind] = true
             eqoa.log.write("warn", "Social did not take over " .. kind .. ": " .. tostring(err.message))
         end
     end
@@ -631,7 +632,9 @@ local function draw()
         set_text_capture(false)
         return
     end
-    if not state.takeover_attempted then
+    -- held again every so often: the claims end with the world and with the player's "Use the game's windows" switch
+    state.claim_frames = state.claim_frames + 1
+    if not state.takeover_attempted or state.claim_frames % 120 == 0 then
         claim_prompts()
     end
 
