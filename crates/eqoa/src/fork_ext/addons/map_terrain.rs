@@ -666,7 +666,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                             let (px, py) = tr.project(x, z);
                             lua.pack_multi((px, py, tr.contains(x, z)))
                         }
-                        None => error(lua, SYMBOL, "not_ready", "the game's map is not loaded yet"),
+                        None => error(lua, SYMBOL, "unavailable", "the game's map is not loaded yet"),
                     }
                 })?,
             )?;
@@ -683,7 +683,7 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     }
                     match p.transform.get() {
                         Some(tr) => lua.pack_multi(tr.unproject(x, y)),
-                        None => error(lua, SYMBOL, "not_ready", "the game's map is not loaded yet"),
+                        None => error(lua, SYMBOL, "unavailable", "the game's map is not loaded yet"),
                     }
                 })?,
             )?;

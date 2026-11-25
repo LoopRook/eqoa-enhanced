@@ -14,6 +14,7 @@ use crate::fork_ext::addons::{
     confirm,
     frame_actions::FrameAction,
     host::Host,
+    native_a6::A6Action,
     native_a7::A7Action,
     native_a8::A8Action,
     native_a9::A9Action,
@@ -157,21 +158,25 @@ fn codes_bad_argument_a_number_for_an_id_is_invalid_argument() {
     assert_eq!(action_broker::queued_kinds_for_test().len(), 9);
 }
 
-/// Row "the client never lets a mod do this": `permission_denied`, in round 6 (0.7.0) and round A6.
+/// Row "the client never lets a mod do this": `permission_denied`, in round 6 (0.7.0) and round A6 (a report route),
+/// and for a capability the mod lacks (A6's rule 4).
 #[test]
 fn codes_policy_refusal_is_permission_denied() {
-    fresh();
-    let h = Host::with_test_capabilities(&["eqoa.actions.*"]).unwrap();
+    let mut p = ready();
+    let s = ws::open_client(VM, "codes_test", "start_menu", "key", serde_json::json!({"entries": []}));
+    let menu = |command: &str| A6Action::StartMenuCommand { vm: VM, session: s.id.clone(), command: command.into() };
+    assert_eq!(code(super::a6_play::dispatch(&mut p, &menu("0xb0b1000:0"))), "permission_denied", "A6: a report route in the Start menu");
+    // the control: a command the menu does not have is the "not offered" row, not this one
+    assert_eq!(code(super::a6_play::dispatch(&mut p, &menu("0xdead:0"))), "unsupported");
+    let h = Host::with_test_capabilities(&["eqoa.actions.command"]).unwrap();
     h.execute("local r, e = eqoa.actions.command('/bug it broke'); assert(r == nil and e.code == 'permission_denied', tostring(e and e.code))")
         .unwrap();
-    h.execute(
-        "local r, e = eqoa.actions.chat_line('say', '/bug it broke'); assert(r == nil and e.code == 'permission_denied', tostring(e and e.code))",
-    )
-    .unwrap();
+    h.execute("local r, e = eqoa.actions.chat_line('say', 'hello'); assert(r == nil and e.code == 'permission_denied', tostring(e and e.code))")
+        .unwrap();
     assert!(action_broker::queued_kinds_for_test().is_empty());
-    // the controls: ordinary lines are queued
-    h.execute("assert(eqoa.actions.command('/who')); assert(eqoa.actions.chat_line('say', 'hello'))").unwrap();
-    assert_eq!(action_broker::queued_kinds_for_test().len(), 2);
+    // the control: an ordinary command is queued
+    h.execute("assert(eqoa.actions.command('/who'))").unwrap();
+    assert_eq!(action_broker::queued_kinds_for_test().len(), 1);
 }
 
 /// Row "a mod holds as many as it may": `quota`, for round A1's windows as for round 2's subscriptions (0.7.0).

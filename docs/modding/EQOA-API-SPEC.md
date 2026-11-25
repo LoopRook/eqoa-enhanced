@@ -1195,7 +1195,7 @@ The game builds its ground behind play for a few seconds after a world is entere
 | `t.world_id`, `t.width`, `t.height` | The world the picture shows and its size in pixels; nil until the game's map has a world to show. |
 | `t.bounds` | `{x_min, z_min, x_max, z_max}`: the whole world's rectangle, in game units. |
 | `t.progress` | `{done, total}`: zones the game's map has drawn, of zones to draw. |
-| `t.project(x, z)` | `px, py, inside`: a world position in the picture's pixels (x grows right, z grows down; a whole-world picture's top left is `x_min, z_min`, a view's middle is `center`), and whether it lies within `bounds`. `not_ready` before the game's map has a world to show. |
+| `t.project(x, z)` | `px, py, inside`: a world position in the picture's pixels (x grows right, z grows down; a whole-world picture's top left is `x_min, z_min`, a view's middle is `center`), and whether it lies within `bounds`. `unavailable` before the game's map has a world to show (a read whose data has not loaded, §1). |
 | `t.unproject(px, py)` | `x, z`: the world position under a pixel. |
 | `t.set_view(spec)` | See above. |
 | `t.close()` | Releases the picture now. It is also released when the mod is disabled or its Lua collects it; after a close `project` and `unproject` are `stale_handle`. |
