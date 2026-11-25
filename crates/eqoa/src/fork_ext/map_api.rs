@@ -185,10 +185,10 @@ impl Map {
         }
         let moved = crate::hudlayout::shift(
             crate::hudlayout::Piece::Minimap,
-            crate::hudlayout::Beyond::of(window),
+            super::addons::hud_layout::beyond_of(window),
         );
         // HUD Scale (and the PC's per-piece size): the minimap is scaled about its moved corner, as `mini.rs` does
-        let mut hud = crate::hudlayout::scale(crate::hudlayout::Piece::Minimap, crate::hudlayout::Beyond::of(window));
+        let mut hud = crate::hudlayout::scale(crate::hudlayout::Piece::Minimap, super::addons::hud_layout::beyond_of(window));
         hud.origin = [hud.origin[0] + moved[0], hud.origin[1] + moved[1]];
         let pixels = render::ui::HudScale { origin: render::ui::window_from_frame(window, hud.origin), ..hud };
         let scaled = |r: [f32; 4]| {
@@ -327,7 +327,7 @@ impl Map {
         let (lib,vui)=real.as_ref().map_or((&blank,&vui_blank),|r|(&r.lib,&r.vui));
         let cx=Context{lib,device,queue,format:wgpu::TextureFormat::Rgba8Unorm,size,dt:0.,player:Some((at,0.)),world:0,origin:[0.;2],group:Vec::new(),in_group:false,target:None,sticks:[0.;4],keyboard:true,words:None,vui:Some(vui),quest_marks:None};
         self.mini_frame(&cx,view);
-        let moved=crate::hudlayout::shift(crate::hudlayout::Piece::Minimap,crate::hudlayout::Beyond::of(size));
+        let moved=crate::hudlayout::shift(crate::hudlayout::Piece::Minimap,super::addons::hud_layout::beyond_of(size));
         let r=mini::window_rect_moved(size,mini::FRAME,moved);
         let l=self.layers.as_mut().unwrap();
         let white=l.white;

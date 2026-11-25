@@ -136,8 +136,19 @@ pub fn hud_frame_json(window_size: (u32, u32)) -> Json {
     })
 }
 
+/// The screen beyond the frame, as `hudlayout::Beyond::of` gives it, but never NaN: a window with no size (a minimised
+/// window) has none beyond the frame. Every place and scale below is worked out from this one value, so no field of
+/// `eqoa.hud.layout()` can be NaN (which JSON writes as null) in either interface, moved or not.
+pub(crate) fn beyond_of(window_size: (u32, u32)) -> crate::hudlayout::Beyond {
+    if window_size.0 == 0 || window_size.1 == 0 {
+        return crate::hudlayout::Beyond::default();
+    }
+    crate::hudlayout::Beyond::of(window_size)
+}
+
 pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
     let m = frame_metrics(window_size);
+    let beyond = beyond_of(window_size);
     let state = get_hud_state();
     use crate::hudlayout::Piece;
     let shifts = [
@@ -147,10 +158,10 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
         Piece::Pet,
         Piece::Minimap,
     ]
-    .map(|piece| crate::hudlayout::shift(piece, crate::hudlayout::Beyond::of(window_size)));
+    .map(|piece| crate::hudlayout::shift(piece, beyond));
     // HUD Scale (either interface) and the PC's per-piece size: drawn about the piece's own corner
     let sizes = [Piece::Player, Piece::Group, Piece::Target, Piece::Pet, Piece::Minimap]
-        .map(|piece| crate::hudlayout::scale(piece, crate::hudlayout::Beyond::of(window_size)).factor);
+        .map(|piece| crate::hudlayout::scale(piece, beyond).factor);
     let key = (window_size, state, shifts, sizes);
     if let Some(value) = LAYOUT_CACHE.with(|c| {
         c.borrow()
@@ -161,7 +172,6 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
         return value;
     }
     let to_rect = |piece: Piece, x: f32, y: f32, w: f32, h: f32, anc: &str, vert: &str| {
-        let beyond = crate::hudlayout::Beyond::of(window_size);
         let size = crate::hudlayout::scale(piece, beyond).factor;
         let [dx, dy] = shifts[match piece {
             Piece::Player => 0,
@@ -392,5 +402,42 @@ mod tests {
                 "negative control: reset restores every stock rectangle"
             );
         }
+    }
+
+    fn no_null(path: &str, v: &Json, bad: &mut Vec<String>) {
+        match v {
+            Json::Null => bad.push(path.to_string()),
+            Json::Array(a) => a.iter().enumerate().for_each(|(i, x)| no_null(&format!("{path}[{i}]"), x, bad)),
+            Json::Object(o) => o.iter().for_each(|(k, x)| no_null(&format!("{path}.{k}"), x, bad)),
+            _ => {}
+        }
+    }
+
+    /// M4 of the 2026-11-25 delta review: with a window of no size (a minimised window) no field of the layout is NaN
+    /// (JSON null), in the PC interface or the Controller's, with the HUD as it stands and with pieces moved. Negative
+    /// control (run red): with `Beyond::of` in place of `beyond_of` the PC target and every moved piece gave null.
+    #[test]
+    fn a_window_with_no_size_gives_no_null_field_in_either_interface_moved_or_not() {
+        for pc in [false, true] {
+            for layout in ["", "player l 35 t 28
+group l 60 t 50
+target l 80 b -40
+pet l 25 t 12
+minimap r 20 t 20
+"] {
+                crate::settings::testing::reset(false);
+                crate::settings::set_ui_mode(pc).unwrap();
+                crate::settings::save_hud_layout(layout);
+                crate::hudlayout::testing_reset();
+                for size in [(0, 0), (0, 480), (640, 0), (1280, 720)] {
+                    let mut bad = Vec::new();
+                    no_null("layout", &hud_layout_json(size), &mut bad);
+                    no_null("frame", &hud_frame_json(size), &mut bad);
+                    assert!(bad.is_empty(), "pc={pc} moved={} size={size:?}: {bad:?}", !layout.is_empty());
+                }
+            }
+        }
+        crate::settings::testing::reset(false);
+        crate::hudlayout::testing_reset();
     }
 }
