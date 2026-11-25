@@ -326,6 +326,19 @@ fn chat_entry(play: &mut Play, fresh: bool) {
     window_sessions::open_client(vm, &addon, "chat_entry", "key", data);
 }
 
+/// Why no item link can be made now, as the spec's table of situations gives it: the server offers none
+/// (`unsupported`) or the player has turned Item Links off (`unavailable`). `not_ready` stays for a chat line with
+/// no room.
+pub(crate) fn links_unavailable(play: &Play) -> Option<DispatchOutcome> {
+    if !play.session.item_links_offer {
+        return Some(refuse("unsupported", "this server offers no item links"));
+    }
+    if !play.links_made() {
+        return Some(refuse("unavailable", "the player has turned Item Links off"));
+    }
+    None
+}
+
 /// `eqoa.actions.link_item` while a mod holds the chat line: the item goes to the mod's line, never into the game's.
 /// None where nothing is held (the game's own Link Item then).
 pub(crate) fn offer_link(play: &mut Play, idx: usize) -> Option<DispatchOutcome> {
@@ -333,11 +346,8 @@ pub(crate) fn offer_link(play: &mut Play, idx: usize) -> Option<DispatchOutcome>
     if !may_divert() {
         return None;
     }
-    if !play.links_made() {
-        return Some(refuse(
-            "not_ready",
-            "the item could not be linked: this server offers no item links, or the chat line has no room",
-        ));
+    if let Some(no) = links_unavailable(play) {
+        return Some(no);
     }
     let it = play.dump.inventory.items.get(idx)?;
     // the name as a console's keyboard could type it (the server writes its own in its place)

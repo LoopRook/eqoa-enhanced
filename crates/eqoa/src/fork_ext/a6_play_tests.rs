@@ -517,10 +517,10 @@ fn a6_link_item_goes_to_the_mods_line_when_it_holds_the_chat_and_to_the_games_ot
     let again = offer_link(&mut p, 0);
     assert!(again.is_some());
     assert_eq!(ws::get(vm, "chat_entry").unwrap().data["offer"]["seq"], 2);
-    // a server with no item links refuses
+    // a server with no item links refuses `unsupported` (not `not_ready`, which is a chat line with no room)
     p.session.item_links_offer = false;
     p.agree_item_links();
-    assert!(matches!(offer_link(&mut p, 0), Some(DispatchOutcome::Refused { code: "not_ready", .. })));
+    assert!(matches!(offer_link(&mut p, 0), Some(DispatchOutcome::Refused { code: "unsupported", .. })));
 }
 
 #[test]
