@@ -737,7 +737,7 @@ const ID_NUMBERS: &[(&str, &[&str])] = &[
             "eqoa.raid.RaidState.leader_id", "eqoa.trade.Partner.id", "eqoa.events.trade.request.data.id",
             "eqoa.duel.State.opponent_id", "eqoa.duel.Invite.id", "eqoa.guild.GuildMember.id",
             "eqoa.guild.GuildInvite.inviter_id", "eqoa.social.Friend.id", "eqoa.social.FriendRequest.id",
-            "eqoa.social.Ignored.id", "eqoa.who.WhoEntry.id", "eqoa.lfg.LfgEntry.id",
+            "eqoa.social.Ignored.id", "eqoa.who.WhoEntry.id", "eqoa.lfg.LfgEntry.id", "eqoa.windows.TalkedTo.id",
         ],
     ),
     (
