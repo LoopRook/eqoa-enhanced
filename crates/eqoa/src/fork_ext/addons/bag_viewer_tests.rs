@@ -4914,7 +4914,8 @@ fn round7c_bag_viewer_sells_single_items_near_a_merchant_body() {
         bv.frames(2);
         let (text, ok) = bv.result_text().expect("a result line");
         assert_eq!(ok, Some(true), "{text}");
-        assert!(text.starts_with(row), "{text}");
+        // a sale the client asked about says "Sell: sent" (the client's question's own line); one it did not says the row
+        assert!(text.starts_with(row) || (asks && text == "Sell: sent"), "{text}");
         assert!(bv.eval::<bool>("not eqoa.windows.taken('merchant')"), "the hidden session is closed afterwards");
         assert_eq!(bv.play.mode, 0);
     };
@@ -5017,7 +5018,7 @@ fn round7c_bag_viewer_second_sell_before_the_merchant_answers_is_refused_body() 
     bv.frames(2);
     let (text, ok) = bv.result_text().expect("a result line");
     assert_eq!(ok, Some(true), "{text}");
-    assert!(text.starts_with("Sell 1"), "{text}");
+    assert!(text.starts_with("Sell 1") || text == "Sell: sent", "{text}");
     assert_eq!(bv.eval::<i64>("eqoa.inventory.get().items[2].quantity"), 4, "one potion sold");
     assert_eq!(bv.eval::<i64>("eqoa.inventory.get().items[7].quantity"), 3, "the pelts were not sold");
     assert_eq!(bv.play.mode, 0);
