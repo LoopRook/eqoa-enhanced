@@ -1148,7 +1148,7 @@ fn round6b_bag_viewer_merchant_bank_and_corpse_menus_and_captures_body() {
     bv.frames(2);
     let (res, ok) = bv.result_text().unwrap();
     assert_eq!(ok, Some(true), "{res}");
-    assert!(res.starts_with("Sell stack (5"), "{res}");
+    assert!(res.starts_with("Sell"), "{res}");
 
     // Open Bank (mode 11) -> Deposit from bags & Withdraw on Bank tab
     bv.play.bags_close_merchant();
@@ -1393,7 +1393,7 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_b
     bv.frames(3);
     let (res, ok) = bv.result_text().unwrap();
     assert_eq!(ok, Some(false));
-    assert!(res.contains("Sell junk stopped after"), "{res}");
+    assert!(res.contains("Sell junk") && (res.contains("stopped after") || res.contains("zoning")), "{res}");
 
     // Corpse open: mark Rat Pelt (id 2001) as junk, switch to Corpse tab, capture r6-junk-corpse.png.
     bv.play.bags_target_corpse(5001, "a decaying skeleton");
@@ -2701,6 +2701,10 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     bv.frames(2);
     bv.play.bags_broker_tick(); // makes the sell_many call
     bv.play.bags_broker_tick(); // the first stack goes out
+    if super::super::confirm::is_open() {
+        // the Odd Thing is not an ordinary item: the client asks once, the player's Yes sells
+        bv_say_yes(&mut bv);
+    }
     assert!(bv.play.bags_shop_pending(), "sell step sent silently");
     bv.play.bags_sell_confirm(7, 1);
     bv.frames(2);

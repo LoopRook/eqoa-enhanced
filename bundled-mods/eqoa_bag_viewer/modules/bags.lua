@@ -1317,7 +1317,8 @@ function M.sell_closed(d)
     if d.answer == "yes" then
         M.result = {text = sent and "Sell: sent" or ("Sell: not sold (" .. tostring(d.detail and d.detail.reason) .. ")"),
             ok = sent == true}
-        if not sent then M.release_sell_hold() end
+        -- the sale goes out on the step after the Yes: the window is let go when the server's answer changes the pack
+        if sent then M.sell_hold_armed = true else M.release_sell_hold() end
     elseif d.answer == "no" then
         M.result = {text = "Sell: kept", ok = true}
         M.release_sell_hold()
@@ -1330,8 +1331,14 @@ end
 
 function M.release_sell_hold()
     local kind = M.sell_hold
-    M.sell_hold = nil
+    M.sell_hold, M.sell_hold_armed = nil, nil
     if kind then release_takeover(kind) end
+end
+
+-- The pack changed: if it was the answer to a sale the player said Yes to, the merchant's window is let go.
+function M.on_pack_changed()
+    if M.sell_hold and M.sell_hold_armed then M.release_sell_hold() end
+    M.dirty()
 end
 
 function M.run_single(label, fn)

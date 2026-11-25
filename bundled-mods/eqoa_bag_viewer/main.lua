@@ -120,7 +120,7 @@ local function open()
     if B.char_dirty then B.sync_character() end
     B.scan_reset()
     listen("render", draw)
-    listen("inventory.changed", function() B.release_sell_hold(); B.dirty() end)
+    listen("inventory.changed", function() B.on_pack_changed() end)
     listen("bank.changed", function(e) B.on_bank_changed(e.data) end)
     listen("loot.changed", function(e) B.on_loot_changed(e.data) end)
     listen("merchant.changed", function(e) B.on_merchant_changed(e.data) end)
