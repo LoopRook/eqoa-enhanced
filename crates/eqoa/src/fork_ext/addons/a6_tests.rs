@@ -1108,3 +1108,5 @@ fn a6_a_failing_handler_releases_its_windows_and_is_told_they_closed() {
 }
 
 include!("perf_mods_tests.rs");
+
+include!("hide_under_map_tests.rs");

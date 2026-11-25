@@ -4,6 +4,8 @@
 -- only real answer is such a hand-in is answered by itself.
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 local ui = eqoa.imgui
+-- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
+local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
 local match = require("match")
 
 local DIALOG_KINDS = { "response_dialog", "text_dialog" }
@@ -150,11 +152,12 @@ end
 
 eqoa.events.on("input.key", function(e)
     local d = e.data
+    if map_up() then return end
     if d.down and not d["repeat"] then press(d.key:lower()) end
 end)
 eqoa.events.on("pointer.pressed", function(e)
     local d = e.data
-    if d.button ~= "left" then return end
+    if d.button ~= "left" or map_up() then return end
     for _, h in ipairs(state.hits) do
         if inside(d.x, d.y, h) and h.run then h.run(); return end
     end
@@ -359,7 +362,8 @@ eqoa.events.on("render", function()
         if s and not offer then offer = s end
     end
     state.hits, state.keys = {}, {}
-    if not dialog and not offer then
+    -- a dialog that arrives under the game's map waits there, unseen, and is drawn when the map closes
+    if not dialog and not offer or map_up() then
         set_claims({})
         return
     end

@@ -50,6 +50,10 @@ local state = {
     takeover_attempted = false, prompt_warned = {}, claim_frames = 0,
 }
 
+
+-- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
+local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
+
 local function say(text, ok)
     state.status = { text = tostring(text), ok = ok }
 end
@@ -632,6 +636,11 @@ local function draw()
         set_text_capture(false)
         return
     end
+    -- under the game's map: nothing drawn, the keyboard is the game's; the window comes back as it was
+    if map_up() then
+        set_text_capture(false)
+        return
+    end
     -- held again every so often: the claims end with the world and with the player's "Use the game's windows" switch
     state.claim_frames = state.claim_frames + 1
     if not state.takeover_attempted or state.claim_frames % 120 == 0 then
@@ -791,7 +800,7 @@ eqoa.events.on("windows.session", function(e)
     end
 end)
 eqoa.events.on("input.key", function(e)
-    if state.open and e.data.down and not e.data["repeat"] and e.data.key:lower() == "escape" then
+    if state.open and not map_up() and e.data.down and not e.data["repeat"] and e.data.key:lower() == "escape" then
         close_window(false)
     end
 end)

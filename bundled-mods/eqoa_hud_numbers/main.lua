@@ -14,7 +14,11 @@ eqoa.options.toggle({ id = "hud_numbers", label = "HUD Numbers", default = true 
 eqoa.options.toggle({ id = "target_hp_percent", label = "Target HP %", default = true })
 eqoa.options.toggle({ id = "xp_details", label = "XP Details", default = true })
 
+-- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
+local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
+
 eqoa.events.on("render", function()
+    if map_up() then return end
     local hud_on = eqoa.options.get("hud_numbers")
     local xp_on = eqoa.options.get("xp_details")
     local target_on = eqoa.options.get("target_hp_percent")

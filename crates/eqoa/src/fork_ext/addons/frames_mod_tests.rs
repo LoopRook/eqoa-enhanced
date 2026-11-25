@@ -480,3 +480,22 @@ fn perf_frames_mod_asks_each_capability_once_and_draws_the_same() {
     assert_eq!(later, 0, "later frames ask nothing");
     assert_eq!(drawn_later, drawn * 30, "and draw the same windows each frame");
 }
+
+/// 2026-11-24, owner's screenshot: EQOA Frames' Casting, Effects and Target windows stayed on top of the game's full map.
+/// Map up: nothing is drawn; map closed: drawn again, the same (control).
+#[test]
+fn hide_under_map_frames_windows_are_not_drawn_while_the_game_map_is_up() {
+    fixture();
+    let mut context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon()).unwrap();
+    frames(&host, &bridge, &mut context, 3);
+    let shown = frames(&host, &bridge, &mut context, 1);
+    assert!(shown > 0, "control: the windows are drawn with the map closed");
+    CORE.with(|c| c.borrow_mut().view.map = json!({"enabled": true, "open": true, "minimap": false, "markers_on": true, "world_id": 1, "revision": 2}));
+    assert_eq!(frames(&host, &bridge, &mut context, 3), 0, "map up: nothing is drawn");
+    CORE.with(|c| c.borrow_mut().view.map = json!({"enabled": true, "open": false, "minimap": true, "markers_on": true, "world_id": 1, "revision": 3}));
+    assert_eq!(frames(&host, &bridge, &mut context, 2), shown, "map closed: the same windows again");
+    assert!(host.drain_logs().unwrap().is_empty());
+}

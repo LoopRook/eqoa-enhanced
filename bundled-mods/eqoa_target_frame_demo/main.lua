@@ -70,7 +70,11 @@ eqoa.events.on("disabling", function()
     release_hidden()
 end)
 
+-- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
+local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
+
 eqoa.events.on("render", function()
+    if map_up() then return end
     local client = eqoa.client.get()
     if not client or not client.in_world then
         return
