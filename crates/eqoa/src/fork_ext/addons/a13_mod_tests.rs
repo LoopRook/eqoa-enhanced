@@ -620,3 +620,121 @@ fn a13_world_map_lets_go_of_held_keys_when_another_text_field_takes_the_keyboard
     assert_eq!(rig.lua_str("world_map.held.w"), "nil", "W is not held any more: the map does not pan by itself");
     other.execute("eqoa.input.capture_text(false)").unwrap();
 }
+
+// ---- owner 2026-11-25: sizes follow the client's UI scale and the player's own settings
+
+fn boxes_overlap(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) -> bool {
+    a.0 < b.0 + b.2 - 0.01 && b.0 < a.0 + a.2 - 0.01 && a.1 < b.1 + b.3 - 0.01 && b.1 < a.1 + a.3 - 0.01
+}
+
+fn bar_box(rig: &Rig, name: &str) -> (f64, f64, f64, f64) {
+    let f = |k: &str| rig.lua_f64(&format!("world_map.bar[\"{name}\"].{k}"));
+    (f("x"), f("y"), f("w"), f("h"))
+}
+
+#[test]
+fn a13_world_map_text_follows_the_ui_scale_and_the_text_size_setting() {
+    // Negative control: with the old fixed 12 pixel text the size would not change with the setting or the display.
+    let mut sizes = Vec::new();
+    let mut k = 1.0;
+    for opt in [1, 2, 3, 4] {
+        fresh();
+        let mut rig = rig([1024.0, 768.0], None);
+        rig.host.execute(&format!("world_map.opts.text = {opt}")).unwrap();
+        rig.open();
+        rig.frames(2);
+        k = rig.lua_f64("world_map.ui_k");
+        let mult = [0.85, 1.0, 1.3, 1.7][opt - 1];
+        let px = rig.lua_f64("world_map.text_px");
+        let want = (11.0 * k * mult).round();
+        assert_eq!(px, want, "text px at option {opt}: {px}, wanted {want} (client scale {k})");
+        assert!((rig.lua_f64("world_map.F") - k * mult).abs() < 1e-9);
+        sizes.push((px, rig.lua_f64("world_map.line_h"), rig.lua_f64("world_map.bar.Center.h")));
+    }
+    assert!(sizes.windows(2).all(|w| w[1].0 > w[0].0 && w[1].1 > w[0].1 && w[1].2 > w[0].2), "text, line and button grow with the setting: {sizes:?}");
+    // at the normal setting the text is what the other mods draw: 11 px of the 640 x 448 frame, scaled
+    assert_eq!(sizes[1].0, (11.0 * k).round());
+}
+
+#[test]
+fn a13_world_map_top_bar_and_footer_do_not_overlap_at_the_smallest_window_and_largest_text() {
+    // Negative control: the old fixed 150 + 56 wide buttons and clipped footer overlap or run out at a larger text.
+    for display in [[1024.0, 768.0], [640.0, 480.0], [1280.0, 720.0]] {
+        for opt in [1, 4] {
+            fresh();
+            let mut rig = rig(display, None);
+            rig.host.execute(&format!("world_map.opts.text = {opt}; world_map.win.w = 1; world_map.win.h = 1")).unwrap();
+            rig.open();
+            rig.frames(2);
+            let r = (rig.lua_f64("world_map.rect.x"), rig.lua_f64("world_map.rect.y"), rig.lua_f64("world_map.rect.w"), rig.lua_f64("world_map.rect.h"));
+            let names = ["title", "search", "Center", "Use the game's map", "X", "footer"];
+            let boxes: Vec<_> = names.iter().map(|n| bar_box(&rig, n)).collect();
+            for (n, b) in names.iter().zip(&boxes) {
+                assert!(b.0 >= r.0 - 0.01 && b.0 + b.2 <= r.0 + r.2 + 0.01 && b.1 >= r.1 - 0.01 && b.1 + b.3 <= r.1 + r.3 + 0.01, "{n} {b:?} is outside the window {r:?} ({display:?}, text {opt})");
+            }
+            for i in 0..names.len() {
+                for j in i + 1..names.len() {
+                    assert!(!boxes_overlap(boxes[i], boxes[j]), "{} {:?} overlaps {} {:?} ({display:?}, text {opt})", names[i], boxes[i], names[j], boxes[j]);
+                }
+            }
+            assert!(rig.lua_f64("world_map.overflow") <= 0.5, "text past the window ({display:?}, text {opt})");
+            let foot = rig.lua_str("world_map.foot_text");
+            assert!(foot.len() > 8, "the footer says something: {foot:?}");
+        }
+    }
+}
+
+#[test]
+fn a13_world_map_card_stays_in_the_window_and_markers_grow_with_the_marker_size() {
+    // Negative control: a card and hit area fixed in pixels would not change with the setting.
+    let mut reach = Vec::new();
+    for opt in [1, 4] {
+        fresh();
+        let mut rig = rig([1024.0, 768.0], None);
+        rig.host.execute(&format!("world_map.opts.text = 4; world_map.opts.marker = {opt}; world_map.win.w = 1; world_map.win.h = 1; world_map.pins['0'] = {{ {{ x = 25300, z = 15200, note = 'A very long note that goes on and on and on and on and on' }} }}")).unwrap();
+        rig.open();
+        let mid = rig.middle();
+        pointer_api::position([mid.0 as f32, mid.1 as f32], true, (1024, 768));
+        rig.frames(2);
+        assert_eq!(rig.lua_str("world_map.card ~= nil"), "true", "the pin answers the pointer");
+        let (cx, cy, cw, ch) = (rig.lua_f64("world_map.card_box.x"), rig.lua_f64("world_map.card_box.y"), rig.lua_f64("world_map.card_box.w"), rig.lua_f64("world_map.card_box.h"));
+        let (ax, ay, aw, ah) = (rig.lua_f64("world_map.area.x"), rig.lua_f64("world_map.area.y"), rig.lua_f64("world_map.area.w"), rig.lua_f64("world_map.area.h"));
+        assert!(cx >= ax && cy >= ay && cx + cw <= ax + aw && cy + ch <= ay + ah, "the card ({cx},{cy},{cw},{ch}) is inside the map area ({ax},{ay},{aw},{ah})");
+        assert!(rig.lua_f64("world_map.overflow") <= 0.5);
+        // how far from the pin's point a pointer still finds it
+        let mut far = 0.0;
+        for dx in 0..80 {
+            pointer_api::position([mid.0 as f32 + dx as f32, mid.1 as f32], true, (1024, 768));
+            rig.frames(1);
+            if rig.lua_str("world_map.card ~= nil") == "true" {
+                far = dx as f64;
+            }
+        }
+        reach.push(far);
+    }
+    assert!(reach[1] > reach[0] + 3.0, "a bigger marker is easier to hit: {reach:?}");
+}
+
+#[test]
+fn a13_world_map_size_settings_are_saved_whole_and_come_back() {
+    // Negative control: a save that carried only the two sizes would lose the pins and the window.
+    fresh();
+    let rig1 = rig([1024.0, 768.0], None);
+    rig1.host.execute("world_map.pins['0'] = { { x = 25300, z = 15200, note = 'Keep me' } }; world_map.win.x = 40; world_map.win.y = 30; world_map.win.w = 700; world_map.win.h = 500; world_map.opts.text = 3; world_map.opts.marker = 4; world_map.persist()").unwrap();
+    let saved = rig1.saved.borrow().last().cloned().expect("saved");
+    let text = saved.to_string();
+    assert!(text.contains("[\"text_size\",3]") && text.contains("[\"marker_size\",4]"), "the sizes are saved: {saved}");
+    assert!(text.contains("Keep me") && text.contains("[\"w\",700]"), "the whole snapshot: {saved}");
+    drop(rig1);
+    fresh();
+    let mut again = rig([1024.0, 768.0], Some(saved));
+    again.open();
+    assert_eq!((again.lua_f64("world_map.opts.text"), again.lua_f64("world_map.opts.marker")), (3.0, 4.0));
+    assert_eq!(again.lua_str("world_map.pins['0'][1].note"), "Keep me");
+    assert_eq!(again.lua_f64("world_map.win.w"), 700.0);
+    // a bad value falls back to Normal
+    drop(again);
+    fresh();
+    let bad = rig([1024.0, 768.0], Some(json!({"table": [["version", 1], ["text_size", 99], ["marker_size", "x"]]})));
+    assert_eq!((bad.lua_f64("world_map.opts.text"), bad.lua_f64("world_map.opts.marker")), (2.0, 2.0));
+}
