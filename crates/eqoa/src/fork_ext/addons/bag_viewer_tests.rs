@@ -4895,7 +4895,7 @@ fn round7c_bag_viewer_sells_single_items_near_a_merchant_body() {
         if asks {
             // a quick-slotted or not ordinary item: once the merchant is open the CLIENT asks, nothing goes out until Yes
             assert!(!bv.play.bags_shop_pending(), "{row}: the question comes before the sale");
-            bv_say_yes(&mut bv);
+            bv_say_yes(bv);
             bv.frames(2);
             bv.play.bags_broker_tick();
         }
