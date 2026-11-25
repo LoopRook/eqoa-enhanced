@@ -2062,8 +2062,8 @@ mod mods {
         }
         r.host
             .execute(
-                "bm_calls = {}; local a = eqoa.actions; local real = a.bank_money; \
-                 a.bank_money = function(d, n) bm_calls[#bm_calls + 1] = d .. ':' .. n; return real(d, n) end",
+                "bm_calls = {}; local B = require('bags'); local real = B.run_single; \
+                 B.run_single = function(label, fn) bm_calls[#bm_calls + 1] = label; return real(label, fn) end",
             )
             .unwrap();
         r
