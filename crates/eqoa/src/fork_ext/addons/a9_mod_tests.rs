@@ -495,29 +495,45 @@ fn window_ptr(name_part: &str) -> Option<*mut sys::ImGuiWindow> {
     None
 }
 
-/// Moves the pointer over the item `label` of the window (or child) whose name contains `window`, by looking for the
-/// place where Dear ImGui says that item is hovered. The click that follows is the real path: the mouse is the
-/// window system's, and the button is the one the player sees.
+/// Moves the pointer to the CENTRE of the item `label` of the window (or child) whose name contains `window`: the
+/// item's whole rectangle is found as every place Dear ImGui says it is hovered, and the pointer goes to the middle
+/// of that, where a player clicks. A thin strip that is hovered (an item another one lies over) fails the size check.
 fn hover_item(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, window: &str, label: &str) -> (f32, f32) {
+    let (x, y, _, h) = hover_rect(host, bridge, ctx, window, label);
+    let _ = h;
+    (x, y)
+}
+
+fn hover_rect(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, window: &str, label: &str) -> (f32, f32, f32, f32) {
     let w = window_ptr(window).unwrap_or_else(|| panic!("window {window:?} is not drawn"));
     let (pos, size, seed) = unsafe { ((*w).Pos, (*w).Size, (*w).ID) };
     let label_c = std::ffi::CString::new(label).unwrap();
     let want = unsafe { sys::igImHashStr(label_c.as_ptr(), 0, seed) };
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     let mut y = pos.y + 2.0;
     while y < pos.y + size.y {
         let mut x = pos.x + 2.0;
         while x < pos.x + size.x {
             ctx.io_mut().add_mouse_pos_event([x, y]);
             frames(host, bridge, ctx, 1);
-            let hovered = unsafe { (*sys::igGetCurrentContext()).HoveredId };
-            if hovered == want {
-                return (x, y);
+            if unsafe { (*sys::igGetCurrentContext()).HoveredId } == want {
+                x0 = x0.min(x);
+                x1 = x1.max(x);
+                y0 = y0.min(y);
+                y1 = y1.max(y);
             }
-            x += 6.0;
+            x += 5.0;
         }
-        y += 4.0;
+        y += 3.0;
     }
-    panic!("no place in {window:?} hovers {label:?}");
+    assert!(x0 <= x1, "no place in {window:?} hovers {label:?}");
+    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+    // a button is about a line tall: a hovered strip of a few pixels is an item that something else lies over
+    assert!(y1 - y0 >= 10.0, "{label:?} is hovered over only {:.0}px of height ({y0:.0} to {y1:.0}): it is covered", y1 - y0);
+    ctx.io_mut().add_mouse_pos_event([cx, cy]);
+    frames(host, bridge, ctx, 2);
+    assert_eq!(unsafe { (*sys::igGetCurrentContext()).HoveredId }, want, "the centre of {label:?} must hover it");
+    (cx, cy, x1 - x0, y1 - y0)
 }
 
 fn click(host: &Host, bridge: &Bridge, ctx: &mut dear_imgui_rs::Context, button: dear_imgui_rs::MouseButton) {
@@ -595,4 +611,65 @@ fn a9_trade_mod_takes_its_windows_again_when_the_switch_was_turned_off_and_on() 
     for k in kinds {
         assert!(window_takeover::is_taken(k), "taken again within 120 frames: {k:?}");
     }
+}
+
+#[test]
+fn a9_trade_mod_buttons_work_in_the_middle_and_empty_enter_and_double_clicks_offer_nothing_extra() {
+    let (host, bridge, mut ctx, vm) = start(TRADE);
+    native_a9::publish(View::Trade, Some(open_state(false)), None);
+    hold(vm, TakeoverKind::Trade);
+    frames(&host, &bridge, &mut ctx, 3);
+    // a click in the MIDDLE of Offer (row 2) and of All (row 1): both buttons take it over their whole height
+    let (_, _, _, h) = hover_rect(&host, &bridge, &mut ctx, "##bags", "Offer##offer_2");
+    assert!(h >= 10.0, "the whole button hovers ({h:.0}px)");
+    hover_item(&host, &bridge, &mut ctx, "##bags", "Offer##offer_2");
+    click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Left);
+    assert_eq!(queued(), vec!["trade_add"], "a click in the middle of Offer offers");
+    host.execute("require('tradeui').state.last_offer = nil").unwrap();
+    hover_item(&host, &bridge, &mut ctx, "##bags", "All##all_1");
+    click(&host, &bridge, &mut ctx, dear_imgui_rs::MouseButton::Left);
+    assert_eq!(queued(), vec!["trade_add", "trade_add"], "a click in the middle of All offers the stack");
+
+    // Enter in an emptied coin box offers nothing; Enter with digits does, and the text is not typed again
+    action_broker::reset_all_for_test();
+    host.execute("local S = require('tradeui').state; S.typing = true; S.money_text = ''").unwrap();
+    CORE_press_enter(&host);
+    assert!(queued().is_empty(), "an emptied box and Enter is not an offer of 0");
+    host.execute("local S = require('tradeui').state; S.typing = true; S.money_text = '40'").unwrap();
+    CORE_press_enter(&host);
+    assert_eq!(queued(), vec!["trade_money"]);
+    host.execute("local S = require('tradeui').state; assert(S.just_sent == '40' and S.money_text == nil)").unwrap();
+
+    // a second offer of ANOTHER row a moment after the first (the list moved under a double click) is dropped
+    action_broker::reset_all_for_test();
+    host.execute(
+        r#"
+        local T = require('tradeui'); local t = eqoa.trade.get()
+        T.state.last_offer = nil
+        T.offer_row(t.bags[1], false)
+        T.offer_row(t.bags[2], false) -- the next row, 0 s later
+        "#,
+    )
+    .unwrap();
+    assert_eq!(queued(), vec!["trade_add"], "the second, on another row, is ignored");
+    host.execute("local T = require('tradeui'); local t = eqoa.trade.get(); T.offer_row(t.bags[1], false)").unwrap();
+    assert_eq!(queued(), vec!["trade_add", "trade_add"], "the same row again (the next of a stack) is allowed");
+}
+
+#[test]
+fn a9_bag_viewer_closing_the_smith_in_the_middle_of_a_run_still_tells_what_was_repaired() {
+    let (host, bridge, mut ctx, _vm) = start(BV);
+    native_a9::publish(View::Smith, Some(smith_state(&[(1, 50), (2, 70)], false, 500)), None);
+    frames(&host, &bridge, &mut ctx, 2);
+    host.execute("local R = require('repair'); local s = eqoa.blacksmith.get(); R.begin_ask(s); R.answer(s, true)").unwrap();
+    frames(&host, &bridge, &mut ctx, 3);
+    sent_ok(&host);
+    native_a9::publish(View::Smith, Some(smith_state(&[(1, 0), (2, 70)], true, 450)), None);
+    frames(&host, &bridge, &mut ctx, 2);
+    // the player walks away: the smith closes with the second item not yet sent
+    native_a9::publish(View::Smith, None, None);
+    frames(&host, &bridge, &mut ctx, 2);
+    let last: String = host.lua.load("return require('repair').last.text").eval().unwrap();
+    assert!(last.starts_with("Repaired 1 item for 50 coins") && last.contains("the smith closed"), "{last}");
+    assert!(window_drawn("Repair##eqoa_bag_viewer_repair_done"), "and the panel shows it for a few seconds");
 }

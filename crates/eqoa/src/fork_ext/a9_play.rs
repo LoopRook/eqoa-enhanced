@@ -188,21 +188,30 @@ fn hold_for(play: &Play, kind: TakeoverKind, other: u32, name: String) -> Option
 
 thread_local! {
     /// The item texts built for the open trade, by (the bag key, the item, the quantity): built once, not every step.
-    static TIPS: RefCell<std::collections::HashMap<(u32, i64, i64), String>> = RefCell::new(std::collections::HashMap::new());
+    static TIPS: RefCell<std::collections::HashMap<(bool, u32, i64, i64, i64, i64), String>> = RefCell::new(std::collections::HashMap::new());
 }
 
 /// What the game's own windows show of an item you hold the cursor on: its lines and every stat bonus
 /// (`Info::inspect_item`, the client's own text for a record no list of the game's holds: a partner's item too).
-fn tip_text(play: &Play, it: &NetItem) -> String {
-    let key = (it.inv_index, it.item.id, it.quantity);
+fn tip_text(play: &Play, it: &NetItem, theirs: bool) -> String {
+    // the side, the bag key, the item, its quantity, its condition and charges: two players' items of one kind and
+    // bag key are not one text
+    let key = (theirs, it.inv_index, it.item.id, it.quantity, it.cur_hp, it.charges);
     if let Some(t) = TIPS.with(|c| c.borrow().get(&key).cloned()) {
         return t;
     }
-    let words = play.words.clone().unwrap_or_default();
+    let none;
+    let words = match &play.words {
+        Some(w) => w,
+        None => {
+            none = vi::strtab::StringTable::default();
+            &none
+        }
+    };
     let attack_words = play.start.as_ref().map(|s| s.attack_words.clone()).unwrap_or_default();
     let pl = &play.dump.player;
     let info = crate::infotext::Info {
-        words: &words,
+        words,
         inv: &play.dump.inventory,
         hp: [play.stats.stat[7], play.stats.stat[8], play.stats.stat[9], play.stats.stat[10]],
         base: &play.stats.base,
@@ -225,8 +234,8 @@ fn clear_tips() {
     TIPS.with(|c| c.borrow_mut().clear());
 }
 
-fn item_row(play: &Play, slot: usize, it: &NetItem) -> Json {
-    json!({"slot": slot, "id": it.item.id, "name": it.item.name, "quantity": it.quantity.max(1), "text": tip_text(play, it)})
+fn item_row(play: &Play, slot: usize, it: &NetItem, theirs: bool) -> Json {
+    json!({"slot": slot, "id": it.item.id, "name": it.item.name, "quantity": it.quantity.max(1), "text": tip_text(play, it, theirs)})
 }
 
 fn bag_row(play: &Play, slot: usize, it: &NetItem, room: bool) -> Json {
@@ -240,7 +249,7 @@ fn bag_row(play: &Play, slot: usize, it: &NetItem, room: bool) -> Json {
         "worn": worn,
         "no_trade": no_trade,
         "can_offer": !worn && !no_trade && room,
-        "text": tip_text(play, it),
+        "text": tip_text(play, it, false),
     })
 }
 
@@ -255,8 +264,8 @@ fn trade_state(play: &Play) -> Option<(Json, Option<(Instant, Duration)>)> {
         let part = &play.duel.part;
         let name = wager.as_ref().map(|h| h.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| name_of(play, part.a));
         let room = part.mine.len() < MAX_OFFER;
-        let mine: Vec<Json> = part.mine.iter().enumerate().map(|(i, it)| item_row(play, i + 1, it)).collect();
-        let theirs: Vec<Json> = part.theirs.iter().enumerate().map(|(i, it)| item_row(play, i + 1, it)).collect();
+        let mine: Vec<Json> = part.mine.iter().enumerate().map(|(i, it)| item_row(play, i + 1, it, false)).collect();
+        let theirs: Vec<Json> = part.theirs.iter().enumerate().map(|(i, it)| item_row(play, i + 1, it, true)).collect();
         let bags: Vec<Json> = part
             .inv
             .iter()
@@ -285,8 +294,8 @@ fn trade_state(play: &Play) -> Option<(Json, Option<(Instant, Duration)>)> {
     if trade.is_some() || play.mode == 15 || responder_open {
         let other = if st.with != u32::MAX { st.with } else { st.partner };
         let room = st.mine.len() < MAX_OFFER;
-        let mine: Vec<Json> = st.mine.iter().enumerate().map(|(i, o)| item_row(play, i + 1, &o.item)).collect();
-        let theirs: Vec<Json> = st.theirs.iter().enumerate().map(|(i, o)| item_row(play, i + 1, &o.item)).collect();
+        let mine: Vec<Json> = st.mine.iter().enumerate().map(|(i, o)| item_row(play, i + 1, &o.item, false)).collect();
+        let theirs: Vec<Json> = st.theirs.iter().enumerate().map(|(i, o)| item_row(play, i + 1, &o.item, true)).collect();
         let bags: Vec<Json> = st
             .inv
             .items

@@ -22,6 +22,8 @@ T.state = {
     capturing = false,
     last_req = nil,
     last_money_sent = nil, -- the amount the last coin offer carried (what a test reads)
+    just_sent = nil, -- the text of the last coin offer: the box writes it back when Enter validates it, and it is not typed
+    last_offer = nil, -- {slot, id, at}: the last item offered, against a double click that lands on the next row
 }
 local S = T.state
 
@@ -95,6 +97,12 @@ end
 
 function T.offer_row(row, whole)
     if not row or not row.can_offer then return end
+    -- a second click within a moment on another row is the list moving up under the first (its echo came between the
+    -- clicks), not a second wish: ignored. The same row again (a second one of a stack) is allowed.
+    local now = os.clock()
+    local last = S.last_offer
+    if last and now - last.at < 0.4 and (last.slot ~= row.slot or last.id ~= row.id) then return end
+    S.last_offer = {slot = row.slot, id = row.id, at = now}
     local count = whole and row.quantity or 1
     run("Offering " .. short(row.name, 20), function()
         return eqoa.actions.trade_add({slot = row.slot, id = row.id, count = count})
@@ -109,8 +117,11 @@ end
 
 -- The coins typed in the box (digits only), offered as the whole amount. Set and Enter both come here.
 function T.set_money(text)
-    local n = tonumber(((text or ""):gsub("[^%d]", ""):sub(1, 9)))
-    if not n then n = 0 end
+    local digits = ((text or ""):gsub("[^%d]", ""):sub(1, 9))
+    -- nothing typed offers nothing (an emptied box and Enter is not an offer of 0: Take back / Set 0 are)
+    if digits == "" then return end
+    local n = tonumber(digits)
+    S.just_sent = text
     S.last_money_sent = n
     run("Offering " .. tunar(n), function() return eqoa.actions.trade_money(n) end)
 end
@@ -226,7 +237,15 @@ local function draw_trade(t)
         -- the text typed stays until Set, Enter or the end of the trade: a click on Set takes the box's focus a frame
         -- before the button fires, so it must not be dropped when the box is left
         local val, changed = ui.InputTextWithHint("##coins", tostring(t.mine.money or 0), S.money_text or "", 0)
-        if changed then S.money_text = val:gsub("[^%d]", ""):sub(1, 9) end
+        if changed then
+            -- the box writes its text back when Enter validates it: what was just offered is not typed again
+            if val == S.just_sent then
+                S.money_text = nil
+            else
+                S.just_sent = nil
+                S.money_text = val:gsub("[^%d]", ""):sub(1, 9)
+            end
+        end
         if ui.IsItemActive() then typing_now = true end
         ui.SameLine()
         if ui.Button("Set##coins_set") then
@@ -252,7 +271,8 @@ local function draw_trade(t)
             for _, b in ipairs(t.bags or {}) do
                 if b.can_offer then
                     shown_rows = shown_rows + 1
-                    ui.Selectable(item_line(b) .. "##bag_" .. b.slot, false)
+                    -- a width that ends before the buttons: a full-line Selectable would take the hover from them
+                    ui.Selectable(item_line(b) .. "##bag_" .. b.slot, false, 0, 230, 0)
                     tip(b)
                     if ui.IsItemHovered() and ui.IsMouseReleased(1) then T.offer_row(b, false) end
                     ui.SameLine()

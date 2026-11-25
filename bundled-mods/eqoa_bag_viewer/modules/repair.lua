@@ -259,7 +259,7 @@ local function draw_panel(s)
             ui.EndChild()
         end
         ui.Separator()
-        ui.TextWrapped(string.format("Repairing everything: %s. You carry %s.", coins(plan.total), coins(s.coin or 0)))
+        ui.TextWrapped(string.format("Can repair now: %s. You carry %s.", coins(plan.total), coins(s.coin or 0)))
         if R.ask then
             local q = string.format("Repair %d item%s for %s?", R.ask.n, R.ask.n == 1 and "" or "s", coins(R.ask.total))
             if R.ask.skipped > 0 then q = q .. string.format(" %d cost more than you carry and are skipped.", R.ask.skipped) end
@@ -302,6 +302,11 @@ local function on_render()
         if R.opened then
             R.opened = false
             R.ask = nil
+            -- the smith closed with a run going: what was repaired is still told
+            if R.run then
+                local run = R.run
+                finish(summary(run) .. " (stopped: the smith closed)", run.done > 0)
+            end
             R.run = nil
             R.status = nil
         end

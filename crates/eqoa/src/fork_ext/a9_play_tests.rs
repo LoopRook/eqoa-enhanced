@@ -1397,3 +1397,30 @@ fn a9_mods_review_the_item_text_the_game_shows_is_in_the_read_and_a_wager_questi
     let text = crate::fork_ext::addons::confirm::trade_accept_text(false, "Al", &["Rusty Sword".to_string()], &[]);
     assert_eq!(text, "You give Rusty Sword, you get nothing. Trade?", "control: a trade keeps its own wording");
 }
+
+#[test]
+fn a9_the_item_text_of_the_two_sides_is_not_shared_by_a_bag_key() {
+    let _baseline = Baseline;
+    let mut p = ready();
+    bags(&mut p);
+    let host = host_all();
+    lua_ok(&host, "assert(eqoa.windows.takeover('trade', {scope='all'}) == true)");
+    step(&mut p, &host);
+    open_trade(&mut p, 77);
+    // ours and theirs: the same kind of item with the same bag key, in different condition
+    let mut mine = item(50, 9, 1, 0, "Steel Sword");
+    mine.item.max_hp = 100;
+    mine.cur_hp = 90;
+    let mut theirs = mine.clone();
+    theirs.cur_hp = 10;
+    p.npcw.trade_state.mine.push(crate::trade::Offer { item: mine, id: 0 });
+    p.npcw.trade_state.theirs.push(crate::trade::Offer { item: theirs, id: 0 });
+    step(&mut p, &host);
+    lua_ok(
+        &host,
+        r#"
+        local t = assert(eqoa.trade.get())
+        assert(t.mine.items[1].text ~= t.theirs.items[1].text, "their sword is in its own condition, not ours:\n" .. t.mine.items[1].text)
+        "#,
+    );
+}
