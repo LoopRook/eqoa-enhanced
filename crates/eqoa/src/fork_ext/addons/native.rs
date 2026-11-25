@@ -1462,7 +1462,7 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.combat.CombatHit",
-            "attacker_id defender_id amount kind color outgoing incoming from_pet to_pet",
+            "attacker_id defender_id amount kind color outgoing incoming from_pet to_pet by_player from_merc",
         ),
         ("eqoa.combat.Counters", "received dropped"),
         ("eqoa.input.InputState", "focused pad text_capture"),

@@ -7941,7 +7941,7 @@ impl Play {
         if amount > 0 && (Some(attacker) == me || (attacker == self.pet_id && self.pet_id != u32::MAX)) {
             self.guide.hit(defender, now);
         }
-        self.fork_combat_event(attacker, amount, defender, rgb);
+        self.fork_combat_event(attacker, amount, defender, rgb, net::session::number_tag(rest, tags));
         if self.options.no_damage != 0 {
             return;
         }

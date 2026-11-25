@@ -859,10 +859,18 @@ pub(crate) fn observe_text(text: &str, color: [f32; 4]) {
     });
 }
 pub(crate) fn observe_hit(attacker: u32, defender: u32, amount: i32, color: Option<[u8; 3]>) {
+    observe_hit_tagged(attacker, defender, amount, color, None);
+}
+/// `observe_hit` with the server's tag byte of the figure (`net::session::NumberTag`) as `(pet, merc)`: a server
+/// that tags the numbers tells a pet's or a merc's hit with the player as its attacker, so the ids alone cannot say
+/// who made it (`combat.hit`'s `by_player` and `from_merc`).
+pub(crate) fn observe_hit_tagged(attacker: u32, defender: u32, amount: i32, color: Option<[u8; 3]>, tag: Option<(bool, bool)>) {
     defer(256, move |c| {
         let me = c.view.player["id"].as_u64();
         let pet = c.view.player["pet_id"].as_u64();
-        c.emit("combat.hit",json!({"attacker_id":attacker,"defender_id":defender,"amount":amount.unsigned_abs(),"kind":if amount>0 {"heal"}else{"damage"},"color":color,"outgoing":me==Some(attacker as u64),"incoming":me==Some(defender as u64),"from_pet":pet==Some(attacker as u64),"to_pet":pet==Some(defender as u64)}));
+        let (tag_pet, tag_merc) = tag.unwrap_or((false, false));
+        let outgoing = me == Some(attacker as u64);
+        c.emit("combat.hit",json!({"attacker_id":attacker,"defender_id":defender,"amount":amount.unsigned_abs(),"kind":if amount>0 {"heal"}else{"damage"},"color":color,"outgoing":outgoing,"incoming":me==Some(defender as u64),"from_pet":pet==Some(attacker as u64),"to_pet":pet==Some(defender as u64),"by_player":outgoing&&!tag_pet&&!tag_merc,"from_merc":tag_merc}));
     });
 }
 
