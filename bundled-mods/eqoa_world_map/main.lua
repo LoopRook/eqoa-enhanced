@@ -6,21 +6,37 @@
 local ui = eqoa.imgui
 local ID = "eqoa_world_map"
 
-local MIN_W, MIN_H = 360, 260
+-- One size rule: every length below is a base value (the numbers at the game's 640 x 448 frame) times one factor F =
+-- (the client's UI scale, as the other mods read it: eqoa.hud.frame) x (the player's "Text size"). Markers use the
+-- same scale times the player's "Marker size". `set_factor` turns the bases into pixels, once a frame.
+local BASE_MIN_W, BASE_MIN_H = 360, 260
+local BASE_TITLE_H, BASE_TOOL_H, BASE_FOOT_H, BASE_GRIP = 24, 28, 18, 14
+local TEXT_BASE = 11 -- the text's size in base pixels: what the Auction and Bag Viewer windows use
+local SIZE_NAMES = { "Small", "Normal", "Large", "Very large" }
+local SIZE_MULT = { 0.85, 1, 1.3, 1.7 }
+local MIN_W, MIN_H = BASE_MIN_W, BASE_MIN_H
 local MAX_AREA = 2048 -- the picture the client makes is at most this many pixels across
-local TITLE_H, TOOL_H, FOOT_H, GRIP = 24, 28, 18, 14
+local TITLE_H, TOOL_H, FOOT_H, GRIP = BASE_TITLE_H, BASE_TOOL_H, BASE_FOOT_H, BASE_GRIP
+local F, FM, UI_K = 1, 1, 1 -- text/layout factor, marker factor, the client's UI scale
 local NOTE_MAX, PINS_MAX = 40, 60
 local ZOOM_STEP = 1.25
 local TILE_SCALE = 7.8 -- the game's map draws its detail tiles at or below this many world units a pixel
 local CELL = 2000
-local font_info = eqoa.fonts.load("package_resources/SpaceMono-Regular.ttf", 13)
-local font = font_info and font_info.font
+local FONT_PATH = "package_resources/SpaceMono-Regular.ttf"
+-- The font is baked at the size drawn (a font baked small and scaled up is blurry). `cur` is the one in use, `pending` the
+-- one being baked for a new size: the old one is scaled to the new size until the new one is ready.
+local fonts = { cur = nil, pending = nil }
+do
+    local info = eqoa.fonts.load(FONT_PATH, 13)
+    if info and info.font then fonts.cur = { font = info.font, px = 13 } end
+end
 local KEYS = { "Escape", "Enter", "w", "a", "s", "d", "W", "A", "S", "D" }
 
 local C = nil -- packed colours, made on the first frame
 local state = {
     session = nil, tokens = {}, claims = {},
-    win = { x = nil, y = nil, w = 760, h = 540 },
+    win = { x = nil, y = nil, w = nil, h = nil }, -- w, h: nil until the player drags them (then a default times F)
+    opts = { text = 2, marker = 2 }, show_sizes = false,
     pins = {}, -- world id (as text) -> { { x, z, note } }
     view = nil, -- { x, z, scale }: the world point at the middle of the map area and the world units a pixel
     last_scale = nil, following = true,
@@ -64,21 +80,31 @@ end)
 
 -- ---------------------------------------------------------------- settings: the window's place and size, the pins
 
+-- everything the mod keeps, always whole (a partial table would drop the rest)
+local function snapshot()
+    return { version = 1, win = state.win, pins = state.pins, scale = state.last_scale,
+             text_size = state.opts.text, marker_size = state.opts.marker }
+end
 local function persist()
-    local ok, err = eqoa.settings.save({ version = 1, win = state.win, pins = state.pins, scale = state.last_scale })
+    local ok, err = eqoa.settings.save(snapshot())
     state.save_error = not ok and err and (err.code .. ": " .. tostring(err.message)) or nil
     if state.save_error then say("The map could not save your pins: " .. tostring(err and err.message)) end
 end
-eqoa.settings.on_save(function() return { version = 1, win = state.win, pins = state.pins, scale = state.last_scale } end)
+state.persist = persist -- read by the mod's tests
+eqoa.settings.on_save(snapshot)
 eqoa.settings.on_load(function(saved)
     if type(saved) ~= "table" then return end
+    for key, field in pairs({ text = "text_size", marker = "marker_size" }) do
+        local n = saved[field]
+        state.opts[key] = (type(n) == "number" and n >= 1 and n <= #SIZE_NAMES and n == math.floor(n)) and n or 2
+    end
     local w = saved.win
     if type(w) == "table" then
         for _, k in ipairs({ "x", "y", "w", "h" }) do
             if type(w[k]) == "number" and w[k] == w[k] and math.abs(w[k]) < 1e5 then state.win[k] = w[k] end
         end
-        state.win.w = clamp(state.win.w, MIN_W, MAX_AREA + 2)
-        state.win.h = clamp(state.win.h, MIN_H, MAX_AREA + TITLE_H + TOOL_H + FOOT_H)
+        if state.win.w then state.win.w = clamp(state.win.w, BASE_MIN_W, MAX_AREA + 2) end
+        if state.win.h then state.win.h = clamp(state.win.h, BASE_MIN_H, MAX_AREA + 80) end
     end
     if type(saved.scale) == "number" and saved.scale == saved.scale and saved.scale >= 1 and saved.scale < 1e5 then state.last_scale = saved.scale end
     if type(saved.pins) == "table" then
@@ -330,11 +356,11 @@ eqoa.events.on("world.leaving", function() finish() end)
 local function geometry(dw, dh)
     local w = state.win
     -- the window as shown: the saved size is only changed by the player's own drag, never by a small display
-    local sw = clamp(w.w, MIN_W, math.max(MIN_W, math.min(dw - 8, MAX_AREA + 2)))
-    local sh = clamp(w.h, MIN_H, math.max(MIN_H, math.min(dh - 8, MAX_AREA + TITLE_H + TOOL_H + FOOT_H)))
+    local sw = clamp(w.w or 760 * F, MIN_W, math.max(MIN_W, math.min(dw - 8, MAX_AREA + 2)))
+    local sh = clamp(w.h or 540 * F, MIN_H, math.max(MIN_H, math.min(dh - 8, MAX_AREA + TITLE_H + TOOL_H + FOOT_H)))
     local sx = clamp(w.x or (dw - sw) / 2, 0, math.max(0, dw - sw))
     local sy = clamp(w.y or (dh - sh) / 2, 0, math.max(0, dh - sh))
-    local area = { x = sx + 1, y = sy + TITLE_H + TOOL_H, w = sw - 2, h = sh - TITLE_H - TOOL_H - FOOT_H }
+    local area = { x = sx + 1, y = sy + TITLE_H + TOOL_H, w = sw - 2, h = math.max(1, sh - TITLE_H - TOOL_H - FOOT_H) }
     return { x = sx, y = sy, w = sw, h = sh }, area
 end
 
@@ -401,13 +427,13 @@ local function under(area, mx, my, world, map)
     if v.scale <= 12 then
         local dots = state.dots
         local px, pz = to_world(area, mx, my)
-        local r2 = (5 * v.scale) ^ 2
+        local r2 = (5 * FM * v.scale) ^ 2
         local self_id = state.self_id
         for i = 1, #dots.ids do
             local dx, dz = dots.xs[i] - px, dots.zs[i] - pz
             if dx * dx + dz * dz <= r2 and dots.ids[i] ~= self_id then
                 local id = dots.ids[i]
-                try(dots.xs[i], dots.zs[i], 5, function()
+                try(dots.xs[i], dots.zs[i], 5 * FM, function()
                     local e = eqoa.entities.find(id)
                     if not e then return nil end
                     local level = (e.level and e.level > 0) and ("Level " .. e.level) or "Level unknown"
@@ -421,8 +447,8 @@ local function under(area, mx, my, world, map)
         local name = m.label or m.name
         if name and name ~= "" and m.kind ~= "waypoint" and (state.markers_on or (m.kind ~= "camp" and m.kind ~= "coach" and m.kind ~= "community")) then
             local sx, sy = to_screen(area, m.x, m.z)
-            if (sx - mx) ^ 2 + (sy - my) ^ 2 <= 49 then
-                try(m.x, m.z, 7, function()
+            if (sx - mx) ^ 2 + (sy - my) ^ 2 <= (7 * FM) ^ 2 then
+                try(m.x, m.z, 7 * FM, function()
                     local lines = { { m.kind == "camp" and (m.name or name) or name, "title" } }
                     if m.kind == "quest" then lines[#lines + 1] = { m.step and "Quest step" or "Quest to take", "text" } end
                     local lv = levels(m)
@@ -433,12 +459,12 @@ local function under(area, mx, my, world, map)
         end
     end
     for i, p in ipairs(pins_here()) do
-        try(p.x, p.z, 8, function() return { { p.note ~= "" and p.note or "Pin", "title" }, { "Right-click to remove", "muted" } } end,
+        try(p.x, p.z, 8 * FM, function() return { { p.note ~= "" and p.note or "Pin", "title" }, { "Right-click to remove", "muted" } } end,
             function() table.remove(pins_here(), i); persist() end)
     end
     local wp = map and map.waypoint
     if wp and wp.world_id == world then
-        try(wp.x, wp.z, 9, function() return { { wp.label and wp.label ~= "" and wp.label or "Waypoint", "title" }, { "Right-click to remove", "muted" } } end,
+        try(wp.x, wp.z, 9 * FM, function() return { { wp.label and wp.label ~= "" and wp.label or "Waypoint", "title" }, { "Right-click to remove", "muted" } } end,
             function() state.remove_waypoint(wp) end)
     end
     if not best then return nil end
@@ -548,12 +574,67 @@ local function colours()
     }
 end
 
+-- the factors, from the client's UI scale and the two settings; the layout's pixels follow
+local function set_factor()
+    local f = eqoa.hud.frame()
+    local k = f and math.min(f.scale_x or 1, f.scale_y or 1) or 1
+    if not (k > 0) then k = 1 end
+    UI_K = k
+    F = k * SIZE_MULT[state.opts.text]
+    FM = k * SIZE_MULT[state.opts.marker]
+    MIN_W, MIN_H = BASE_MIN_W * F, BASE_MIN_H * F
+    TITLE_H, TOOL_H, FOOT_H, GRIP = BASE_TITLE_H * F, BASE_TOOL_H * F, BASE_FOOT_H * F, BASE_GRIP * F
+    state.F, state.FM, state.ui_k = F, FM, k -- read by the mod's tests
+end
+
+-- bake the font at the size drawn; one request at a time, the old size scaled meanwhile
+eqoa.events.on("resource.ready", function(e)
+    local d = e.data
+    if d and d.kind == "font" and fonts.pending then
+        if fonts.cur and fonts.cur.font then eqoa.fonts.release(fonts.cur.font) end
+        fonts.cur, fonts.pending = fonts.pending, nil
+    end
+end)
+local function ensure_font(want)
+    if fonts.cur and fonts.cur.px == want then return end
+    if fonts.pending then return end
+    local info = eqoa.fonts.load(FONT_PATH, want)
+    if not (info and info.font) then return end
+    if info.status == "fallback" then eqoa.fonts.release(info.font); return end
+    local made = { font = info.font, px = want }
+    if info.status == "ready" then
+        if fonts.cur and fonts.cur.font then eqoa.fonts.release(fonts.cur.font) end
+        fonts.cur = made
+    else
+        fonts.pending = made
+    end
+end
+
+-- the small window for the two sizes (a row in Mods & Addons opens it)
+eqoa.options.button({ id = "sizes", label = "World Map: text and marker size..." }, function() state.show_sizes = not state.show_sizes end)
+local function sizes_window()
+    if not state.show_sizes then return end
+    ui.SetNextWindowPos(80, 80, 4)
+    if not ui.Begin("World Map sizes") then ui.End() return end
+    local o = state.opts
+    local t = ui.SliderInt("Text size", o.text, 1, #SIZE_NAMES)
+    ui.Text(SIZE_NAMES[t] or SIZE_NAMES[2])
+    local m = ui.SliderInt("Marker size", o.marker, 1, #SIZE_NAMES)
+    ui.Text(SIZE_NAMES[m] or SIZE_NAMES[2])
+    t, m = clamp(math.floor(t or o.text), 1, #SIZE_NAMES), clamp(math.floor(m or o.marker), 1, #SIZE_NAMES)
+    if t ~= o.text or m ~= o.marker then o.text, o.marker = t, m; persist() end
+    if ui.Button("Close") then state.show_sizes = false end
+    ui.End()
+end
+eqoa.events.on("render", sizes_window)
+
 function draw(e)
     if not state.session then return end
     local dw, dh = ui.GetDisplaySize()
     if dw <= 0 or dh <= 0 then return end
     state.now = e and e.time or state.now
     local dt = clamp(e and e.data and e.data.dt or 1 / 60, 0, 0.1)
+    set_factor()
     local rect, area = geometry(dw, dh)
     state.rect, state.area = rect, area
     ui.SetNextWindowPos(0, 0)
@@ -607,8 +688,16 @@ function draw(e)
     if state.focus or state.note then set_capture(true) else set_capture(false) end
     if v.scale <= 12 then state.dots = eqoa.entities.dots() or state.dots end
 
-    if font then ui.PushFont(font) end
-    ui.SetWindowFontScale(12 / 13)
+    -- the font: baked at the size drawn (or the old size scaled until the new one is ready)
+    local want_px = clamp(math.floor(TEXT_BASE * F + 0.5), 6, 96)
+    ensure_font(want_px)
+    local cur = fonts.cur
+    if cur and cur.font then ui.PushFont(cur.font) end
+    ui.SetWindowFontScale(want_px / ((cur and cur.px) or 13))
+    state.text_px = want_px
+    local lh = select(2, ui.CalcTextSize("Mg"))
+    state.line_h = lh
+    local function tw(value) return (ui.CalcTextSize(value)) end
     local dl = ui.GetWindowDrawList()
     local V = ImVec2.new
     -- a press that took the title strip, the grip or the map, followed to its release
@@ -636,24 +725,32 @@ function draw(e)
     end
     local function fill(x, y, w, h, col) dl:AddRectFilled(V(x, y), V(x + w, y + h), col) end
     local function frame(x, y, w, h, col) dl:AddRect(V(x, y), V(x + w, y + h), col) end
+    -- text cut to `maxw` ends in "..." (the tests read how far it reaches past the window)
     local function text(x, y, value, col, maxw)
         value = tostring(value)
-        while maxw and #value > 0 and ui.CalcTextSize(value) > maxw do
-            value = value:match("^(.*)[%z\1-\127\194-\244][\128-\191]*$") or ""
+        if maxw and tw(value) > maxw then
+            while #value > 0 and tw(value .. "...") > maxw do
+                value = value:match("^(.*)[%z\1-\127\194-\244][\128-\191]*$") or ""
+            end
+            value = value .. "..."
+            if tw(value) > maxw then value = "" end
         end
         dl:AddText(V(x, y), col or c.text, value)
-        -- how far the text reaches past the window (the tests read it)
-        local over = x + ui.CalcTextSize(value) - (rect.x + rect.w)
+        local over = x + tw(value) - (rect.x + rect.w)
         if over > state.overflow then state.overflow = over end
     end
+    -- the same, centred up and down in a box of height h
+    local function ctext(x, y, h, value, col, maxw) text(x, y + (h - lh) / 2, value, col, maxw) end
     state.hits = {}
     state.overflow = -1e9
     state.marker_calls = 0
+    state.bar = {} -- the top bar's and the footer's boxes, by name (the tests read them)
     local function button(x, y, w, h, label, run, active)
         fill(x, y, w, h, active and c.selected or c.raised)
         frame(x, y, w, h, active and c.red or c.border)
-        text(x + 6, y + 4, label, c.text, w - 10)
+        ctext(x + 6 * F, y, h, label, c.text, w - 10 * F)
         state.hits[#state.hits + 1] = { x = x, y = y, w = w, h = h, run = run, label = label }
+        state.bar[label] = { x = x, y = y, w = w, h = h }
     end
 
     -- the window
@@ -661,27 +758,40 @@ function draw(e)
     frame(rect.x, rect.y, rect.w, rect.h, c.border)
     local title = "WORLD MAP  " .. (map.world_name or "World")
     if map.zone and map.zone.name and map.zone.name ~= "" then title = title .. ": " .. map.zone.name end
-    text(rect.x + 10, rect.y + 5, title, c.muted, rect.w - 50)
-    button(rect.x + rect.w - 24, rect.y + 2, 20, 20, "X", close)
+    local xs = 20 * F
+    ctext(rect.x + 10 * F, rect.y, TITLE_H, title, c.muted, rect.w - xs - 24 * F)
+    state.bar.title = { x = rect.x + 10 * F, y = rect.y, w = math.min(tw(title), rect.w - xs - 24 * F), h = TITLE_H }
+    button(rect.x + rect.w - xs - 4 * F, rect.y + 2 * F, xs, xs, "X", close)
 
-    -- the toolbar: the search box, the way back to the player, the game's map
-    local ty = rect.y + TITLE_H + 2
-    local gm_w, cb_w = 150, 56
-    local sw = clamp(rect.w - gm_w - cb_w - 30, 70, 220)
-    local sx = rect.x + 8
-    fill(sx, ty, sw, 22, c.black)
-    frame(sx, ty, sw, 22, state.focus and c.red or c.border)
+    -- the toolbar: the search box, the way back to the player, the game's map. Widths follow the words; when they do not
+    -- all fit, the search box gives way first, then the game's-map button.
+    local th = 22 * F
+    local ty = rect.y + TITLE_H + 2 * F
+    local gap, margin = 6 * F, 8 * F
+    local cb_w = tw("Center") + 14 * F
+    local gm_w = tw("Use the game's map") + 14 * F
+    local avail = rect.w - 2 * margin
+    local sw = clamp(avail - cb_w - gm_w - 2 * gap, 70 * F, 220 * F)
+    if sw + cb_w + gm_w + 2 * gap > avail then
+        local excess = sw + cb_w + gm_w + 2 * gap - avail
+        gm_w = gm_w - math.min(excess, math.max(0, gm_w - 44 * F))
+        sw = math.max(12 * F, math.min(sw, avail - cb_w - gm_w - 2 * gap))
+    end
+    local sx = rect.x + margin
+    fill(sx, ty, sw, th, c.black)
+    frame(sx, ty, sw, th, state.focus and c.red or c.border)
     local qtext = state.search or ""
-    if qtext == "" and not state.focus then text(sx + 6, ty + 4, "Find a place...", c.muted, sw - 12)
-    else text(sx + 6, ty + 4, qtext .. (state.focus and "_" or ""), c.text, sw - 12) end
-    state.hits[#state.hits + 1] = { label = "search", x = sx, y = ty, w = sw, h = 22, run = function()
+    if qtext == "" and not state.focus then ctext(sx + 6 * F, ty, th, "Find a place...", c.muted, sw - 12 * F)
+    else ctext(sx + 6 * F, ty, th, qtext .. (state.focus and "_" or ""), c.text, sw - 12 * F) end
+    state.hits[#state.hits + 1] = { label = "search", x = sx, y = ty, w = sw, h = th, run = function()
         state.focus = true
         state.note = nil
         state.search = state.search or ""
         state.results = search_results()
     end }
-    button(sx + sw + 6, ty, cb_w, 22, "Center", function() state.following = true end, state.following)
-    button(rect.x + rect.w - gm_w - 8, ty, gm_w, 22, "Use the game's map", game_map)
+    state.bar.search = { x = sx, y = ty, w = sw, h = th }
+    button(sx + sw + gap, ty, cb_w, th, "Center", function() state.following = true end, state.following)
+    button(rect.x + rect.w - margin - gm_w, ty, gm_w, th, "Use the game's map", game_map)
 
     -- the ground
     local info = t and t.texture
@@ -692,12 +802,12 @@ function draw(e)
         dl:AddImage(info.texture, V(area.x, area.y), V(area.x + area.w, area.y + area.h),
             V(uv[1], uv[2]), V(uv[1] + (uv[3] - uv[1]) * area.w / pw, uv[2] + (uv[4] - uv[2]) * area.h / ph), c.white)
     elseif state.terrain_error then
-        text(area.x + 10, area.y + 10, "The map picture is not available: " .. state.terrain_error, c.muted, area.w - 20)
+        text(area.x + 10 * F, area.y + 10 * F, "The map picture is not available: " .. state.terrain_error, c.muted, area.w - 20 * F)
     elseif t and t.error then
-        text(area.x + 10, area.y + 10, "The map picture is not available: " .. tostring(t.error.message), c.muted, area.w - 20)
+        text(area.x + 10 * F, area.y + 10 * F, "The map picture is not available: " .. tostring(t.error.message), c.muted, area.w - 20 * F)
     end
     local world = map.world_id
-    local function on_screen(sx2, sy2, r) return sx2 >= area.x - r and sx2 <= area.x + area.w + r and sy2 >= area.y - r and sy2 <= area.y + area.h + r end
+    local function on_screen(sx2, sy2, r) r = r * FM; return sx2 >= area.x - r and sx2 <= area.x + area.w + r and sy2 >= area.y - r and sy2 <= area.y + area.h + r end
     -- the game's grid of cells, where a cell is big enough to see
     local b = t and t.bounds
     if b and CELL / v.scale >= 48 then
@@ -716,11 +826,12 @@ function draw(e)
         local dots = state.dots
         for i = 1, #dots.ids do
             local sx2, sy2 = to_screen(area, dots.xs[i], dots.zs[i])
-            if on_screen(sx2, sy2, 3) and dots.ids[i] ~= state.self_id then dl:AddCircleFilled(V(sx2, sy2), 2, c.npc, 8) end
+            if on_screen(sx2, sy2, 3) and dots.ids[i] ~= state.self_id then dl:AddCircleFilled(V(sx2, sy2), 2 * FM, c.npc, 8) end
         end
     end
     local show_marks = state.markers_on -- the game's Map Markers setting: camps, coaches and community marks
     local town_boxes = {}
+    local lw = math.max(1, math.floor(2 * FM + 0.5))
     for _, m in ipairs(state.markers) do
         local kind = m.kind
         if kind ~= "waypoint" and ((kind ~= "camp" and kind ~= "coach" and kind ~= "community") or show_marks) then
@@ -728,36 +839,37 @@ function draw(e)
             if on_screen(sx2, sy2, 8) then
                 local name = m.label or m.name
                 if kind == "quest" then
-                    -- "!" a quest to take, "?" a step to do
+                    -- "!" a quest to take, "?" a step to do, drawn in the text's size
                     local mark = m.step and "?" or "!"
-                    text(sx2 - 3, sy2 - 7, mark, c.black); text(sx2 - 4, sy2 - 8, mark, c.quest)
+                    local ox, oy = sx2 - tw(mark) / 2, sy2 - lh / 2
+                    text(ox + 1, oy + 1, mark, c.black); text(ox, oy, mark, c.quest)
                     state.marker_calls = state.marker_calls + 2
                 elseif kind == "coach" then
-                    dl:AddCircleFilled(V(sx2, sy2), 5, c.black, 12); dl:AddCircleFilled(V(sx2, sy2), 4, c.coach, 12)
+                    dl:AddCircleFilled(V(sx2, sy2), 5 * FM, c.black, 12); dl:AddCircleFilled(V(sx2, sy2), 4 * FM, c.coach, 12)
                     state.marker_calls = state.marker_calls + 2
                 elseif kind == "camp" then
                     -- one diamond a layer: the world in view holds about 280 camps
-                    dl:AddNgonFilled(V(sx2, sy2), 4.8, c.black, 4)
-                    dl:AddNgonFilled(V(sx2, sy2), 3.6, c.camp, 4)
+                    dl:AddNgonFilled(V(sx2, sy2), 4.8 * FM, c.black, 4)
+                    dl:AddNgonFilled(V(sx2, sy2), 3.6 * FM, c.camp, 4)
                     state.marker_calls = state.marker_calls + 2
                 else
                     local col = kind == "group_waypoint" and c.group or c[kind] or c.group
-                    dl:AddRectFilled(V(sx2 - 3.5, sy2 - 3.5), V(sx2 + 3.5, sy2 + 3.5), c.black)
-                    dl:AddRectFilled(V(sx2 - 2.5, sy2 - 2.5), V(sx2 + 2.5, sy2 + 2.5), col)
+                    dl:AddRectFilled(V(sx2 - 3.5 * FM, sy2 - 3.5 * FM), V(sx2 + 3.5 * FM, sy2 + 3.5 * FM), c.black)
+                    dl:AddRectFilled(V(sx2 - 2.5 * FM, sy2 - 2.5 * FM), V(sx2 + 2.5 * FM, sy2 + 2.5 * FM), col)
                     state.marker_calls = state.marker_calls + 2
                     if kind == "group_waypoint" then
                         local a = away(m.x, m.z)
-                        text(sx2 + 7, sy2 - 6, (name or "Group") .. (a and string.format("  %.0f away", a) or ""), c.text, 160)
+                        text(sx2 + 7 * FM, sy2 - lh / 2, (name or "Group") .. (a and string.format("  %.0f away", a) or ""), c.text, 160 * F)
                     end
                 end
                 if kind == "town" and name then
                     -- a name that would cover a name already placed is left out
-                    local box = { x = sx2 + 6, y = sy2 - 6, w = math.min(ui.CalcTextSize(name), 150), h = 13 }
+                    local box = { x = sx2 + 6 * FM, y = sy2 - lh / 2, w = math.min(tw(name), 150 * F), h = lh }
                     local clear = true
                     for _, o in ipairs(town_boxes) do
                         if box.x < o.x + o.w and o.x < box.x + box.w and box.y < o.y + o.h and o.y < box.y + box.h then clear = false; break end
                     end
-                    if clear then town_boxes[#town_boxes + 1] = box; text(box.x, box.y, name, c.text, 150) end
+                    if clear then town_boxes[#town_boxes + 1] = box; text(box.x, box.y, name, c.text, 150 * F) end
                 end
             end
         end
@@ -765,19 +877,19 @@ function draw(e)
     for _, p in ipairs(pins_here()) do
         local sx2, sy2 = to_screen(area, p.x, p.z)
         if on_screen(sx2, sy2, 10) then
-            dl:AddTriangleFilled(V(sx2, sy2), V(sx2 - 5, sy2 - 11), V(sx2 + 5, sy2 - 11), c.black)
-            dl:AddTriangleFilled(V(sx2, sy2 - 1.5), V(sx2 - 3.5, sy2 - 10), V(sx2 + 3.5, sy2 - 10), c.red)
-            if p.note ~= "" then text(sx2 + 8, sy2 - 14, p.note, c.text, 160) end
+            dl:AddTriangleFilled(V(sx2, sy2), V(sx2 - 5 * FM, sy2 - 11 * FM), V(sx2 + 5 * FM, sy2 - 11 * FM), c.black)
+            dl:AddTriangleFilled(V(sx2, sy2 - 1.5 * FM), V(sx2 - 3.5 * FM, sy2 - 10 * FM), V(sx2 + 3.5 * FM, sy2 - 10 * FM), c.red)
+            if p.note ~= "" then text(sx2 + 8 * FM, sy2 - 11 * FM - lh / 2, p.note, c.text, 160 * F) end
         end
     end
     local wp = map.waypoint
     if wp and wp.world_id == world then
         local sx2, sy2 = to_screen(area, wp.x, wp.z)
         if on_screen(sx2, sy2, 12) then
-            dl:AddCircleFilled(V(sx2, sy2), 7, c.black, 16)
-            dl:AddCircleFilled(V(sx2, sy2), 5, c.waypoint, 16)
+            dl:AddCircleFilled(V(sx2, sy2), 7 * FM, c.black, 16)
+            dl:AddCircleFilled(V(sx2, sy2), 5 * FM, c.waypoint, 16)
             local a = away(wp.x, wp.z)
-            if a then text(sx2 + 9, sy2 - 6, string.format("%.0f away", a), c.text, 120) end
+            if a then text(sx2 + 9 * FM, sy2 - lh / 2, string.format("%.0f away", a), c.text, 120 * F) end
         end
     end
     -- the group, in member colours by place in the group
@@ -788,8 +900,8 @@ function draw(e)
             if mp and m.world_id == world then
                 local sx2, sy2 = to_screen(area, mp.x, mp.z)
                 if on_screen(sx2, sy2, 8) then
-                    dl:AddCircleFilled(V(sx2, sy2), 5, c.black, 12)
-                    dl:AddCircleFilled(V(sx2, sy2), 3.5, c.members[math.min(i, #c.members)], 12)
+                    dl:AddCircleFilled(V(sx2, sy2), 5 * FM, c.black, 12)
+                    dl:AddCircleFilled(V(sx2, sy2), 3.5 * FM, c.members[math.min(i, #c.members)], 12)
                 end
             end
         end
@@ -799,7 +911,7 @@ function draw(e)
     local tp = target and target.position
     if tp and (target.world_id == nil or target.world_id == world) then
         local sx2, sy2 = to_screen(area, tp.x, tp.z)
-        if on_screen(sx2, sy2, 10) then dl:AddCircle(V(sx2, sy2), 8, c.target, 20, 2) end
+        if on_screen(sx2, sy2, 10) then dl:AddCircle(V(sx2, sy2), 8 * FM, c.target, 20, lw) end
     end
     -- the player, a dart facing the heading
     local pp = state.player
@@ -808,63 +920,79 @@ function draw(e)
         if on_screen(sx2, sy2, 10) then
             local h = state.heading or 0
             local fx, fy = math.sin(h), math.cos(h)
-            local r = 8
+            local r = 8 * FM
             local tipx, tipy = sx2 + fx * r, sy2 + fy * r
             local lx, ly = sx2 - fx * r * .6 + fy * r * .6, sy2 - fy * r * .6 - fx * r * .6
             local rx, ry = sx2 - fx * r * .6 - fy * r * .6, sy2 - fy * r * .6 + fx * r * .6
-            dl:AddTriangleFilled(V(tipx + fx, tipy + fy), V(lx - fy * 1.5, ly + fx * 1.5), V(rx + fy * 1.5, ry - fx * 1.5), c.black)
+            local o = 1.5 * FM
+            dl:AddTriangleFilled(V(tipx + fx, tipy + fy), V(lx - fy * o, ly + fx * o), V(rx + fy * o, ry - fx * o), c.black)
             dl:AddTriangleFilled(V(tipx, tipy), V(lx, ly), V(rx, ry), c.red)
         end
     end
     if state.found and state.found.until_ > state.now then
         local sx2, sy2 = to_screen(area, state.found.x, state.found.z)
-        dl:AddCircle(V(sx2, sy2), 12, c.title, 24, 2)
+        dl:AddCircle(V(sx2, sy2), 12 * FM, c.title, 24, lw)
     end
     dl:PopClipRect()
     frame(area.x, area.y, area.w, area.h, c.border)
 
-    -- the footer
-    local fy = rect.y + rect.h - FOOT_H + 2
+    -- the footer: the help line is the longest of its versions that fits the window
     local foot
+    local footw = rect.w - GRIP - 20 * F
     if state.message and state.message_until > state.now then foot = state.message
     elseif t and t.progress and t.progress.done < t.progress.total then foot = string.format("Drawing the map: %d of %d zones", t.progress.done, t.progress.total)
-    else foot = "Drag: pan  Wheel: zoom  Right-click: waypoint or pin  Esc: close" end
-    text(rect.x + 8, fy, foot, c.muted, rect.w - GRIP - 20)
+    else
+        for _, line in ipairs({ "Drag: pan  Wheel: zoom  Right-click: waypoint or pin  Esc: close",
+                                "Drag: pan  Wheel: zoom  Right-click: pin  Esc: close",
+                                "Drag: pan  Wheel: zoom  Right-click: pin", "Right-click: waypoint or pin", "Right-click: pin" }) do
+            foot = line
+            if tw(line) <= footw then break end
+        end
+    end
+    local fy = rect.y + rect.h - FOOT_H
+    ctext(rect.x + 8 * F, fy, FOOT_H, foot, c.muted, footw)
+    state.bar.footer = { x = rect.x + 8 * F, y = fy, w = math.min(tw(foot), footw), h = FOOT_H }
+    state.foot_text = foot
 
     -- the grip
     state.grip = { x = rect.x + rect.w - GRIP, y = rect.y + rect.h - GRIP, w = GRIP, h = GRIP }
     dl:AddTriangleFilled(V(rect.x + rect.w - 2, rect.y + rect.h - GRIP), V(rect.x + rect.w - 2, rect.y + rect.h - 2), V(rect.x + rect.w - GRIP, rect.y + rect.h - 2), c.border)
 
     -- search results
+    local rowh = math.max(18 * F, lh + 4 * F)
     if state.focus and #state.results > 0 then
         local rows = math.min(6, #state.results)
         local more = #state.results > rows
-        local ry = ty + 24
-        fill(sx, ry, sw, rows * 18 + 4 + (more and 14 or 0), c.surface)
-        frame(sx, ry, sw, rows * 18 + 4 + (more and 14 or 0), c.border)
+        local ry = ty + th + 2 * F
+        local boxh = rows * rowh + 4 * F + (more and rowh or 0)
+        fill(sx, ry, sw, boxh, c.surface)
+        frame(sx, ry, sw, boxh, c.border)
         for i = 1, rows do
             local r = state.results[i]
-            local yy = ry + 2 + (i - 1) * 18
-            if i == 1 then fill(sx + 2, yy, sw - 4, 17, c.selected) end
-            text(sx + 6, yy + 2, r.name .. "  (" .. r.kind .. ")", c.text, sw - 12)
-            state.hits[#state.hits + 1] = { label = r.name, x = sx, y = yy, w = sw, h = 17, run = function() go_to(r) end }
+            local yy = ry + 2 * F + (i - 1) * rowh
+            if i == 1 then fill(sx + 2, yy, sw - 4, rowh - 1, c.selected) end
+            ctext(sx + 6 * F, yy, rowh, r.name .. "  (" .. r.kind .. ")", c.text, sw - 12 * F)
+            state.hits[#state.hits + 1] = { label = r.name, x = sx, y = yy, w = sw, h = rowh - 1, run = function() go_to(r) end }
         end
-        if more then text(sx + 6, ry + rows * 18 + 4, "+" .. (#state.results - rows) .. " more: type more letters", c.muted, sw - 12) end
+        if more then ctext(sx + 6 * F, ry + rows * rowh + 4 * F, rowh, "+" .. (#state.results - rows) .. " more: type more letters", c.muted, sw - 12 * F) end
     elseif state.focus and (state.search or "") ~= "" then
-        local ry = ty + 24
-        fill(sx, ry, sw, 22, c.surface); frame(sx, ry, sw, 22, c.border)
-        text(sx + 6, ry + 4, "No matching place", c.muted, sw - 12)
+        local ry = ty + th + 2 * F
+        fill(sx, ry, sw, th, c.surface); frame(sx, ry, sw, th, c.border)
+        ctext(sx + 6 * F, ry, th, "No matching place", c.muted, sw - 12 * F)
     end
 
     -- the pin's note box
     if state.note then
         local n = state.note
-        local bw, bh = 250, 54
+        local bw = math.min(250 * F, math.max(40, area.w))
+        local fh = lh + 8 * F
+        local bh = 10 * F + lh + 4 * F + fh + 6 * F
         local bx, by = clamp(n.sx, area.x, math.max(area.x, area.x + area.w - bw)), clamp(n.sy, area.y, math.max(area.y, area.y + area.h - bh))
         fill(bx, by, bw, bh, c.surface); frame(bx, by, bw, bh, c.red)
-        text(bx + 8, by + 5, "Note for this pin (Enter saves, Esc cancels)", c.muted, bw - 16)
-        fill(bx + 8, by + 24, bw - 16, 22, c.black); frame(bx + 8, by + 24, bw - 16, 22, c.border)
-        text(bx + 12, by + 28, n.text .. "_", c.text, bw - 24)
+        text(bx + 8 * F, by + 5 * F, "Note for this pin (Enter saves, Esc cancels)", c.muted, bw - 16 * F)
+        local fy2 = by + 10 * F + lh + 4 * F
+        fill(bx + 8 * F, fy2, bw - 16 * F, fh, c.black); frame(bx + 8 * F, fy2, bw - 16 * F, fh, c.border)
+        ctext(bx + 12 * F, fy2, fh, n.text .. "_", c.text, bw - 24 * F)
         state.hits[#state.hits + 1] = { x = bx, y = by, w = bw, h = bh, run = function() end }
     end
 
@@ -883,17 +1011,21 @@ function draw(e)
             end },
         }
         if map.waypoint then rows[#rows + 1] = { "Clear waypoint", function() state.remove_waypoint(map.waypoint) end } end
-        local mw = 170
-        local mx2, my2 = clamp(mn.x, area.x, math.max(area.x, area.x + area.w - mw)), clamp(mn.y, area.y, math.max(area.y, area.y + area.h - #rows * 20 - 4))
-        fill(mx2, my2, mw, #rows * 20 + 4, c.surface); frame(mx2, my2, mw, #rows * 20 + 4, c.border)
+        local mrow = math.max(20 * F, lh + 6 * F)
+        local mw = 170 * F
+        for _, r in ipairs(rows) do mw = math.max(mw, tw(r[1]) + 16 * F) end
+        mw = math.min(mw, math.max(40, area.w))
+        local mx2, my2 = clamp(mn.x, area.x, math.max(area.x, area.x + area.w - mw)), clamp(mn.y, area.y, math.max(area.y, area.y + area.h - #rows * mrow - 4 * F))
+        fill(mx2, my2, mw, #rows * mrow + 4 * F, c.surface); frame(mx2, my2, mw, #rows * mrow + 4 * F, c.border)
         for i, r in ipairs(rows) do
-            local yy = my2 + 2 + (i - 1) * 20
-            text(mx2 + 8, yy + 3, r[1], c.text, mw - 16)
+            local yy = my2 + 2 * F + (i - 1) * mrow
+            ctext(mx2 + 8 * F, yy, mrow, r[1], c.text, mw - 16 * F)
             local run = r[2]
-            state.hits[#state.hits + 1] = { label = r[1], x = mx2, y = yy, w = mw, h = 20, run = function() state.menu = nil; run() end }
+            state.hits[#state.hits + 1] = { label = r[1], x = mx2, y = yy, w = mw, h = mrow, run = function() state.menu = nil; run() end }
         end
     end
     -- hover card
+    state.card_box = nil
     if pointer and pointer.inside_window and inside(pointer.x, pointer.y, area) and not state.menu and not state.note and not state.drag
         and not (state.focus and #state.results > 0) then
         local hit = under(area, pointer.x, pointer.y, world, map)
@@ -901,17 +1033,20 @@ function draw(e)
         if hit then
             local lines = {}
             for _, l in ipairs(hit.lines) do if l[1] and l[1] ~= "" then lines[#lines + 1] = l end end
-            local w, h = 0, 6
-            for _, l in ipairs(lines) do local tw, th = ui.CalcTextSize(l[1]); w = math.max(w, tw); h = h + th + 2 end
-            w = math.min(w + 16, 280)
-            local cx = clamp(hit.sx + 14, area.x + 2, math.max(area.x + 2, area.x + area.w - w - 2))
+            local pad, lgap = 8 * F, 2 * F
+            local w, h = 0, 6 * F
+            for _, l in ipairs(lines) do local lw2, lh2 = ui.CalcTextSize(l[1]); w = math.max(w, lw2); h = h + lh2 + lgap end
+            w = math.min(w + 2 * pad, 280 * F, math.max(40, area.w - 4))
+            h = math.min(h, math.max(lh, area.h - 4))
+            local cx = clamp(hit.sx + 14 * F, area.x + 2, math.max(area.x + 2, area.x + area.w - w - 2))
             local cy = clamp(hit.sy - h / 2, area.y + 2, math.max(area.y + 2, area.y + area.h - h - 2))
             fill(cx, cy, w, h, c.surface); frame(cx, cy, w, h, c.border)
-            local yy = cy + 4
+            state.card_box = { x = cx, y = cy, w = w, h = h }
+            local yy = cy + 4 * F
             for _, l in ipairs(lines) do
-                text(cx + 8, yy, l[1], l[2] == "title" and c.title or l[2] == "muted" and c.muted or c.card, w - 16)
-                local _, th = ui.CalcTextSize(l[1])
-                yy = yy + th + 2
+                text(cx + pad, yy, l[1], l[2] == "title" and c.title or l[2] == "muted" and c.muted or c.card, w - 2 * pad)
+                local _, lh2 = ui.CalcTextSize(l[1])
+                yy = yy + lh2 + lgap
             end
         end
     else
@@ -919,6 +1054,6 @@ function draw(e)
     end
 
     ui.SetWindowFontScale(1)
-    if font then ui.PopFont() end
+    if cur and cur.font then ui.PopFont() end
     ui.End()
 end
