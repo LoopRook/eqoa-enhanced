@@ -11,13 +11,24 @@ local ROWS = 8
 -- the game's wear slots a search can name (its own picker's list); the words come from the game
 local WEARS = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 27 }
 local LIMITS = { name = 40, min_level = 3, max_level = 3, bid = 9 }
+-- the game's own class and race pickers (its lists, in its order: the names are in order); the value is the class or
+-- race id the search takes. Alchemist and Ogre are shown by the game only on servers that offer them: a search for
+-- one where it is not offered finds nothing.
+local CLASSES = { 14, 5, 9, 7, 12, 10, 4, 11, 2, 1, 6, 3, 8, 0, 13 }
+local CLASS_NAMES = { [0] = "Warrior", "Ranger", "Paladin", "Shadowknight", "Monk", "Bard", "Rogue", "Druid", "Shaman",
+    "Cleric", "Magician", "Necromancer", "Enchanter", "Wizard", "Alchemist" }
+local RACES = { 6, 2, 4, 1, 8, 3, 7, 0, 9, 5 }
+local RACE_NAMES = { [0] = "Human", "Elf", "Dark Elf", "Gnome", "Dwarf", "Troll", "Barbarian", "Halfling", "Erudite", "Ogre" }
 
 local state = {
     open = false, tab = "search", session = nil, tokens = {}, escape = nil, enter = nil,
-    name = "", min_level = "", max_level = "", wear = nil, bid = "", count = 1, sel = nil, scroll = 0,
+    name = "", min_level = "", max_level = "", wear = nil, class = nil, race = nil, opts = nil, layout = {}, bid = "", count = 1, sel = nil, scroll = 0,
     field = nil, result = nil, last_req = nil, picking = false, pick_scroll = 0, searched = false,
     hits = {}, row_hits = {}, list_rect = nil, pick_rect = nil, field_rect = nil, a = nil, was_down = false, fresh = false,
 }
+
+-- what the window keeps, readable by the mod's tests (nothing else reads it)
+package.loaded["eqoa_auction_state"] = state
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
@@ -86,9 +97,37 @@ local function start_typing(field)
     if not state.enter then state.enter = eqoa.input.claim("Enter", true) end
 end
 
+-- the rows of a picker: {label, value}; the first is "any"
+local function pick_options(kind)
+    local o = {}
+    if kind == "wear" then
+        o[1] = { label = "Any type" }
+        for _, w in ipairs(WEARS) do o[#o + 1] = { label = wear_name(w), value = w } end
+    elseif kind == "class" then
+        o[1] = { label = "Any class" }
+        local pl = eqoa.player.get()
+        local mine = pl and pl.class_id
+        if mine and CLASS_NAMES[mine] then o[2] = { label = "My class (" .. CLASS_NAMES[mine] .. ")", value = mine } end
+        for _, c in ipairs(CLASSES) do o[#o + 1] = { label = CLASS_NAMES[c], value = c } end
+    else
+        o[1] = { label = "Any race" }
+        local pl = eqoa.player.get()
+        local mine = pl and pl.race_id
+        if mine and RACE_NAMES[mine] then o[2] = { label = "My race (" .. RACE_NAMES[mine] .. ")", value = mine } end
+        for _, r in ipairs(RACES) do o[#o + 1] = { label = RACE_NAMES[r], value = r } end
+    end
+    return o
+end
+
+local function open_picker(kind)
+    stop_typing()
+    if state.picking == kind then state.picking = false; return end
+    state.picking, state.pick_scroll, state.opts = kind, 0, pick_options(kind)
+end
+
 local function search()
     stop_typing()
-    local args = { name = state.name ~= "" and state.name or nil, wear = state.wear }
+    local args = { name = state.name ~= "" and state.name or nil, wear = state.wear, class = state.class, race = state.race }
     if state.min_level ~= "" then args.min_level = tonumber(state.min_level) end
     if state.max_level ~= "" then args.max_level = tonumber(state.max_level) end
     state.sel, state.scroll, state.searched = nil, 0, true
@@ -200,7 +239,7 @@ local function open(page)
         if (d.steps or 0) == 0 then return end
         local delta = d.steps > 0 and -1 or 1
         if state.picking and inside(d.x, d.y, state.pick_rect) then
-            state.pick_scroll = math.max(0, math.min(math.max(0, #WEARS + 1 - 6), state.pick_scroll + delta))
+            state.pick_scroll = math.max(0, math.min(math.max(0, #(state.opts or {}) - 6), state.pick_scroll + delta))
         elseif inside(d.x, d.y, state.list_rect) and state.a then
             local n = state.tab == "search" and (state.a.mode == "search" and #state.a.results or 0) or (state.tab == "lots" and #state.a.lots or #state.a.bids)
             state.scroll = math.max(0, math.min(math.max(0, n - ROWS), state.scroll + delta))
@@ -286,12 +325,29 @@ function draw()
         while maxw and #value > 0 and ui.CalcTextSize(value) > maxw * k do value = chop(value) end
         dl:AddText(at(x, y), color or col.text, value)
     end
-    local function hit(x, y, w, h, run_) return { x = x0 + x * k, y = y0 + y * k, w = w * k, h = h * k, run = run_ } end
+    local function hit(x, y, w, h, run_, label) return { x = x0 + x * k, y = y0 + y * k, w = w * k, h = h * k, run = run_, label = label } end
     local function button(x, y, w, label, enabled, run_)
         fill(x, y, w, 16, col.raised)
         frame(x, y, w, 16, enabled and col.border or col.surface)
         text(x + 6, y + 2, label, enabled and col.text or col.muted, w - 8)
-        if enabled then state.hits[#state.hits + 1] = hit(x, y, w, 16, run_) end
+        if enabled then state.hits[#state.hits + 1] = hit(x, y, w, 16, run_, label) end
+    end
+    -- The columns on the right of a list, each as wide as its title or its widest value (measured, so it holds at any
+    -- UI scale); the first column of a row takes what is left. `spec` is {{title, widest value}, ...} left to right.
+    local function columns(tab, spec)
+        local right, out = W - PAD, {}
+        for i = #spec, 1, -1 do
+            local tw_, sw_ = ui.CalcTextSize(spec[i][1]) / k, ui.CalcTextSize(spec[i][2]) / k
+            local w = math.max(tw_, sw_) + 1 -- a pixel over: the cut-off test below never trims the last letter of an exact fit
+            out[i] = { x = right - w, w = w, title = spec[i][1], title_w = tw_, value_w = sw_ }
+            right = right - w - 10
+        end
+        out.name_w = right + 10 - PAD - 12
+        state.layout[tab] = out
+        return out
+    end
+    local function header(cs, y)
+        for _, c in ipairs(cs) do text(c.x, y, c.title, col.muted, c.w) end
     end
     local function box(x, y, w, label, field)
         text(x, y, label, col.muted)
@@ -351,16 +407,22 @@ function draw()
     if state.tab == "search" then
         box(PAD, 44, 170, "Name", "name")
         local wlabel = state.wear and wear_name(state.wear) or "Any type"
-        button(PAD + 180, 41, 130, "Type: " .. wlabel, true, function()
-            stop_typing(); state.picking = not state.picking; state.pick_scroll = 0
-        end)
+        button(PAD + 180, 41, 130, "Type: " .. wlabel, true, function() open_picker("wear") end)
         box(PAD, 62, 100, "Level", "min_level")
         box(PAD + 104, 62, 60, "to", "max_level")
         button(PAD + 180, 59, 60, "Search", not busy, search)
         local results = a.mode == "search" and a.results or {}
         button(PAD + 244, 59, 50, "< Page", not busy and #results > 0, function() turn(false) end)
         button(PAD + 298, 59, 56, "Page >", not busy and #results > 0, function() turn(true) end)
-        list_y = 90
+        local function chosen_label(kind, v, any)
+            if v == nil then return any end
+            for _, o in ipairs(pick_options(kind)) do if o.value == v and not o.label:find("^My ") then return o.label end end
+            return any
+        end
+        button(PAD, 77, 170, "Class: " .. chosen_label("class", state.class, "Any class"), true, function() open_picker("class") end)
+        button(PAD + 180, 77, 130, "Race: " .. chosen_label("race", state.race, "Any race"), true, function() open_picker("race") end)
+        list_y = 108
+        local cs = columns("search", { { "High bid", "999999999" }, { "Buy now (each)", "999999999" }, { "Time left", "23h 59m" } })
         state.list_rect = { x = x0 + PAD * k, y = y0 + list_y * k, w = (W - 2 * PAD) * k, h = ROWS * LINE * k }
         if #results == 0 then
             text(PAD + 2, list_y, busy and "Searching..." or (state.searched and "Nothing found" or "Type what to look for and press Search"), col.muted)
@@ -371,16 +433,14 @@ function draw()
             if l then
                 local y = list_y + (i - 1) * LINE
                 if state.sel == l.lot then fill(PAD, y, W - 2 * PAD, LINE, col.hl); chosen = l end
-                text(PAD + 2, y, l.name .. (l.quantity > 1 and (" x" .. l.quantity) or ""), l.mine and col.mark or col.text, 168)
-                text(PAD + 176, y, l.high_bid and tostring(l.high_bid) or "no bids", col.muted, 56)
-                text(PAD + 236, y, l.buyout > 0 and tostring(l.buyout) or "", col.good, 56)
-                text(PAD + 296, y, time_left(l.minutes_left), (l.minutes_left or 1) <= 0 and col.warn or col.muted, 60)
+                text(PAD + 2, y, l.name .. (l.quantity > 1 and (" x" .. l.quantity) or ""), l.mine and col.mark or col.text, cs.name_w)
+                text(cs[1].x, y, l.high_bid and tostring(l.high_bid) or "no bids", col.muted, cs[1].w)
+                text(cs[2].x, y, l.buyout > 0 and tostring(l.buyout) or "", col.good, cs[2].w)
+                text(cs[3].x, y, time_left(l.minutes_left), (l.minutes_left or 1) <= 0 and col.warn or col.muted, cs[3].w)
                 state.row_hits[#state.row_hits + 1] = hit(PAD, y, W - 2 * PAD, LINE, function() select_lot(l) end)
             end
         end
-        text(PAD + 176, list_y - 12, "High bid", col.muted)
-        text(PAD + 236, list_y - 12, "Buy now (each)", col.muted)
-        text(PAD + 296, list_y - 12, "Time left", col.muted)
+        header(cs, list_y - 12)
         -- the lot chosen
         local dy = list_y + ROWS * LINE + 6
         if chosen then
@@ -410,22 +470,27 @@ function draw()
             text(PAD, dy, "Click a lot to bid on it", col.muted)
         end
     elseif state.tab == "lots" then
-        list_y = 44
+        list_y = 58
+        local cs = columns("lots", { { "Buy now", "999999999" }, { "Time left", "23h 59m" } })
+        text(PAD + 2, list_y - 12, "Item", col.muted)
+        header(cs, list_y - 12)
         state.list_rect = { x = x0 + PAD * k, y = y0 + list_y * k, w = (W - 2 * PAD) * k, h = ROWS * LINE * k }
-        text(PAD, list_y - 1 + 0, "", col.muted)
         if #a.lots == 0 then text(PAD + 2, list_y, busy and "Asking..." or "You have nothing up at the auction", col.muted) end
         for i = 1, ROWS + 4 do
             local l = a.lots[state.scroll + i]
             if l then
                 local y = list_y + (i - 1) * LINE
-                text(PAD + 2, y, l.name .. (l.quantity > 1 and (" x" .. l.quantity) or ""), col.text, 230)
-                text(PAD + 240, y, l.buyout > 0 and ("buy now " .. l.buyout) or "", col.good, 80)
-                text(PAD + 316, y, time_left(l.minutes_left), col.muted, 50)
+                text(PAD + 2, y, l.name .. (l.quantity > 1 and (" x" .. l.quantity) or ""), col.text, cs.name_w)
+                text(cs[1].x, y, l.buyout > 0 and tostring(l.buyout) or "", col.good, cs[1].w)
+                text(cs[2].x, y, time_left(l.minutes_left), col.muted, cs[2].w)
             end
         end
         button(PAD, H - 40, 64, "Refresh", not busy, function() run(function() return eqoa.actions.auction_my_lots() end) end)
     else
-        list_y = 44
+        list_y = 58
+        local cs = columns("bids", { { "Count", "999" }, { "Price each", "999999999" }, { "Held", "999999999" } })
+        text(PAD + 2, list_y - 12, "Lot", col.muted)
+        header(cs, list_y - 12)
         state.list_rect = { x = x0 + PAD * k, y = y0 + list_y * k, w = (W - 2 * PAD) * k, h = ROWS * LINE * k }
         if #a.bids == 0 then text(PAD + 2, list_y, busy and "Asking..." or "You have no bids", col.muted) end
         local names = {}
@@ -434,28 +499,34 @@ function draw()
             local b = a.bids[state.scroll + i]
             if b then
                 local y = list_y + (i - 1) * LINE
-                text(PAD + 2, y, names[b.lot] or ("Lot " .. b.lot), col.text, 200)
-                text(PAD + 210, y, b.count .. " at " .. b.price, col.muted, 90)
-                text(PAD + 306, y, "held " .. b.escrow, col.muted, 60)
+                text(PAD + 2, y, names[b.lot] or ("Lot " .. b.lot), col.text, cs.name_w)
+                text(cs[1].x, y, tostring(b.count), col.muted, cs[1].w)
+                text(cs[2].x, y, tostring(b.price), col.muted, cs[2].w)
+                text(cs[3].x, y, tostring(b.escrow), col.muted, cs[3].w)
             end
         end
         button(PAD, H - 40, 64, "Refresh", not busy, function() run(function() return eqoa.actions.auction_my_bids() end) end)
     end
 
-    -- the type picker
-    if state.picking and state.tab == "search" then
-        local pw, ph = 150, 6 * LINE + 8
-        local px, py = PAD + 180, 92
+    -- the pickers (type, class, race): a short list of the game's own choices, the wheel scrolls it
+    if state.picking and state.tab == "search" and state.opts then
+        local px, pw = PAD + 180, 150
+        local py = 92
+        if state.picking == "class" then px, pw, py = PAD, 170, 96 elseif state.picking == "race" then py = 96 end
+        local ph = 6 * LINE + 8
         fill(px, py, pw, ph, col.raised)
         frame(px, py, pw, ph, col.white)
         state.pick_rect = { x = x0 + px * k, y = y0 + py * k, w = pw * k, h = ph * k }
+        local kind = state.picking
         for i = 1, 6 do
-            local idx = state.pick_scroll + i
+            local o = state.opts[state.pick_scroll + i]
             local y = py + 4 + (i - 1) * LINE
-            local w = idx > 1 and WEARS[idx - 1] or nil
-            if idx <= #WEARS + 1 then
-                text(px + 4, y, idx == 1 and "Any type" or wear_name(w), col.text, pw - 8)
-                state.hits[#state.hits + 1] = hit(px, y, pw, LINE, function() state.wear = w; state.picking = false end)
+            if o then
+                text(px + 4, y, o.label, col.text, pw - 8)
+                state.hits[#state.hits + 1] = hit(px, y, pw, LINE, function()
+                    state[kind] = o.value
+                    state.picking = false
+                end, "pick " .. o.label)
             end
         end
     end
