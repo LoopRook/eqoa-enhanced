@@ -178,7 +178,8 @@ local function mark_bank(flag)
     if not H then return end
     local n, worn = 0, {}
     for _, it in ipairs((X.current())) do
-        if it.equipped then
+        -- a worn item cannot be marked, but a mark it already has (made before it was put on) can always be taken off
+        if flag and it.equipped then
             worn[#worn + 1] = it
         elseif flag and not H.is_banked(it) then
             H.bank[tostring(it.id)] = true
@@ -189,8 +190,8 @@ local function mark_bank(flag)
         end
     end
     H.save()
-    B.result = {text = string.format("%s %d %s%s", flag and "Marked" or "Stopped banking", n,
-        plural(n, "item", "items") .. (flag and " to bank" or ""), worn_line(worn)), ok = true}
+    B.result = {text = flag and string.format("Marked %d %s to bank%s", n, plural(n, "item", "items"), worn_line(worn))
+        or string.format("Unmarked %d %s for the bank", n, plural(n, "item", "items")), ok = true}
     X.clear()
     B.dirty()
 end
@@ -330,6 +331,12 @@ function X.build_menu(fx, fy)
             for _, it in ipairs(usable) do if not H.is_banked(it) then to_bank = to_bank + 1 end end
             row("Mark to bank", to_bank > 0, #usable == 0 and "all selected items are worn" or "all are already marked",
                 function() mark_bank(true) end)
+            -- the mark can be taken off again: offered when any selected item (worn or not) carries it
+            local banked = 0
+            for _, it in ipairs(items) do if H.is_banked(it) then banked = banked + 1 end end
+            if banked > 0 then
+                row(string.format("Unmark bank (%d)", banked), true, nil, function() mark_bank(false) end)
+            end
         end
         -- Sell: through the open merchant, or by talking to the nearest one first (as Sell junk does)
         local merch_open = eqoa.merchant.get() ~= nil
