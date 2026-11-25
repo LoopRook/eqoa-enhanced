@@ -266,6 +266,7 @@ impl Manager {
         if s.setup.is_some() {
             return Ok(());
         } // Preview is not published before a choice.
+        let _probe = super::super::stall_probe::scope("profile save (logout, switch, copy)");
         self.capture_profile(s, context)?;
         // A save for a logout, a switch or a copy waits for the disk, after any background write of the
         // same file (a mod's settings) so the older bytes cannot land on top of these.
@@ -424,6 +425,7 @@ impl Manager {
         character: Option<CharacterSnapshot>,
         server: &str,
     ) {
+        let _probe = super::super::stall_probe::scope("profile boundary (world entry, switch)");
         if self.awaiting_render {
             self.diagnostic(
                 None,
@@ -606,6 +608,7 @@ impl Manager {
         self.named = Some(s);
     }
     pub fn flush_profile(&mut self, context: &mut Context, force: bool) {
+        let _probe = super::super::stall_probe::scope("profile autosave");
         self.report_write_failures();
         let Some(mut s) = self.named.take() else {
             return;

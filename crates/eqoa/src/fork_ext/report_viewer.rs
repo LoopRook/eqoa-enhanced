@@ -227,7 +227,9 @@ pub(super) fn prepare_addons(
         .map(|f| &f.texture)
         .or(g.offscreen.as_ref())?
         .create_view(&Default::default());
+    let probe = crate::fork_ext::addons::stall_probe::scope("mods: the world snapshot");
     let snapshot = play.map_or_else(Default::default, |p| p.forge_snapshot(walker));
+    drop(probe);
     crate::fork_ext::addons::native_a12::set_plates(play.map(|p| p.fork_plate_points()).unwrap_or_default());
     let mut encoder = g.device.create_command_encoder(&Default::default());
     g.forge_runtime.draw(

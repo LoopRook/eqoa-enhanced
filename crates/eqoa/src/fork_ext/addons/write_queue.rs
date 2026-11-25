@@ -116,6 +116,11 @@ impl WriteQueue {
     /// Waits until every accepted write has been tried (written or failed).
     pub fn flush(&self) {
         let mut state = self.shared.state.lock().unwrap();
+        if state.pending.is_empty() && !state.busy {
+            return;
+        }
+        // The frame is about to wait for the disk: said if it waits long.
+        let _waiting = super::stall_probe::scope("waiting for the background writer");
         while !state.pending.is_empty() || state.busy {
             state = self.shared.changed.wait(state).unwrap();
         }
@@ -205,7 +210,14 @@ fn work(shared: &Shared) {
             }
         }
         let owner = job.owner.clone();
+        super::stall_probe::write_began();
+        let began = std::time::Instant::now();
         let result = attempt(job.run);
+        super::stall_probe::write_ended(
+            &job.key.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            owner.as_deref(),
+            began.elapsed(),
+        );
         let mut state = shared.state.lock().unwrap();
         state.busy = false;
         if let Err(message) = result {
@@ -287,6 +299,30 @@ mod tests {
         assert_eq!(failures[0], Failure { owner: Some("mod_a".into()), message: "disk full".into() });
         assert_eq!(failures[1].owner.as_deref(), Some("mod_c"));
         assert!(queue.take_failures().is_empty(), "taken once");
+    }
+
+    /// A background write that takes long is a line of its own in the log (the owner's next log then shows
+    /// how long the disk's syncs take). Control: a quick write says nothing.
+    #[test]
+    fn write_queue_a_slow_background_write_is_said_in_the_log_and_a_quick_one_is_not() {
+        let queue = WriteQueue::new();
+        // the job itself is what is slow, as a sync is (the test seam's delay is outside the timed write)
+        let slow = crate::fork_ext::addons::stall_probe::SLOW_WRITE + Duration::from_millis(80);
+        queue.submit(
+            PathBuf::from("probe-slow-file.json"),
+            Some("probe_mod".into()),
+            Box::new(move || {
+                std::thread::sleep(slow);
+                Ok(())
+            }),
+        );
+        queue.flush();
+        let said = super::super::stall_probe::said_anywhere_for_test("probe-slow-file.json");
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].contains("for probe_mod took"), "{said:?}");
+        queue.submit(PathBuf::from("probe-quick-file.json"), None, Box::new(|| Ok(())));
+        queue.flush();
+        assert!(super::super::stall_probe::said_anywhere_for_test("probe-quick-file.json").is_empty(), "control");
     }
 
     #[test]
