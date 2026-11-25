@@ -961,7 +961,7 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
                 // its own line (`TEXT_BOXES_LABEL`)
                 "input_text" => continue,
                 // round A1 / A7: these never act on their own: the player's Yes is asked first (`asks_first_label`)
-                "destroy" | "destroy_many" | "drop_quest" | "guild_kick" | "friend_accept" | "guild_accept" => continue,
+                "destroy" | "destroy_many" | "drop_quest" | "guild_kick" | "friend_accept" | "guild_accept" | "loot_assign" | "loot_abandon" => continue,
                 // round A8: their own line (`native_a8::crafting_label`)
                 k if k.starts_with("craft_") => continue,
                 // round A9: their own lines (`native_a9::trading_label`, `asks_first_label`)
@@ -1078,6 +1078,8 @@ pub(crate) fn asks_first_label(caps: &[String]) -> Option<String> {
         ("destroy", "destroy an item"),
         ("destroy_many", "destroy several items"),
         ("drop_quest", "drop a quest"),
+        ("loot_assign", "give a corpse item to a raid member (master looter)"),
+        ("loot_abandon", "abandon a corpse's loot (master looter)"),
         ("guild_kick", "kick a guild member"),
         ("friend_accept", "accept a friend request"),
         ("guild_accept", "accept a guild invitation"),

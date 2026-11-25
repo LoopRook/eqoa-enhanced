@@ -201,6 +201,8 @@ pub(crate) fn carry_out(play: &mut Play, act: &Act) -> Result<(), String> {
         Act::Destroy { .. }
         | Act::DestroyMany { .. }
         | Act::Sell { .. }
+        | Act::LootAssign { .. }
+        | Act::LootAbandon
         | Act::SellMany { .. }
         | Act::DropQuest { .. }
         | Act::AcceptOffer { .. }

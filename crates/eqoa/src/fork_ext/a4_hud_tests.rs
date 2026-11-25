@@ -1346,6 +1346,19 @@ fn a4_master_loot_read_actions_and_refusals() {
         .eval()
         .unwrap();
     assert_eq!(assign_state, "completed");
+    // 2026-11-25: the game's window asks "Assign <item> to <name>?" first, so the client does: nothing is sent until the
+    // player's own Yes (negative control: the old behaviour sent at once, with `record` holding the Assign here)
+    assert!(p.session.record.as_ref().unwrap().is_empty(), "asking assigns nothing");
+    let q = crate::fork_ext::addons::confirm::current_for_test().expect("the assign question is up");
+    assert_eq!(q.text, "Assign Boss Sword to Wizard?");
+    assert!(!q.yes, "starts on No");
+    assert_eq!(q.act.kind(), "loot_assign");
+    {
+        use winit::keyboard::{Key, NamedKey};
+        assert!(crate::fork_ext::addons::confirm::key(&Key::Named(NamedKey::ArrowRight)));
+        assert!(crate::fork_ext::addons::confirm::key(&Key::Named(NamedKey::Enter)));
+    }
+    step_actions(&mut p);
     {
         let sent = p.session.record.as_ref().unwrap();
         assert_eq!(sent.len(), 1);
@@ -1365,6 +1378,40 @@ fn a4_master_loot_read_actions_and_refusals() {
         .eval()
         .unwrap();
     assert_eq!(abandon_state, "completed");
+    assert!(p.session.record.as_ref().unwrap().is_empty(), "asking abandons nothing");
+    let q = crate::fork_ext::addons::confirm::current_for_test().expect("the abandon question is up");
+    assert!(q.text.starts_with("Abandon this corpse's loot?") && !q.yes);
+    // No sends nothing
+    {
+        use winit::keyboard::{Key, NamedKey};
+        assert!(crate::fork_ext::addons::confirm::key(&Key::Named(NamedKey::Escape)));
+    }
+    step_actions(&mut p);
+    assert!(p.session.record.as_ref().unwrap().is_empty(), "No abandons nothing");
+    // Yes, but master loot is no longer ours by the time of the answer: nothing is sent
+    h.lua.load(r#"r_abandon2 = assert(eqoa.actions.loot_abandon())"#).exec().unwrap();
+    step_actions(&mut p);
+    {
+        use winit::keyboard::{Key, NamedKey};
+        assert!(crate::fork_ext::addons::confirm::key(&Key::Named(NamedKey::ArrowRight)));
+        assert!(crate::fork_ext::addons::confirm::key(&Key::Named(NamedKey::Enter)));
+    }
+    crate::fork_ext::addons::raid_strips::set_master_loot_detail(None);
+    step_actions(&mut p);
+    assert!(p.session.record.as_ref().unwrap().is_empty(), "a Yes after master loot ended sends nothing");
+    crate::fork_ext::addons::raid_strips::set_master_loot_detail(Some(MasterLoot {
+        seconds: 120,
+        members: vec![(10, "Leader".into()), (20, "Wizard".into())],
+    }));
+    // Yes with master loot still ours: the Abandon goes out
+    h.lua.load(r#"r_abandon3 = assert(eqoa.actions.loot_abandon())"#).exec().unwrap();
+    step_actions(&mut p);
+    {
+        use winit::keyboard::{Key, NamedKey};
+        assert!(crate::fork_ext::addons::confirm::key(&Key::Named(NamedKey::ArrowRight)));
+        assert!(crate::fork_ext::addons::confirm::key(&Key::Named(NamedKey::Enter)));
+    }
+    step_actions(&mut p);
     {
         let sent = p.session.record.as_ref().unwrap();
         assert_eq!(sent.len(), 1);

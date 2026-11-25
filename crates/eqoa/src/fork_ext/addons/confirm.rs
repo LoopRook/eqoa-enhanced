@@ -45,6 +45,10 @@ pub(crate) enum Act {
     /// sold in order, each waiting for the server's answer to the one before (`Run`), re-checking its slot.
     SellMany { items: Vec<(u32, String, i64)> },
     DropQuest { index: usize, title: String, stamp: u32, revision: u64 },
+    /// `eqoa.actions.loot_assign`: the master looter gives a corpse item (the game's key for it, its name) to a member.
+    LootAssign { key: u32, item: String, member_id: u32, member: String },
+    /// `eqoa.actions.loot_abandon`: the master looter lets the whole corpse go to anyone.
+    LootAbandon,
     /// Round A7: guild kick, accepting a friend request, accepting a guild invitation.
     GuildKick { member_id: i32, name: String },
     FriendAccept { request_id: u32, name: String },
@@ -82,6 +86,8 @@ impl Act {
             Self::Sell { .. } => "sell",
             Self::SellMany { .. } => "sell_many",
             Self::DropQuest { .. } => "drop_quest",
+            Self::LootAssign { .. } => "loot_assign",
+            Self::LootAbandon => "loot_abandon",
             Self::GuildKick { .. } => "guild_kick",
             Self::FriendAccept { .. } => "friend_accept",
             Self::GuildAccept { .. } => "guild_accept",
@@ -543,6 +549,16 @@ pub(crate) fn sell_many_text(n: usize, total: i64, asked: &[SellLine], plain: us
 and {plain} {noun}"));
     }
     text
+}
+
+/// The game's own question for an assignment (`masterloot.rs` `ask_assign`).
+pub(crate) fn loot_assign_text(item: &str, member: &str) -> String {
+    format!("Assign {item} to {member}?")
+}
+
+/// The game's own question for abandoning (`masterloot.rs`, the Abandon step).
+pub(crate) fn loot_abandon_text() -> String {
+    "Abandon this corpse's loot? Anyone may then loot anything on it, and you are no longer its master looter.".to_string()
 }
 
 pub(crate) fn drop_quest_text(title: &str) -> String {

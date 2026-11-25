@@ -222,6 +222,23 @@ fn sell_many(play: &Play, items: &[ResolvedItemSpec]) -> DispatchOutcome {
     ask(Act::SellMany { items: acts }, confirm::sell_many_text(n, total, &asked, plain), "merchant")
 }
 
+/// `loot_assign` after the broker's own checks: the game's own question for the assignment, never the assignment.
+pub(super) fn loot_assign_question(key: u32, item: &str, member_id: u32, member: &str) -> DispatchOutcome {
+    if crate::fork_ext::addons::action_broker::dispatching_batch_step() {
+        return refuse("not_ready", "the game asks before assigning loot, and a batch step cannot ask: use eqoa.actions.loot_assign itself");
+    }
+    let act = Act::LootAssign { key, item: item.to_string(), member_id, member: member.to_string() };
+    ask(act, confirm::loot_assign_text(item, member), "loot")
+}
+
+/// `loot_abandon` after the broker's own checks.
+pub(super) fn loot_abandon_question() -> DispatchOutcome {
+    if crate::fork_ext::addons::action_broker::dispatching_batch_step() {
+        return refuse("not_ready", "the game asks before abandoning a corpse's loot, and a batch step cannot ask: use eqoa.actions.loot_abandon itself");
+    }
+    ask(Act::LootAbandon, confirm::loot_abandon_text(), "loot")
+}
+
 /// `drop_quest` after the broker's own checks: the question, never the drop.
 pub(crate) fn ask_drop_quest(index: usize, title: &str, stamp: u32, revision: u64) -> DispatchOutcome {
     let act = Act::DropQuest { index, title: title.to_string(), stamp, revision };
@@ -270,6 +287,36 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
         // a group destroy is carried out stack by stack (`step_runs`), never in one step
         Act::DestroyMany { .. } => Err("a group destroy runs stack by stack".into()),
         Act::SellMany { .. } => Err("a group sale runs stack by stack".into()),
+        Act::LootAssign { key, item, member_id, .. } => {
+            // still the master looter of this corpse, the item still on it, the member still eligible
+            let Some(ml) = crate::fork_ext::addons::raid_strips::master_loot_detail() else {
+                return Err("master loot is no longer yours on this corpse".into());
+            };
+            if !super::loot_session_open(play) {
+                return Err("the corpse window is closed".into());
+            }
+            let Some(it) = play.npcw.corpse.as_ref().and_then(|c| c.items.iter().find(|it| it.inv_index == *key)) else {
+                return Err("the item is no longer on the corpse".into());
+            };
+            if it.item.name != *item {
+                return Err("the corpse holds a different item there now".into());
+            }
+            if !ml.members.iter().any(|(id, _)| id == member_id) {
+                return Err("that member is no longer eligible".into());
+            }
+            play.session.send_raid_command(net::raid::Command::Assign { key: *key, id: *member_id });
+            Ok(())
+        }
+        Act::LootAbandon => {
+            if crate::fork_ext::addons::raid_strips::master_loot_detail().is_none() {
+                return Err("master loot is no longer yours on this corpse".into());
+            }
+            if !super::loot_session_open(play) {
+                return Err("the corpse window is closed".into());
+            }
+            play.session.send_raid_command(net::raid::Command::Abandon);
+            Ok(())
+        }
         Act::Sell { inv_index, name, count } => {
             if !super::merchant_session_open(play) {
                 return Err("the merchant window is closed".into());
