@@ -54,7 +54,7 @@ pub(crate) fn take_mod_log_for_test() -> Vec<String> {
     MOD_LOG.with(|l| std::mem::take(&mut *l.borrow_mut()))
 }
 
-const MAX_INSTANCES: usize = 16;
+const MAX_INSTANCES: usize = 64;
 const MAX_DIAGNOSTICS: usize = 128;
 #[path = "manager_profiles.rs"]
 mod named;
@@ -120,6 +120,8 @@ struct Entry {
     enabled_intent: bool,
     instance: Option<Instance>,
     not_before: u64,
+    /// Failed only because every VM slot was taken: starts again when a slot frees.
+    limit_blocked: bool,
 }
 
 pub(crate) struct Manager {
@@ -324,15 +326,18 @@ impl Manager {
                 && (!snapshot.capture_pending
                     || (entry.instance.is_none() && count >= MAX_INSTANCES))
                 && entry.enabled_intent
-                && entry.status != Status::Failed
+                && (entry.status != Status::Failed || entry.limit_blocked)
                 && entry.not_before <= self.frame_number
             {
                 if entry.instance.is_none() {
                     if count >= MAX_INSTANCES {
                         entry.status = Status::Failed;
-                        self.diagnostic(Some(&entry.metadata.id),"initialize","16 addon VM limit reached; remove an instantiated addon before reloading".into());
+                        entry.limit_blocked = true;
+                        self.diagnostic(Some(&entry.metadata.id),"initialize",format!("{MAX_INSTANCES} addon VM limit reached; disable or remove an addon to free a slot (this one starts by itself when one is free)"));
                         continue;
                     }
+                    entry.limit_blocked = false;
+                    entry.status = Status::Disabled;
                     let prepared = {
                         // a mod's VM made and its Lua compiled (the first frame after a world entry makes them all)
                         let _probe = super::stall_probe::scope_of("mod start (VM and Lua)", &entry.metadata.id);
@@ -345,6 +350,7 @@ impl Manager {
                         }
                         Err(e) => {
                             entry.status = Status::Failed;
+                            entry.limit_blocked = false;
                             self.diagnostic(Some(&entry.metadata.id), "initialize", e);
                             continue;
                         }
@@ -825,6 +831,7 @@ impl Manager {
     fn fail(&mut self, entry: &mut Entry, phase: &'static str, error: String, rendering: bool) {
         self.diagnostic(Some(&entry.metadata.id), phase, error);
         entry.status = Status::Failed;
+        entry.limit_blocked = false;
         self.disable(entry, rendering, false, Disposition::Retire);
     }
     fn configure_native_settings(&self, entry: &Entry) {
@@ -945,8 +952,7 @@ impl Manager {
                     self.diagnostic(
                         Some(&entry.metadata.id),
                         "reload",
-                        "16 VM limit prevents staging a fresh replacement; remove an addon first"
-                            .into(),
+                        format!("{MAX_INSTANCES} VM limit prevents staging a fresh replacement; remove an addon first"),
                     );
                 } else {
                     match self.prepare(&entry.metadata) {
@@ -1104,6 +1110,7 @@ impl Manager {
                 status: Status::Disabled,
                 instance: None,
                 not_before: self.frame_number,
+                limit_blocked: false,
             });
         }
         for mut removed in old {
@@ -2350,8 +2357,50 @@ mod tests {
         assert!(!native_core::capture_requested());
     }
 
+    /// 27 bundled mods plus Forge ones need more than the old 16 VMs: 30 all start.
     #[test]
-    fn forge_manager_disabled_defaults_missing_root_and_sixteen_vm_cap() {
+    fn thirty_enabled_mods_all_start_and_a_blocked_one_starts_when_a_slot_frees() {
+        let Some(mut gpu) = Gpu::new() else {
+            return;
+        };
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        for n in 0..30 {
+            scripts.package(&format!("n{n:02}"), true, "count=(count or 0)+1");
+        }
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        assert_eq!(manager.entries.iter().filter(|e| e.instance.is_some()).count(), 30);
+        assert!(manager.entries.iter().all(|e| e.status != Status::Failed));
+        manager.shutdown();
+
+        // past the limit: the extra mod is Failed by the limit, then starts when one is removed
+        let scripts = Scratch::new();
+        for n in 0..=MAX_INSTANCES {
+            scripts.package(&format!("m{n:02}"), true, "count=(count or 0)+1");
+        }
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        gpu.frame(&mut manager);
+        let blocked: Vec<String> = manager.entries.iter()
+            .filter(|e| e.instance.is_none()).map(|e| e.metadata.id.clone()).collect();
+        assert_eq!(blocked.len(), 1);
+        assert!(manager.entries.iter().find(|e| e.metadata.id == blocked[0]).unwrap().limit_blocked);
+        assert!(manager.diagnostics().iter().any(|d| d.message.contains("64 addon VM limit")));
+        let other = manager.entries.iter().find(|e| e.instance.is_some()).unwrap().metadata.id.clone();
+        manager.queue(Command::Enable(other, false));
+        // a disabled mod keeps its VM, so remove its package to free the slot
+        std::fs::remove_dir_all(scripts.0.join(&manager.entries.iter().find(|e| e.instance.is_some()).unwrap().metadata.id)).ok();
+        manager.queue(Command::Rescan);
+        gpu.frame(&mut manager);
+        gpu.frame(&mut manager);
+        let again = manager.entries.iter().find(|e| e.metadata.id == blocked[0]).unwrap();
+        assert!(again.instance.is_some(), "the blocked mod starts when a slot is free");
+        assert_eq!(again.status, Status::Enabled);
+        manager.shutdown();
+    }
+
+    #[test]
+    fn forge_manager_disabled_defaults_missing_root_and_vm_cap() {
         let Some(mut gpu) = Gpu::new() else {
             return;
         };
@@ -2364,11 +2413,11 @@ mod tests {
             "error('must remain disabled')",
         )
         .unwrap();
-        for n in 0..17 {
+        for n in 0..=MAX_INSTANCES {
             scripts.package(&format!("n{n:02}"), true, "count=(count or 0)+1");
         }
         let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
-        assert_eq!(manager.entries().len(), 18);
+        assert_eq!(manager.entries().len(), MAX_INSTANCES + 2);
         assert!(manager.entries.iter().all(|e| e.instance.is_none()));
         gpu.frame(&mut manager);
         assert_eq!(
@@ -2383,7 +2432,7 @@ mod tests {
             manager
                 .diagnostics()
                 .iter()
-                .any(|d| d.message.contains("16"))
+                .any(|d| d.message.contains(&MAX_INSTANCES.to_string()))
         );
         assert!(manager.diagnostics().len() <= MAX_DIAGNOSTICS);
         assert_eq!(
