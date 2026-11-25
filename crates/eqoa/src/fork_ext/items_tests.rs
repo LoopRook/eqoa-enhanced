@@ -2377,6 +2377,7 @@ fn round6c_no_false_confirmations_unrelated_invadd_or_corpse_close() {
     let mut bag1 = potion();
     bag1.key = 101;
     bag1.equip_slot = -1;
+    bag1.quick_slot = -1; // a plain misc item: a sale of it is not asked about
     let mut bag2 = gem();
     bag2.key = 102;
     bag2.equip_slot = -1;
@@ -4285,6 +4286,7 @@ fn round7c_game_windows_switch_is_saved_and_stops_a_claimed_batch() {
     let mut a = potion();
     a.key = 101;
     a.equip_slot = -1;
+    a.quick_slot = -1; // a plain misc item: a sale of it is not asked about
     let mut b = gem();
     b.key = 102;
     b.equip_slot = -1;
@@ -4387,6 +4389,7 @@ fn round7c_sale_batch(scope: &str) -> (Play, Host) {
     let mut a = potion();
     a.key = 101;
     a.equip_slot = -1;
+    a.quick_slot = -1; // a plain misc item: a sale of it is not asked about
     let mut b = gem();
     b.key = 102;
     b.equip_slot = -1;
@@ -4505,6 +4508,7 @@ fn round7c_merchant_list_after_a_hidden_sale_stays_hidden() {
     let mut a = potion();
     a.key = 101;
     a.equip_slot = -1;
+    a.quick_slot = -1; // a plain misc item: a sale of it is not asked about
     let mut b = gem();
     b.key = 102;
     b.equip_slot = -1;
@@ -4616,6 +4620,7 @@ fn round7c_switch_on_leaves_helper_claims_working() {
     let mut a = potion();
     a.key = 101;
     a.equip_slot = -1;
+    a.quick_slot = -1; // a plain misc item: a sale of it is not asked about
     let mut b = gem();
     b.key = 102;
     b.equip_slot = -1;
