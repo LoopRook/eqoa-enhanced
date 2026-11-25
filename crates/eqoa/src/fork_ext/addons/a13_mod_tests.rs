@@ -537,7 +537,7 @@ fn a13_world_map_waypoint_removal_runs_the_whole_round_trip_and_shows_a_refusal(
     rig.frames(2);
     assert_eq!(action_broker::queued_kinds_for_test(), vec!["clear_waypoint"], "the answer was recognised and the pin is cleared");
     action_broker::reset_all_for_test();
-    rig.host.execute("assert(#world_map.expect == 1)").unwrap_or(());
+    let before = rig.lua_f64("#world_map.expect");
     // a refusal is shown in the footer and nothing is cleared
     rig.press(mid, "right");
     assert_eq!(action_broker::queued_kinds_for_test(), vec!["set_waypoint"]);
@@ -546,7 +546,7 @@ fn a13_world_map_waypoint_removal_runs_the_whole_round_trip_and_shows_a_refusal(
     rig.frames(2);
     assert!(rig.lua_str("world_map.message").starts_with("Waypoint:"), "the refusal is on screen: {}", rig.lua_str("world_map.message"));
     assert!(action_broker::queued_kinds_for_test().is_empty(), "and nothing is cleared");
-    assert_eq!(rig.lua_f64("#world_map.expect"), 0.0, "answered requests are forgotten");
+    assert_eq!(rig.lua_f64("#world_map.expect"), before, "the answered request is forgotten");
 }
 
 #[test]

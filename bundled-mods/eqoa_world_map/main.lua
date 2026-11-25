@@ -727,13 +727,14 @@ function draw(e)
             local sx2, sy2 = to_screen(area, m.x, m.z)
             if on_screen(sx2, sy2, 8) then
                 local name = m.label or m.name
-                state.marker_calls = state.marker_calls + 1
                 if kind == "quest" then
                     -- "!" a quest to take, "?" a step to do
                     local mark = m.step and "?" or "!"
                     text(sx2 - 3, sy2 - 7, mark, c.black); text(sx2 - 4, sy2 - 8, mark, c.quest)
+                    state.marker_calls = state.marker_calls + 2
                 elseif kind == "coach" then
                     dl:AddCircleFilled(V(sx2, sy2), 5, c.black, 12); dl:AddCircleFilled(V(sx2, sy2), 4, c.coach, 12)
+                    state.marker_calls = state.marker_calls + 2
                 elseif kind == "camp" then
                     -- one diamond a layer: the world in view holds about 280 camps
                     dl:AddNgonFilled(V(sx2, sy2), 4.8, c.black, 4)
@@ -743,6 +744,7 @@ function draw(e)
                     local col = kind == "group_waypoint" and c.group or c[kind] or c.group
                     dl:AddRectFilled(V(sx2 - 3.5, sy2 - 3.5), V(sx2 + 3.5, sy2 + 3.5), c.black)
                     dl:AddRectFilled(V(sx2 - 2.5, sy2 - 2.5), V(sx2 + 2.5, sy2 + 2.5), col)
+                    state.marker_calls = state.marker_calls + 2
                     if kind == "group_waypoint" then
                         local a = away(m.x, m.z)
                         text(sx2 + 7, sy2 - 6, (name or "Group") .. (a and string.format("  %.0f away", a) or ""), c.text, 160)
