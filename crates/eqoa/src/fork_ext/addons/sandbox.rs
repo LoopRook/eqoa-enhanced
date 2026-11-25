@@ -261,49 +261,55 @@ pub(crate) fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>, String> {
 }
 pub(crate) fn check_quota(root: &Path, replaced: &Path, new_len: usize) -> Result<(), String> {
     let _probe = super::stall_probe::scope("mod file quota scan");
-    check_quota_inner(root, replaced, new_len, None)
+    check_quota_inner(root, replaced, new_len, None, None)
 }
 pub(crate) fn check_settings_quota(
     root: &Path,
     slot: &Path,
     value: &serde_json::Value,
 ) -> Result<(), String> {
+    check_settings_quota_known(root, slot, value, None)
+}
+/// The same check, with the other profiles' usage already read (`profile_usage` with `slot` left out).
+pub(crate) fn check_settings_quota_known(
+    root: &Path,
+    slot: &Path,
+    value: &serde_json::Value,
+    known: Option<&ProfileUsage>,
+) -> Result<(), String> {
     let size = serde_json::to_vec(value).map_err(|e| e.to_string())?.len();
     if size > 1024 * 1024 {
         return Err("addon settings exceeds 1 MiB quota".into());
     }
-    check_quota_inner(root, &root.join(".settings-reservation"), size, Some(slot))
+    check_quota_inner(root, &root.join(".settings-reservation"), size, Some(slot), known)
 }
-fn settings_usage(root: &Path, excluded: Option<&Path>) -> Result<u64, String> {
-    let Some(key) = root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .and_then(|n| n.strip_suffix("-files"))
-    else {
-        return Ok(0);
-    };
-    let Some(parent) = root.parent() else {
-        return Ok(0);
-    };
-    fn read(path: &Path, max: u64) -> Result<serde_json::Value, String> {
-        super::file_io::no_links(path)?;
-        if fs::metadata(path).map_err(|e| e.to_string())?.len() > max {
-            return Err("settings file exceeds quota".into());
-        }
-        #[cfg(windows)]
-        let bytes = read_bounded(path, max as usize)?;
-        #[cfg(not(windows))]
-        let bytes = fs::read(path).map_err(|e| e.to_string())?;
-        serde_json::from_slice(&bytes).map_err(|e| e.to_string())
+#[cfg(test)]
+thread_local! {static PROFILE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };}
+/// Test seam: how many profile files the quota checks of this thread read since the last call.
+#[cfg(test)]
+pub(crate) fn take_profile_reads_for_test() -> usize {
+    PROFILE_READS.with(|n| n.replace(0))
+}
+
+fn read_settings_file(path: &Path, max: u64) -> Result<serde_json::Value, String> {
+    super::file_io::no_links(path)?;
+    if fs::metadata(path).map_err(|e| e.to_string())?.len() > max {
+        return Err("settings file exceeds quota".into());
     }
-    let default = parent.join(format!("{key}.json"));
-    let mut size = 0;
-    if excluded != Some(default.as_path()) && default.is_file() {
-        size = serde_json::to_vec(&read(&default, 1024 * 1024)?)
-            .map_err(|e| e.to_string())?
-            .len() as u64;
-    }
-    let profiles = parent.join("profiles");
+    #[cfg(windows)]
+    let bytes = read_bounded(path, max as usize)?;
+    #[cfg(not(windows))]
+    let bytes = fs::read(path).map_err(|e| e.to_string())?;
+    serde_json::from_slice(&bytes).map_err(|e| e.to_string())
+}
+
+/// What every mod's settings take in the profile files (all but the one being replaced), read once: a save of a
+/// profile checks each of its mods against this instead of reading every profile again for each mod.
+pub(crate) struct ProfileUsage(std::collections::HashMap<String, u64>);
+
+pub(crate) fn profile_usage(addons: &Path, excluded: Option<&Path>) -> Result<ProfileUsage, String> {
+    let mut sizes = std::collections::HashMap::new();
+    let profiles = addons.join("profiles");
     if profiles.exists() {
         super::file_io::no_links(&profiles)?;
         let mut count = 0;
@@ -316,16 +322,51 @@ fn settings_usage(root: &Path, excluded: Option<&Path>) -> Result<u64, String> {
             if count > 256 {
                 return Err("settings profile entry quota exceeded".into());
             }
-            let document = read(&path, 16 * 1024 * 1024)?;
-            if let Some(value) = document.get("addons").and_then(|a| a.get(key)) {
-                size = size.saturating_add(
-                    serde_json::to_vec(value).map_err(|e| e.to_string())?.len() as u64,
-                );
-            }
-            if size > 16 * 1024 * 1024 {
-                return Err("addon settings exceeds 16 MiB quota".into());
+            #[cfg(test)]
+            PROFILE_READS.with(|n| n.set(n.get() + 1));
+            let document = read_settings_file(&path, 16 * 1024 * 1024)?;
+            let Some(entries) = document.get("addons").and_then(|a| a.as_object()) else {
+                continue;
+            };
+            for (key, value) in entries {
+                let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?.len() as u64;
+                let size = sizes.entry(key.clone()).or_insert(0u64);
+                *size = size.saturating_add(bytes);
             }
         }
+    }
+    Ok(ProfileUsage(sizes))
+}
+
+fn settings_usage(root: &Path, excluded: Option<&Path>, known: Option<&ProfileUsage>) -> Result<u64, String> {
+    let Some(key) = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| n.strip_suffix("-files"))
+    else {
+        return Ok(0);
+    };
+    let Some(parent) = root.parent() else {
+        return Ok(0);
+    };
+    let default = parent.join(format!("{key}.json"));
+    let mut size = 0u64;
+    if excluded != Some(default.as_path()) && default.is_file() {
+        size = serde_json::to_vec(&read_settings_file(&default, 1024 * 1024)?)
+            .map_err(|e| e.to_string())?
+            .len() as u64;
+    }
+    let scanned;
+    let usage = match known {
+        Some(usage) => usage,
+        None => {
+            scanned = profile_usage(parent, excluded)?;
+            &scanned
+        }
+    };
+    size = size.saturating_add(usage.0.get(key).copied().unwrap_or(0));
+    if size > 16 * 1024 * 1024 {
+        return Err("addon settings exceeds 16 MiB quota".into());
     }
     Ok(size)
 }
@@ -334,9 +375,10 @@ fn check_quota_inner(
     replaced: &Path,
     new_len: usize,
     settings_slot: Option<&Path>,
+    known: Option<&ProfileUsage>,
 ) -> Result<(), String> {
     let mut pending = vec![root.to_path_buf()];
-    let mut size = (new_len as u64).saturating_add(settings_usage(root, settings_slot)?);
+    let mut size = (new_len as u64).saturating_add(settings_usage(root, settings_slot, known)?);
     if size > 16 * 1024 * 1024 {
         return Err("addon storage exceeds 16 MiB quota".into());
     }

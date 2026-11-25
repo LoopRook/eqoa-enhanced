@@ -384,7 +384,7 @@ function draw()
     frame(0, 0, W, H, c.border)
     text(PAD, 7, "Bags", c.white)
     -- the Auction window (the EQOA Auction mod, when it is on): its own button, drawn with the other actions below
-    local auction_btn = {x = W - PAD - 46, y = 3, w = 46, h = 15}
+    local auction_btn = {x = W - PAD - 56, y = 3, w = 56, h = 15}
     fill(auction_btn.x, auction_btn.y, auction_btn.w, auction_btn.h, c.raised)
     frame(auction_btn.x, auction_btn.y, auction_btn.w, auction_btn.h, c.border)
     text(auction_btn.x + 5, auction_btn.y + 2, "Auction", c.text, auction_btn.w - 6)
