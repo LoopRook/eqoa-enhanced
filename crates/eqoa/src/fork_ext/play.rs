@@ -1491,11 +1491,19 @@ pub(crate) fn bank_requests(_play: &Play, _out: &mut Vec<crate::bank::BankOut>) 
                 }
             }
             PendingBankTx::Money { dir, amount } => {
-                _out.push(crate::bank::BankOut::MoveMoney(dir, amount));
+                _out.push(bank_money_out(dir, amount));
                 mark_deferred_sent("bank_money");
             }
         }
     }
+}
+
+/// The game's own request for a tunar move. The broker's `dir` is 1 for a deposit and 2 for a withdraw; the wire byte
+/// is the game's `fromBank` (`VIBankControl::MoveMoney`): 0 puts tunar into the bank, 1 takes it out (the deposit form
+/// sends 0 and the withdraw form 1, `trade.rs`). Sending the broker's `dir` as it stood made a deposit a withdraw.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn bank_money_out(dir: u8, amount: i32) -> crate::bank::BankOut {
+    crate::bank::BankOut::MoveMoney(u8::from(dir == 2), amount)
 }
 
 /// A skill the Class Mastery list's reply opened is kept (not dropped for want of the game's window) while a mod

@@ -5261,3 +5261,36 @@ fn autoloot_fix1_an_open_nobody_waits_for_any_more_decides_nothing() {
         bid_reset();
     }
 }
+
+/// Owner 2026-11-25: the Bag Viewer's Deposit took tunar OUT of the bank. The broker's `deposit` (1) and `withdraw` (2)
+/// went to the wire as they stood, but the game's `MoveMoney(fromBank, n)` is 0 for a deposit and 1 for a withdraw
+/// (`trade.rs`: the deposit form sends `Bank(0, v)`, the withdraw form `Bank(1, v)`). Asserted on the request the game's
+/// bank loop sends (`bankplay.rs` writes `target, dir, n` from it), the same request the game's own form makes.
+#[test]
+fn owner1125b_bank_money_sends_the_games_own_direction_deposit_0_and_withdraw_1() {
+    use crate::fork_ext::addons::{action_broker, native_events};
+    for (call, want) in [
+        ("deposit', 50", crate::bank::BankOut::MoveMoney(0, 50)),
+        ("withdraw', 250", crate::bank::BankOut::MoveMoney(1, 250)),
+    ] {
+        action_broker::reset_all_for_test();
+        crate::fork_ext::bindpage::reset_in_memory();
+        let mut p = ready();
+        p.session.conn = Some(usize::MAX);
+        p.dump.player.p34 = 500;
+        p.dump.player.p38 = 500;
+        p.mode = 11;
+        p.bank.state = 0;
+        p.forge_snapshot(None);
+        let host = r6f3_host();
+        r6f3_press(&host, &format!("next_fn = function() return eqoa.actions.bank_money('{call}) end"));
+        host.execute("assert(last_req ~= nil, last_err and last_err.reason or 'nil')").unwrap();
+        super::super::begin_iteration(&mut p, true);
+        let mut out = vec![];
+        super::super::bank_requests(&p, &mut out);
+        assert_eq!(out, vec![want], "the request the bank loop writes for {call}");
+        native_events::dispatch(&host).unwrap();
+    }
+    action_broker::reset_all_for_test();
+    crate::fork_ext::bindpage::reset_in_memory();
+}
