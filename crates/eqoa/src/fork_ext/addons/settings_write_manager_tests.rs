@@ -190,3 +190,96 @@ fn reload_waits_for_the_files_the_mod_left_open() {
     assert_eq!(find_file(&config.0, "h.txt").as_deref(), Some(&b"left open"[..]), "{:?}", manager.diagnostics());
     super::super::deferred_sync::set_delay_for_test(std::time::Duration::ZERO);
 }
+
+/// Regression test (PC interface perf): steady `Manager::frame` ticks in PC mode must not re-run
+/// `bindpage::resolve`, while an interface switch (PC <-> Controller) or disable/re-enable runs it once.
+#[test]
+fn perf_steady_frames_do_not_re_resolve_binds() {
+    let Some(mut gpu) = Gpu::new() else {
+        eprintln!("SKIP perf_steady_frames_do_not_re_resolve_binds: no GPU adapter");
+        return;
+    };
+    crate::settings::testing::reset(false);
+    crate::settings::set_ui_mode(true).unwrap();
+    crate::fork_ext::bindpage::reset_in_memory();
+
+    let scripts = Scratch::new();
+    let config = Scratch::new();
+    scripts.package(
+        "mod_bind",
+        true,
+        r#"
+        if not init then
+            init = true
+            assert(eqoa.input.bind({id = "seven", label = "Seven", default_key = "7"}, function() end))
+        end
+        "#,
+    );
+    scripts.package("mod_plain", true, "local x = 1");
+
+    let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+    manager.enable_profiles(Some(config.0.clone()));
+    // Warmup: frame 1 compiles & initializes; frame 2 settles steady state.
+    gpu.frame(&mut manager);
+    gpu.frame(&mut manager);
+
+    assert_eq!(
+        crate::fork_ext::bindpage::get_key("mod_bind", "seven").as_deref(),
+        Some(""),
+        "PC mode reserves 7 for Bar 2 slot 2"
+    );
+
+    let resolves_before = crate::fork_ext::bindpage::resolve_count_for_test();
+    for _ in 0..5 {
+        gpu.frame(&mut manager);
+    }
+    assert_eq!(
+        crate::fork_ext::bindpage::resolve_count_for_test(),
+        resolves_before,
+        "steady PC frames must not re-run bindpage::resolve"
+    );
+
+    // Negative control 1: switching PC -> Controller re-resolves once on the next frame.
+    crate::settings::set_ui_mode(false).unwrap();
+    gpu.frame(&mut manager);
+    assert_eq!(
+        crate::fork_ext::bindpage::resolve_count_for_test(),
+        resolves_before + 1,
+        "interface switch must re-resolve mod defaults once"
+    );
+    assert_eq!(
+        crate::fork_ext::bindpage::get_key("mod_bind", "seven").as_deref(),
+        Some("7"),
+        "7 becomes available in Controller mode"
+    );
+    for _ in 0..3 {
+        gpu.frame(&mut manager);
+    }
+    assert_eq!(
+        crate::fork_ext::bindpage::resolve_count_for_test(),
+        resolves_before + 1,
+        "steady Controller frames must not re-run bindpage::resolve"
+    );
+
+    // Negative control 2: disabling and re-enabling a bound mod runs resolve on each transition.
+    manager.queue(Command::Enable("mod_bind".into(), false));
+    gpu.frame(&mut manager);
+    let after_disable = crate::fork_ext::bindpage::resolve_count_for_test();
+    assert!(after_disable > resolves_before + 1, "disable must re-resolve");
+    manager.queue(Command::Enable("mod_bind".into(), true));
+    gpu.frame(&mut manager);
+    let after_enable = crate::fork_ext::bindpage::resolve_count_for_test();
+    assert!(after_enable > after_disable, "re-enable must re-resolve");
+    for _ in 0..3 {
+        gpu.frame(&mut manager);
+    }
+    assert_eq!(
+        crate::fork_ext::bindpage::resolve_count_for_test(),
+        after_enable,
+        "no further resolves once active again"
+    );
+
+    manager.shutdown();
+    crate::settings::testing::reset(false);
+    crate::fork_ext::bindpage::reset_in_memory();
+}

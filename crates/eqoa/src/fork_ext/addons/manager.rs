@@ -318,6 +318,7 @@ impl Manager {
                         .is_none_or(|instance| !super::native_events::active(&instance.host.lua)))
                 .then_some(entry.metadata.id.as_str())
             }));
+        crate::fork_ext::bindpage::sync_interface_mode();
         drop(_prologue);
         let mut entries = std::mem::take(&mut self.entries);
         let mut count = entries.iter().filter(|e| e.instance.is_some()).count();
@@ -356,9 +357,12 @@ impl Manager {
                         }
                     }
                 }
+                let was_active = entry.instance.as_ref().is_some_and(|i| i.active);
                 self.configure_native_settings(entry);
-                super::options::set_addon_enabled(&entry.metadata.id, true);
-                crate::fork_ext::bindpage::set_addon_enabled(&entry.metadata.id, true);
+                if !was_active {
+                    super::options::set_addon_enabled(&entry.metadata.id, true);
+                    crate::fork_ext::bindpage::set_addon_enabled(&entry.metadata.id, true);
+                }
                 let instance = entry.instance.as_mut().unwrap();
                 instance.host.snapshot.set(snapshot);
                 instance.active = true;
