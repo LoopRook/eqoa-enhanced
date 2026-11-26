@@ -327,6 +327,7 @@ local function helper_listeners()
     end
 end
 HP.on_auto_change = helper_listeners
+B.on_character = helper_listeners
 helper_listeners()
 -- a merchant or bank the player opened by hand is a real answer from where they stand: the mod learns the reach
 eqoa.events.on("merchant.changed", function(e)
