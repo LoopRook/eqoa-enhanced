@@ -147,6 +147,7 @@ fn files_in(d: &std::path::Path) -> Vec<std::path::PathBuf> {
 /// [`KEPT`] let go; its file, or None when it could not be written.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn write(stamp: &str, text: &str) -> Option<std::path::PathBuf> {
+    if !crate::fork_ext::report_consent::keep_for_server() { return None; }
     write_in(&dir()?, stamp, text)
 }
 
@@ -344,6 +345,7 @@ pub fn answered(number: u32) -> bool {
 /// The server offered to take crash reports (`most` bytes of each): each kept
 /// is sent. How many went.
 pub fn send_pending(session: &mut Session, most: usize) -> usize {
+    if let Some(n) = crate::fork_ext::report_consent::hold(most) { return n; }
     let kept = crate::fork_ext::report_label::pending(pending(), most);
     for k in &kept {
         session.send_crash_report(k.number, &k.text, most);

@@ -893,6 +893,9 @@ mod native {
     pub(super) struct Stopped {
         pub(super) at: Option<SystemTime>,
         pub(super) version: Option<String>,
+        /// the run did not close and left no panic (killed, End task): the
+        /// report says only that it ended without closing
+        pub(super) unclosed: bool,
     }
 
     pub(super) fn stopped(f: &Path) -> Stopped {
@@ -908,6 +911,7 @@ mod native {
             version: field("version: ")
                 .and_then(|v| v.split_whitespace().next())
                 .map(str::to_string),
+            unclosed: text.contains(" ended without closing: killed"),
         }
     }
 
@@ -1198,6 +1202,8 @@ mod native {
                     for f in files {
                         let _ = std::fs::remove_file(f);
                     }
+                    // upstream's copies of the same crashes (`crashes/`) too
+                    crate::fork_ext::report_consent::forget_server_copies();
                 }
                 *d = None;
             }
@@ -1594,8 +1600,11 @@ mod native {
                 Some(at) => format!("The game stopped {}", ago(at, now)),
                 None => "The game stopped earlier".to_string(),
             };
-            let then =
-                "It kept a crash report then. Save it locally to share with Enhanced support.";
+            let then = if newest.unclosed {
+                "The game did not close normally then (it may have been ended from outside, such as End task, or stopped without a message). It kept a report of that. Save it locally to share with Enhanced support."
+            } else {
+                "It kept a crash report then. Save it locally to share with Enhanced support."
+            };
             let intro = match &newest.version {
                 Some(v) if v != this => {
                     format!("That was in an earlier version of the game ({v}). {then}")
@@ -2009,7 +2018,8 @@ mod tests {
             d.stopped,
             [Stopped {
                 at: Some(at(1_792_755_679)),
-                version: Some("dev-e768e44".into())
+                version: Some("dev-e768e44".into()),
+                unclosed: false
             }]
         );
         let offered = at(1_792_755_679 + 11 * 3600 + 18 * 60 + 25);
@@ -2275,6 +2285,40 @@ mod tests {
             "It kept a crash report then. Save it locally to share with Enhanced support."
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A run that ended without closing (End task, a kill) is offered as that,
+    /// not as a crash that kept a report of a panic; a panic's report is still
+    /// a crash. The control: both read from real files.
+    #[test]
+    fn a_run_that_did_not_close_is_not_worded_as_a_crash() {
+        use native::{Stopped, crash_words, stopped};
+        let root = std::env::temp_dir().join(format!("eqoa-unclosed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let prev = root.join("eqoa.log");
+        std::fs::write(&prev, "[eqoa] run 20261111-010101, local (local), windows x86_64, window 1
+last event
+").unwrap();
+        native::ended_without_closing_for_test(&root, &prev);
+        let unclosed = stopped(&crate::fork_ext::report_crash_dir::in_config(&root).join("crash-20261111-010101.txt"));
+        assert!(unclosed.unclosed, "the unclosed run is known as one");
+        let panic_file = root.join("crash-p.txt");
+        std::fs::write(&panic_file, "EQOA native client crash report
+version: local (local)
+
+--- crash ---
+thread 'main' panicked at crates/a.rs:1:2:
+boom
+").unwrap();
+        let panicked = stopped(&panic_file);
+        assert!(!panicked.unclosed, "control: a panic's report is a crash");
+        let now = std::time::SystemTime::now();
+        let (_, a) = crash_words(&[unclosed], "local", now);
+        let (_, b) = crash_words(&[Stopped { unclosed: false, ..panicked }], "local", now);
+        assert!(a.starts_with("The game did not close normally then") && !a.contains("kept a crash report"), "{a}");
+        assert!(b.starts_with("It kept a crash report then"), "{b}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A report too long for the server is cut, at a character, saying so.
