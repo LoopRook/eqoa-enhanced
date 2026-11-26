@@ -4524,7 +4524,6 @@ impl App {
                 k => held_name(k),
             };
             if let Some(n) = name {
-                p.keyboard = true;
                 p.map.keyboard_key(&n, event.state == ElementState::Pressed, event.repeat);
             }
             return;
