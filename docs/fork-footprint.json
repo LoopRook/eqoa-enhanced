@@ -36,6 +36,8 @@
     "tools/test_scene_suite.py",
     "tools/eqoa1_freeze.py",
     "tools/test_eqoa1_freeze.py",
+    "tools/api_tiers.py",
+    "tools/test_api_tiers.py",
     "tools/upstream_pr.py",
     "tools/test_upstream_pr.py",
     "tools/test_parser_launch.py",
