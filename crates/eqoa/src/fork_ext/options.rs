@@ -26,7 +26,8 @@ const PAGES: [Category; super::CATEGORIES.len() + 1] = categories(super::CATEGOR
 // `STANDARD_PAGE_ITEMS` (the Enhanced page) takes the menu's place with its own title
 // (`WndOptions::extended_window`)
 const _: () = assert!(super::pages_fit(&PAGES));
-// the Enhanced page joins the UI group's menu: every group's menu must still fit (`menus_fit`)
+// the Enhanced page joins the Other group's menu (upstream's UI menu is full at `MENU_MOST`, sync
+// 2026-11-26): every group's menu must still fit (`menus_fit`)
 const _: () = assert!(super::menus_fit(&PAGES));
 /// The rows of the Enhanced page ahead of the Mods & Addons rows: one per Enhanced HUD toggle.
 const HUD_ROWS: usize = 6;
@@ -133,8 +134,9 @@ pub(super) const CATEGORY: Category = Category {
         1053,
     ],
     note: Note::None,
-    // listed in upstream's UI menu (Extended's groups, 2026-11-15), beside its HUD page
-    group: super::Group::Ui,
+    // listed in upstream's Other menu (Extended's groups): its UI menu holds `MENU_MOST` categories since
+    // sync 2026-11-26, so Options > Other > Enhanced
+    group: super::Group::Other,
 };
 /// The registered rows: upstream's and the fork's own.
 pub(super) fn items() -> impl Iterator<Item = &'static (i32, &'static str)> {
@@ -394,14 +396,14 @@ mod tests {
         assert_eq!(&cats[first].items[..6], &[2000, 2001, 2002, 2003, 2004, 2005], "Enhanced HUD rows first");
         assert_eq!(&cats[first].items[6..8], &[1051, 1052], "then the Mods & Addons rows");
         assert!(!cats[first].items.contains(&1045) && !items().any(|i| i.0 == 1045), "the Quest Markers row is gone (owner 2026-11-22)");
-        // Extended's groups (upstream, sync 2026-11-15): the Enhanced page closes the UI group's
+        // Extended's groups (upstream, sync 2026-11-15): the Enhanced page closes the Other group's
         // menu and is in no other group's
         let groups = &super::super::GROUPS;
-        let ui = groups.iter().position(|g| g.0 == super::super::Group::Ui).unwrap();
-        let in_ui = super::super::group_categories(ui);
-        assert_eq!(in_ui.last(), Some(&first), "Enhanced last in the UI group's menu");
-        assert!((0..groups.len()).filter(|&g| g != ui).all(|g| !super::super::group_categories(g).contains(&first)), "in no other group");
-        w.grp_sel = ui as i32;
+        let other = groups.iter().position(|g| g.0 == super::super::Group::Other).unwrap();
+        let in_other = super::super::group_categories(other);
+        assert_eq!(in_other.last(), Some(&first), "Enhanced last in the Other group's menu");
+        assert!((0..groups.len()).filter(|&g| g != other).all(|g| !super::super::group_categories(g).contains(&first)), "in no other group");
+        w.grp_sel = other as i32;
         w.key(
             &vui,
             &mut NullRaster,
@@ -411,8 +413,8 @@ mod tests {
             &mut cues,
             &mut ups,
         );
-        assert_eq!(w.grp, Some(ui), "the UI group's menu open");
-        for (index, category) in [(in_ui.len() - 1, &cats[first])] {
+        assert_eq!(w.grp, Some(other), "the Other group's menu open");
+        for (index, category) in [(in_other.len() - 1, &cats[first])] {
             w.cat_sel = index as i32;
             w.key(
                 &vui,
