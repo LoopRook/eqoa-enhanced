@@ -480,3 +480,82 @@ fn guards_ok(src: &str) -> bool {
     };
     ok().unwrap_or(false)
 }
+
+// ---- the game's own Stat Window ---------------------------------------------------------------------------------
+
+#[test]
+fn stat_window_a_mod_holds_back_the_games_stat_window_and_gives_it_back() {
+    let h = hud();
+    // negative control: no mod holds it, the game draws it
+    assert!(crate::hud::fork_hud::stat_window_visible());
+    assert!(super::hud_layout::hud_element_visible("stat_window"));
+    h.host.execute("claim=assert(eqoa.hud.hide('stat_window'))").unwrap();
+    h.publish();
+    assert!(!crate::hud::fork_hud::stat_window_visible());
+    assert!(!super::hud_layout::hud_element_visible("stat_window"), "reads as hidden through eqoa.hud.visible");
+    h.host.execute("assert(#eqoa.hud.hidden_by('stat_window')==1)").unwrap();
+    // it holds back only the Stat Window: the other overlays stay the game's
+    assert_eq!(hidden(), (false, false, false));
+    assert!(super::hud_layout::hud_element_visible("name_plates"));
+    assert!(super::hud_layout::hud_element_visible("target"));
+    // the player's "Use the game's windows" gives the game's window back while the mod still holds its claim
+    super::window_takeover::set_use_game_windows(true);
+    assert!(crate::hud::fork_hud::stat_window_visible(), "the switch is on: the game's Stat Window");
+    assert!(super::hud_layout::hud_element_visible("stat_window"));
+    super::window_takeover::set_use_game_windows(false);
+    assert!(!crate::hud::fork_hud::stat_window_visible(), "the switch is off again: held");
+    h.host.execute("assert(eqoa.hud.show(claim))").unwrap();
+    h.publish();
+    assert!(crate::hud::fork_hud::stat_window_visible(), "shown again");
+    super::window_takeover::forget_switch_for_test();
+}
+
+#[test]
+fn stat_window_the_other_hide_tokens_leave_it_to_the_game() {
+    let h = hud();
+    h.host
+        .execute("a=assert(eqoa.hud.hide('all')); b=assert(eqoa.hud.hide('all_pieces')); c=assert(eqoa.hud.hide('player'))")
+        .unwrap();
+    h.publish();
+    assert!(crate::hud::fork_hud::stat_window_visible(), "all, all_pieces and player do not hide it");
+}
+
+#[test]
+fn stat_window_a_disabled_or_failed_mod_gives_it_back_and_two_mods_share_the_claim() {
+    let a = hud();
+    let b = hud_on(a.claims.clone());
+    a.host.execute("t=assert(eqoa.hud.hide('stat_window'))").unwrap();
+    b.host.execute("t=assert(eqoa.hud.hide('stat_window'))").unwrap();
+    a.publish();
+    assert!(!crate::hud::fork_hud::stat_window_visible());
+    a.lease.clear();
+    a.publish();
+    assert!(!crate::hud::fork_hud::stat_window_visible(), "the other mod still holds it");
+    b.lease.clear();
+    b.publish();
+    assert!(crate::hud::fork_hud::stat_window_visible(), "released when the last mod stops");
+    // and the claim does not come back on its own
+    b.lease.update(HealthSnapshot::new(true, 10, 10), true);
+    b.publish();
+    assert!(crate::hud::fork_hud::stat_window_visible());
+}
+
+#[test]
+fn stat_window_the_disclosure_names_it() {
+    assert!(visibility::is_hud_disclosure("hud.stat_window"), "accepted in `replaces`");
+}
+
+/// Two lines in the game's own code carry the switch: the draw (which also leaves no panel for a click to find)
+/// and the one place F4 and `/stats` both end (`set_stat_window`). Their behaviour is tested in `play`'s
+/// `stat_window_hide_tests`; this keeps the lines from being lost in a merge.
+#[test]
+fn stat_window_the_guard_lines_sit_in_the_games_own_code() {
+    let play = include_str!("../../play.rs").replace("\r\n", "\n");
+    let at = play.find("self.stat_panel = None;\n            if crate::settings::stat_window()").expect("the Stat Window draw");
+    let line = play[at..].lines().nth(1).unwrap();
+    assert!(line.contains("fork_hud::stat_window_visible()"), "{line}");
+    let statplay = include_str!("../../statplay.rs").replace("\r\n", "\n");
+    let a = statplay.find("fn set_stat_window(").expect("set_stat_window");
+    let body = &statplay[a..a + statplay[a..].find("/// `/stats`").unwrap()];
+    assert!(body.find("fork_hud::stat_window_visible()").unwrap() < body.find("settings::set_stat_window(on)").unwrap());
+}

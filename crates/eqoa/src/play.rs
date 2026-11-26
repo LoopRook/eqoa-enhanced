@@ -11324,7 +11324,7 @@ impl Play {
             // the Stat Window (`statwnd`, petition 2925), where the effects
             // are shown
             self.stat_panel = None;
-            if crate::settings::stat_window() && crate::influence::shown(self.mode) {
+            if crate::settings::stat_window() && crate::hud::fork_hud::stat_window_visible() && crate::influence::shown(self.mode) {
                 let m = crate::hudlayout::begin(r.ui, crate::hudlayout::Piece::Stats);
                 let mut facts = crate::statwnd::facts(&self.stats.stat, &self.stats.base);
                 facts.figures = self.session.stat_figures;

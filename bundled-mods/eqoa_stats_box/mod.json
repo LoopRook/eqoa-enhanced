@@ -7,7 +7,12 @@
   "entry": "main.lua",
   "entryMode": "once",
   "enabled": true,
+  "replaces": [
+    "hud.stat_window"
+  ],
   "capabilities": [
+    "eqoa.hud.hide",
+    "eqoa.hud.show",
     "eqoa.player.stats",
     "eqoa.hud.panel",
     "eqoa.hud.text",

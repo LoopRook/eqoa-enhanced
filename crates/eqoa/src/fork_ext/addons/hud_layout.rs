@@ -271,6 +271,7 @@ pub fn hud_element_visible(element: &str) -> bool {
         "name_plates" => !v.name_plates,
         "damage_numbers" => !v.damage_numbers,
         "target_rings" => !v.target_rings,
+        "stat_window" => !v.stat_window || super::window_takeover::use_game_windows(),
         "stats_box" | "plain_play" => state.right_hud_up,
         "mana_bars" => true,
         "all" => {

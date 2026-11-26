@@ -652,6 +652,8 @@ pub(crate) fn native_leaves(element: &str) -> Option<Vec<&'static str>> {
         "name_plates" => vec!["name_plates"],
         "damage_numbers" => vec!["damage_numbers"],
         "target_rings" => vec!["target_rings"],
+        // the game's own Stat Window (F4, `/stats`), which a mod such as the Stats Box replaces
+        "stat_window" => vec!["stat_window"],
         "all" => ALL_UI_ELEMENTS.to_vec(),
         "all_pieces" => {
             let mut all = ALL_UI_ELEMENTS.to_vec();
@@ -864,6 +866,7 @@ pub struct PublishedVisibility {
     pub name_plates: bool,
     pub damage_numbers: bool,
     pub target_rings: bool,
+    pub stat_window: bool,
 }
 
 #[allow(dead_code)]
@@ -899,6 +902,7 @@ impl PublishedVisibility {
             || self.name_plates
             || self.damage_numbers
             || self.target_rings
+            || self.stat_window
     }
 }
 
@@ -926,6 +930,7 @@ const REPORT_ELEMENTS: &[&str] = &[
     "name_plates",
     "damage_numbers",
     "target_rings",
+    "stat_window",
 ];
 
 thread_local! {
@@ -954,6 +959,7 @@ thread_local! {
         name_plates: false,
         damage_numbers: false,
         target_rings: false,
+        stat_window: false,
     }) };
 }
 
@@ -1000,6 +1006,7 @@ pub(crate) fn publish_claims(claims: &HudClaimsRegistry) {
         name_plates: claims.is_hidden("name_plates"),
         damage_numbers: claims.is_hidden("damage_numbers"),
         target_rings: claims.is_hidden("target_rings"),
+        stat_window: claims.is_hidden("stat_window"),
     });
 }
 

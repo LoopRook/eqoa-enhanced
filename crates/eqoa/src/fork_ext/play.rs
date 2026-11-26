@@ -72,6 +72,9 @@ mod sync_fix_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "api_codes_tests.rs"]
 mod api_codes_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "stat_window_hide_tests.rs"]
+mod stat_window_hide_tests;
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy)]
 struct CachedCycleView {

@@ -1066,6 +1066,7 @@ fn forge_wereoxxs_disabled_startup_profile_enable_toggle_disable_reenable_all_el
         name_plates: false,
         damage_numbers: false,
         target_rings: false,
+        stat_window: false,
     };
     assert_eq!(
         published_visibility(),
