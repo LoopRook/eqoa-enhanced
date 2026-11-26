@@ -419,12 +419,7 @@ mod tests {
     #[test]
     fn a_window_with_no_size_gives_no_null_field_in_either_interface_moved_or_not() {
         for pc in [false, true] {
-            for layout in ["", "player l 35 t 28
-group l 60 t 50
-target l 80 b -40
-pet l 25 t 12
-minimap r 20 t 20
-"] {
+            for layout in ["", "player l 35 t 28\ngroup l 60 t 50\ntarget l 80 b -40\npet l 25 t 12\nminimap r 20 t 20\n"] {
                 crate::settings::testing::reset(false);
                 crate::settings::set_ui_mode(pc).unwrap();
                 crate::settings::save_hud_layout(layout);

@@ -147,7 +147,7 @@ pub fn register(addon: &str, id: &str, default_key: &str, description: &str) -> 
         // once: the first time this binding is registered after the key went to the game, whatever the interface in use
         // then; a key bound afterwards is the player's, whichever interface is in use at a restart
         if !taken_settled(addon, id) {
-            let drop = stored.as_deref() == Some(old) && (game_owner(&game, old).is_some() || game_default_key(old));
+            let drop = stored.as_deref() == Some(old) && game_owner(&game, old).is_some();
             if settle_taken(addon, id, drop).is_ok() && drop {
                 crate::say(&format!("controls: {addon}.{id} was on {old}, which the game has now: back on its default"));
                 stored = None;
@@ -1164,11 +1164,6 @@ pub fn save_mod_bind(addon: &str, id: &str, key: &str) -> Result<(), String> {
     write_config(KEYS_FILE, out.as_bytes())
 }
 
-/// `key` is a default key of one of the game's own rows (on whichever interface), not only what the active profile has.
-fn game_default_key(key: &str) -> bool {
-    ROWS.iter().any(|r| r.keys.contains(&key))
-}
-
 /// The marker line in `mod-keys.opt` that says this binding's saved key was looked at once (`KEYS_TAKEN_BY_THE_GAME`).
 fn taken_marker(addon: &str, id: &str) -> String {
     format!("migrated.{addon}.{id}=keys_taken_by_the_game_2026_11_25")
@@ -1189,12 +1184,10 @@ fn settle_taken(addon: &str, id: &str, drop: bool) -> Result<(), String> {
     let mut out = String::new();
     for line in text.lines().filter(|line| !(drop && line.starts_with(&prefix))) {
         out.push_str(line);
-        out.push('
-');
+        out.push('\n');
     }
     out.push_str(&taken_marker(addon, id));
-    out.push('
-');
+    out.push('\n');
     write_config(KEYS_FILE, out.as_bytes())
 }
 
