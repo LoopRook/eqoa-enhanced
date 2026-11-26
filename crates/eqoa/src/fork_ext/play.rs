@@ -334,6 +334,19 @@ pub(crate) fn divert_event(play: &mut Play) {
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn divert_event(_: &mut Play) {}
 
+/// Number Colors' tags (`Session::agree_number_tags`) are asked for while an enabled mod listens to `combat.hit`, whatever
+/// the player's Number Colors rows say: the tag is the only thing that tells a pet's or mercenary's hit from the player's
+/// (`combat.hit.by_player`). Asking changes only what the server appends to each figure (one byte); the colour a figure
+/// is drawn in stays the row's (`numcolor::rgb`: Default is the game's own). The one upstream line for it.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn number_tags_wanted() -> bool {
+    crate::fork_ext::addons::native_events::interested("combat.hit")
+}
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn number_tags_wanted() -> bool {
+    false
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
     MODE_BEFORE_EVENT.with(|m| m.set(-1));
@@ -4716,12 +4729,12 @@ impl Play {
         #[cfg(not(target_arch = "wasm32"))]
         // the tag byte is read only where the game's own number colours read it (`number_rgb`): never on a server whose
         // client patch carries the colour itself (S2 `damage_rgb`)
-        crate::fork_ext::addons::native_core::observe_hit_tagged(
+        crate::fork_ext::addons::native_core::observe_hit_numbered(
             _attacker,
             _defender,
             _amount,
             _color,
-            _tag.filter(|_| !crate::s2::get().damage_rgb).map(|t| (t.pet, t.merc)),
+            _tag.filter(|_| !crate::s2::get().damage_rgb),
         );
         // Unit tests never emit to a real companion. The browser has no native socket
         // or SystemTime clock; neither is touched by this hook there.

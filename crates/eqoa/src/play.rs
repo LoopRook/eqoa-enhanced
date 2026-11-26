@@ -11822,7 +11822,7 @@ impl Play {
     /// Number Colors: the server told to tag the numbers while a row is not
     /// Default, and to stop when every one is (`numcolor::wanted`).
     fn agree_number_tags(&mut self) {
-        self.session.agree_number_tags(crate::numcolor::wanted(&crate::settings::number_colors()));
+        self.session.agree_number_tags(crate::numcolor::wanted(&crate::settings::number_colors()) || fork_hooks::number_tags_wanted());
     }
 
     /// The DPS Meter: the server told what the Extended row says (off, the
@@ -16439,3 +16439,4 @@ mod stacked_pad_tests {
 #[cfg(test)]
 #[path = "offline_hud_test.rs"]
 mod offline_hud_test;
+#[cfg(all(test, not(target_arch = "wasm32")))] #[path = "fork_ext/number_tags_tests.rs"] mod number_tags_tests;

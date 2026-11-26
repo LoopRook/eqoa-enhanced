@@ -866,16 +866,43 @@ pub(crate) fn observe_text(text: &str, color: [f32; 4]) {
 pub(crate) fn observe_hit(attacker: u32, defender: u32, amount: i32, color: Option<[u8; 3]>) {
     observe_hit_tagged(attacker, defender, amount, color, None);
 }
-/// `observe_hit` with the server's tag byte of the figure (`net::session::NumberTag`) as `(pet, merc)`: a server
-/// that tags the numbers tells a pet's or a merc's hit with the player as its attacker, so the ids alone cannot say
-/// who made it (`combat.hit`'s `by_player` and `from_merc`).
+/// `observe_hit` with the server's tag byte of the figure as `(pet, merc)` and no kind: see [`observe_hit_numbered`].
 pub(crate) fn observe_hit_tagged(attacker: u32, defender: u32, amount: i32, color: Option<[u8; 3]>, tag: Option<(bool, bool)>) {
+    observe_hit_numbered(attacker, defender, amount, color, tag.map(|(pet, merc)| net::session::NumberTag { kind: 0, pet, merc }));
+}
+
+/// `combat.hit`'s `hit_kind` from a tag's kind bits (`net::session::NumberTag::kind`); nil for a kind not known (0, 8 up).
+pub(crate) fn hit_kind(kind: u8) -> Option<&'static str> {
+    Some(match kind {
+        1 => "swing",
+        2 => "spell",
+        3 => "dot",
+        4 => "shield",
+        5 => "proc",
+        6 => "heal",
+        7 => "hot",
+        _ => return None,
+    })
+}
+
+/// `observe_hit` with the server's tag of the figure (`net::session::NumberTag`): a server that tags the numbers
+/// tells a pet's or a merc's hit with the player as its attacker, so the ids alone cannot say who made it
+/// (`combat.hit`'s `by_player` and `from_merc`). `attribution` says how they were found: `"tag"` (the tag was read),
+/// `"id"` (no tag, but the attacker is not the player's id, so it follows from the ids that the player did not make
+/// it) or `"unknown"` (no tag and the attacker is the player's id: a pet's or merc's hit credited to the player cannot
+/// be told from the player's own, so `by_player` and `from_merc` are nil, never a guess).
+pub(crate) fn observe_hit_numbered(attacker: u32, defender: u32, amount: i32, color: Option<[u8; 3]>, tag: Option<net::session::NumberTag>) {
     defer(256, move |c| {
         let me = c.view.player["id"].as_u64();
         let pet = c.view.player["pet_id"].as_u64();
-        let (tag_pet, tag_merc) = tag.unwrap_or((false, false));
         let outgoing = me == Some(attacker as u64);
-        c.emit("combat.hit",json!({"attacker_id":attacker,"defender_id":defender,"amount":amount.unsigned_abs(),"kind":if amount>0 {"heal"}else{"damage"},"color":color,"outgoing":outgoing,"incoming":me==Some(defender as u64),"from_pet":pet==Some(attacker as u64),"to_pet":pet==Some(defender as u64),"by_player":outgoing&&!tag_pet&&!tag_merc,"from_merc":tag_merc}));
+        let (attribution, by_player, from_merc) = match tag {
+            Some(t) => ("tag", json!(outgoing && !t.pet && !t.merc), json!(t.merc)),
+            None if !outgoing => ("id", json!(false), json!(false)),
+            None => ("unknown", Json::Null, Json::Null),
+        };
+        let hit_kind = tag.and_then(|t| hit_kind(t.kind));
+        c.emit("combat.hit",json!({"attacker_id":attacker,"defender_id":defender,"amount":amount.unsigned_abs(),"kind":if amount>0 {"heal"}else{"damage"},"color":color,"outgoing":outgoing,"incoming":me==Some(defender as u64),"from_pet":pet==Some(attacker as u64),"to_pet":pet==Some(defender as u64),"by_player":by_player,"from_merc":from_merc,"attribution":attribution,"hit_kind":hit_kind}));
     });
 }
 
