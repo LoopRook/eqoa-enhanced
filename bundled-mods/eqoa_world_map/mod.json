@@ -29,6 +29,7 @@
     "eqoa.fonts.load",
     "eqoa.fonts.release",
     "eqoa.hud.frame",
+    "eqoa.hud.hide",
     "eqoa.options.button",
     "eqoa.settings.save",
     "eqoa.input.claim",

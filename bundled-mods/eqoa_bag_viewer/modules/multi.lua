@@ -324,7 +324,7 @@ function X.build_menu(fx, fy)
         row("Mark as junk", to_mark > 0, #usable == 0 and "all selected items are worn" or "all are already junk",
             function() mark_junk(true) end, {ask = mark_ask, ask_title = "Mark these items as junk?",
                 ask_yes = "Yes, mark them as junk", ask_q = "mark them all as junk?"})
-        row("Unmark", marked > 0, "none is marked as junk", function() mark_junk(false) end)
+        row("Unmark junk", marked > 0, "none is marked as junk", function() mark_junk(false) end)
         if H then
             local to_bank = 0
             for _, it in ipairs(usable) do if not H.is_banked(it) then to_bank = to_bank + 1 end end

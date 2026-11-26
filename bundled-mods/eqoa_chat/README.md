@@ -40,3 +40,5 @@ It uses `eqoa.windows.takeover("chat_entry")`, `eqoa.actions.chat_line`, `eqoa.a
 `eqoa.actions.set_channel` and `eqoa.actions.open_link`; Mods & Addons labels it as able to act on its own for those.
 Other mods' warnings are not collected here: the mod API has no way to read them yet. While the line is open your character keeps
 running (autorun and follow too), as in the game's own chat box.
+
+Long lines wrap at the window's inner width on word boundaries (a word longer than a row breaks inside the word), on every tab; each row keeps the message's colour, and an item link split across two rows opens from either part. The wheel scrolls a row at a time. Resizing the window wraps again. Only the messages the shown rows come from are measured.

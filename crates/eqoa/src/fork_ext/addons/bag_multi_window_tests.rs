@@ -68,7 +68,7 @@ fn bag_multi_select_with_real_clicks_body() {
     bv.right_click(6);
     assert_eq!(bv.menu_title().as_deref(), Some("6 items selected"));
     let labels = bv.menu_labels();
-    for want in ["Mark as junk", "Unmark", "Mark to bank", "Sell (6)", "Put in bank (6)", "Destroy..."] {
+    for want in ["Mark as junk", "Unmark junk", "Mark to bank", "Sell (6)", "Put in bank (6)", "Destroy..."] {
         assert!(labels.iter().any(|l| l == want), "{want} in {labels:?}");
     }
     let (_, _, sell_on, sell_why, _) = bv.menu_row("Sell").unwrap();

@@ -20,6 +20,11 @@ local TITLE_H, TOOL_H, FOOT_H, GRIP = BASE_TITLE_H, BASE_TOOL_H, BASE_FOOT_H, BA
 local F, FM, UI_K = 1, 1, 1 -- text/layout factor, marker factor, the client's UI scale
 local NOTE_MAX, PINS_MAX = 40, 60
 local ZOOM_STEP = 1.25
+-- The closest zoom, in world units a pixel. The client makes the ground picture at 1 unit a pixel at the finest (the game's
+-- 512-texel detail tiles are 3.9 units a texel, so 3.9 pixels a texel there); beyond that this mod asks for the picture at
+-- 1 and draws it larger, up to MIN_SCALE = 0.25: 4 times larger, 15.6 pixels a texel, about 200 units across a 760-pixel
+-- window (a street in a city). Past that the tiles are only blocks.
+local MIN_SCALE = 0.25
 local TILE_SCALE = 7.8 -- the game's map draws its detail tiles at or below this many world units a pixel
 local CELL = 2000
 local FONT_PATH = "package_resources/SpaceMono-Regular.ttf"
@@ -106,7 +111,7 @@ eqoa.settings.on_load(function(saved)
         if state.win.w then state.win.w = clamp(state.win.w, BASE_MIN_W, MAX_AREA + 2) end
         if state.win.h then state.win.h = clamp(state.win.h, BASE_MIN_H, MAX_AREA + 80) end
     end
-    if type(saved.scale) == "number" and saved.scale == saved.scale and saved.scale >= 1 and saved.scale < 1e5 then state.last_scale = saved.scale end
+    if type(saved.scale) == "number" and saved.scale == saved.scale and saved.scale >= MIN_SCALE and saved.scale < 1e5 then state.last_scale = saved.scale end
     if type(saved.pins) == "table" then
         state.pins = {}
         local worlds = 0
@@ -196,6 +201,8 @@ local function release_keys()
 end
 
 local function finish()
+    -- the minimap (the round one steps aside for any hide claim) comes back with the window's end
+    if state.minimap_claim then eqoa.hud.show(state.minimap_claim); state.minimap_claim = nil end
     for _, token in ipairs(state.tokens) do eqoa.events.off(token) end
     state.tokens = {}
     release_keys()
@@ -325,6 +332,8 @@ local function show(session)
     state.session = session
     if not fresh then return end
     state.view = nil
+    -- the minimap goes while this window is up (its corner would draw over the map)
+    if not state.minimap_claim then state.minimap_claim = eqoa.hud.hide("minimap") end
     state.held, state.menu, state.note, state.search, state.focus = {}, nil, nil, nil, nil
     state.markers_stale = true
     state.following = true
@@ -389,9 +398,9 @@ end
 
 local function fit_limits(t, area)
     local b = t and t.bounds
-    if not b then return 1, 400 end
+    if not b then return MIN_SCALE, 400 end
     local fit = math.max((b.x_max - b.x_min) / area.w, (b.z_max - b.z_min) / area.h) * 1.1
-    return 1, math.max(fit, 2)
+    return MIN_SCALE, math.max(fit, 2)
 end
 
 -- the middle kept inside the world, as the game's map keeps it
@@ -682,7 +691,14 @@ function draw(e)
     keep_in(t)
     if t then
         -- the picture's middle is the view's middle shifted by the rounding of its size
-        t.set_view({ center = { x = v.x + (pw - area.w) / 2 * v.scale, z = v.z + (ph - area.h) / 2 * v.scale }, scale = v.scale })
+        if v.scale >= 1 then
+            t.set_view({ center = { x = v.x + (pw - area.w) / 2 * v.scale, z = v.z + (ph - area.h) / 2 * v.scale }, scale = v.scale })
+            state.mag = 1
+        else
+            -- closer than the client's finest picture: the picture at 1 a pixel, centred on the view, drawn 1/scale larger
+            t.set_view({ center = { x = v.x, z = v.z }, scale = 1 })
+            state.mag = 1 / v.scale
+        end
     end
     refresh_markers(map.world_id)
     if state.focus or state.note then set_capture(true) else set_capture(false) end
@@ -799,8 +815,17 @@ function draw(e)
     dl:PushClipRect(V(area.x, area.y), V(area.x + area.w, area.y + area.h), true)
     if info then
         local uv = info.uv
+        if (state.mag or 1) > 1 then
+            -- the middle of the picture, as much of it as the area shows at this magnification
+            local fu, fv = area.w / (state.mag * pw), area.h / (state.mag * ph)
+            local cu, cv = (uv[1] + uv[3]) / 2, (uv[2] + uv[4]) / 2
+            local hu, hv = (uv[3] - uv[1]) * fu / 2, (uv[4] - uv[2]) * fv / 2
+            dl:AddImage(info.texture, V(area.x, area.y), V(area.x + area.w, area.y + area.h),
+                V(cu - hu, cv - hv), V(cu + hu, cv + hv), c.white)
+        else
         dl:AddImage(info.texture, V(area.x, area.y), V(area.x + area.w, area.y + area.h),
             V(uv[1], uv[2]), V(uv[1] + (uv[3] - uv[1]) * area.w / pw, uv[2] + (uv[4] - uv[2]) * area.h / ph), c.white)
+        end
     elseif state.terrain_error then
         text(area.x + 10 * F, area.y + 10 * F, "The map picture is not available: " .. state.terrain_error, c.muted, area.w - 20 * F)
     elseif t and t.error then

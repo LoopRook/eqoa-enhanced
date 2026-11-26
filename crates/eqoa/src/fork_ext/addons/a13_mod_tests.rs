@@ -738,3 +738,99 @@ fn a13_world_map_size_settings_are_saved_whole_and_come_back() {
     let bad = rig([1024.0, 768.0], Some(json!({"table": [["version", 1], ["text_size", 99], ["marker_size", "x"]]})));
     assert_eq!((bad.lua_f64("world_map.opts.text"), bad.lua_f64("world_map.opts.marker")), (2.0, 2.0));
 }
+
+/// Owner 2026-11-25: "can't zoom in much". The client's ground picture is at 1 world unit a pixel at the finest, so the
+/// mod draws that picture larger: down to 0.25 units a pixel (4 times), the point under the pointer staying under it.
+/// Negative control: the old limit was 1, so the scale stopped there and these assertions fail.
+#[test]
+fn owner1125b_world_map_zooms_in_to_a_quarter_unit_a_pixel_about_the_pointer() {
+    fresh();
+    let mut rig = rig([1024.0, 768.0], None);
+    rig.open();
+    let mid = rig.middle();
+    rig.wheel(mid, 40, true);
+    let s = rig.lua_f64("world_map.view.scale");
+    assert!((s - 0.25).abs() < 1e-9, "the closest zoom is a quarter unit a pixel, not {s}");
+    assert!((rig.lua_f64("world_map.mag") - 4.0).abs() < 1e-9, "the picture is drawn 4 times larger");
+    // a turn in at the closest does not go past it
+    rig.wheel(mid, 3, true);
+    assert!((rig.lua_f64("world_map.view.scale") - 0.25).abs() < 1e-9);
+    // the point under an off-centre pointer stays under it while zooming out from there
+    let at = (mid.0 + 120.0, mid.1 - 70.0);
+    let under = |rig: &Rig| {
+        (
+            rig.lua_f64(&format!("world_map.view.x + ({} - world_map.area.x - world_map.area.w / 2) * world_map.view.scale", at.0)),
+            rig.lua_f64(&format!("world_map.view.z + ({} - world_map.area.y - world_map.area.h / 2) * world_map.view.scale", at.1)),
+        )
+    };
+    let before = under(&rig);
+    rig.wheel(at, -2, true);
+    let after = under(&rig);
+    assert!(rig.lua_f64("world_map.view.scale") > 0.25 + 1e-6, "it zoomed out");
+    assert!((before.0 - after.0).abs() < 1e-6 && (before.1 - after.1).abs() < 1e-6, "{before:?} {after:?}");
+}
+
+/// Owner 2026-11-25: the round minimap (picture, dots, arrow) still drew over the World Map window's corner while its frame
+/// was gone. The World Map holds a hide claim on the minimap while its window is up and the round minimap steps aside for it.
+/// Negative control: the old mods leave `suppressed` false with the window up.
+#[test]
+fn owner1125b_round_minimap_goes_while_the_world_map_window_is_up_and_returns_when_it_closes() {
+    fresh();
+    let mut map = rig([1024.0, 768.0], None);
+    let round_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods/eqoa_round_minimap").canonicalize().unwrap();
+    let rm: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(round_root.join("mod.json")).unwrap()).unwrap();
+    let round = DiscoveredAddon {
+        id: "eqoa_round_minimap".into(),
+        name: "eqoa_round_minimap".into(),
+        entry: round_root.join("main.lua"),
+        script_root: round_root.clone(),
+        package_root: round_root.clone(),
+        module_dirs: vec![round_root.clone()],
+        resource_dirs: vec![round_root.clone()],
+        api: Some("eqoa/1".into()),
+        entry_mode: EntryMode::Once,
+        capabilities_declared: true,
+        requested_capabilities: rm["capabilities"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()).collect(),
+        extensions: Extensions::default(),
+        initially_enabled: true,
+        mods_root: None,
+    };
+    let host = Host::for_addon(&round).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    // both mods see one set of hide claims, as the manager gives them (`hidden_by` reads it)
+    let health = Rc::new(RefCell::new(super::health::HealthBarClaimsRegistry::new()));
+    let claims = Rc::new(RefCell::new(super::visibility::HudClaimsRegistry::new()));
+    let mut fixture = crate::play::Play::bundled_ui_fixture();
+    let snapshot = fixture.forge_snapshot(None);
+    let mut leases = Vec::new();
+    for h in [&map.host, &host] {
+        h.snapshot.set(snapshot);
+        let lease = super::visibility::VisibilityLease::with_hud_claims(health.clone(), claims.clone()).unwrap();
+        lease.update(snapshot.health, true);
+        super::visibility::install_managed_health_adapter(h, &lease).unwrap();
+        leases.push(lease);
+    }
+    host.run_addon(&round).unwrap();
+    let mut frame = |map: &mut Rig, n: usize| {
+        for _ in 0..n {
+            CORE.with(|c| c.borrow_mut().frame += 1);
+            map.context.frame();
+            bridge.invoke(|| { native_events::dispatch(&host)?; native_events::render(&host) }).unwrap();
+            let _ = map.context.render_legacy();
+            for l in &leases { l.update(snapshot.health, true); }
+        }
+    };
+    let suppressed = |host: &Host| -> String { host.lua.load("return tostring(round_minimap.suppressed)").eval().unwrap() };
+    frame(&mut map, 3);
+    assert_eq!(suppressed(&host), "false", "control: no map window, the minimap is not set aside; {:?}", host.drain_logs());
+    map.open();
+    frame(&mut map, 3);
+    assert_eq!(suppressed(&host), "true", "the World Map window is up: the whole minimap steps aside");
+    // closed: it comes back
+    let id = ws::get(map.vm, "map").unwrap().id;
+    ws::end_dialog_session(&id, "closed");
+    native_core::flush_deferred();
+    map.frames(3);
+    frame(&mut map, 3);
+    assert_eq!(suppressed(&host), "false", "the window closed: the minimap returns");
+}

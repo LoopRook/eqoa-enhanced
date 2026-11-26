@@ -261,7 +261,7 @@ fn marking_gear_usables_quick_slotted_and_no_trade_items_as_junk_asks_once_and_m
         assert!(boolean(&lua, &format!("B.is_junk(INV_ITEMS[{idx}])")), "{what}: Yes marks it");
     }
     // unmarking never asks
-    run(&lua, "B.build_menu(INV_ITEMS[2]); for _, r in ipairs(B.menu.rows) do if r.label == 'Unmark' then ROW = r end end; B.trigger_menu(ROW)");
+    run(&lua, "B.build_menu(INV_ITEMS[2]); for _, r in ipairs(B.menu.rows) do if r.label == 'Unmark junk' then ROW = r end end; B.trigger_menu(ROW)");
     assert!(!boolean(&lua, "B.is_junk(INV_ITEMS[2])"));
 
     // negative control: without the question the sword is marked by the first click

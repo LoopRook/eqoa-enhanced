@@ -1262,7 +1262,7 @@ function M.build_menu(it, fx, fy)
         end, true)
     end
     if M.junk_ids[tostring(it.id)] then
-        add("Unmark", true, nil, function() M.set_junk(it, false) end, true)
+        add("Unmark junk", true, nil, function() M.set_junk(it, false) end, true)
     else
         add("Mark as junk", not it.equipped,
             it.equipped and "cannot mark an equipped item as junk" or nil,
