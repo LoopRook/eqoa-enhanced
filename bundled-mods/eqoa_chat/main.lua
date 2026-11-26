@@ -65,6 +65,41 @@ local function width(s)
     return w
 end
 
+-- How a message wraps in `limit` window pixels: its rows as {first byte, last byte}, words kept whole, a word longer than
+-- a row broken inside it, the spaces a row ends at dropped. A message that fits is one row.
+local function wrap_rows(body, limit)
+    local n = #body
+    if n == 0 or width(body) <= limit then return { { 1, n } } end
+    local rows = {}
+    local start = body:find("%S") or 1
+    while start and start <= n do
+        local last, i = nil, start
+        while true do
+            local ws, we = body:find("%S+", i)
+            if not ws then last = last or n; break end
+            if width(body:sub(start, we)) <= limit then
+                last, i = we, we + 1
+            elseif last then
+                break
+            else
+                -- one word wider than a row: as many characters as fit (at least one)
+                local seg = body:sub(start, we)
+                local lo, hi = 1, chars(seg)
+                while lo < hi do
+                    local mid = math.ceil((lo + hi) / 2)
+                    if width(seg:sub(1, byte_at(seg, mid + 1) - 1)) <= limit then lo = mid else hi = mid - 1 end
+                end
+                last = start + byte_at(seg, lo + 1) - 2
+                break
+            end
+        end
+        rows[#rows + 1] = { start, last }
+        start = body:find("%S", last + 1)
+    end
+    if #rows == 0 then rows[1] = { 1, n } end
+    return rows
+end
+
 -- The chat styles a tab can show, in the order its menu lists them.
 local STYLE_ORDER = { "say", "group", "guild", "shouts", "tells", "combat", "loot", "rolls", "experience", "system" }
 local NAME_MOST = 12
@@ -745,15 +780,33 @@ eqoa.events.on("render", function()
     fill(W - 6, H - 6, 4, 1, c.muted)
     fill(W - 4, H - 9, 2, 1, c.muted)
 
-    -- the lines, newest at the bottom; the wheel scrolls back
-    local most = math.max(0, #list - ROWS)
-    state.scroll = math.min(state.scroll, most)
-    for row = 1, ROWS do
-        local index = #list - state.scroll - (ROWS - row)
+    -- the lines, newest at the bottom; the wheel scrolls back, a row at a time. A message longer than the window wraps at
+    -- the window's inner width (words kept whole; a word longer than the line breaks inside it). Its rows are worked out
+    -- once for a width and kept on the message (`wrap_rows`), and only the messages the visible rows (and the scrolled-back
+    -- ones) come from are looked at: never the whole history in a frame.
+    local limit_px = (W - 2 * PAD) * k
+    local wkey = measure_key .. "|" .. limit_px
+    local need = state.scroll + ROWS
+    local picked, found = {}, 0
+    local index = #list
+    while index >= 1 and found < need do
         local l = list[index]
-        if l then
+        if l.wkey ~= wkey then l.wrows, l.wkey = wrap_rows(l.text, limit_px), wkey end
+        for r = #l.wrows, 1, -1 do
+            found = found + 1
+            picked[found] = { l = l, b0 = l.wrows[r][1], b1 = l.wrows[r][2] }
+            if found >= need then break end
+        end
+        index = index - 1
+    end
+    -- the oldest row is at the top at the most: that many rows back, and no more
+    if found < need then state.scroll = math.max(0, found - ROWS) end
+    state.drawn = {}
+    for row = 1, ROWS do
+        local pk = picked[state.scroll + (ROWS - row) + 1]
+        if pk then
+            local l = pk.l
             local y = HEAD + 18 + (row - 1) * LINE
-            local body = l.text
             local color = l.kind == "notice" and c.warn or c.text
             if l.color and l.color.r then
                 if l.packed_for ~= packed then
@@ -761,17 +814,23 @@ eqoa.events.on("render", function()
                 end
                 color = l.packed
             end
-            text(PAD, y, body, color, W - 2 * PAD)
+            local body = l.text
+            local piece = body:sub(pk.b0, pk.b1)
+            text(PAD, y, piece, color, W - 2 * PAD)
+            state.drawn[#state.drawn + 1] = { text = piece, width = width(piece) / k, y = y, color = l.color, msg = l.seq }
             for _, link in ipairs(l.links or {}) do
                 local from = byte_at(body, link.start)
-                local upto = byte_at(body, link.start + link.len)
-                local before = body:sub(1, from - 1)
-                local name = body:sub(from, upto - 1)
-                local lx = PAD + width(before) / k
-                local lw = width(name) / k
-                if lx + lw < W - PAD then
-                    text(lx, y, name, c.link)
-                    state.hits[#state.hits + 1] = hit(lx, y, lw, LINE, function() open_link(link) end)
+                local upto = byte_at(body, link.start + link.len) - 1
+                -- the part of the link on this row (a link split across rows is a link on each)
+                local s0, e0 = math.max(from, pk.b0), math.min(upto, pk.b1)
+                if s0 <= e0 then
+                    local lx = PAD + width(body:sub(pk.b0, s0 - 1)) / k
+                    local name = body:sub(s0, e0)
+                    local lw = width(name) / k
+                    if lx + lw < W - PAD + 0.5 then
+                        text(lx, y, name, c.link)
+                        state.hits[#state.hits + 1] = tag(hit(lx, y, lw, LINE, function() open_link(link) end), "link")
+                    end
                 end
             end
         end
@@ -856,6 +915,7 @@ end)
 
 -- what a test reads: the tabs, what the open one shows, and the hit areas by name
 chat_probe = {
+    rows = function() return state.drawn end,
     state = state,
     visible = function() return #visible_lines(active_tab()) end,
     lines = function()
