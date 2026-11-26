@@ -123,6 +123,7 @@ fn combat_hit_says_who_made_it_or_says_it_cannot() {
     p.damage_indication(&msg(foe, -12, me, None), 1); // a hit taken: the server tags none
     p.damage_indication(&msg(me, -5, foe, Some(0x05)), 1); // its own proc
     p.damage_indication(&msg(me, -6, foe, Some(0x09)), 1); // a kind a later server sends
+    p.damage_indication(&msg(me, -7, foe, Some(0xC1)), 1); // pet and merc bits both set: read as the mercenary's
     // the same player's id with no tag: a server that sends none, or none agreed yet
     p.session.number_tags_offer = false;
     p.damage_indication(&msg(me, -40, foe, None), 1);
@@ -140,7 +141,7 @@ fn combat_hit_says_who_made_it_or_says_it_cannot() {
                 assert(h[k] == nil, string.format('hit %d %s: want nil got %s', i, k, tostring(h[k])))
             end
         end
-        assert(#hits == 11, #hits)
+        assert(#hits == 12, #hits)
         chk(1, {attribution = 'tag', by_player = true,  from_merc = false, hit_kind = 'swing',  kind = 'damage', outgoing = true})
         chk(2, {attribution = 'tag', by_player = false, from_merc = false, hit_kind = 'swing',  outgoing = true})
         chk(3, {attribution = 'tag', by_player = false, from_merc = true,  hit_kind = 'spell',  outgoing = true})
@@ -151,8 +152,9 @@ fn combat_hit_says_who_made_it_or_says_it_cannot() {
         chk(8, {attribution = 'tag', by_player = true,  hit_kind = 'proc'})
         chk(9, {attribution = 'tag', by_player = true}, {'hit_kind'})
         -- no tag from the player's id: nil, never a guess, and `outgoing` keeps its 0.7.0 meaning
-        chk(10, {attribution = 'unknown', outgoing = true, kind = 'damage'}, {'by_player', 'from_merc', 'hit_kind'})
-        chk(11, {attribution = 'unknown', outgoing = true, kind = 'heal'}, {'by_player', 'from_merc', 'hit_kind'})
+        chk(10, {attribution = 'tag', by_player = false, from_merc = true, hit_kind = 'swing'})
+        chk(11, {attribution = 'unknown', outgoing = true, kind = 'damage'}, {'by_player', 'from_merc', 'hit_kind'})
+        chk(12, {attribution = 'unknown', outgoing = true, kind = 'heal'}, {'by_player', 'from_merc', 'hit_kind'})
         "#,
     )
     .unwrap();

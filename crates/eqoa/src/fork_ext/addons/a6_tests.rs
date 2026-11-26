@@ -1142,6 +1142,51 @@ fn a6_chat_combat_tab_does_not_say_you_when_it_cannot_tell() {
     );
 }
 
+/// 2026-11-26 owner report (eqoaclassic, a mercenary and no pet of his own): the Combat tab wrote "Your pet hits" for his
+/// mercenary's pets, and wrote the heals on those pets as his. A pet-tagged hit is "Your pet" only while the player has
+/// a pet; with none out it is "Your side's pet" (a mercenary's pets are tagged the same way). A tag with both the pet and
+/// the merc bits reads as the mercenary's; a heal the server sends without a tag is "Your side". Negative control: the
+/// old mod writes "Your pet hits Gnoll for 9." for the first line (git stash of `bundled-mods/eqoa_chat/main.lua`).
+#[test]
+fn a6_chat_combat_tab_says_your_pet_only_while_the_player_has_one() {
+    let (host, bridge, mut context, _vm) = loaded();
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.player = json!({"id": 256, "name": "Me", "level": 20, "pet_id": null});
+        c.view.entities = vec![
+            json!({"ref": {"$ref": "entity", "key": "8193", "generation": 0, "incarnation": 1}, "id": 8193, "name": "Gnoll", "level": 22, "kind": "npc", "is_creature": true,
+                   "position": {"x": 1.0, "y": 0.0, "z": 1.0}, "actor_position": {"x": 1.0, "y": 0.0, "z": 1.0}}),
+            json!({"ref": {"$ref": "entity", "key": "7001", "generation": 0, "incarnation": 1}, "id": 7001, "name": "Wolf", "level": 20, "kind": "npc", "is_creature": true,
+                   "position": {"x": 1.0, "y": 0.0, "z": 1.0}, "actor_position": {"x": 1.0, "y": 0.0, "z": 1.0}}),
+        ];
+    });
+    host.execute("chat_probe.state.w = 640").unwrap();
+    tick_n(&host, &bridge, &mut context, 3);
+    let (x, y): (f64, f64) = host.lua.load("local h = chat_probe.hit('tab:combat'); return h.x + h.w / 2, h.y + h.h / 2").eval().unwrap();
+    super::pointer_api::position([x as f32, y as f32], true, (1024, 768));
+    CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": x, "y": y, "inside_window": true, "button": "left"})));
+    tick_n(&host, &bridge, &mut context, 2);
+    native_core::observe_hit_tagged(256, 8193, -9, None, Some((true, false))); // pet bit, no pet of the player's out
+    native_core::observe_hit_tagged(256, 8193, -11, None, Some((true, true))); // pet and merc bits: the mercenary's
+    native_core::observe_hit(256, 7001, 20, None); // a heal on the mercenary's pet, sent with no tag
+    native_core::flush_deferred();
+    tick_n(&host, &bridge, &mut context, 2);
+    CORE.with(|c| c.borrow_mut().view.player = json!({"id": 256, "name": "Me", "level": 20, "pet_id": 9000}));
+    native_core::observe_hit_tagged(256, 8193, -13, None, Some((true, false))); // the same bit with a pet of the player's out
+    native_core::flush_deferred();
+    tick_n(&host, &bridge, &mut context, 2);
+    let lines: Vec<String> = host.lua.load("return chat_probe.lines()").eval().unwrap();
+    assert_eq!(
+        lines,
+        vec![
+            "Your side's pet hits Gnoll for 9.",
+            "Your mercenary hits Gnoll for 11.",
+            "Your side heals Wolf for 20.",
+            "Your pet hits Gnoll for 13.",
+        ],
+    );
+}
+
 #[test]
 fn a6_chat_mod_tabs_are_all_plus_one_per_style_or_the_players_own() {
     fresh();
