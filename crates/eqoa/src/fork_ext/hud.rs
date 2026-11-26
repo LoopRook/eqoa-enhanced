@@ -84,6 +84,49 @@ pub(crate) fn stat_window_visible() -> bool {
     published(|v| !v.stat_window)
 }
 
+/// What the player asked of the Stat Window with its key, `/stats` or `/stats on|off`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum StatAsk {
+    Toggle,
+    Show,
+    Hide,
+}
+
+/// The key or `/stats` alone: the window turned (`Play::toggle_stat_window`).
+pub(crate) fn stat_window_toggle_held() -> bool {
+    stat_window_held(StatAsk::Toggle)
+}
+
+/// `/stats on` or `/stats off`, and a click on the window's X (`Play::set_stat_window`).
+pub(crate) fn stat_window_set_held(on: bool) -> bool {
+    stat_window_held(if on { StatAsk::Show } else { StatAsk::Hide })
+}
+
+/// The player asked for the Stat Window (F4 or the key it is rebound to, `/stats`): while a mod holds the window back
+/// (`stat_window_visible` is false) the game does nothing, and the ask goes to the mod that holds it as
+/// `hud.piece_requested` (`piece = "stat_window"`), which is how a mod that replaces the window answers the game's own
+/// key. True when a mod holds it (the caller stops); false leaves the game's window as it always was.
+fn stat_window_held(ask: StatAsk) -> bool {
+    if stat_window_visible() {
+        return false;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::fork_ext::addons::window_sessions::queue_event(
+        "hud.piece_requested",
+        serde_json::json!({
+            "piece": "stat_window",
+            "action": match ask {
+                StatAsk::Toggle => "toggle",
+                StatAsk::Show => "show",
+                StatAsk::Hide => "hide",
+            },
+        }),
+    );
+    #[cfg(target_arch = "wasm32")]
+    let _ = ask;
+    true
+}
+
 pub(crate) fn compass_visible(_s: &HudState) -> bool {
     published(|v| !v.compass)
 }

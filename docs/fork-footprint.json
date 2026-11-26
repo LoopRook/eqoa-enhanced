@@ -153,9 +153,9 @@
       "reason": "Existing restored option entries plus one adapter reference per fork option hook. Trimmed to measured upstream diff in the b5e6310 review follow-up. Owner-approved defaults export adds eight regression setup/assertion lines for the 64/650 defaults and retail-minimum controls. Sync 2026-11-07: upstream's Raid List row sits in Map & Quests (UI already holds six, PAGE_MOST stays 6); its walk-test lines move with it (+5/-5). Sync 2026-11-08: upstream's Textures page goes after Map & Quests and Mods & Addons (index 9, so the web build's split_at keeps the fork pages); its row-doc, array lengths, split_at and walk-test page numbers move with it (+5/-5). Refactor/fork-options-rows: the fork's rows, category, change/value_text arms and walk-test steps moved into fork-owned fork_ext/options.rs, leaving only hook calls and page references here (+41/-41). Sync 2026-11-09: Upstream restored IDs 41?45 overlap existing Mana Bars 42. Route map parts and masters through owned rows (existing IDs retained; new 1054/1055), retain six-row pages and put Textures last on web. Stock map/UI walk assertions move to the owned fork walk, retaining Lighting/Texture Folder tests in place. +1 for the new owned master-category reference; deletions remove the conflicting stock rows/arms and relocated assertions. New upstream unique-ID test uses the combined registry, and its retail-boundary fixture explicitly selects 24/100 rather than Enhanced defaults. Round 2.5 review fix (MiniMax H2/M1): upstream walk and table tests restored verbatim; +3/-2 net for the restored text and one allow(dead_code) on the unused stock row table. Sync 2026-11-15: upstream's Extended became five groups of categories (petitions 1631/1634/2084); the fork's Enhanced page joins the UI group (fork_ext/options.rs) and upstream's group/category/page lookups read fork_options::pages(); the category rows/legend hooks went with upstream's one-menu code. Tightened to measured. Sync 2026-11-18: the existing runtime page lookup in page_note also supplies the two new server-restriction membership checks, keeping notices on the active category and avoiding a stock-table index on Enhanced. Measured +3/-2. Round 7 Part E H3 (2026-11-20, lead-approved, pending the owner's read): two plain hook calls, bindpage::session_begin() in open() and bindpage::session_cancel() in the cancel arm, so a cancelled Options session restores mod keys together with the game's (+2/-0)."
     },
     "crates/eqoa/src/statplay.rs": {
-      "added": 1,
+      "added": 2,
       "deleted": 0,
-      "reason": "2026-11-25: one early return in set_stat_window while a mod hides the Stat Window (`fork_hud::stat_window_visible()`), so F4 and /stats do nothing then and the player's own setting is not flipped unseen."
+      "reason": "2026-11-25: one early return in set_stat_window while a mod hides the Stat Window, so F4 and /stats do nothing then and the player's own setting is not flipped unseen. 2026-11-26 (owner-1126c): that early return now asks `fork_hud::stat_window_set_held(on)`, and one more line at the top of toggle_stat_window asks `fork_hud::stat_window_toggle_held()`; each, while a mod holds the window, does nothing in the game and tells the holder through the `hud.piece_requested` event (fork_ext/hud.rs), so the game's own Stat Window key and /stats open and close the mod that replaces the window (the Stats Box). No upstream code is changed or removed: +1 line beyond the existing hook."
     },
     "crates/eqoa/src/play.rs": {
       "added": 103,
@@ -386,8 +386,8 @@
     {
       "path": "crates/eqoa/src/statplay.rs",
       "name": "stat window toggle held",
-      "pattern": "\\bfork_hud::stat_window_visible\\s*\\(",
-      "count": 1
+      "pattern": "\\bfork_hud::stat_window_(toggle|set)_held\\s*\\(",
+      "count": 2
     },
     {
       "path": "crates/eqoa/src/play.rs",

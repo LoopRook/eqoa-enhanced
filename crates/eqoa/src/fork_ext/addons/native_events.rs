@@ -170,6 +170,7 @@ const EVENTS: &[&str] = &[
     "auction.changed",
     "raid.changed",
     "factions.changed",
+    "hud.piece_requested",
 ];
 fn install_event_fields(lua: &mlua::Lua) {
     for (name, fields) in [
@@ -259,6 +260,7 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("auction.changed", "revision open"),
         ("raid.changed", "revision open"),
         ("factions.changed", "revision open"),
+        ("hud.piece_requested", "piece action"),
     ] {
         let payload = format!("eqoa.events.{name}.data");
         for field in fields.split_whitespace() {
@@ -298,7 +300,7 @@ fn event_round(name: &str) -> u8 {
         | "who.result" | "lfg.result" | "lfg.changed" | "trade.request" | "trade.changed" | "trade.accepted"
         | "trade.closed" | "duel.changed" | "blacksmith.changed" | "merc.changed" | "dye.changed"
         | "fishing.changed" | "craft.changed" | "mail.changed" | "auction.changed" | "raid.changed"
-        | "factions.changed" => 8,
+        | "factions.changed" | "hud.piece_requested" => 8,
         _ => 2,
     }
 }
@@ -568,6 +570,7 @@ fn local(name: &str, data: serde_json::Value) -> Event {
             name: name.into(),
             data: std::sync::Arc::new(data),
             bytes: 0,
+            only_vm: None,
             seq: c.seq,
             time: super::native_core::time_unborrowed(&c),
             tick: c.tick,
@@ -1061,6 +1064,11 @@ pub(crate) fn publish(event: &Event) {
                 if b.active
                     && (!matches!(event.name.as_str(), "guide.lost" | "windows.session" | "windows.key" | "confirm.closed")
                         || event.data["owner"].as_u64() == Some(b.vm))
+                    // an event made for one mod (the player's paste) goes to that mod and to no other
+                    && event.only_vm.is_none_or(|vm| vm == b.vm)
+                    // the player's key for a piece goes to every mod that holds the piece hidden, and to no other
+                    && (event.name != "hud.piece_requested"
+                        || event.data["piece"].as_str().is_some_and(|piece| super::visibility::vm_holds(b.vm, piece)))
                     // a click or wheel goes to the window in front under the pointer only (`pointer_api::covered`)
                     && super::pointer_api::delivers(&event.name, &event.data, event.frame, b.vm)
                 {

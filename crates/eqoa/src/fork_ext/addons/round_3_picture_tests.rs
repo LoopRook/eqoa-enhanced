@@ -352,6 +352,7 @@ fn bundled_stats_box_picture_comparison() {
     let assets_mod = test_assets(&mut ui_mod, &device, &queue);
 
     let tree = bundled_tree();
+    stat_window_is_held();
     let addon = discovery::discover(tree.path())
         .addons
         .into_iter()
@@ -722,6 +723,7 @@ fn round_3_all_four_mods_per_frame_performance_benchmark() {
     let vui = test_vui();
 
     let tree = bundled_tree();
+    stat_window_is_held();
     let discovered = discovery::discover(tree.path());
 
     let mod_ids = [
@@ -981,6 +983,15 @@ fn round_3_all_four_mods_per_frame_performance_benchmark() {
     }
 }
 
+/// A mod holds the game's Stat Window, as the Stats Box does in play (the claim is published to the game): the box draws.
+/// With nobody holding it the window reads as visible, which is the player's "Use the game's windows" to the box, and the
+/// box stands down.
+fn stat_window_is_held() {
+    let mut claims = visibility::HudClaimsRegistry::new();
+    claims.disable("stat_window", super::health::InstanceToken::next().unwrap(), "test");
+    visibility::publish_claims(&claims);
+}
+
 fn load_hud_mod(tree: &TestDir, id: &str) -> Host {
     let addon = discovery::discover(tree.path())
         .addons
@@ -1019,6 +1030,9 @@ fn fresh_hud_mod_load_defaults_and_live_stats_key_and_menu_wiring() {
         .execute("assert(eqoa.options.get('stats_box') == true)")
         .unwrap();
     assert!(options::toggle_by_item(2000));
+    // the mod's own key is an extra: unbound until the player binds it (the game's Stat Window key opens the box)
+    assert_eq!(crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle").as_deref().unwrap_or(""), "");
+    assert!(crate::fork_ext::bindpage::set_key("eqoa_stats_box", "toggle", "y"));
     let b = Key::Character("y".into());
     input::route_mod_key(&b, true, false, false, true, false);
     native_events::dispatch(&stats).unwrap();
@@ -1190,6 +1204,7 @@ fn assert_mod_click(id: &str, option: &str, frame_rect: [f32; 4], vertical: &str
         .unwrap()
         .build();
     let tree = bundled_tree();
+    stat_window_is_held();
     options::reset_in_memory();
     let host = load_hud_mod(&tree, id);
     if !summary {
@@ -1427,6 +1442,7 @@ fn hud_layout_uses_native_wide_tall_transforms_and_dynamic_pet_rect() {
 fn stats_box_updates_cached_rows_when_only_native_stat_bonuses_change() {
     options::reset_in_memory();
     let tree = bundled_tree();
+    stat_window_is_held();
     let host = load_hud_mod(&tree, "eqoa_stats_box");
     host.execute("eqoa.options.set('stats_box',true)").unwrap();
     hud_layout::set_hud_state(true, true, false, 93, 20);

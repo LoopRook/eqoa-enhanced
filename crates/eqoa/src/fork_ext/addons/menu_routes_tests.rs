@@ -142,3 +142,26 @@ fn start_menu_routes_by_the_games_command_not_by_a_word_that_other_entries_share
     assert!(ws::get(menu.vm, "start_menu").is_some(), "the sub-menu opened, the menu is still up");
     assert!(ws::get(social.vm, "guild").is_none(), "and the guild page did not");
 }
+
+/// Owner test 2026-11-26: "Support ... reads as broken". Request Help and Help Status open the game's own Support windows
+/// in one click and the menu closes (open-only: the mod never runs a report route); Send Report is the report editor, which
+/// no mod may open, so it opens nothing and the menu stays with its note.
+#[test]
+fn start_menu_support_entries_open_the_games_support_windows_in_one_click() {
+    let mut ctx = context();
+    for (entry, command) in [("Request Help", "0xb0b1000:0"), ("Help Status", "0xb0b1001:0")] {
+        fixture();
+        let menu = run("eqoa_start_menu");
+        open_menu(&menu, &mut ctx, entry, command);
+        assert!(ws::get(menu.vm, "start_menu").is_some(), "{entry}: the menu is up");
+        press(&menu.host, "return", "return");
+        assert_eq!(action_broker::queued_kinds_for_test(), vec!["open_window"], "{entry}: the game's Support window is asked for; logs {:?}", menu.host.drain_logs());
+        assert!(ws::get(menu.vm, "start_menu").is_none(), "{entry}: the menu closes so the window can open");
+    }
+    fixture();
+    let menu = run("eqoa_start_menu");
+    open_menu(&menu, &mut ctx, "Send Report", "0xb0b1002:0");
+    press(&menu.host, "return", "return");
+    assert!(action_broker::queued_kinds_for_test().is_empty(), "the report editor is never opened or run for a mod");
+    assert!(ws::get(menu.vm, "start_menu").is_some(), "the menu stays, with its note");
+}

@@ -606,6 +606,32 @@ fn nameplates_crowded_keeps_the_nearest_and_always_the_target() {
     assert!(v70 <= v60 + 400, "70 in range draw about what 60 do ({v70} vs {v60}): the cap holds");
 }
 
+/// Owner's log 2026-11-26: `name plates: a frame failed: ...: attempt to index local 'e' (a nil value)`. The cap's sort ran over
+/// the whole of a table kept from frame to frame, so after a busier frame it named candidates that were no longer there. The
+/// crowd shrinks from 80 to 65, still over the cap, and moves away: the 15 that left were the farthest of the first frame, and
+/// their old distances are nearer than the 65 left now.
+#[test]
+fn nameplates_a_crowd_that_shrinks_but_stays_over_the_cap_never_fails_a_frame() {
+    // `main` is the first 65's distance; the ones after them stand 20 away
+    let crowd = |n: u32, main: f32| -> Vec<Json> {
+        (0..n)
+            .map(|i| entity(9000 + i, &format!("Crowd {i}"), "npc", [((i % 14) as f32 - 6.5) * 0.5, 0.0, if i >= 65 { -20.0 } else { -main }]))
+            .collect()
+    };
+    let mut context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    world(crowd(80, 10.0));
+    host.run_addon(&addon()).unwrap();
+    let busy = frame(&host, &bridge, &mut context).len();
+    assert!(busy > 0, "plates are drawn");
+    world(crowd(65, 30.0));
+    let after = frame(&host, &bridge, &mut context).len();
+    let logs = host.drain_logs().unwrap();
+    assert!(logs.is_empty(), "no frame failed: {logs:?}");
+    assert!(after > 0, "and the smaller crowd's plates are drawn");
+}
+
 // ---- the plate layer is never in anyone's way ---------------------------------------------------------------------
 
 /// Every draw list of a frame, back to front, as positions.

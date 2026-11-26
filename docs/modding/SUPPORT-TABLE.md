@@ -787,6 +787,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.guide.lost` | supported | 4 |  |
 | `eqoa.events.guild.changed` | supported | 8 |  |
 | `eqoa.events.hotbar.changed` | supported | 2 |  |
+| `eqoa.events.hud.piece_requested` | supported | 8 |  |
 | `eqoa.events.ignored.changed` | supported | 8 |  |
 | `eqoa.events.input.key` | supported | 2 |  |
 | `eqoa.events.input.pad` | supported | 2 |  |
@@ -1350,6 +1351,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.hotbar.changed.data.after` | supported | 2 |  |
 | `eqoa.events.hotbar.changed.data.before` | supported | 2 |  |
 | `eqoa.events.hotbar.changed.data.changed` | supported | 2 |  |
+| `eqoa.events.hud.piece_requested.data.action` | supported | 8 |  |
+| `eqoa.events.hud.piece_requested.data.piece` | supported | 8 |  |
 | `eqoa.events.ignored.changed.data.after` | supported | 8 |  |
 | `eqoa.events.ignored.changed.data.before` | supported | 8 |  |
 | `eqoa.events.ignored.changed.data.changed` | supported | 8 |  |

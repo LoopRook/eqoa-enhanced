@@ -38,6 +38,10 @@ pub(crate) const FRAME_EVENTS: &[&str] = &["buffs.changed", "cast.started", "cas
 /// Round A11's events, driven in `a11_play_tests::a11_the_reads_say_what_the_windows_hold`.
 pub(crate) const A11_EVENTS: &[&str] = &["merc.changed", "dye.changed", "fishing.changed"];
 
+/// The player's key for a HUD piece a mod holds hidden (owner-1126c), driven in `a12_tests`'
+/// `stat_window_the_games_key_is_told_to_the_holder_only` and by the Stats Box in `round_minimap_manager_tests`.
+pub(crate) const HUD_EVENTS: &[&str] = &["hud.piece_requested"];
+
 /// The change events of the systems that were poll-only (`change_events`), driven in `change_events_tests`.
 pub(crate) const CHANGE_EVENTS: &[&str] = &["craft.changed", "mail.changed", "auction.changed", "raid.changed", "factions.changed"];
 
@@ -249,6 +253,7 @@ fn round7c_supported_event_inventory_has_fixture_coverage() {
         .chain(A7_EVENTS)
         .chain(A9_EVENTS)
         .chain(A11_EVENTS)
+        .chain(HUD_EVENTS)
         .chain(CHANGE_EVENTS)
         .copied()
         .chain(["loot.changed", "merchant.changed"])

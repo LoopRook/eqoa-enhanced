@@ -297,6 +297,10 @@ local function draw_plates(dl, player, k)
     -- more than the cap: the nearest are kept (and the target always)
     local n = cand_n
     for i = 1, n do order[i] = i end
+    -- `order` and `cand_d2` are kept from frame to frame and `table.sort` sorts the whole of `order`: the places past this
+    -- frame's candidates still hold the last busier frame's numbers, which sorted in among the nearest and named
+    -- candidates that are no longer there. Only this frame's candidates are kept in it.
+    for i = #order, n + 1, -1 do order[i] = nil end
     if n > MAX_PLATES then
         table.sort(order, function(a, b) return cand_d2[a] < cand_d2[b] end)
         n = MAX_PLATES

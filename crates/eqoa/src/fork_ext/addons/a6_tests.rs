@@ -1243,3 +1243,181 @@ fn a6_a_failing_handler_releases_its_windows_and_is_told_they_closed() {
 include!("perf_mods_tests.rs");
 
 include!("hide_under_map_tests.rs");
+
+/// Owner test 2026-11-26: "being able to paste into it would be nice". The player's paste key (Ctrl+V) while the chat line holds
+/// the keyboard hands the clipboard's text to the mod as typed text (single line, control characters left out, the mod's own
+/// limit), and the mod never asks for the clipboard. Control: a plain V types the letter. Negative control: without the paste
+/// handling Ctrl+V types the letter "v" and nothing is pasted.
+#[test]
+fn a6_chat_line_takes_a_paste_as_typed_text() {
+    let (host, bridge, mut context, vm) = loaded();
+    tick_n(&host, &bridge, &mut context, 3);
+    let state = |code: &str| probe_str(&host, &format!("chat_probe.state.{code}"));
+    open_line(&host, &bridge, &mut context, vm, "hi ", "say");
+    assert!(super::input::is_text_capture_active());
+    let key_v = || winit::keyboard::Key::Character("v".into());
+    // control: a plain V is the letter
+    real_key(&host, key_v());
+    assert_eq!(state("text"), "hi v");
+    host.execute("chat_probe.state.text = 'hi '").unwrap();
+    // Ctrl+V: two lines, a tab and a bell on the clipboard
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("hello\r\nwor\u{7}ld\tend".into()));
+    super::input::set_modifiers((true, false, false));
+    real_key(&host, key_v());
+    super::input::set_modifiers((false, false, false));
+    assert_eq!(state("text"), "hi hello world end", "the pasted text was typed in, one line, no control characters");
+    // a long paste stops where typing does (the line's own limit)
+    host.execute("chat_probe.state.text = ''").unwrap();
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("a".repeat(300)));
+    super::input::set_modifiers((true, false, false));
+    real_key(&host, key_v());
+    super::input::set_modifiers((false, false, false));
+    assert_eq!(state("text").len(), 110, "the line takes no more than it takes typed");
+    // nothing on the clipboard: nothing typed, and not the letter either
+    host.execute("chat_probe.state.text = 'x'").unwrap();
+    super::input::set_modifiers((true, false, false));
+    real_key(&host, key_v());
+    super::input::set_modifiers((false, false, false));
+    assert_eq!(state("text"), "x");
+    // with no text entry holding the keyboard a paste goes nowhere
+    super::input::reset_input_state();
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("late".into()));
+    super::input::set_modifiers((true, false, false));
+    real_key(&host, key_v());
+    super::input::set_modifiers((false, false, false));
+    assert_eq!(state("text"), "x", "the entry is not holding the keyboard: nothing is typed");
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = None);
+}
+
+/// A second mod that listens to `input.key` (as a third-party one may) and writes down the text it is given.
+fn listener() -> Host {
+    let host = Host::new().unwrap();
+    host.execute("texts, keys = {}, 0; eqoa.events.on('input.key', function(e) keys = keys + 1; if e.data.text then texts[#texts + 1] = e.data.text end end)").unwrap();
+    host
+}
+fn heard(host: &Host) -> String {
+    native_events::dispatch(host).unwrap();
+    host.lua.load("return table.concat(texts, '|')").eval().unwrap()
+}
+fn ctrl_v(host: &Host) {
+    super::input::set_modifiers((true, false, false));
+    real_key(host, winit::keyboard::Key::Character("v".into()));
+    super::input::set_modifiers((false, false, false));
+}
+
+/// Review of owner-1126c, point 1: the clipboard's text reaches only the one mod whose text entry had the keyboard when the
+/// paste key was pressed. Another mod that listens to `input.key` is told of the key (as it is of every typed key) but never
+/// of the text. Negative control: with the text told to every mod (`emit` for `emit_to`) the listener hears it.
+#[test]
+fn a6_a_paste_reaches_only_the_mod_that_held_the_text_capture() {
+    let (host, bridge, mut context, vm) = loaded();
+    tick_n(&host, &bridge, &mut context, 3);
+    let other = listener();
+    let state = |code: &str| probe_str(&host, &format!("chat_probe.state.{code}"));
+    open_line(&host, &bridge, &mut context, vm, "", "say");
+    // text with what the game's own boxes cannot type: accents, symbols, other scripts
+    let text = "caf\u{e9} & $5 <b> [x] {y} \\ | ` \u{65e5}\u{672c}";
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some(text.into()));
+    ctrl_v(&host);
+    assert_eq!(state("text"), text, "the mod's entry got all of it, as typed text");
+    assert_eq!(heard(&other), "", "another mod listening to input.key is not given the clipboard's text");
+    let keys: i64 = other.lua.load("return keys").eval().unwrap();
+    assert!(keys > 0, "it still hears the key pressed (as it hears every typed key), without text");
+}
+
+/// Point 1: the capture changed hands before the clipboard answered: nobody gets the text. And the world changing does
+/// the same. Negative control: without the check the new holder gets it.
+#[test]
+fn a6_a_paste_is_dropped_when_the_capture_has_moved_on_or_the_world_changed() {
+    let (host, bridge, mut context, vm) = loaded();
+    tick_n(&host, &bridge, &mut context, 3);
+    let other = listener();
+    let other_vm = native_events::bus(&other.lua).borrow().vm;
+    let state = |code: &str| probe_str(&host, &format!("chat_probe.state.{code}"));
+    open_line(&host, &bridge, &mut context, vm, "", "say");
+    let press = || {
+        super::input::set_modifiers((true, false, false));
+        super::input::route_mod_key(&winit::keyboard::Key::Character("v".into()), true, false, false, true, false);
+        super::input::set_modifiers((false, false, false));
+    };
+    // the entry closes and another mod's opens before the answer comes
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("secret".into()));
+    press();
+    super::input::set_text_capture_for_test(vm, false);
+    super::input::set_text_capture_for_test(other_vm, true);
+    native_core::flush_deferred();
+    native_events::dispatch(&host).unwrap();
+    assert_eq!(heard(&other), "", "the mod that holds the capture now is not given a paste meant for another");
+    assert_eq!(state("text"), "", "nor is the one that held it");
+    // the world changes before the answer
+    super::input::set_text_capture_for_test(other_vm, false);
+    super::input::set_text_capture_for_test(vm, true);
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("late".into()));
+    press();
+    CORE.with(|c| c.borrow_mut().generation += 1);
+    native_core::flush_deferred();
+    native_events::dispatch(&host).unwrap();
+    assert_eq!(state("text"), "", "an answer from another world is dropped");
+    // control: the same press with nothing changed is typed in
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("ok".into()));
+    press();
+    native_core::flush_deferred();
+    native_events::dispatch(&host).unwrap();
+    assert_eq!(state("text"), "ok");
+}
+
+/// Points 1 and 2: a press with no text entry holding the keyboard reads nothing (a mod cannot get the clipboard that
+/// way); only one read is in flight at a time; AltGr+V is a letter, not a paste.
+/// Negative controls: reading on every press (the second text is taken), and AltGr taken for Ctrl.
+#[test]
+fn a6_a_paste_needs_a_text_entry_one_read_at_a_time_and_not_altgr() {
+    let (host, bridge, mut context, vm) = loaded();
+    tick_n(&host, &bridge, &mut context, 3);
+    let state = |code: &str| probe_str(&host, &format!("chat_probe.state.{code}"));
+    let clipboard = || super::input::TEST_CLIPBOARD.with_borrow(|c| c.clone());
+    // no capture: the key is read by nobody, the clipboard is not touched
+    super::input::reset_input_state();
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("private".into()));
+    ctrl_v(&host);
+    assert_eq!(clipboard().as_deref(), Some("private"), "no text entry: the clipboard is never read");
+    // an entry is open: two presses before the answer is one read
+    open_line(&host, &bridge, &mut context, vm, "", "say");
+    // with another mod holding a text capture too, nobody can say which was meant: nothing is read, nobody is given it
+    let other_vm = native_events::bus(&listener().lua).borrow().vm;
+    super::input::set_text_capture_for_test(other_vm, true);
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("contested".into()));
+    ctrl_v(&host);
+    assert_eq!(clipboard().as_deref(), Some("contested"), "two mods hold a text capture: the clipboard is not read");
+    assert_eq!(state("text"), "");
+    super::input::set_text_capture_for_test(other_vm, false);
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("one".into()));
+    let press = || {
+        super::input::set_modifiers((true, false, false));
+        super::input::route_mod_key(&winit::keyboard::Key::Character("v".into()), true, false, false, true, false);
+        super::input::set_modifiers((false, false, false));
+    };
+    press();
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("two".into()));
+    press();
+    assert_eq!(clipboard().as_deref(), Some("two"), "the second press waits for the first read: no second read");
+    native_core::flush_deferred();
+    native_events::dispatch(&host).unwrap();
+    assert_eq!(state("text"), "one");
+    // AltGr (Ctrl and Alt) + V types the letter and reads nothing
+    super::input::set_modifiers((true, true, false));
+    real_key(&host, winit::keyboard::Key::Character("v".into()));
+    super::input::set_modifiers((false, false, false));
+    assert_eq!(state("text"), "onev", "AltGr+V is the letter");
+    assert_eq!(clipboard().as_deref(), Some("two"), "and reads nothing");
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = None);
+}
+
+/// Point 2: what a paste lets through is what typing does: everything but control characters, line breaks and tabs as a
+/// space, at most 4096 characters. Negative control: the game's own boxes' filter drops the accents and symbols.
+#[test]
+fn a6_a_paste_keeps_what_typing_keeps() {
+    assert_eq!(super::input::paste_text_for_test("a\r\nb\rc\nd\te\u{7}f\u{2028}g\u{7f}"), "a b c d ef g");
+    assert_eq!(super::input::paste_text_for_test("caf\u{e9} & $ ^ < > [ ] { } \\ | ` \u{65e5}"), "caf\u{e9} & $ ^ < > [ ] { } \\ | ` \u{65e5}");
+    assert_eq!(super::input::paste_text_for_test(&"x".repeat(5000)).chars().count(), 4096);
+    assert_eq!(super::input::paste_text_for_test(&"\u{e9}".repeat(5000)).chars().count(), 4096);
+}

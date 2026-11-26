@@ -23,9 +23,10 @@ spell book, ...) return to this one.
 - **Ability** opens **EQOA Spellbook** when that mod is on; with it off it is the game's own Ability page, and Escape (or its
   Close) there brings you back to this menu.
 - **Enter** is this menu's while it is up: the game's chat line does not open with it.
-- **Inventory** with Bag Viewer off, and **Support** (Request Help, Help Status, Send Report), open the game's own Start
-  menu: the item page has no copy here, and the game keeps its help and report forms to its own menu, so you press
-  Support there yourself.
+- **Support**: **Request Help** and **Help Status** open the game's own Support window in one click, and the menu closes;
+  the form, its topics and everything you send are the game's and yours (the menu only opens the window). **Send Report**
+  is the game's own report editor, which no mod may open, so it opens the game's own Start menu for you to press it there.
+- **Inventory** with Bag Viewer off opens the game's own Start menu: the item page has no copy here.
 - The menu closes when you run an entry, zoom, die, turn the mod off or switch on **Use the game's windows**. Your
   character can keep walking while it is up; the controller's sticks do not move the character while it holds the pad.
 - Turn the mod off and the Start key is the game's again at once.

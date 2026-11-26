@@ -822,6 +822,180 @@ fn round_minimap_stays_in_window_coordinates_at_aspects_and_render_scales_body()
     }
 }
 
+/// The round picture, its ring, the hover and the pointer claim follow the game's minimap piece: where it is and
+/// HUD Scale, in the PC interface and the controller one. (Owner's report 2026-11-26: at HUD Scale 85 on the PC
+/// interface the picture was drawn at 100% size over a ring that had shrunk, spilling past it.)
+#[test]
+fn round_minimap_follows_hud_scale_in_both_interfaces() {
+    big_stack(round_minimap_follows_hud_scale_in_both_interfaces_body)
+}
+fn round_minimap_follows_hud_scale_in_both_interfaces_body() {
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let mut at_100: Option<f64> = None;
+    for (pc, percent) in [(true, 100u8), (true, 85), (true, 150), (false, 100), (false, 75)] {
+        let Some(mut rm) = Rm::sized(|p| p == "eqoa_round_minimap", 0, RM_SIZE, 1) else {
+            eprintln!("SKIP round_minimap_follows_hud_scale_in_both_interfaces: no GPU adapter");
+            return;
+        };
+        crate::settings::set_ui_mode(pc).unwrap();
+        crate::settings::set_hud_scale_percent(percent);
+        crate::hudlayout::testing_reset();
+        super::super::hud_layout::set_hud_state(true, true, false, 93, 0);
+        super::super::hud_layout::set_window_size(RM_SIZE.0, RM_SIZE.1);
+        let note = format!("{} interface at HUD Scale {percent}%", if pc { "PC" } else { "controller" });
+        let layout = super::super::hud_layout::hud_layout_json(RM_SIZE);
+        assert_eq!(layout["pc_mode"].as_bool(), Some(pc), "{note}: the interface reached the layout");
+        assert!((layout["hud_scale"].as_f64().unwrap() - percent as f64 / 100.0).abs() < 1e-6, "{note}: the HUD Scale reached the layout: {:?}", layout["hud_scale"]);
+        rm.frames(4);
+        let t = rm.frames(2);
+        let pixels = rm_pixels(&rm.gpu, &t);
+        let px = |x: f64, y: f64| rm_px_in(&pixels, t.width(), x, y);
+        rm_png(&pixels, &format!("hudscale-{}-{percent}.png", if pc { "pc" } else { "controller" }));
+        let (cx, cy, r) = rm.circle();
+        let k = r / 50.0;
+        assert_eq!(rm.state::<Option<String>>("round_minimap.image_error"), None, "{note}");
+        // the circle is the stock piece's size, so it is as big as HUD Scale makes the minimap
+        let stock = rm.stock_rect();
+        assert!((r - (stock[2] - stock[0]) as f64 * 50.0 / 112.0).abs() < 0.5, "{note}: circle radius {r} against the piece {stock:?}");
+        match percent {
+            100 => {
+                if pc {
+                    at_100 = Some(r);
+                }
+            }
+            _ if pc => {
+                let base = at_100.expect("the 100% case runs first");
+                assert!((r - base * percent as f64 / 100.0).abs() < 1.0, "{note}: radius {r} is {percent}% of {base}");
+            }
+            _ => {}
+        }
+        let picture = |p: [u8; 4]| {
+            let c = RM_GREEN.map(|c| (c * 255.0) as i32);
+            (0..3).all(|i| (p[i] as i32 - c[i]).abs() < 12)
+        };
+        for (sx, sy) in [(0.5, 0.5), (-0.5, -0.5), (0.5, -0.5), (-0.5, 0.5)] {
+            assert!(picture(px(cx + sx * r, cy + sy * r)), "{note}: picture at ({sx}, {sy})");
+        }
+        // the picture fills the ring on every side and stops at it: nothing of it past the ring, nothing short
+        for (sx, sy) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
+            assert_eq!(px(cx + sx * r * 0.95, cy + sy * r * 0.95), RM_BG, "{note}: corner ({sx}, {sy}) cut off");
+            let ring = px(cx + sx * s * (r + 1.5 * k), cy + sy * s * (r + 1.5 * k));
+            assert!((0..3).all(|i| (ring[i] as i32 - 51).abs() < 14), "{note}: ring at the diagonal ({sx}, {sy}): {ring:?}");
+            assert_eq!(px(cx + sx * s * (r + 5.0 * k), cy + sy * s * (r + 5.0 * k)), RM_BG, "{note}: the picture spills past the ring at ({sx}, {sy})");
+            assert!(picture(px(cx + sx * s * (r - 2.0 * k), cy + sy * s * (r - 2.0 * k))), "{note}: the picture stops short of the ring at ({sx}, {sy})");
+        }
+        for (sx, sy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+            let ring = px(cx + sx * (r + 1.5 * k), cy + sy * (r + 1.5 * k));
+            assert!((0..3).all(|i| (ring[i] as i32 - 51).abs() < 14), "{note}: ring on the axis ({sx}, {sy}): {ring:?}");
+            assert!(picture(px(cx + sx * (r - 2.0 * k), cy + sy * (r - 2.0 * k))), "{note}: picture up to the ring ({sx}, {sy}): {:?} at ({}, {}), circle {:?}", px(cx + sx * (r - 2.0 * k), cy + sy * (r - 2.0 * k)), cx + sx * (r - 2.0 * k), cy + sy * (r - 2.0 * k), (cx, cy, r));
+            assert_eq!(px(cx + sx * (r + 5.0 * k), cy + sy * (r + 5.0 * k)), RM_BG, "{note}: nothing outside the ring ({sx}, {sy})");
+        }
+        // the dots, the hover and the claim are where the picture draws them
+        let (dx, dy) = rm.dot_at(rm.me[0] + 40.0, rm.me[2] + 30.0);
+        let dot = |p: [u8; 4]| p[0] > 200 && p[1] < 120 && p[2] > 200;
+        assert!((-3..=3).any(|ox| (-3..=3).any(|oy| dot(px(dx + ox as f64, dy + oy as f64)))), "{note}: the native dot is where the hit test looks");
+        assert_eq!(rm.hover(dx, dy).as_deref(), Some("Test Rat"), "{note}");
+        assert!(rm_claims(&rm, [cx as f32, cy as f32]), "{note}: the pointer is claimed at the centre");
+        assert!(!rm_claims(&rm, [(cx + r * 1.2) as f32, cy as f32]), "{note}: and not past the ring");
+        rm.manager.shutdown();
+    }
+    crate::settings::testing::reset(false);
+}
+
+/// The Stats Box replaces the game's Stat Window, so while the mod is on the game's window never shows (the box up or not)
+/// and the game's own key and `/stats` open and close the box, in both interfaces; with the mod off, or "Use the game's
+/// windows" on, they are the game's. A mod that does not hold the window is not told. (Owner's report 2026-11-26: the mod's
+/// own key and the game's F4 swapped the two windows.)
+#[test]
+fn stats_box_answers_the_games_stat_window_key_and_command() {
+    big_stack(stats_box_answers_the_games_stat_window_key_and_command_body)
+}
+fn stats_box_answers_the_games_stat_window_key_and_command_body() {
+    use crate::settings;
+    for pc in [true, false] {
+        super::super::options::reset_in_memory();
+        crate::fork_ext::bindpage::reset_in_memory();
+        let Some(mut rm) = Rm::with(|p| p == "eqoa_stats_box" || p == "eqoa_round_minimap", 0) else {
+            eprintln!("SKIP stats_box_answers_the_games_stat_window_key_and_command: no GPU adapter");
+            return;
+        };
+        settings::set_ui_mode(pc).unwrap();
+        let note = if pc { "PC interface" } else { "controller interface" };
+        rm.frames(4);
+        let stats = lua(&rm.manager, "eqoa_stats_box");
+        let other = lua(&rm.manager, "eqoa_round_minimap");
+        other.load("heard = 0; eqoa.events.on('hud.piece_requested', function() heard = heard + 1 end)").exec().unwrap();
+        let shown = |s: &Lua| s.load("return eqoa.options.get('stats_box') == true").eval::<bool>().unwrap();
+        let heard = || other.load("return heard").eval::<i64>().unwrap();
+        rm.frames(4);
+        assert!(rm.manager.entries.iter().all(|e| e.status == Status::Enabled), "{:?}", rm.manager.diagnostics());
+        // the window is held back with the box off, which is when the game's window used to come back
+        assert!(!shown(&stats), "{note}: the box starts off");
+        assert!(rm.manager.is_hud_element_hidden("stat_window"), "{note}: the game's Stat Window is held while the box is off");
+        assert!(!crate::hud::fork_hud::stat_window_visible(), "{note}: and the game is told so");
+        // the game's key opens the box and closes it; the player's own Stat Window setting is not touched
+        for (step, want) in [("F4", true), ("F4", false), ("F4", true)] {
+            rm.play.toggle_stat_window();
+            rm.frames(3);
+            assert_eq!(shown(&stats), want, "{note}: {step} gives the box {want}");
+            assert!(!settings::stat_window(), "{note}: the game's own setting stays as it was");
+            assert!(rm.manager.is_hud_element_hidden("stat_window"), "{note}: the game's window stays held");
+        }
+        // /stats toggles; on and off say what they mean whichever way the box is
+        rm.play.chat_line("/stats");
+        rm.frames(3);
+        assert!(!shown(&stats), "{note}: /stats closes it");
+        rm.play.chat_line("/stats off");
+        rm.frames(3);
+        assert!(!shown(&stats), "{note}: /stats off leaves it closed");
+        rm.play.chat_line("/stats on");
+        rm.frames(3);
+        assert!(shown(&stats), "{note}: /stats on opens it");
+        rm.play.chat_line("/stats on");
+        rm.frames(3);
+        assert!(shown(&stats), "{note}: /stats on leaves it open");
+        rm.play.chat_line("/stats off");
+        rm.frames(3);
+        assert!(!shown(&stats), "{note}: /stats off closes it");
+        assert_eq!(heard(), 0, "{note}: a mod that does not hold the window is not told of the key");
+        // the mod's own key is an extra: unbound until the player binds it
+        assert!(crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle").unwrap_or_default().is_empty(), "{note}: the extra key is unbound by default");
+        // "Use the game's windows": the game's window and key are the game's again, and the box is left alone
+        // with the box open BEFORE the switch (review point 4): the box stands down, the game's window is the game's,
+        // and the box comes back as it was when the switch goes off
+        let standing_down = || stats.load("return stats_box.standing_down").eval::<bool>().unwrap();
+        rm.play.toggle_stat_window();
+        rm.frames(3);
+        assert!(shown(&stats) && !standing_down(), "{note}: the box is open and drawing");
+        super::super::window_takeover::set_use_game_windows(true);
+        rm.frames(3);
+        assert!(crate::hud::fork_hud::stat_window_visible(), "{note}: the switch gives the game's window back");
+        assert!(standing_down(), "{note}: the box stands down while the game's windows are in use, so the two are never both up");
+        assert!(shown(&stats), "{note}: its option is left as it was");
+        rm.play.toggle_stat_window();
+        rm.frames(3);
+        assert!(settings::stat_window(), "{note}: the game's key turns the game's window with the switch on");
+        assert!(shown(&stats), "{note}: and not the box");
+        super::super::window_takeover::set_use_game_windows(false);
+        rm.frames(3);
+        assert!(!standing_down() && shown(&stats), "{note}: the box is back as it was when the switch goes off");
+        assert!(!crate::hud::fork_hud::stat_window_visible(), "{note}: and the game's window is held again");
+        rm.play.toggle_stat_window();
+        rm.frames(3);
+        assert!(!shown(&stats), "{note}: the key closes it again");
+        // the mod off: the game's key is the game's, as upstream
+        rm.manager.queue(Command::Enable("eqoa_stats_box".into(), false));
+        rm.frames(3);
+        assert!(!rm.manager.is_hud_element_hidden("stat_window"), "{note}: the mod off lets go of the window");
+        assert!(crate::hud::fork_hud::stat_window_visible());
+        rm.play.toggle_stat_window();
+        assert!(!settings::stat_window(), "{note}: with the mod off F4 turns the game's window as before");
+        super::super::window_takeover::forget_switch_for_test();
+        rm.manager.shutdown();
+    }
+    crate::settings::testing::reset(false);
+}
+
 /// A waypoint cropped by the circle gets a rim arrow in its own colour: a personal one magenta, the
 /// group's orange as on the stock minimap, whichever corner.
 #[test]

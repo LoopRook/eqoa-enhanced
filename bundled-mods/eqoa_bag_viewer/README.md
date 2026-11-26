@@ -80,7 +80,11 @@ exactly as before, and a helper acts only on its button or on its own switch.
   version that carry both are settled when the mod loads: the **bank mark is kept and the junk mark dropped** (the safe one:
   nothing gets sold).
 - **Bank marked**: **Bank this** in an item's menu; near a banker, **Bank marked (N)** deposits the marked stacks (never worn
-  ones) and says so when the bank is full.
+  ones) and says so when the bank is full. **Taking an item out of the bank takes its bank mark off**, however you take it out
+  (Withdraw 1, Withdraw stack, the multi-select's Take out of bank, or the game's own bank window), so it is not banked
+  again at the next visit; a deposit never marks anything, and you mark an item again with **Bank this** if you want it
+  banked again. A mark belongs to the item type (the same item id, as every mark here does), so it comes off for every stack
+  of that item; a different item with the same name has its own mark and keeps it.
 - **Do it when I get near**: three switches under the buttons (Sell junk, Restock, Bank), kept for each character. **Bank starts ON** for a
   character with no saved choice (an item marked to bank is a clear instruction); **Sell junk and Restock start OFF** (they
   sell items and spend tunar). A choice you have made, off included, is kept as it is; a character saved by an older version

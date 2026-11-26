@@ -327,8 +327,11 @@ impl Map {
         let (lib,vui)=real.as_ref().map_or((&blank,&vui_blank),|r|(&r.lib,&r.vui));
         let cx=Context{lib,device,queue,format:wgpu::TextureFormat::Rgba8Unorm,size,dt:0.,player:Some((at,0.)),world:0,origin:[0.;2],group:Vec::new(),in_group:false,target:None,sticks:[0.;4],keyboard:true,words:None,vui:Some(vui),quest_marks:None};
         self.mini_frame(&cx,view);
-        let moved=crate::hudlayout::shift(crate::hudlayout::Piece::Minimap,crate::fork_ext::addons::hud_layout::beyond_of(size));
-        let r=mini::window_rect_moved(size,mini::FRAME,moved);
+        // the stand-in fills the piece where the game draws it: moved and grown by HUD Scale, as the layout says
+        let layout=crate::fork_ext::addons::hud_layout::hud_layout_json(size);
+        let piece=&layout["minimap"];
+        let at=|key:&str|piece[key].as_f64().unwrap_or(0.0) as f32;
+        let r=[at("x"),at("y"),at("x")+at("width"),at("y")+at("height")];
         let l=self.layers.as_mut().unwrap();
         let white=l.white;
         l.map.quads.push(render::map::MapQuad::rect(white,r,[0.0,0.0,1.0,1.0],color));

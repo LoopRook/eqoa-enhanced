@@ -372,12 +372,13 @@ fn a1_mods_and_addons_says_what_a_mod_provides_before_it_is_enabled() {
 fn a1_the_three_windows_take_their_keys_and_the_stats_box_gives_up_b() {
     use crate::fork_ext::bindpage;
     bindpage::reset_in_memory();
-    for (addon, default) in [("eqoa_stats_box", "y"), ("eqoa_bag_viewer", "shift+b"), ("eqoa_spellbook", "shift+k"), ("eqoa_quest_journal", "shift+j")] {
+    // the Stats Box answers the game's own Stat Window key, so its own key is an extra and is unbound until the player binds it
+    for (addon, default) in [("eqoa_stats_box", ""), ("eqoa_bag_viewer", "shift+b"), ("eqoa_spellbook", "shift+k"), ("eqoa_quest_journal", "shift+j")] {
         let manifest = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods").join(addon).join(if addon == "eqoa_bag_viewer" { "main.lua" } else { "main.lua" })).unwrap();
         assert!(manifest.contains(&format!("default_key = \"{default}\"")), "{addon} declares {default}");
         bindpage::register(addon, if addon == "eqoa_stats_box" { "toggle" } else { "open" }, default, addon);
     }
-    assert_eq!(bindpage::get_key("eqoa_stats_box", "toggle").as_deref(), Some("y"));
+    assert_eq!(bindpage::get_key("eqoa_stats_box", "toggle").as_deref().unwrap_or(""), "", "the Stats Box's own key is unbound by default");
     assert_eq!(bindpage::get_key("eqoa_bag_viewer", "open").as_deref(), Some("shift+b"));
     assert_eq!(bindpage::get_key("eqoa_spellbook", "open").as_deref(), Some("shift+k"));
     assert_eq!(bindpage::get_key("eqoa_quest_journal", "open").as_deref(), Some("shift+j"));

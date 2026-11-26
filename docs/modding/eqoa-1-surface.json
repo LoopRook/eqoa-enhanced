@@ -8333,6 +8333,30 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.hud.piece_requested",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.hud.piece_requested.data.action",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.hud.piece_requested.data.piece",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.ignored.changed",
       "reason": null,
       "revision": 1,

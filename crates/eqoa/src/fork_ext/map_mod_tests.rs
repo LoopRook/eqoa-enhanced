@@ -65,6 +65,7 @@ fn step(host: &Host, time: f64) {
             bytes: 128,
             player_command: false,
             player_action: None,
+            only_vm: None,
         }
     });
     native_events::publish(&event);
@@ -1248,7 +1249,7 @@ fn round4b_fix_busy_world_max_journal_cost_and_incremental_queries() {
     let mut loaded = false;
     while Instant::now() < deadline {
         step(&j, 1.); jpeak = jpeak.max(j.lua.used_memory());
-        step(&h, 1.); peak = peak.max(h.lua.used_memory()); jpeak = jpeak.max(j.lua.used_memory());
+        step(&h, 1.); peak = peak.max(h.lua.used_memory());
         loaded=h.lua.load("local s=require('search');return #s.journal==80000 and #s.catalog>1000 and #s.jobs==0").eval::<bool>().unwrap();
         if loaded {
             break;
@@ -1267,7 +1268,7 @@ fn round4b_fix_busy_world_max_journal_cost_and_incremental_queries() {
                 winit::keyboard::Key::Named(winit::keyboard::NamedKey::F2),
             );
             for _ in 0..160 {
-                step(&h, 1.); peak = peak.max(h.lua.used_memory()); jpeak = jpeak.max(j.lua.used_memory());
+                step(&h, 1.); peak = peak.max(h.lua.used_memory());
                 minimum = minimum.min(h.instructions_remaining());
             }
             h.execute("local s=require('search');assert(s.open and not s.build and #s.npc_cache>=10000);cached_rows=s.npc_cache").unwrap();
@@ -1291,7 +1292,7 @@ fn round4b_fix_busy_world_max_journal_cost_and_incremental_queries() {
             }
             let start = Instant::now();
             step(&j, 1.); jpeak = jpeak.max(j.lua.used_memory());
-            step(&h, 1.); peak = peak.max(h.lua.used_memory()); jpeak = jpeak.max(j.lua.used_memory());
+            step(&h, 1.); peak = peak.max(h.lua.used_memory());
             let ms = start.elapsed().as_secs_f64() * 1000.;
             minimum = minimum.min(h.instructions_remaining());
             if phase == 0 {
@@ -1305,7 +1306,7 @@ fn round4b_fix_busy_world_max_journal_cost_and_incremental_queries() {
                 .unwrap();
         } else {
             for _ in 0..60 {
-                step(&h, 1.); peak = peak.max(h.lua.used_memory()); jpeak = jpeak.max(j.lua.used_memory());
+                step(&h, 1.); peak = peak.max(h.lua.used_memory());
             }
             h.execute("local s=require('search');assert(s.npc_cache==cached_rows and not s.build and #s.rows==10000 and #s.live==200);assert(s.query=='Perf creature 0')").unwrap();
         }
