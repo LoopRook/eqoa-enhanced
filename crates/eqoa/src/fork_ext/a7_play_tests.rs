@@ -795,6 +795,17 @@ fn a7_friend_request_mod_off_control_takeover_45s_timeout_and_confirmed_accept()
     step(&mut p, &host);
     host.execute("assert(ev[#ev] == 'closed:friend_request:declined', ev[#ev])").unwrap();
 
+    // 6b. Refusing while the accept question is up ends that question "declined" too (negative control: it said "refused")
+    clear_recorded(&mut p);
+    deliver_op(&mut p, 0x076F, pkt_076f(408, "Quin"));
+    super::health_redraw(&mut p, false, false);
+    step(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.friend_accept()");
+    assert!(confirm::is_open(), "the accept question is up");
+    ask(&mut p, &host, "return eqoa.actions.friend_refuse()");
+    step(&mut p, &host);
+    host.execute("assert(closed[1] and closed[1].kind == 'friend_accept' and closed[1].answer == 'declined', closed[1] and closed[1].answer)").unwrap();
+
     // 7. pass() hands back to the native mode 17 box
     clear_recorded(&mut p);
     deliver_op(&mut p, 0x076F, pkt_076f(407, "Pia"));
@@ -893,6 +904,17 @@ fn a7_guild_invite_mod_off_control_takeover_45s_timeout_confirm_and_drop_cleanup
     ask(&mut p, &host, "return eqoa.actions.guild_refuse()");
     step(&mut p, &host);
     host.execute("assert(ev[#ev] == 'closed:guild_invite:declined', ev[#ev])").unwrap();
+
+    // 4c. The same while the accept question is up: it ends "declined" (negative control: it said "refused")
+    clear_recorded(&mut p);
+    deliver_op(&mut p, 0x057A, pkt_057a(509, "Una", "Dawn Watch"));
+    super::health_redraw(&mut p, false, false);
+    step(&mut p, &host);
+    ask(&mut p, &host, "return eqoa.actions.guild_accept()");
+    assert!(confirm::is_open(), "the accept question is up");
+    ask(&mut p, &host, "return eqoa.actions.guild_refuse()");
+    step(&mut p, &host);
+    host.execute("assert(closed[1] and closed[1].kind == 'guild_accept' and closed[1].answer == 'declined', closed[1] and closed[1].answer)").unwrap();
 
     // 5. Leaving the world (Play dropped with quit=true) refuses any held invite so server never waits
     clear_recorded(&mut p);

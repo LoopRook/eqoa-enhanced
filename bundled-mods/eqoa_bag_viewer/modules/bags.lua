@@ -275,7 +275,10 @@ function M.clear_corpse_hold()
     M.tracked_target_id = nil
     M.tracked_target_pos = nil
     M.recently_dead = nil
-    M.engaged = {}
+    M.engaged, M.engaged_n, M.engaged_pruned = {}, 0, nil
+    -- a sale (Sell, Sell junk, Sell (N)) ends with the world and with the window: nothing of it is held over
+    M.sell_hold, M.sell_hold_armed, M.sell_req = nil, nil, nil
+    if M.batch_id == M.SELL_MANY then M.batch_id = nil end
     M.auto_retry = {}
     -- corpses waiting for bag space or for another try, the close marks and the guard are the old world's: a new creature
     -- may be given the same entity id
@@ -1319,7 +1322,13 @@ function M.sell_closed(d)
         M.result = {text = sent and "Sell: sent" or ("Sell: not sold (" .. tostring(d.detail and d.detail.reason) .. ")"),
             ok = sent == true}
         -- the sale goes out on the step after the Yes: the window is let go when the server's answer changes the pack
-        if sent then M.sell_hold_armed = true else M.release_sell_hold() end
+        -- (arms only where a merchant window is held for this sale, or about to be: this answer can come before the
+        -- sale's own result, and a stale arm would let go of a later sale's window early)
+        if sent then
+            if M.sell_hold or M.held_for_req then M.sell_hold_armed = true end
+        else
+            M.release_sell_hold()
+        end
     elseif d.answer == "no" then
         M.result = {text = "Sell: kept", ok = true}
         M.release_sell_hold()
@@ -1459,10 +1468,29 @@ end
 -- still counts (the server decides who may loot and its refusal is shown); manual Loot works on any corpse.
 M.ENGAGED_SECS = 120.0
 
+M.ENGAGED_PRUNE_SECS = 30.0
+M.ENGAGED_MAX = 256
+
+-- The table is bounded whether or not Auto-loot runs (its poll, which also drops the expired, only runs while it is on):
+-- the expired are dropped here at most every ENGAGED_PRUNE_SECS, at once when ENGAGED_MAX is passed, and a table still
+-- over the cap after that (a swarm of live creatures) is started over.
 function M.mark_engaged(id)
     if not id then return end
+    local now = os.clock()
     M.engaged = M.engaged or {}
-    M.engaged[id] = os.clock() + M.ENGAGED_SECS
+    local n = M.engaged_n or 0
+    if M.engaged[id] == nil then n = n + 1 end
+    if n > M.ENGAGED_MAX or now - (M.engaged_pruned or 0) >= M.ENGAGED_PRUNE_SECS or now < (M.engaged_pruned or 0) then
+        M.engaged_pruned = now
+        n = 0
+        for k, until_ in pairs(M.engaged) do
+            if until_ < now then M.engaged[k] = nil else n = n + 1 end
+        end
+        if M.engaged[id] == nil then n = n + 1 end
+        if n > M.ENGAGED_MAX then M.engaged, n = {}, 1 end
+    end
+    M.engaged_n = n
+    M.engaged[id] = now + M.ENGAGED_SECS
 end
 
 function M.engaged_recently(id)
@@ -2111,7 +2139,20 @@ function M.on_action_result(d)
         if eqoa.windows.confirm() ~= nil then
             M.result = {text = label .. ": answer the question on the screen", ok = nil}
         end
-        M.sell_hold, M.held_for_req, M.last_req = M.held_for_req, nil, nil
+        -- the merchant's window a talk opened is held until the answer is heard; if the answer was heard already
+        -- (`confirm.closed` can come before this result) a Yes that sent waits for the pack's change, anything else
+        -- lets the window go now: it is released exactly once on every path
+        local held = M.held_for_req
+        M.held_for_req, M.last_req = nil, nil
+        if held then
+            if eqoa.windows.confirm() ~= nil then
+                M.sell_hold, M.sell_hold_armed = held, nil
+            elseif M.sell_hold_armed then
+                M.sell_hold = held
+            else
+                release_takeover(held)
+            end
+        end
         M.dirty()
         return
     end

@@ -31,6 +31,14 @@ pub(crate) fn reserved(label: &str) -> bool {
 /// How long a question waits for its answer.
 pub(crate) const TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The merchant a sale was asked or started under: its id and the rate it pays (percent). A Yes under another merchant,
+/// or the same one at another rate, sells nothing: the player agreed to that price from that merchant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Merchant {
+    pub id: Option<u32>,
+    pub rate: i32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Act {
     /// `inv_index` is the game's slot for the item (what the destroy message names), `count` how many.
@@ -40,15 +48,20 @@ pub(crate) enum Act {
     DestroyMany { items: Vec<(u32, String, i64)> },
     /// `eqoa.actions.sell` where the game's merchant window asks first: one stack, `count` of it, to the open merchant.
     /// `inv_index` is the game's slot key; the name is checked again at the Yes.
-    Sell { inv_index: u32, name: String, count: i64 },
+    /// `at` is the merchant and rate the question was put under, `price` what it quoted: the Yes is carried out only
+    /// under the same ones.
+    Sell { inv_index: u32, name: String, count: i64, at: Merchant, price: i64 },
     /// `eqoa.actions.sell_many` where any of the stacks would be asked about: one question, then (on Yes) every stack
     /// sold in order, each waiting for the server's answer to the one before (`Run`), re-checking its slot.
-    SellMany { items: Vec<(u32, String, i64)> },
+    /// `plain` are the game's slots of the stacks that needed no question: one that has come to need it by its
+    /// turn (quick-slotted meanwhile) is skipped, never sold unasked.
+    SellMany { items: Vec<(u32, String, i64)>, at: Merchant, plain: Vec<u32> },
     DropQuest { index: usize, title: String, stamp: u32, revision: u64 },
     /// `eqoa.actions.loot_assign`: the master looter gives a corpse item (the game's key for it, its name) to a member.
-    LootAssign { key: u32, item: String, member_id: u32, member: String },
+    /// `corpse` is the corpse the question was put under (`None`: the client could not name it).
+    LootAssign { key: u32, item: String, member_id: u32, member: String, corpse: Option<u32> },
     /// `eqoa.actions.loot_abandon`: the master looter lets the whole corpse go to anyone.
-    LootAbandon,
+    LootAbandon { corpse: Option<u32> },
     /// Round A7: guild kick, accepting a friend request, accepting a guild invitation.
     GuildKick { member_id: i32, name: String },
     FriendAccept { request_id: u32, name: String },
@@ -87,7 +100,7 @@ impl Act {
             Self::SellMany { .. } => "sell_many",
             Self::DropQuest { .. } => "drop_quest",
             Self::LootAssign { .. } => "loot_assign",
-            Self::LootAbandon => "loot_abandon",
+            Self::LootAbandon { .. } => "loot_abandon",
             Self::GuildKick { .. } => "guild_kick",
             Self::FriendAccept { .. } => "friend_accept",
             Self::GuildAccept { .. } => "guild_accept",
@@ -317,21 +330,22 @@ pub(crate) fn take_answered() -> Vec<Pending> {
 
 /// A Yes to a group destroy or a group sale starts its run (`Act::DestroyMany` and `Act::SellMany` only).
 pub(crate) fn begin_run(p: Pending) {
-    let (Act::DestroyMany { items } | Act::SellMany { items }) = &p.act else { return };
+    let (Act::DestroyMany { items } | Act::SellMany { items, .. }) = &p.act else { return };
     let queue: std::collections::VecDeque<_> = items.iter().cloned().collect();
     let run = Run { total: queue.len(), queue, sent: 0, skipped: Vec::new(), waiting_since: None, p, quiet: false };
     STATE.with(|s| s.borrow_mut().runs.push(run));
 }
 
 /// `sell_many` with no stack the game would ask about: the same run, with no question before it and none closed after.
-pub(crate) fn begin_quiet_run(vm: u64, addon: &str, items: Vec<(u32, String, i64)>) {
+pub(crate) fn begin_quiet_run(vm: u64, addon: &str, session: Option<String>, at: Merchant, items: Vec<(u32, String, i64)>) {
+    let plain = items.iter().map(|i| i.0).collect();
     let queue: std::collections::VecDeque<_> = items.iter().cloned().collect();
     let p = Pending {
         id: 0,
         vm,
         addon: addon.into(),
-        session: None,
-        act: Act::SellMany { items },
+        session,
+        act: Act::SellMany { items, at, plain },
         text: String::new(),
         opened: Instant::now(),
         yes: false,
@@ -339,6 +353,15 @@ pub(crate) fn begin_quiet_run(vm: u64, addon: &str, items: Vec<(u32, String, i64
     };
     let run = Run { total: queue.len(), queue, sent: 0, skipped: Vec::new(), waiting_since: None, p, quiet: true };
     STATE.with(|s| s.borrow_mut().runs.push(run));
+}
+
+/// A group sale is under way (running, or its Yes waiting to start): a second `sell_many` is refused `busy`.
+pub(crate) fn sell_run_active() -> bool {
+    STATE.with(|s| {
+        let s = s.borrow();
+        let sell = |p: &Pending| matches!(p.act, Act::SellMany { .. });
+        s.runs.iter().any(|r| sell(&r.p)) || s.answered.iter().any(sell)
+    })
 }
 
 /// The runs, for the client to advance one step; `put_runs` gives back the ones still going.

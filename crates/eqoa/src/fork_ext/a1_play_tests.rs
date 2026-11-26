@@ -957,3 +957,83 @@ fn a1_sell_many_stops_when_the_merchant_leaves() {
     pump(&mut p, &host);
     host.execute("assert(closed[1].detail.sent_count == 1 and closed[1].detail.reason == 'the merchant window closed' and closed[1].detail.skipped[1] == 'Bone Chip')").unwrap();
 }
+
+// ---------------------------------------------------------------- 2026-11-26 (H1): a Yes is for the merchant and price asked under
+
+#[test]
+fn a1_h1_a_yes_to_a_sell_is_for_the_merchant_and_the_rate_it_was_asked_under() {
+    // each change between the question and the Yes: nothing is sold (negative control: without the check the first
+    // two sell, to another merchant and at half the price)
+    let changes: [(&str, fn(&mut Play)); 3] = [
+        ("another merchant's window", |p| p.npcw.shop.id = Some(88)),
+        ("the same merchant at a lower rate", |p| p.npcw.shop.sell_rate = 50),
+        ("a worn-out stack that now pays less", |p| {
+            p.dump.inventory.items[2].item.max_hp = 10;
+            p.dump.inventory.items[2].cur_hp = 1;
+        }),
+    ];
+    for (what, change) in changes {
+        let (mut p, host) = rig_sell();
+        let sent = p.session.sends_lost;
+        ask(&mut p, &host, &sell_one(3, 3));
+        change(&mut p);
+        yes();
+        pump(&mut p, &host);
+        assert!(!p.npcw.shop.pending && p.session.sends_lost == sent, "{what}: never sold");
+        host.execute("assert(closed[1].answer == 'yes' and closed[1].detail.sent == false and closed[1].detail.reason)").unwrap();
+    }
+    // control: unchanged, the same Yes sells
+    let (mut p, host) = rig_sell();
+    ask(&mut p, &host, &sell_one(3, 3));
+    yes();
+    pump(&mut p, &host);
+    assert!(p.npcw.shop.pending);
+}
+
+#[test]
+fn a1_h1_a_yes_to_a_sell_many_is_for_the_merchant_and_the_rate_it_was_asked_under() {
+    for (what, change) in [
+        ("another merchant", (|p: &mut Play| p.npcw.shop.id = Some(88)) as fn(&mut Play)),
+        ("a lower rate", |p| p.npcw.shop.sell_rate = 50),
+    ] {
+        let (mut p, host) = rig_sell();
+        let sent = p.session.sends_lost;
+        ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[3].ref, inv.items[6].ref})");
+        change(&mut p);
+        yes();
+        pump(&mut p, &host);
+        assert!(!p.npcw.shop.pending && p.session.sends_lost == sent, "{what}: nothing sold");
+        host.execute("assert(closed[1].kind == 'sell_many' and closed[1].detail.sent_count == 0)").unwrap();
+    }
+    // the quiet run too: another rate by its first turn
+    let (mut p, host) = rig_sell();
+    let sent = p.session.sends_lost;
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[2].ref, inv.items[6].ref})");
+    p.npcw.shop.sell_rate = 50;
+    pump(&mut p, &host);
+    assert!(!p.npcw.shop.pending && p.session.sends_lost == sent, "a quiet run at another rate sells nothing");
+}
+
+#[test]
+fn a1_h1_a_quiet_sell_many_has_the_guards_of_an_asked_one() {
+    // a second call while one is under way is busy (negative control: both used to be accepted and overlap)
+    let (mut p, host) = rig_sell();
+    ask(
+        &mut p,
+        &host,
+        "local inv = eqoa.inventory.get(); local a = eqoa.actions.sell_many({inv.items[2].ref}); return eqoa.actions.sell_many({inv.items[6].ref})",
+    );
+    host.execute("local busy = 0; local ok = 0; for _, r in ipairs(results) do if r.ok then ok = ok + 1 elseif r.code == 'busy' then busy = busy + 1 end end; assert(ok == 1 and busy == 1, ok .. '/' .. busy)").unwrap();
+    // a stack quick-slotted before its turn is skipped, never sold without asking
+    let (mut p, host) = rig_sell();
+    let sent = p.session.sends_lost;
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.sell_many({inv.items[2].ref, inv.items[6].ref})");
+    pump(&mut p, &host);
+    assert_eq!(p.session.sends_lost, sent + 1);
+    let bone = p.dump.inventory.items.iter().position(|it| it.item.name == "Bone Chip").unwrap();
+    p.dump.inventory.items[bone].quick_slot = 4;
+    merchant_answers(&mut p, "Iron Ore");
+    pump(&mut p, &host);
+    assert_eq!(p.session.sends_lost, sent + 1, "the stack the game would now ask about is not sold");
+    host.execute("assert(closed[1].answer == 'not_asked' and closed[1].detail.skipped[1] == 'Bone Chip')").unwrap();
+}

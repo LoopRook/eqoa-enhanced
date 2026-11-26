@@ -104,7 +104,7 @@ selects every slot from the one you clicked last to this one (**Ctrl+Shift+click
 A plain click works as before and clears the selection. The line under the grid says how many are selected. **Right-click** any
 selected item for one menu titled **"N items selected"**:
 
-- **Mark as junk** and **Unmark** (marking asks once, with the same Yes or No as a single item, when some of the items are
+- **Mark as junk** and **Unmark junk** (marking asks once, with the same Yes or No as a single item, when some of the items are
   equipment, potions or other things the game's merchant would ask about), **Mark to bank**.
 - **Sell (N)** at a merchant and **Put in bank (N)** at a banker: greyed with the reason when none is near ("no merchant nearby",
   "too far from the merchant"; the same reach rules as the other buttons, and a second click tries anyway). **Sell (N)** is one call to the client (`eqoa.actions.sell_many`): where
@@ -126,6 +126,15 @@ A worn item is never sold, banked or destroyed by a group action (the client ref
 you close the window, zone, change tab, or when the action finishes. The controller does not multi-select (its d-pad and confirm
 work as before). The mod uses `eqoa.actions.destroy_many` and the `ctrl` and `shift` fields of `pointer.pressed` (both
 additions to `eqoa/1`).
+
+## Bank tunar (Bank tab)
+
+On the Bank tab the line under the grid shows **Bank tunar** and **Carried** (the tunar in your pack), and a row of its
+own has a box, **Deposit**, **All**, **Withdraw** and **All**. Click the box and type an amount (digits only; Enter,
+Escape or a click elsewhere ends the typing, and only while you type does the mod take the keyboard). **Deposit** and
+**Withdraw** move that amount; each **All** moves everything you carry or everything in the bank at once. A button is
+greyed when it cannot work (the box is empty, the amount is more than you carry or the bank holds, or the banker is too far or not near) and a click on it says why in the result line, which also shows the game's own answer, for example "Deposit 500 tunar: ok". You do not open the bank first: with a banker near, **Deposit** and **Withdraw** open the mod's own hidden bank themselves, move the tunar and let go, as **Put in bank** and **Bank marked** do. The amounts follow the game's own money updates. The controller's d-pad still moves over
+the items only. It uses `eqoa.actions.bank_money`; with the game's full map open the box lets go of the keyboard.
 
 ## List on auction (at a bank)
 

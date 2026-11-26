@@ -424,8 +424,8 @@ fn refuse_held_friend(play: &mut Play, id: u32, reason: &'static str) {
     }
     confirm::cancel_kind("friend_accept", reason);
     a7::clear_friend_request();
-    // the session ends "declined" when the player said No (the same word as every other yes/no request)
-    window_sessions::sync_held_request(TakeoverKind::FriendRequest, None, if reason == "refused" { "declined" } else { reason });
+    // the question and the session both end "declined" when the player said No (the word every yes/no request uses)
+    window_sessions::sync_held_request(TakeoverKind::FriendRequest, None, reason);
 }
 
 fn refuse_held_guild(play: &mut Play, inviter_id: u32, reason: &'static str) {
@@ -439,7 +439,7 @@ fn refuse_held_guild(play: &mut Play, inviter_id: u32, reason: &'static str) {
     }
     confirm::cancel_kind("guild_accept", reason);
     a7::clear_guild_invite();
-    window_sessions::sync_held_request(TakeoverKind::GuildInvite, None, if reason == "refused" { "declined" } else { reason });
+    window_sessions::sync_held_request(TakeoverKind::GuildInvite, None, reason);
 }
 
 /// Runs each step from `begin_iteration`: hides taken requests, runs the 45-second timeout and holder checks so
@@ -686,7 +686,7 @@ pub(crate) fn dispatch(play: &mut Play, action: &A7Action) -> DispatchOutcome {
             let Some(id) = id else {
                 return refuse("window_closed", "no incoming friend request to refuse");
             };
-            refuse_held_friend(play, id, "refused");
+            refuse_held_friend(play, id, "declined");
             sent()
         }
         A7Action::IgnoreAdd { name } => {
@@ -815,7 +815,7 @@ pub(crate) fn dispatch(play: &mut Play, action: &A7Action) -> DispatchOutcome {
             let Some(id) = id else {
                 return refuse("window_closed", "no incoming guild invitation to refuse");
             };
-            refuse_held_guild(play, id, "refused");
+            refuse_held_guild(play, id, "declined");
             sent()
         }
         A7Action::WhoRequest => {

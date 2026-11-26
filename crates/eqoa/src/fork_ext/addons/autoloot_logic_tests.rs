@@ -672,3 +672,90 @@ fn a_corpse_seen_again_says_what_became_of_it_once_and_never_claims_a_loot_that_
     assert!(!boolean(&lua, "logged('already looted')"));
     assert_eq!(int(&lua, "count_logged('Auto-loot has finished with it')"), 1);
 }
+
+// ---------------------------------------------------------------- 2026-11-26 recheck: M1 (engaged table) and M2 (sale hold)
+
+#[test]
+fn recheck_m1_the_engaged_table_stays_bounded_while_auto_loot_is_off() {
+    // Auto-loot off: nothing polls, the hit handler still marks. A fight of a thousand creatures over a thousand seconds
+    // (negative control: without pruning on insert the table holds all of them)
+    let lua = world();
+    run(&lua, "B.auto_mode = 'off'");
+    run(&lua, "for i = 1, 1000 do NOW = NOW + 1; B.on_combat_hit({outgoing = true, kind = 'damage', defender_id = 5000 + i}) end");
+    assert!(int(&lua, "(function() local n = 0 for _ in pairs(B.engaged) do n = n + 1 end return n end)()") <= 160, "only the last 120 s (plus a prune gap) remain");
+    // what is still valid is kept: the latest creature is engaged, an old one is not
+    assert!(boolean(&lua, "B.engaged_recently(6000)") && !boolean(&lua, "B.engaged_recently(5001)"));
+    // a swarm of live creatures cannot grow it past the cap either
+    let lua = world();
+    run(&lua, "for i = 1, 5000 do B.mark_engaged(8000 + i) end");
+    assert!(int(&lua, "(function() local n = 0 for _ in pairs(B.engaged) do n = n + 1 end return n end)()") <= 256);
+}
+
+const SELL_FIXTURE: &str = r#"
+CONFIRM = nil
+eqoa.windows.confirm = function() return CONFIRM end
+function sale_asked() B.held_for_req, B.last_req, CONFIRM = 'merchant', 's1', {kind = 'sell'} end
+function sale_result() B.on_action_result({request_id = 's1', ok = true, state = 'completed', phase = 'dispatch', kind = 'sell'}) end
+function sale_closed(answer, sent) CONFIRM = nil; B.on_confirm_closed({kind = 'sell', answer = answer, detail = {sent = sent}}) end
+function released(kind) local n = 0 for _, k in ipairs(RELEASED) do if k == kind then n = n + 1 end end return n end
+"#;
+
+fn sell_world() -> Lua {
+    let lua = world();
+    run(&lua, SELL_FIXTURE);
+    lua
+}
+
+#[test]
+fn recheck_m2_the_merchant_window_held_for_a_sale_is_let_go_exactly_once_in_either_event_order() {
+    // the result first, then the answer No
+    let lua = sell_world();
+    run(&lua, "sale_asked(); sale_result()");
+    assert_eq!(int(&lua, "released('merchant')"), 0, "held while the question is up");
+    run(&lua, "sale_closed('no', nil)");
+    assert_eq!(int(&lua, "released('merchant')"), 1);
+    assert!(boolean(&lua, "B.sell_hold == nil and B.held_for_req == nil"));
+    // the answer first (confirm.closed before action.result), then the result: negative control, the old code leaves it
+    // held open after No
+    let lua = sell_world();
+    run(&lua, "sale_asked(); sale_closed('no', nil); sale_result()");
+    assert_eq!(int(&lua, "released('merchant')"), 1, "let go once");
+    assert!(boolean(&lua, "B.sell_hold == nil and B.held_for_req == nil"), "nothing left held");
+    // a Yes that sent, the result first: held until the pack changes, then once
+    let lua = sell_world();
+    run(&lua, "sale_asked(); sale_result(); sale_closed('yes', true)");
+    assert_eq!(int(&lua, "released('merchant')"), 0, "the sale goes out on the next step");
+    run(&lua, "B.on_pack_changed(); B.on_pack_changed()");
+    assert_eq!(int(&lua, "released('merchant')"), 1, "exactly once");
+    // a Yes that sent, the answer first
+    let lua = sell_world();
+    run(&lua, "sale_asked(); sale_closed('yes', true); sale_result()");
+    assert_eq!(int(&lua, "released('merchant')"), 0, "still held for the server's answer");
+    run(&lua, "B.on_pack_changed(); B.on_pack_changed()");
+    assert_eq!(int(&lua, "released('merchant')"), 1, "exactly once");
+    // a Yes that did not send, the answer first
+    let lua = sell_world();
+    run(&lua, "sale_asked(); sale_closed('yes', false); sale_result()");
+    assert_eq!(int(&lua, "released('merchant')"), 1);
+    // the question timing out
+    let lua = sell_world();
+    run(&lua, "sale_asked(); sale_result(); sale_closed('expired', nil)");
+    assert_eq!(int(&lua, "released('merchant')"), 1);
+}
+
+#[test]
+fn recheck_m2_closing_or_zoning_with_a_question_open_leaves_nothing_held_for_the_next_sale() {
+    let lua = sell_world();
+    run(&lua, "sale_asked(); sale_result(); B.batch_id = B.SELL_MANY; B.sell_req = 'x'");
+    // the window closes / the world changes (state.reset): the hold, the arm and the batch name are cleared
+    run(&lua, "B.clear_corpse_hold()");
+    assert!(boolean(&lua, "B.sell_hold == nil and B.sell_hold_armed == nil and B.sell_req == nil and B.batch_id == nil"));
+    // the client's answer to the old question comes after (Yes, sent): it must not arm anything
+    run(&lua, "sale_closed('yes', true)");
+    assert!(boolean(&lua, "B.sell_hold_armed == nil"), "a late answer arms nothing");
+    // negative control: a later sale's window is not let go by an unrelated pack change before its own answer
+    run(&lua, "RELEASED = {}; sale_asked(); sale_result(); B.on_pack_changed()");
+    assert_eq!(int(&lua, "released('merchant')"), 0, "held until its own answer");
+    run(&lua, "sale_closed('no', nil)");
+    assert_eq!(int(&lua, "released('merchant')"), 1);
+}
