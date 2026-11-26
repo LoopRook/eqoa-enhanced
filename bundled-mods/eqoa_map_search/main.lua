@@ -14,6 +14,8 @@ local function load_journal()
     if not request then reload=true;retry_at=(s.now or 0)+1 end
 end
 requests.catalog=eqoa.files.load_json("package_resources/map-entities.json")
+-- the name index waits while a file is still being read; a read that failed leaves nothing to wait for
+s.loads_pending=function() return next(requests)~=nil end
 local font_info=eqoa.fonts.load("package_resources/SpaceMono-Regular.ttf",13)
 local font=font_info and font_info.font
 local function command(name)

@@ -40,6 +40,7 @@ local function load_step()
     end
     if done then
         M.by_name[j.kind]=j.by_name;M.index_stale=true;M.rows_stale=true;M.build=nil
+        M.index_job=nil -- its walk is over the table this load just replaced; the stale flag starts a fresh one
         M[j.kind]=j.out
         if j.kind=="journal" then local names={};local n=0;for _,p in ipairs(j.out) do if not names[p.name] then names[p.name]=true;n=n+1 end end;M.journal_names=n end
         table.remove(M.jobs,1);M.dirty=true
@@ -171,7 +172,7 @@ end
 local function index_step()
     -- not while a load is still being read; and the old index goes first, so two never sit in memory together
     if M.index_stale and #M.jobs==0 then M.index_stale=false;M.npc_cache=nil;M.done_rows=nil;M.index_job={phase=1,key=nil,out={},seen={}};M.index_count=(M.index_count or 0)+1 end
-    local j=M.index_job;if not j then return end
+    local j=M.index_job;if not j or #M.jobs>0 then return end
     local n=0
     while n<INDEX_SLICE do
         local src=j.phase==1 and M.by_name.catalog or M.by_name.journal
@@ -289,7 +290,11 @@ end
 local function build_step()
     if M.dirty then
         -- the creature list needs its name index; until it is ready the panel says "Searching..."
-        if M.tab==1 and not M.npc_cache then M.want_index=true;return end
+        if M.tab==1 and not M.npc_cache then
+            -- wait only while an index is really coming; with no catalogue and no journal there is none, and the live creatures are still searched
+            if #M.jobs>0 or M.index_job or M.index_stale or (M.loads_pending and M.loads_pending()) then M.want_index=true;return end
+            M.npc_cache={}
+        end
         build_start()
     end
     local b=M.build;if not b then return end
