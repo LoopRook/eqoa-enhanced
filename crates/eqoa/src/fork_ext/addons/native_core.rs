@@ -898,7 +898,8 @@ pub(crate) fn observe_hit_numbered(attacker: u32, defender: u32, amount: i32, co
         let outgoing = me == Some(attacker as u64);
         let (attribution, by_player, from_merc) = match tag {
             Some(t) => ("tag", json!(outgoing && !t.pet && !t.merc), json!(t.merc)),
-            None if !outgoing => ("id", json!(false), json!(false)),
+            // the player's own id must be known to say a hit is not the player's from the ids alone
+            None if me.is_some() && !outgoing => ("id", json!(false), json!(false)),
             None => ("unknown", Json::Null, Json::Null),
         };
         let hit_kind = tag.and_then(|t| hit_kind(t.kind));

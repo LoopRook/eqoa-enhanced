@@ -89,7 +89,9 @@ pub(crate) fn set_factions(key: u64, build: impl FnOnce() -> Option<Json>) {
             // `factions.changed`: the page the read returns is not the one it returned
             if page != s.factions {
                 s.factions = page;
-                if super::change_events::wanted(super::change_events::Sys::Factions) {
+                // A new request forgets the page held until its answer comes: that is not told (no `open = false`
+                // event on a page turn); the page that arrives is.
+                if s.factions.is_some() && super::change_events::wanted(super::change_events::Sys::Factions) {
                     let revision = super::change_events::next_revision(super::change_events::Sys::Factions);
                     super::change_events::note(super::change_events::Sys::Factions, revision, s.factions.is_some());
                 }

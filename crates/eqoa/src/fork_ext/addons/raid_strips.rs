@@ -73,12 +73,13 @@ pub(crate) struct RaidSnapshot {
 }
 
 /// What a strip session of the raid ready check (0) or the loot rolls (1) is doing (`sync_sessions`).
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct StripSession {
     /// The client opened a session for the holder and has not seen it end.
     open: bool,
-    /// It ended some other way (zoning, the player's switch): the same check is not opened again.
-    blocked: bool,
+    /// It ended some other way (zoning, the player's switch, a death): the check or the rolls that were up then (their
+    /// ids) are not opened again. A check or a roll with an id not in here is new, and opens one.
+    blocked: Vec<u64>,
     /// The mod answered since the last sync: the end that follows is `answered`.
     answered: bool,
     /// The latest deadline the strip had, to tell a strip that ran out from one the server took away.
@@ -200,6 +201,14 @@ fn roll_data(snap: &RaidSnapshot) -> Option<Json> {
     Some(json!({"rolls": rolls}))
 }
 
+/// The ids a strip's data stands for: the ready check's own, or each loot roll's.
+fn data_ids(d: &Json) -> Vec<u64> {
+    if let Some(id) = d["id"].as_u64() {
+        return vec![id];
+    }
+    d["rolls"].as_array().map(|r| r.iter().filter_map(|r| r["id"].as_u64()).collect()).unwrap_or_default()
+}
+
 /// The ready check and the loot rolls a mod holds, as sessions (`windows.session`, spec section 7): opened when a check
 /// or a roll comes while the mod holds the kind, told changed when its data does, ended when it is gone.
 fn sync_sessions() {
@@ -214,8 +223,8 @@ fn sync_sessions() {
         });
         let holder = window_takeover::holder_vm(kind).zip(window_takeover::holder_of(kind));
         let mine = window_sessions::held_session(kind);
-        let state = STORE.with(|s| s.borrow().strips[i]);
-        let mut next = state;
+        let state = STORE.with(|s| s.borrow().strips[i].clone());
+        let mut next = state.clone();
         if let Some(d) = data.as_ref().and_then(|d| d["deadline_ms"].as_i64()) {
             next.deadline_ms = d;
         } else if let Some(rolls) = data.as_ref().and_then(|d| d["rolls"].as_array()) {
@@ -247,19 +256,25 @@ fn sync_sessions() {
                 window_sessions::end_by_id(&h.id, end_reason(state.answered));
                 next.open = false;
                 next.answered = false;
-                next.blocked = false;
+                next.blocked.clear();
                 if let (Some((vm, addon)), Some(d)) = (holder, d) {
                     window_sessions::start_held_data(vm, &addon, kind, d);
                     next.open = true;
                 }
             }
             (None, Some((vm, addon)), Some(d)) => {
+                let ids = data_ids(&d);
                 if next.open {
-                    // it ended some other way (zoning, a switch of the player's): not opened again for the same check
+                    // it ended some other way (zoning, a switch of the player's, a death): not opened again for the
+                    // same check or the same rolls
                     next.open = false;
-                    next.blocked = true;
+                    next.blocked = ids.clone();
                 }
-                if !next.blocked {
+                // a check or a roll that was not up then is a new one: it is not held back by an earlier end
+                if ids.iter().any(|id| !next.blocked.contains(id)) {
+                    next.blocked.clear();
+                }
+                if next.blocked.is_empty() {
                     window_sessions::start_held_data(vm, &addon, kind, d);
                     next.open = true;
                     next.answered = false;

@@ -347,6 +347,20 @@ pub(crate) fn number_tags_wanted() -> bool {
     false
 }
 
+/// The Stat Window's offence and defence figures (`Session::agree_stat_figures`) are asked for while a mod holds the
+/// game's Stat Window back (`hud.hide("stat_window")`), whatever the player's own Stat Window setting says: the mod draws
+/// its own and reads `eqoa.player.stats().figures`, and F4 and `/stats` do nothing while it holds the window, so the
+/// setting cannot be turned on from the game. A server that turns the window off (`qol::STAT_CAPS`) is not asked, and
+/// the player's "Use the game's windows" gives the game's window back (`stat_window_visible`). The one upstream line for it.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn stat_figures_wanted() -> bool {
+    !crate::settings::qol::off(crate::settings::qol::STAT_CAPS) && !crate::hud::fork_hud::stat_window_visible()
+}
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn stat_figures_wanted() -> bool {
+    false
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn end_game_event(play: &Play, capture: GameEventCapture) {
     MODE_BEFORE_EVENT.with(|m| m.set(-1));
@@ -1152,6 +1166,10 @@ pub(super) fn dropped(_play: &mut Play) {
     // round A11: nor of a mercenary, dye or fishing window
     #[cfg(not(target_arch = "wasm32"))]
     a11_play::dropped();
+    // the clears above tell a mod's `changed` events (`open = false`); the world they belong to is gone, so none
+    // is left for the next one
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::fork_ext::addons::change_events::world_changed();
 }
 
 /// Round A11: whether a window the server opens (a mercenary's, the dye picker, a fishing session) must act as the game

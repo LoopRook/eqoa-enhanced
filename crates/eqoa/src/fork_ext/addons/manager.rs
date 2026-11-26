@@ -103,7 +103,8 @@ enum Disposition {
 /// newly created or switched session can never collide with a previous generation number.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum SettingsConfig {
-    Legacy(u64),
+    /// the manager's own generation, and the count of option writes to the mods' files (`options::persist_generation`)
+    Legacy(u64, u64),
     Named { session_id: u64, generation: u64 },
 }
 
@@ -868,7 +869,7 @@ impl Manager {
                 session_id: s.session_id,
                 generation: s.generation,
             },
-            None => SettingsConfig::Legacy(self.legacy_settings_gen),
+            None => SettingsConfig::Legacy(self.legacy_settings_gen, super::options::persist_generation()),
         }
     }
     fn configure_native_settings(&self, entry: &mut Entry) {

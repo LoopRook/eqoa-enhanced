@@ -1332,7 +1332,7 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.player.Stats", "rows" | "columns") => Some("eqoa.player.StatItem"),
         ("eqoa.player.Stats", "resists") => Some("eqoa.player.Stats"),
         ("eqoa.player.Stats", "figures") => Some("eqoa.player.StatFigures"),
-        ("eqoa.player.StatFigures", "melee" | "ranged" | "defence") => Some("eqoa.player.StatRange"),
+        ("eqoa.player.StatFigures", "melee" | "ranged" | "defense") => Some("eqoa.player.StatRange"),
         (
             "eqoa.player.Stats",
             "strength" | "stamina" | "agility" | "dexterity" | "wisdom" | "intelligence"
@@ -1343,11 +1343,12 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.hud.Layout", "group_members") => Some("eqoa.hud.GroupMemberLayout"),
         ("eqoa.hud.Layout", "target") => Some("eqoa.hud.TargetLayout"),
         ("eqoa.hud.Layout", "minimap") => Some("eqoa.hud.Rect"),
+        ("eqoa.hud.Layout", "pieces") => Some("eqoa.hud.LayoutPieces"),
         (
-            "eqoa.hud.Layout",
-            "quests" | "meter" | "effects" | "chat" | "chat1" | "chat2" | "chat3" | "settings"
-            | "breath" | "quick_menus" | "spell_bars" | "utility_bars" | "equipment_bar"
-            | "target_info" | "raid_prompts" | "stats" | "focus",
+            "eqoa.hud.LayoutPieces",
+            "quest_tracker" | "dps_meter" | "effects" | "chat" | "chat1" | "chat2" | "chat3"
+            | "settings" | "breath" | "quick_menus" | "spell_bars" | "utility_bars"
+            | "equipment_bar" | "target_info" | "raid_prompts" | "stat_window" | "focus",
         ) => Some("eqoa.hud.Rect"),
         ("eqoa.hud.Layout", "pet") => Some("eqoa.hud.SinglePanelLayout"),
         (
@@ -1440,7 +1441,7 @@ fn install_fields(lua: &Lua) {
             "eqoa.player.Stats",
             "rows columns resists strength stamina agility dexterity wisdom intelligence charisma armor max_hp hp_max max_power power fire cold lightning arcane poison disease hot pot figures",
         ),
-        ("eqoa.player.StatFigures", "melee ranged defence"),
+        ("eqoa.player.StatFigures", "melee ranged defense"),
         ("eqoa.player.StatRange", "low high text"),
         (
             "eqoa.player.StatItem",
@@ -1509,7 +1510,11 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.hud.Layout",
-            "player group_members target pet minimap hud_scale pc_mode hud_unlocked quests meter effects chat chat1 chat2 chat3 settings breath quick_menus spell_bars utility_bars equipment_bar target_info raid_prompts stats focus",
+            "player group_members target pet minimap hud_scale pc_mode hud_unlocked pieces",
+        ),
+        (
+            "eqoa.hud.LayoutPieces",
+            "quest_tracker dps_meter effects chat chat1 chat2 chat3 settings breath quick_menus spell_bars utility_bars equipment_bar target_info raid_prompts stat_window focus",
         ),
         ("eqoa.hud.PlayerLayout", "panel health power exp"),
         ("eqoa.hud.TargetLayout", "panel health power"),
@@ -1519,6 +1524,8 @@ fn install_fields(lua: &Lua) {
     ] {
         let round = if path.starts_with("eqoa.map.") || matches!(path, "eqoa.input.Pointer" | "eqoa.options.Button") {
             Some(4)
+        } else if path == "eqoa.hud.LayoutPieces" {
+            Some(8)
         } else if path.starts_with("eqoa.hud.")
             || path.starts_with("eqoa.options.")
             || matches!(path, "eqoa.player.Stats" | "eqoa.player.StatItem")
@@ -1549,6 +1556,10 @@ fn install_fields(lua: &Lua) {
                 Some(5)
             } else if matches!((path, field), ("eqoa.entities.Entity", "head_mark" | "merc_tag"))
                 || matches!((path, field), ("eqoa.player.Stats", "hot" | "pot" | "figures"))
+                || matches!(
+                    (path, field),
+                    ("eqoa.combat.CombatHit", "by_player" | "from_merc" | "attribution" | "hit_kind")
+                )
                 || (path == "eqoa.hud.Layout"
                     && !matches!(field, "player" | "group_members" | "target" | "pet" | "minimap"))
             {

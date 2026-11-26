@@ -210,6 +210,20 @@ fn craft_mail_auction_events_arrive_after_a_zone_change() {
     }
 }
 
+/// A world dropped with a crafting, mail or auction window's state still held clears it, and that clear's `open = false`
+/// change is not left to be told in the next world. Negative control: without `change_events::world_changed()` at the end
+/// of `fork_ext::play::dropped`, the change is still pending after the drop.
+#[test]
+fn a_dropped_world_leaves_no_change_event_pending() {
+    fresh();
+    let _h = listener();
+    let p = crate::play::Play::bundled_ui_fixture();
+    change_events::note(change_events::Sys::Craft, 1, false);
+    assert!(change_events::pending_for_test(), "the change is waiting to be told");
+    drop(p);
+    assert!(!change_events::pending_for_test(), "the old world's change is gone with the world");
+}
+
 // ---- the faction page --------------------------------------------------------------------------------------------------
 
 fn page(standing: i32) -> Value {
@@ -246,6 +260,26 @@ fn factions_one_event_for_a_changed_page_none_for_the_same_one() {
     native_a5::set_factions(6, || Some(page(12)));
     step(&h);
     assert_eq!(heard(&h).matches("factions.changed:true:").count(), 1, "told after a zone change: {}", heard(&h));
+}
+
+/// A page turn (`request_factions` forgets the page, then the answer arrives) is one event, `open = true`: nothing is
+/// told for the moment the page is forgotten. Negative control: with the `is_some` test removed from `set_factions`,
+/// an `open = false` event is heard.
+#[test]
+fn factions_a_page_turn_tells_the_new_page_only_never_open_false() {
+    fresh();
+    let h = listener();
+    native_a5::set_factions(1, || Some(page(10)));
+    step(&h);
+    clear_heard(&h);
+    native_a5::set_factions(2, || None);
+    step(&h);
+    assert_eq!(heard(&h), "", "the page forgotten while the request is out: nothing told");
+    native_a5::set_factions(3, || Some(page(11)));
+    step(&h);
+    let arrived = heard(&h);
+    assert_eq!(arrived.matches("factions.changed:true:").count(), 1, "{arrived}");
+    assert!(!arrived.contains("factions.changed:false"), "{arrived}");
 }
 
 /// A mod that does not listen: no revision is spent and nothing is kept. Negative control: with the `wanted` test
@@ -532,6 +566,30 @@ fn raid_strip_session_ends_with_the_world_and_is_not_reopened_for_the_same_check
     window_takeover::release_all();
     step(&h);
     assert!(sessions(&h).ends_with("raid_ready:closed:zoning:request"), "{}", sessions(&h));
+}
+
+/// A session that ended with the player's death is not opened again for the rolls that were up, but a roll that comes
+/// later is new and opens one, though the first roll's timer has not run out. Negative control: with `blocked` a bare
+/// flag (cleared only when no roll is up), the second roll never opens a session.
+#[test]
+fn raid_roll_session_ended_by_death_does_not_block_a_later_roll() {
+    fresh();
+    let h = listener();
+    hold(&h, TakeoverKind::RaidRoll);
+    raid_strips::update(RaidSnapshot { rolls: vec![roll(1, 90000)], now_ms: 1000, ..Default::default() });
+    step(&h);
+    assert_eq!(sessions(&h), "raid_roll:opened:nil:request");
+    ws::end_all("death");
+    window_takeover::reset_all_for_test();
+    hold(&h, TakeoverKind::RaidRoll);
+    raid_strips::update(RaidSnapshot { rolls: vec![roll(1, 90000)], now_ms: 1100, ..Default::default() });
+    raid_strips::update(RaidSnapshot { rolls: vec![roll(1, 90000)], now_ms: 1200, ..Default::default() });
+    step(&h);
+    assert_eq!(sessions(&h), "raid_roll:opened:nil:request raid_roll:closed:death:request", "the same roll is not reopened");
+    clear_heard(&h);
+    raid_strips::update(RaidSnapshot { rolls: vec![roll(1, 90000), roll(2, 90000)], now_ms: 1300, ..Default::default() });
+    step(&h);
+    assert_eq!(sessions(&h), "raid_roll:opened:nil:request", "a roll that came later opens a session");
 }
 
 /// The strips cannot be passed or closed by a call; they are not a view that hides nothing.

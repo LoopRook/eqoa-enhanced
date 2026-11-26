@@ -1770,19 +1770,20 @@ fn hud_layout_says_the_scale_the_interface_and_the_unlocked_state_and_more_piece
         let l = hud_layout::hud_layout_json((640, 480));
         assert_eq!(l["hud_unlocked"].as_bool(), Some(true), "Move HUD on: the cached record follows");
         crate::hudlayout::set_unlocked(false);
-        assert!(l.get("quests").is_none(), "a piece the game did not draw has no rectangle");
+        assert!(l["pieces"].as_object().is_some_and(|p| p.is_empty()), "a piece the game did not draw has no rectangle");
+        assert!(l.get("quests").is_none() && l.get("quest_tracker").is_none(), "pieces are not top-level keys");
         // the quest tracker and the stat window drawn in the last frame
         crate::hudlayout::frame_begin();
         crate::hudlayout::note(crate::hudlayout::Piece::Quests, [500.0, 120.0, 620.0, 200.0], [0.0; 2]);
         crate::hudlayout::note(crate::hudlayout::Piece::Stats, [6.0, 150.0, 202.0, 250.0], [0.0; 2]);
         crate::hudlayout::frame_end();
         let l = hud_layout::hud_layout_json((640, 480));
-        let q = &l["quests"];
+        let q = &l["pieces"]["quest_tracker"];
         assert_eq!((q["frame_x"].as_f64(), q["frame_width"].as_f64(), q["frame_height"].as_f64()), (Some(500.0), Some(120.0), Some(80.0)), "pc={pc}");
         for (key, want) in [("x", 500.0), ("y", 120.0 * 480.0 / 448.0), ("width", 120.0), ("height", 80.0 * 480.0 / 448.0)] {
             assert!((q[key].as_f64().unwrap() - want).abs() < 0.01, "window {key} at 640 x 480: {} vs {want}", q[key]);
         }
-        assert_eq!(l["stats"]["frame_x"].as_f64(), Some(6.0));
+        assert_eq!(l["pieces"]["stat_window"]["frame_x"].as_f64(), Some(6.0));
         for size in [(0, 0), (0, 480), (640, 0), (1280, 720)] {
             let mut bad = Vec::new();
             no_null("layout", &hud_layout::hud_layout_json(size), &mut bad);
@@ -1790,7 +1791,29 @@ fn hud_layout_says_the_scale_the_interface_and_the_unlocked_state_and_more_piece
         }
         crate::hudlayout::frame_begin();
         crate::hudlayout::frame_end();
-        assert!(hud_layout::hud_layout_json((640, 480)).get("quests").is_none(), "gone when not drawn");
+        assert!(hud_layout::hud_layout_json((640, 480))["pieces"].get("quest_tracker").is_none(), "gone when not drawn");
+    }
+    hud_setup(false, 100, "", (640, 448));
+}
+
+/// `hud.layout(size)` for a size other than the window the game drew in: the other pieces' own coordinates are
+/// measured with the drawn window's side (not the asked size's), so the same piece does not move by the difference.
+#[test]
+fn hud_layout_pieces_are_measured_in_the_window_they_were_drawn_in() {
+    use crate::hudlayout::{Edge, Piece};
+    hud_setup(false, 100, "", (1280, 720));
+    crate::hudlayout::frame_begin();
+    crate::hudlayout::note(Piece::Quests, [500.0, 120.0, 620.0, 200.0], [0.0; 2]);
+    crate::hudlayout::frame_end();
+    let (own_h, _) = Piece::Quests.own();
+    assert!(own_h != Edge::Middle, "the probe piece is kept at a side");
+    let drawn = hud_layout::beyond_of((1280, 720));
+    let want = 500.0 - if own_h == Edge::Start { -drawn.side } else { drawn.side };
+    assert!(drawn.side > 50.0, "a 16:9 window has a side: {}", drawn.side);
+    for size in [(1280, 720), (640, 448), (1920, 1080)] {
+        let l = hud_layout::hud_layout_json(size);
+        let got = l["pieces"]["quest_tracker"]["frame_x"].as_f64().unwrap() as f32;
+        assert!((got - want).abs() < 0.01, "size {size:?}: frame_x {got} vs {want}");
     }
     hud_setup(false, 100, "", (640, 448));
 }
@@ -1807,16 +1830,29 @@ fn gauge_and_image_take_an_optional_scale() {
         assert(eqoa.hud.gauge({x=10, y=20, art=7, fill=0.5, scale=1.5}))
         assert(eqoa.hud.gauge({x=10, y=20, art=7, fill=0.5}))
         assert(eqoa.hud.image({ui_id=25, x=10, y=20, w=174, scale=2}))
+        assert(eqoa.hud.image({ui_id='panel', x=10, y=20, scale=1.5}))
+        -- a scale that cannot apply (a texture) is refused, never ignored
+        for _, sc in ipairs({1, 2, -1}) do
+            local ok, err = eqoa.hud.image({texture={}, x=1, y=1, scale=sc})
+            assert(ok == nil and err.code == 'invalid_argument', 'texture scale ' .. tostring(sc))
+        end
         for _, bad in ipairs({0, -1, 1/0, 0/0}) do
             local ok, err = eqoa.hud.gauge({x=1, y=1, art=7, fill=1, scale=bad})
             assert(ok == nil and err.code == 'invalid_argument', 'gauge scale ' .. tostring(bad))
             ok, err = eqoa.hud.image({ui_id=25, x=1, y=1, scale=bad})
             assert(ok == nil and err.code == 'invalid_argument', 'image scale ' .. tostring(bad))
+            ok, err = eqoa.hud.image({ui_id='panel', x=1, y=1, scale=bad})
+            assert(ok == nil and err.code == 'invalid_argument', 'panel scale ' .. tostring(bad))
         end
     "#,
     )
     .unwrap();
-    let q = drawn(hud_layer::MOD_QUEUES.with(|q| q.borrow().values().flatten().cloned().collect()));
+    let raw: Vec<hud_layer::HudCommand> = hud_layer::MOD_QUEUES.with(|q| q.borrow().values().flatten().cloned().collect());
+    assert!(
+        raw.iter().any(|c| matches!(c, hud_layer::HudCommand::Panel { scale, .. } if *scale == 1.5)),
+        "the panel keeps its scale: {raw:?}"
+    );
+    let q = drawn(raw.into_iter().filter(|c| !matches!(c, hud_layer::HudCommand::Panel { .. })).collect());
     assert_eq!(q.len(), 3, "the refused calls queue nothing: {q:?}");
     assert!(matches!(q[0], Drawn::Gauge { scale, .. } if scale == 1.5));
     assert!(matches!(q[1], Drawn::Gauge { scale, .. } if scale == 1.0), "no scale: the old call");
@@ -1847,6 +1883,7 @@ fn a_scaled_gauge_and_image_grow_about_their_own_corner() {
     for (what, make) in [
         ("gauge", (|s: f32| hud_layer::HudCommand::Gauge { x: 100, y: 200, art: 7, fill: 1.0, lit: true, scale: s, anchor: render::ui::Anchor::Left, vertical: render::ui::Vertical::Top }) as fn(f32) -> hud_layer::HudCommand),
         ("image", |s: f32| hud_layer::HudCommand::Image { ui_id: 25, target_fade: false, x: 100, y: 200, w: Some(174), h: None, color: None, scale: s, anchor: render::ui::Anchor::Left, vertical: render::ui::Vertical::Top }),
+        ("panel", |s: f32| hud_layer::HudCommand::Panel { x: 100, y: 200, w: 148, h: 132, scale: s, anchor: render::ui::Anchor::Left, vertical: render::ui::Vertical::Top }),
     ] {
         let mut seen = Vec::new();
         for s in [1.0, 1.5] {

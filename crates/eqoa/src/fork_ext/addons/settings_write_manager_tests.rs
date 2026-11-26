@@ -328,7 +328,7 @@ fn settings_gen_profile_switch_reads_and_writes_target_profile_with_session_iden
     gpu.frame(&mut manager);
     assert!(matches!(
         manager.entries[0].instance.as_ref().unwrap().settings_config,
-        Some(SettingsConfig::Legacy(_))
+        Some(SettingsConfig::Legacy(..))
     ));
 
     manager.enable_profiles(Some(config.0.clone()));
@@ -707,4 +707,48 @@ fn settings_gen_steady_frames_skip_reconfigure() {
         "no further reconfigures once caught up"
     );
     manager.shutdown();
+}
+
+/// A mod option flipped on the Options page (`options::set_toggle_persisted`, which writes `addons/<key>.json`) reaches
+/// a mod's `eqoa.settings.load()` in legacy storage, though the manager no longer re-reads that file every frame. In
+/// named-profile mode the mod's settings are the profile's, which that write does not touch: they stay as they were.
+/// Negative control: without the generation the option write bumps, the legacy mod keeps the old `nil` (checked by
+/// leaving the write out in the same test: no change, no reload).
+#[test]
+fn option_write_reaches_settings_load_in_legacy_storage_and_leaves_named_profiles_alone() {
+    let Some(mut gpu) = Gpu::new() else {
+        eprintln!("SKIP option_write_reaches_settings_load: no GPU adapter");
+        return;
+    };
+    for named in [false, true] {
+        let scripts = Scratch::new();
+        let config = Scratch::new();
+        scripts.package("t", true, "local c = eqoa.settings.load(); seen = c and c.opt or 'none'");
+        let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+        if named {
+            manager.enable_profiles(Some(config.0.clone()));
+        }
+        let seen = |m: &Manager| m.entries[0].instance.as_ref().unwrap().host.lua.globals().get::<mlua::Value>("seen").unwrap();
+        for _ in 0..4 {
+            gpu.frame(&mut manager);
+        }
+        let id = manager.entries[0].metadata.id.clone();
+        assert!(matches!(seen(&manager), mlua::Value::String(ref s) if &*s.to_str().unwrap() == "none"), "named={named}: nothing saved yet");
+        // control: frames with no option write change nothing
+        for _ in 0..3 {
+            gpu.frame(&mut manager);
+        }
+        assert!(matches!(seen(&manager), mlua::Value::String(ref s) if &*s.to_str().unwrap() == "none"), "named={named}: control");
+        super::super::options::set_toggle_persisted(&id, "opt", true).unwrap();
+        for _ in 0..3 {
+            gpu.frame(&mut manager);
+        }
+        if named {
+            assert!(matches!(seen(&manager), mlua::Value::String(ref s) if &*s.to_str().unwrap() == "none"), "named: the profile's settings are untouched");
+        } else {
+            assert!(matches!(seen(&manager), mlua::Value::Boolean(true)), "legacy: the option written is what load() gives, got {:?}", seen(&manager));
+        }
+        manager.shutdown();
+    }
+    super::super::options::reset_in_memory();
 }

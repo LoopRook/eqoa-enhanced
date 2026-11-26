@@ -204,7 +204,7 @@ impl View {
         named.insert(
             "figures".to_string(),
             if g.any() {
-                json!({"melee": range_json(g.melee), "ranged": range_json(g.ranged), "defence": range_json(g.defence)})
+                json!({"melee": range_json(g.melee), "ranged": range_json(g.ranged), "defense": range_json(g.defence)})
             } else {
                 Json::Null
             },

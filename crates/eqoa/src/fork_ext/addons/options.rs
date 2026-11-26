@@ -163,6 +163,14 @@ pub fn load_persisted_toggle(addon_id: &str, id: &str) -> Option<bool> {
     None
 }
 
+/// Counts writes of a mod's `addons/<key>.json` by `persist_toggle`, so the manager knows a legacy-storage mod's
+/// `eqoa.settings.load()` data is out of date (it caches what it read until something says the file changed).
+static PERSIST_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub(super) fn persist_generation() -> u64 {
+    PERSIST_GENERATION.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn persist_toggle(addon_id: &str, id: &str, value: bool) -> Result<(), String> {
     let v2_key = super::storage::Storage::key_for_addon_id(addon_id);
     let rel_path = format!("addons/{v2_key}.json");
@@ -205,6 +213,7 @@ fn persist_toggle(addon_id: &str, id: &str, value: bool) -> Result<(), String> {
             super::storage::Storage::new(Some(dir)).save_encoded_deferred_sync(&v2_key, &new_json, Some(addon_id))?;
         }
     }
+    PERSIST_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Ok(())
 }
 
