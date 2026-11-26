@@ -345,5 +345,61 @@ class Committed(unittest.TestCase):
         self.assertEqual(len(provisional_actions), acts["provisional"])
 
 
+SPEC = T.ROOT / "docs/modding/EQOA-API-SPEC.md"
+
+
+def provisional_actions(doc):
+    return sorted(n.split(".")[2] for n in doc["provisional"]
+                  if n.startswith("eqoa.actions.") and n.count(".") == 2 and n.split(".")[2][0].islower())
+
+
+def spec_problems(spec_text, prov):
+    """Every provisional action is marked on a line that describes it, and no line carries the
+    whole-row mark unless every action in its first cell is provisional."""
+    import re
+    lines = spec_text.replace("\r\n", "\n").split("\n")
+    out = []
+    for name in prov:
+        described = [l for l in lines if re.search(r"eqoa\.actions\.%s\b" % name, l)]
+        if not any("*Provisional" in l or "*(provisional)*" in l for l in described):
+            out.append(f"{name}: no line that describes it is marked provisional")
+    for l in lines:
+        if l.startswith("| `eqoa.actions.") and "*Provisional.*" in l:
+            cells = re.split(r"(?<!\\)\|", l)
+            names = re.findall(r"eqoa\.actions\.([a-z_0-9]+)", cells[1])
+            wrong = [n for n in names if n not in prov]
+            if wrong:
+                out.append(f"{wrong}: marked provisional but proven")
+    return out
+
+
+class SpecMarks(unittest.TestCase):
+    def setUp(self):
+        self.doc = json.loads(T.TIERS.read_text(encoding="utf-8"))
+        self.prov = provisional_actions(self.doc)
+        self.spec = SPEC.read_text(encoding="utf-8")
+
+    def test_every_provisional_action_is_marked_in_the_spec(self):
+        self.assertEqual(spec_problems(self.spec, self.prov), [])
+
+    def test_negative_control_unmarked_action_is_caught(self):
+        stripped = self.spec.replace("*Provisional.* ", "")
+        self.assertTrue(spec_problems(stripped, self.prov))
+
+    def test_negative_control_a_proven_action_marked_is_caught(self):
+        self.assertNotIn("cast", self.prov)
+        bad = self.spec.replace("| `eqoa.actions.cast(ability)` | ", "| `eqoa.actions.cast(ability)` | *Provisional.* ", 1)
+        self.assertNotEqual(bad, self.spec)
+        self.assertTrue(spec_problems(bad, self.prov))
+
+    def test_wording_has_no_em_dash_and_names_both_words(self):
+        for page in ("VERSIONING.md", "PROVISIONAL.md"):
+            text = (T.ROOT / "docs/modding" / page).read_text(encoding="utf-8")
+            self.assertNotIn("—", text, page)
+            self.assertIn("provisional", text.lower())
+        self.assertIn("## Proven and provisional names",
+                      (T.ROOT / "docs/modding/VERSIONING.md").read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()

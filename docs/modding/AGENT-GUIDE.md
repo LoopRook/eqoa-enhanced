@@ -10,7 +10,9 @@ One page for an AI agent. The owner describes what they want to see in the game;
 3. List the API areas you need and look each up in [EQOA-API-SPEC.md](EQOA-API-SPEC.md). Then check the
    generated [SUPPORT-TABLE.md](SUPPORT-TABLE.md) (or ask the running client with
    `eqoa.capabilities.get(path)`). Treat `not_yet` and `unsupported` as "cannot be built"; tell the owner
-   rather than faking it. Never invent function names.
+   rather than faking it. Never invent function names. Prefer proven names: those on the provisional list
+   ([PROVISIONAL.md](PROVISIONAL.md)) work but no shipped mod uses them yet, so they may still be corrected
+   after the final freeze.
 
 ## 2. Start from the template
 

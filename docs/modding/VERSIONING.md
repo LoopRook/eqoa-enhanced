@@ -5,7 +5,30 @@ Plain words for mod authors. The reference is [EQOA-API-SPEC.md](EQOA-API-SPEC.m
 **Status:** from Enhanced 0.7.0 `eqoa/1` is a stable candidate. The guard test described below is on and we
 do not expect breaking changes. The promise takes full effect at the final freeze, which comes when the API
 is offered to the upstream client and upstream has had its say. Until then a rare correction can still
-happen, and every one is listed in the release notes.
+happen, and every one is listed in the release notes. At the final freeze the names fall into two groups,
+proven and provisional (next section); the promise below applies in full to the proven ones.
+
+## Proven and provisional names
+
+At the final freeze every `eqoa/1` name is either proven or provisional. The list of provisional names is
+[PROVISIONAL.md](PROVISIONAL.md); the machine-readable form is
+[eqoa-1-tiers.json](eqoa-1-tiers.json). A name that is not on the list is proven.
+
+- **Proven** means a mod shipped with the client uses it, so it has been exercised in real play. A proven
+  name gets the full promise on this page: it never changes and never disappears.
+- **Provisional** means the name is covered by the client's automated tests but no shipped mod uses it
+  yet. It works as documented, but it can still be **corrected** after the final freeze if real use shows
+  a mistake in the name, a field, a result or a limit. Every correction to a provisional name is listed in
+  the release notes, with the name; a correction that is not listed there is a bug in the client.
+- **Graduating:** a provisional name becomes proven once a mod shipped with the client uses it. It is then
+  promised in full, and a name never goes back from proven to provisional. If you want a provisional name
+  to be promised, use it in a mod and tell us.
+- Provisional is a statement about how far a name has been used, not about whether it works. Nothing in
+  `eqoa.capabilities` changes: a provisional name still reports `supported`.
+- The FrontiersForge compatibility layer (below) is neither proven nor provisional.
+
+Until the final freeze the list is a forecast: it is regenerated whenever a shipped mod starts or stops
+using a name, and a name only moves toward proven unless the project's owner decides otherwise.
 
 ## What never changes under `eqoa/1`
 

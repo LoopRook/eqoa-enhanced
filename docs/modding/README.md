@@ -18,5 +18,7 @@ ever disagree, the client's own answer wins: ask it with `eqoa.capabilities.get(
 
 `eqoa/1` is a stable candidate from Enhanced 0.7.0: the guard is on and we do not expect breaking changes.
 The final freeze comes when the API is offered upstream, after upstream has had its say; from then on it
-only grows ([VERSIONING.md](VERSIONING.md)). Mods written for FrontiersForge keep running through a
+only grows ([VERSIONING.md](VERSIONING.md)). Names that no shipped mod uses yet are marked provisional
+([PROVISIONAL.md](PROVISIONAL.md)): they may still be corrected after the freeze, with a release-notes entry.
+Mods written for FrontiersForge keep running through a
 compatibility layer that is not part of that promise.
