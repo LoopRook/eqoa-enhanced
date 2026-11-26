@@ -69,6 +69,26 @@ pub fn set_storage_root(root: Option<PathBuf>) {
     STORAGE_ROOT.with(|r| *r.borrow_mut() = root);
 }
 
+thread_local! {
+    /// The manager's background writer of the mods' settings (weak: the manager owns it, and its drop writes what
+    /// still waits).
+    static SETTINGS_WRITES: RefCell<std::sync::Weak<super::write_queue::WriteQueue>> = RefCell::new(std::sync::Weak::new());
+}
+
+pub(super) fn set_settings_writes(queue: &std::sync::Arc<super::write_queue::WriteQueue>) {
+    SETTINGS_WRITES.with(|w| *w.borrow_mut() = std::sync::Arc::downgrade(queue));
+}
+
+/// Waits for the mods' queued settings writes to reach the disk. `persist_toggle` reads a mod's file and writes it
+/// whole: a save of that mod still queued would otherwise be read around (its keys lost from the file) or land
+/// after the toggle and put the older file back. Blocks for as long as the queued writes take (each an atomic
+/// replace with a sync: well over a second on a slow disk, normally milliseconds); nothing waits when none is queued.
+fn finish_queued_settings_writes() {
+    if let Some(q) = SETTINGS_WRITES.with(|w| w.borrow().upgrade()) {
+        q.flush();
+    }
+}
+
 pub fn reset_in_memory() {
     super::option_buttons::reset();
     TOGGLES.with(|t| *t.borrow_mut() = default_toggles());
@@ -172,6 +192,7 @@ pub(super) fn persist_generation() -> u64 {
 }
 
 fn persist_toggle(addon_id: &str, id: &str, value: bool) -> Result<(), String> {
+    finish_queued_settings_writes();
     let v2_key = super::storage::Storage::key_for_addon_id(addon_id);
     let rel_path = format!("addons/{v2_key}.json");
     let mut entries: Vec<Json> = load_persisted_json(addon_id)

@@ -752,3 +752,70 @@ fn option_write_reaches_settings_load_in_legacy_storage_and_leaves_named_profile
     }
     super::super::options::reset_in_memory();
 }
+
+/// M3 (second review of batch 8): in legacy storage a mod's save is queued on the background writer; another
+/// mod's option toggle bumps the generation, and the next frame reloads every mod's settings from the disk. The
+/// reload waited for nothing, so the mod that had just saved got its older file (none) back in memory. Now the
+/// queued write reaches the disk first. Control (run red): without the waits, `eqoa.settings.load()` gives 'none'.
+#[test]
+fn a_save_followed_by_another_mods_option_toggle_is_not_read_back_stale() {
+    let Some(mut gpu) = Gpu::new() else {
+        eprintln!("SKIP a_save_followed_by_another_mods_option_toggle_is_not_read_back_stale: no GPU adapter");
+        return;
+    };
+    let scripts = Scratch::new();
+    let config = Scratch::new();
+    scripts.package(
+        "a",
+        true,
+        "frames = (frames or 0) + 1; if frames == 2 then assert(eqoa.settings.save({v=1})) end; local c = eqoa.settings.load(); seen_v = c and c.v or 'none'",
+    );
+    scripts.package("b", true, "frames = (frames or 0) + 1");
+    let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+    let at = |m: &Manager, id: &str| m.entries.iter().position(|e| e.metadata.id == id).unwrap_or_else(|| panic!("no mod {id}"));
+    let (ia, ib) = (at(&manager, "a"), at(&manager, "b"));
+    let seen = |m: &Manager| m.entries[ia].instance.as_ref().unwrap().host.lua.globals().get::<mlua::Value>("seen_v").unwrap();
+    gpu.frame(&mut manager);
+    manager.writes.set_delay_for_test(std::time::Duration::from_millis(400));
+    gpu.frame(&mut manager); // a saves: queued behind the slow disk
+    assert!(manager.writes.is_busy(), "control: the save has not reached the disk");
+    let b_id = manager.entries[ib].metadata.id.clone();
+    super::super::options::set_toggle_persisted(&b_id, "opt", true).unwrap();
+    for _ in 0..3 {
+        gpu.frame(&mut manager);
+    }
+    assert!(matches!(seen(&manager), mlua::Value::Integer(1) | mlua::Value::Number(_)), "the saved value is what load() gives, got {:?}", seen(&manager));
+    manager.shutdown();
+    super::super::options::reset_in_memory();
+}
+
+/// M3: a mod's save, queued, and the same mod's option toggle: the toggle's own file write must not be undone by
+/// the older queued write (nor the save lost to the toggle's read of the file). Both are on the disk afterwards.
+/// Control (run red): with the toggle not waiting for the queue, the queued save lands after it and the option is lost.
+#[test]
+fn a_save_followed_by_the_same_mods_toggle_keeps_both_on_disk() {
+    let Some(mut gpu) = Gpu::new() else {
+        eprintln!("SKIP a_save_followed_by_the_same_mods_toggle_keeps_both_on_disk: no GPU adapter");
+        return;
+    };
+    let scripts = Scratch::new();
+    let config = Scratch::new();
+    scripts.package("a", true, "frames = (frames or 0) + 1; if frames == 2 then assert(eqoa.settings.save({v=1})) end");
+    let addon = super::super::discovery::discover(&scripts.0).addons.remove(0);
+    let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+    gpu.frame(&mut manager);
+    manager.writes.set_delay_for_test(std::time::Duration::from_millis(400));
+    gpu.frame(&mut manager);
+    assert!(manager.writes.is_busy(), "control: the save is still queued");
+    let id = manager.entries[0].metadata.id.clone();
+    super::super::options::set_toggle_persisted(&id, "opt", true).unwrap();
+    for _ in 0..3 {
+        gpu.frame(&mut manager);
+    }
+    manager.writes.flush();
+    let on_disk = settings_file(&config.0, &addon).expect("the mod's file").to_string();
+    assert!(on_disk.contains("\"v\""), "the save is on disk: {on_disk}");
+    assert!(on_disk.contains("\"opt\""), "the toggle is on disk: {on_disk}");
+    manager.shutdown();
+    super::super::options::reset_in_memory();
+}
