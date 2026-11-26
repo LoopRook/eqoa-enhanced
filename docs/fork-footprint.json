@@ -108,9 +108,9 @@
     },
     "crates/eqoa/src/crashfile.rs": {
 
-      "added": 4,
+      "added": 5,
       "deleted": 1,
-      "reason": "Sync 2026-11-11: send-boundary hook prefixes every native/browser/legacy crash report with fork-owned Enhanced identity; upstream persistence, wire protocol and tests retained. Fix round: one test-only #[path] line loads fork_ext/crashfile_dirs_tests.rs (it needs crashfile's private files_in/pending_in/write_in/answered_in; proves the fork's local crash folder and upstream's never mix). Hotfix 0.7.1 (crash-report consent): +2 one-line hooks, report_consent::keep_for_server() at the top of write and report_consent::hold(most) at the top of send_pending: a kept crash report was sent to the game server at login without the player being asked; no copy is kept for a server and none is sent."
+      "reason": "Sync 2026-11-11: send-boundary hook prefixes every native/browser/legacy crash report with fork-owned Enhanced identity; upstream persistence, wire protocol and tests retained. Fix round: one test-only #[path] line loads fork_ext/crashfile_dirs_tests.rs (it needs crashfile's private files_in/pending_in/write_in/answered_in; proves the fork's local crash folder and upstream's never mix). Hotfix 0.7.1 (crash-report consent): +2 one-line hooks, report_consent::keep_for_server() at the top of write and report_consent::hold(most) at the top of send_pending: a kept crash report was sent to the game server at login without the player being asked; no copy is kept for a server and none is sent. Also +1 hook at the top of the wasm write_page (the page keeps nothing for a server)."
     },
     "crates/eqoa/src/hud.rs": {
       "added": 52,
@@ -143,9 +143,9 @@
       "reason": "Integration of Parts B and C, tightened to the merged tree's measured +94/-53 (Part C removes the native circle/hover-card/search hooks, lowering Part B's +147/-54). Part B fix round: restore upstream test lines and the native map-open condition; tightened to measured. Reviewed restored state plus native health receipt/reset, cached HUD invalidation, addon hide-UI draw/click hooks for compass, active effects, chat, and HUD menus... Round 3 Stage C removes native Stats Box, ToT, and Mana Bars fields, lowering added lines from 381 to 278 and deletions from 62 to 61. Sync 2026-11-11 fix round: send_bug_note wraps its note in fork_ext::report_label::bug_note (one line changed, +1/-1 against the measured 263/62) so F3's server Support note names EQOA Enhanced; deletions return to 62. Round 4 Part B: tightened to measured divergence after replacing native search/journal with bundled mods. Sync 2026-11-15: upstream's stacked spell bars and buff window take the existing ability-bar/active-effects hide hooks; the HUD pick match returns to upstream's order. Tightened to measured. Sync 2026-11-15 review (Terra M1/M2): upstream's new buff-window clicks and right-click autocast on the ability bars take the same mod hide checks as their drawing (+1/-1 each). Round 5 (owner-approved 2026-11-15, loot request seam): +1 line in attack_press, `crate::fork_ext::loot_requested(self.target);`, before the corpse request (0x0015) is built, so the loot window's source is the corpse that was asked for. round 6 action hook calls, approved by the lead on the owner's delegation 2026-11-16: +1 line in Play::frame, `fork_hooks::apply_camera(self, walker);`. Sync 2026-11-18 develop merge: upstream added `impl Drop for Play`, which conflicted with the session recorder's own Drop in fork_ext/play.rs; upstream's Drop keeps its body and gains +1 line, `fork_hooks::dropped(self);` (measured +80/-40, within budget)."
     },
     "crates/eqoa/src/settings.rs": {
-      "added": 17,
+      "added": 18,
       "deleted": 1,
-      "reason": "Restored map/quest settings plus one adapter reference per settings hook... Round 3 Stage C removes hardcoded legacy HUD options (stats_box, target_of_target, mana_bars, hud_numbers, xp_details, target_hp_percent), lowering added lines from 162 to 17 and deletions from 32 to 1."
+      "reason": "Restored map/quest settings plus one adapter reference per settings hook... Round 3 Stage C removes hardcoded legacy HUD options (stats_box, target_of_target, mana_bars, hud_numbers, xp_details, target_hp_percent), lowering added lines from 162 to 17 and deletions from 32 to 1. Hotfix 0.7.1 (crash-report consent): +1 line in the unit tests' settings store (cfg(test) only), `if let Some(d) = crate::fork_ext::report_consent::test_config_dir() { return Some(d); }` before its `None`, so a test can give the store a config folder of its own and the consent tests reach the real send_pending/Delete paths."
     },
     "crates/eqoa/src/ui.rs": {
       "added": 10,
