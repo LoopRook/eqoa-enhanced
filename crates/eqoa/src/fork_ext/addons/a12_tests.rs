@@ -586,6 +586,37 @@ fn stat_window_the_games_key_is_told_to_the_holder_only() {
     assert_eq!(told(&a).matches(',').count(), 2);
 }
 
+/// Review point 3: two mods holding the window are both told (the spec says so), a third that holds nothing is not, and a
+/// holder that lets go stops hearing it.
+#[test]
+fn stat_window_every_holder_is_told_and_no_other() {
+    use crate::hud::fork_hud::stat_window_toggle_held;
+    let a = hud();
+    let b = hud_on(a.claims.clone());
+    let c = hud_on(a.claims.clone());
+    for (h, tag) in [(&a, "a"), (&b, "b"), (&c, "c")] {
+        h.host.execute(&format!("told = {{}}; eqoa.events.on('hud.piece_requested', function(e) told[#told + 1] = '{tag}:' .. e.data.action end)")).unwrap();
+    }
+    let told = |h: &Hud| -> String { h.host.lua.load("return table.concat(told, ',')").eval().unwrap() };
+    let deliver = || {
+        super::native_core::flush_deferred();
+        for h in [&a, &b, &c] {
+            super::native_events::dispatch(&h.host).unwrap();
+        }
+    };
+    a.host.execute("claim=assert(eqoa.hud.hide('stat_window'))").unwrap();
+    b.host.execute("claim=assert(eqoa.hud.hide('stat_window'))").unwrap();
+    a.publish();
+    assert!(stat_window_toggle_held());
+    deliver();
+    assert_eq!((told(&a).as_str(), told(&b).as_str(), told(&c).as_str()), ("a:toggle", "b:toggle", ""));
+    a.host.execute("assert(eqoa.hud.show(claim))").unwrap();
+    a.publish();
+    assert!(stat_window_toggle_held(), "b still holds it");
+    deliver();
+    assert_eq!((told(&a).as_str(), told(&b).as_str()), ("a:toggle", "b:toggle,b:toggle"), "the one that let go hears no more");
+}
+
 #[test]
 fn stat_window_the_disclosure_names_it() {
     assert!(visibility::is_hud_disclosure("hud.stat_window"), "accepted in `replaces`");
