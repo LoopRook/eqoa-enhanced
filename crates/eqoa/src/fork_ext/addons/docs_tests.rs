@@ -559,7 +559,7 @@ fn pins() -> Vec<Pin> {
     vec![
         pin!("Lua memory per mod", "8 MiB", "fork_ext/addons/host.rs", "set_memory_limit(8 * 1024 * 1024)",
             "fork_ext/addons/file_io.rs", "round4_json_calls_keep_ordinary_heap_and_manifest_opt_in"),
-        pin!("Lua memory per mod", "128 MiB", "fork_ext/addons/async_json.rs", "JSON_HEAP: usize = 128 * 1024 * 1024",
+        pin!("Lua memory per mod", "256 MiB", "fork_ext/addons/async_json.rs", "JSON_HEAP: usize = 256 * 1024 * 1024",
             "fork_ext/addons/file_io.rs", "round4_json_calls_keep_ordinary_heap_and_manifest_opt_in"),
         pin!("Lua instructions per mod per frame, all handlers together", "4 million",
             "fork_ext/addons/host.rs", "INSTRUCTION_BUDGET: u32 = 4_000_000",

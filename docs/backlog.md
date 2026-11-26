@@ -499,3 +499,38 @@ A font restored after going missing is retried after a face or size change or af
   runs on a busy PC. Repeat on an idle PC before quoting a number.
 - **Controls not run red in batch 8:** the crash-report consent tests, most of the review-fix tests and the mod pass
   (in-test mutations only); there is no end-to-end test of Delete through the crash offer's dialog.
+
+## From the owner's test of batch 8 on the PC interface (2026-11-26)
+
+- **Status:** Deferred by the owner as mod work for later, except where noted. What he asked to be fixed now (Round
+  Minimap scale on the PC interface, the Stat Window key opening the Stats Box, bank marks surviving a withdrawal,
+  Support in the Start Menu mod, a Name Plates error, paste into the Chat line if small) is on `fix/owner-1126c`.
+- **Target of Target does nothing on the PC interface** (it works on Controller). Mod work.
+- **Mana Bars take about a second to show for a new target**, and neither Mana Bars nor Target of Target matches the
+  look the mods are meant to share.
+- **Effects window:** better as an icon strip, still "not great" and not in the shared look; "really unwieldy and not
+  like a modern buff bar". An effect's hover text often says the game does not say what it does (seen on a mercenary's
+  abilities; the player's own may be described). See "Frames / buff numbers" above: the client gets no effect numbers.
+  Whether mod windows should collapse into drop-downs is a question for the mod project.
+- **Hitches when coming back to the game window (lead, from his log):** sixteen frames of 150 to 600 ms in thirty
+  minutes, logged as `slow: hud: mods took ... ms`, most of them on the first frames after the window comes to the
+  front, several with "a background write was running", one inside `eqoa_map_search`'s events. Average frame rate on
+  the PC interface was fine by his eye; the log holds no average. Wants a measurement (which mod, what it does on the
+  first frame in front) before a fix.
+- **Dev builds carry no version of their own** (owner: "we really should have been versioning all of these dev
+  builds"): every dev build says 0.7.0 plus its commit. A counter or a `-dev.N` suffix in the build id would make "which
+  build did you test" a one-word answer. Small; touches the Nightly workflow and the build stamp.
+
+## Map Search and Creature Journal: hold less in memory (owner, 2026-11-26)
+
+- **Status:** Deferred to the mod project. The room was raised instead for now: a mod with `"large_data"` has 256 MiB
+  of Lua memory since 2026-11-26 (was 128 MiB; an ordinary mod still has 8 MiB).
+- **Why:** with a 10,000-name, 80,000-spawn journal (the test's worst case) Map Search peaks at about 101 to 111 MB and
+  the Creature Journal at 93 to 102 MB, about twice what each really holds, because the garbage of a load or an index
+  build counts until Lua's collector runs. A fix on 2026-11-26 briefly took Map Search to 131 MB of 134 MB and the
+  test failed now and then.
+- **What to do:** keep spawn rows as plain arrays (not one table per spawn), make the index text cheaper, load the
+  journal lazily when the panel first opens, and let go of the catalogue when the panel has been closed for a while.
+  The test `round4b_fix_busy_world_max_journal_cost_and_incremental_queries` keeps its guard at 90% of the OLD 128 MiB
+  on purpose, so the mods do not grow into the new room; lower that guard as the mods get leaner.
+- **Not measured:** the owner's real journal in play.

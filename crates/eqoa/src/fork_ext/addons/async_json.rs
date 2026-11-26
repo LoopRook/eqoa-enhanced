@@ -14,7 +14,7 @@ use std::{
     thread,
 };
 pub(crate) const READ_CAP: usize = 16 * 1024 * 1024;
-pub(crate) const JSON_HEAP: usize = 128 * 1024 * 1024;
+pub(crate) const JSON_HEAP: usize = 256 * 1024 * 1024;
 const NODES: usize = 2_000_000;
 struct JsonNull;
 impl UserData for JsonNull {}
