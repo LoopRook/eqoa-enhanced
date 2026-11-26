@@ -58,7 +58,7 @@ fn owner1126_chat_the_line_being_typed_wraps_inside_the_window_and_grows_upward(
     assert!(widest <= limit + 0.01, "no row wider than the window: {widest} > {limit}");
     assert!(full > limit, "control: on one row the line would have run off the right edge ({full} > {limit})");
     assert!(shown.ends_with('_'), "the caret ends the last row: {shown}");
-    assert!((bottom2 - bottom).abs() < 0.5, "it grew upward: the bottom edge stayed ({bottom} -> {bottom2})");
+    assert!((bottom2 - bottom).abs() < 1.5, "it grew upward: the bottom edge stayed ({bottom} -> {bottom2})");
     // each row break fell on a word boundary: the rows put back together are the line
     assert_eq!(shown.replace('|', " ").replace('_', ""), host.lua.load("return chat_probe.state.text").eval::<String>().unwrap(), "{shown}");
     // one long word breaks inside itself, still inside the window

@@ -665,7 +665,8 @@ fn round_minimap_card_stays_inside_the_window_wherever_the_minimap_is_moved_body
     let (dx, dy) = rm.dot_at(rm.me[0] + 40.0, rm.me[2] + 30.0);
     assert!(rm.hover(dx, dy).is_some());
     let home = inside(&rm, "home");
-    assert!(home[2] < 400.0, "the long name is wrapped: card {} wide", home[2]);
+    let lines: Vec<String> = rm.state("round_minimap.card_text");
+    assert!(lines.len() > 3, "the long name is wrapped onto several lines: {lines:?}");
     // Move HUD: far left and down
     hudlayout::frame_begin();
     hudlayout::note(Piece::Minimap, [474.0, 50.0, 586.0, 162.0], [0.0, 0.0]);

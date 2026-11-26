@@ -389,7 +389,7 @@ fn line4_a_merchant_you_talk_to_yourself_opens_the_games_window_and_helpers_act_
     run(&lua, "H.keep['1'] = 9; H.bank['1'] = true");
     // Sell junk and Restock are off by default (Bank is on since 2026-11-26, and no banker is near here): standing at the
     // merchant does nothing
-    assert!(!boolean(&lua, "H.auto_on('sell') or H.auto_on('restock')") && boolean(&lua, "H.auto_on('bank')"));
+    assert!(!boolean(&lua, "H.auto_on('sell') or H.auto_on('restock')") && boolean(&lua, "H.is_on('Hero', 'bank')"));
     run(&lua, "for i = 1, 8 do later(1); H.auto_poll(true) end");
     assert_eq!(int(&lua, "#TALKS + #BATCHES + #TAKEOVERS"), 0, "nothing is done unasked");
     // the player talks to the merchant: the game's own window opens, and no helper takes it over or acts on it

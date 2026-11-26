@@ -1613,11 +1613,10 @@ mod mods {
             p.dump.bank.items.items[1].item.value = 80;
         });
         r.settle();
-        r.host.execute("local B = require('bags'); B.select(6)").unwrap();
+        r.host.execute("local B = require('bags'); B.select(6); local H = require('helpers'); H.bank_near_seen, H.bank_refresh_wanted = true, false").unwrap();
         for _ in 0..6 {
             r.settle();
         }
-        quiet_bank_tab(&mut r);
         let diag = state_of(&r, "local B = require('bags'); return 'open=' .. tostring(B.open) .. ' grid=' .. tostring(B.grid) .. ' tab=' .. tostring(B.tab) .. ' rect=' .. tostring(B.rect) .. ' inv=' .. tostring(eqoa.inventory.get())");
         assert!(state_of(&r, "return tostring(require('bags').rect ~= nil)") == "true", "the Bags window is drawn: {diag}; {}", r.why());
         r
@@ -2054,6 +2053,7 @@ mod mods {
         r.type_text("900");
         assert_eq!(state_of(&r, "local s = require('eqoa_auction_state'); return s.seller .. '|' .. s.min_price .. '|' .. s.max_price"), "Zed|100|900");
         r.key("enter", "");
+        r.settle();
         assert_eq!(sent().len(), n + 1, "Enter in a box searches; {}", r.why());
         assert_eq!(sent().last().unwrap(), &want, "the seller and the price range reach the game's search");
         assert_eq!(state_of(&r, "return tostring(require('eqoa_auction_state').field)"), "nil", "the typing is released");
@@ -2122,12 +2122,10 @@ mod mods {
             p.dump.bank.items = net::dump::ItemList { p04: 0, items: vec![item(700_001, "Gold Ring", 21, 1)] };
         });
         r.settle();
-        r.host.execute("require('bags').select(6)").unwrap();
+        // closed-bank tests start before the tab's own refresh (it would have opened the bank)
+        r.host.execute(if open { "require('bags').select(6)" } else { "require('bags').select(6); local H = require('helpers'); H.bank_near_seen, H.bank_refresh_wanted = true, false" }).unwrap();
         for _ in 0..6 {
             r.settle();
-        }
-        if !open {
-            quiet_bank_tab(&mut r);
         }
         if open {
             bank_money_open(&mut r);
@@ -2139,17 +2137,6 @@ mod mods {
             )
             .unwrap();
         r
-    }
-
-    /// The Bank tab now asks the banker itself when it is shown (no "Open bank" button). The tests that start from a closed
-    /// bank (to test what opens it) let the session go and say the tab has asked already.
-    fn quiet_bank_tab(r: &mut Rig) {
-        r.host
-            .execute("eqoa.windows.release('bank'); local H = require('helpers'); H.bank_near_seen, H.bank_refresh_wanted, H.bank_was_open = true, false, nil")
-            .unwrap();
-        for _ in 0..3 {
-            r.settle();
-        }
     }
 
     fn bank_money_open(r: &mut Rig) {
