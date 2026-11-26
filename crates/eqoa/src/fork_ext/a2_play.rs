@@ -313,7 +313,13 @@ pub(crate) fn dispatch_answer(play: &mut Play, session: &str, choice: Choice) ->
     }
     match press(play, &active.item, option) {
         Ok(sent) => {
-            dialog_sessions::finish(&active.id, "answered");
+            // a yes/no invitation or offer ends "accepted" or "declined"; a dialog with several answers "answered"
+            let reason = match active.item {
+                Item::Invite { .. } | Item::Offer { .. } if option == 1 => "accepted",
+                Item::Invite { .. } | Item::Offer { .. } => "declined",
+                _ => "answered",
+            };
+            dialog_sessions::finish(&active.id, reason);
             DispatchOutcome::Completed { detail: Some(json!({"sent": sent})) }
         }
         Err(e) => e,
@@ -335,7 +341,7 @@ pub(crate) fn accept_offer(play: &mut Play, session: &str) -> Result<(), String>
     }
     match press(play, &active.item, 1) {
         Ok(_) => {
-            dialog_sessions::finish(&active.id, "answered");
+            dialog_sessions::finish(&active.id, "accepted");
             Ok(())
         }
         Err(DispatchOutcome::Refused { reason, .. }) => Err(reason),

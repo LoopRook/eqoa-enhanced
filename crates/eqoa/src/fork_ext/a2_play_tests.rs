@@ -45,6 +45,15 @@ fn ready(live: bool) -> Play {
 }
 
 /// What the session sent since the last look (live connection only).
+/// The `reason` of the last `windows.session` close queued for the mod since the outbox was last taken.
+fn closed_reason() -> Option<String> {
+    ws::take_outbox()
+        .into_iter()
+        .filter(|(n, d)| *n == "windows.session" && d["phase"] == "closed")
+        .last()
+        .and_then(|(_, d)| d["reason"].as_str().map(str::to_string))
+}
+
 fn sent(p: &mut Play) -> Vec<Vec<u8>> {
     p.session.record.as_mut().map(std::mem::take).unwrap_or_default().into_iter().map(|(_, d)| d).collect()
 }
@@ -443,6 +452,9 @@ fn a2_a_group_invitation_is_a_session_accepted_and_declined_through_the_games_bo
             super::super::a2_play::dispatch_answer(&mut p, &s.id, super::super::a2_play::Choice::Option(if accept { 1 } else { 2 }))
         });
         assert!(matches!(got, action_broker::DispatchOutcome::Completed { .. }), "{}", show(&got));
+        // a yes/no invitation ends "accepted" or "declined", not "answered" (negative control: the old code said
+        // "answered" for both)
+        assert_eq!(closed_reason().as_deref(), Some(if accept { "accepted" } else { "declined" }));
         let out = sent(&mut p);
         let mut w = Writer::op(if accept { 0x0622 } else { 0x0624 });
         w.u32(3001);
@@ -485,6 +497,7 @@ fn a2_a_resurrection_is_accepted_only_through_the_players_own_yes() {
     yes.u8(1);
     assert_eq!(sent(&mut p), vec![yes.data], "0x00D4 with 1, the game's own");
     assert!(session_of("revive_offer").is_none());
+    assert_eq!(closed_reason().as_deref(), Some("accepted"), "the player's own Yes ends the offer accepted");
 }
 
 #[test]
@@ -501,6 +514,7 @@ fn a2_declining_an_offer_is_always_allowed_and_sent_at_once() {
     let mut no = Writer::op(0x00D4);
     no.u8(0);
     assert_eq!(sent(&mut p), vec![no.data]);
+    assert_eq!(closed_reason().as_deref(), Some("declined"), "a No ends the offer declined");
     assert_eq!(p.mode, 0);
 }
 

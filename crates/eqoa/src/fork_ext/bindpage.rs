@@ -143,10 +143,15 @@ pub fn register(addon: &str, id: &str, default_key: &str, description: &str) -> 
     let game = crate::settings::with_binds(Clone::clone);
     let mut binds = MOD_BINDS.lock().unwrap();
     let mut stored = load_saved_key(addon, id);
-    if let Some(&(_, _, old)) = KEYS_TAKEN_BY_THE_GAME.iter().find(|(a, i, k)| (*a, *i) == (addon, id) && stored.as_deref() == Some(*k)) {
-        if game_owner(&game, old).is_some() && forget_mod_bind(addon, id).is_ok() {
-            crate::say(&format!("controls: {addon}.{id} was on {old}, which the game has now: back on its default"));
-            stored = None;
+    if let Some(&(_, _, old)) = KEYS_TAKEN_BY_THE_GAME.iter().find(|(a, i, _)| (*a, *i) == (addon, id)) {
+        // once: the first time this binding is registered after the key went to the game, whatever the interface in use
+        // then; a key bound afterwards is the player's, whichever interface is in use at a restart
+        if !taken_settled(addon, id) {
+            let drop = stored.as_deref() == Some(old) && game_owner(&game, old).is_some();
+            if settle_taken(addon, id, drop).is_ok() && drop {
+                crate::say(&format!("controls: {addon}.{id} was on {old}, which the game has now: back on its default"));
+                stored = None;
+            }
         }
     }
     if let Some(existing) = binds.iter_mut().find(|b| b.addon_id == addon && b.id == id) {
@@ -1159,6 +1164,33 @@ pub fn save_mod_bind(addon: &str, id: &str, key: &str) -> Result<(), String> {
     write_config(KEYS_FILE, out.as_bytes())
 }
 
+/// The marker line in `mod-keys.opt` that says this binding's saved key was looked at once (`KEYS_TAKEN_BY_THE_GAME`).
+fn taken_marker(addon: &str, id: &str) -> String {
+    format!("migrated.{addon}.{id}=keys_taken_by_the_game_2026_11_25")
+}
+
+fn taken_settled(addon: &str, id: &str) -> bool {
+    let marker = taken_marker(addon, id);
+    let bytes = read_config(KEYS_FILE).unwrap_or_default();
+    String::from_utf8_lossy(&bytes).lines().any(|line| line.trim() == marker)
+}
+
+/// Writes the marker (and takes the binding's saved key out when `drop`), in one write of the whole file: after it the
+/// saved key of this binding is never touched again, so a key the player binds later stays.
+fn settle_taken(addon: &str, id: &str, drop: bool) -> Result<(), String> {
+    let existing = read_config(KEYS_FILE).unwrap_or_default();
+    let text = String::from_utf8_lossy(&existing);
+    let prefix = format!("mod.{addon}.{id}=");
+    let mut out = String::new();
+    for line in text.lines().filter(|line| !(drop && line.starts_with(&prefix))) {
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str(&taken_marker(addon, id));
+    out.push('\n');
+    write_config(KEYS_FILE, out.as_bytes())
+}
+
 /// Takes a mod's entry out of `mod-keys.opt`: it has only its default again.
 fn forget_mod_bind(addon: &str, id: &str) -> Result<(), String> {
     let existing = read_config(KEYS_FILE).unwrap_or_default();
@@ -1530,6 +1562,59 @@ mod.eqoa_map_search.clear=f6
         register("eqoa_map_search", "clear", "", "Clear map guide");
         assert_eq!(get_key(MANAGER_ADDON, MANAGER_ID).as_deref(), Some("f8"));
         assert_eq!(get_key("eqoa_map_search", "clear").as_deref(), Some("f6"));
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+    }
+
+    /// M3 of the 2026-11-25 delta review: the drop of an old saved F10 / F4 happens once. After the first run a key the
+    /// player binds (F10 for Mods & Addons in the PC interface) is never taken again, not at a restart in the other
+    /// interface and not at one in the same. Negative control (run red): with the marker ignored, the Controller
+    /// restart (where the game's Settings has F10 too) wiped the player's own F10.
+    #[test]
+    fn sync_the_old_key_drop_is_once_and_a_later_f10_in_either_interface_stays() {
+        interface(true);
+        crate::settings::testing::put(KEYS_FILE, b"mod.enhanced.mods_addons=f10
+mod.eqoa_map_search.clear=f4
+");
+        register_manager_row();
+        register("eqoa_map_search", "clear", "", "Clear map guide");
+        assert_eq!(get_key(MANAGER_ADDON, MANAGER_ID).as_deref(), Some("shift+f10"), "the first run drops the old save");
+        let first = String::from_utf8(crate::settings::testing::kept(KEYS_FILE).unwrap()).unwrap();
+        assert!(!first.contains("mod.enhanced.mods_addons=") && !first.contains("clear=f4"), "{first}");
+        assert!(first.contains("migrated.enhanced.mods_addons=") && first.contains("migrated.eqoa_map_search.clear="), "{first}");
+        // the player now binds F10 and F4 himself, in the PC interface
+        assert!(set_key(MANAGER_ADDON, MANAGER_ID, "f10"));
+        assert!(set_key("eqoa_map_search", "clear", "f4"));
+        for pc in [false, true, false] {
+            // a restart in the other interface, then back (the files stay: not `interface()`)
+            crate::settings::set_ui_mode(pc).unwrap();
+            reset_in_memory();
+            register_manager_row();
+            register("eqoa_map_search", "clear", "", "Clear map guide");
+            let kept = String::from_utf8(crate::settings::testing::kept(KEYS_FILE).unwrap()).unwrap();
+            assert!(kept.contains("mod.enhanced.mods_addons=f10") && kept.contains("mod.eqoa_map_search.clear=f4"), "pc={pc}: {kept}");
+        }
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+    }
+
+    /// The first run in the Controller interface drops the old default too (the game has F10 there as well), and the
+    /// marker is written even for a binding that had nothing saved, so a key bound later is the player's.
+    #[test]
+    fn sync_the_old_key_drop_also_runs_first_in_the_controller_and_marks_a_binding_with_no_save() {
+        interface(false);
+        crate::settings::testing::put(KEYS_FILE, b"mod.enhanced.mods_addons=f10
+");
+        register_manager_row();
+        register("eqoa_map_search", "clear", "", "Clear map guide");
+        assert_eq!(get_key(MANAGER_ADDON, MANAGER_ID).as_deref(), Some("shift+f10"));
+        let kept = String::from_utf8(crate::settings::testing::kept(KEYS_FILE).unwrap()).unwrap();
+        assert!(kept.contains("migrated.eqoa_map_search.clear="), "a binding with no saved key is marked too: {kept}");
+        assert!(set_key("eqoa_map_search", "clear", "f4"));
+        reset_in_memory();
+        register_manager_row();
+        register("eqoa_map_search", "clear", "", "Clear map guide");
+        assert_eq!(get_key("eqoa_map_search", "clear").as_deref(), Some("f4"), "a later F4 stays");
         crate::settings::testing::reset(false);
         reset_in_memory();
     }

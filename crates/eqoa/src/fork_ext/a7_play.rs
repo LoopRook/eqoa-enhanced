@@ -424,7 +424,8 @@ fn refuse_held_friend(play: &mut Play, id: u32, reason: &'static str) {
     }
     confirm::cancel_kind("friend_accept", reason);
     a7::clear_friend_request();
-    window_sessions::sync_held_request(TakeoverKind::FriendRequest, None, reason);
+    // the session ends "declined" when the player said No (the same word as every other yes/no request)
+    window_sessions::sync_held_request(TakeoverKind::FriendRequest, None, if reason == "refused" { "declined" } else { reason });
 }
 
 fn refuse_held_guild(play: &mut Play, inviter_id: u32, reason: &'static str) {
@@ -438,7 +439,7 @@ fn refuse_held_guild(play: &mut Play, inviter_id: u32, reason: &'static str) {
     }
     confirm::cancel_kind("guild_accept", reason);
     a7::clear_guild_invite();
-    window_sessions::sync_held_request(TakeoverKind::GuildInvite, None, reason);
+    window_sessions::sync_held_request(TakeoverKind::GuildInvite, None, if reason == "refused" { "declined" } else { reason });
 }
 
 /// Runs each step from `begin_iteration`: hides taken requests, runs the 45-second timeout and holder checks so

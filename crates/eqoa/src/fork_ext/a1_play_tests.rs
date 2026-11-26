@@ -429,9 +429,20 @@ fn a1_link_item_and_hide_look_use_the_games_own_item_menu_steps() {
     assert_eq!(p.session.sends_lost, sent);
     // link item: refused where the server offers no item links (the control), done where it does
     ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.link_item(inv.items[2].ref)");
-    host.execute("assert(results[1].ok == false and results[1].code == 'not_ready', tostring(results[1] and results[1].code))").unwrap();
+    host.execute("assert(results[1].ok == false and results[1].code == 'unsupported', tostring(results[1] and results[1].code))").unwrap();
     assert_ne!(p.mode, 2, "the chat line was not opened");
+    // the server offers them but the player has Item Links off: `unavailable` (negative control: it said not_ready)
     p.session.item_links_offer = true;
+    let kept = crate::settings::client();
+    let mut off = kept.clone();
+    off.item_links = false;
+    crate::settings::set_client(off);
+    p.agree_item_links();
+    ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.link_item(inv.items[2].ref)");
+    host.execute("assert(results[1].ok == false and results[1].code == 'unavailable', tostring(results[1] and results[1].code))").unwrap();
+    assert_ne!(p.mode, 2, "the chat line was not opened");
+    crate::settings::set_client(kept);
+    p.agree_item_links();
     ask(&mut p, &host, "local inv = eqoa.inventory.get(); return eqoa.actions.link_item(inv.items[2].ref)");
     host.execute("assert(results[1].ok == true, tostring(results[1] and results[1].reason))").unwrap();
     assert_eq!(p.mode, 2, "the item's link is in the chat line, which the game opened");

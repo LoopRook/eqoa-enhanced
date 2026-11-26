@@ -175,7 +175,7 @@ eqoa.events.on("windows.session", function(e)
     local d = e.data
     if d.phase == "opened" then
         note("info", "a " .. tostring(d.kind) .. " opened")
-    elseif d.phase == "closed" and d.reason and d.reason ~= "answered" and d.reason ~= "passed" then
+    elseif d.phase == "closed" and d.reason and d.reason ~= "answered" and d.reason ~= "accepted" and d.reason ~= "declined" and d.reason ~= "passed" then
         note("info", tostring(d.kind) .. " ended: " .. tostring(d.reason))
     end
 end)

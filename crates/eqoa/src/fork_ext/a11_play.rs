@@ -123,7 +123,7 @@ fn up(kind: TakeoverKind) -> bool {
 
 /// The one answer to "does a mod hold a window the game would count as up while its own mode reads 0": a hidden
 /// corpse, merchant or bank session, a hidden trade, duel or blacksmith window (A9), a held NPC dialog, offer or
-/// server window (A2, A11: `dialog_sessions`), and a held Start menu, chat line or map (A6, A13). A window a mod opens
+/// server window (A2, A11: `dialog_sessions`), and a Start menu a mod shows (A6; not the chat line or the map, which the game does not count). A window a mod opens
 /// as a view of its own (Bags, Journal, the crafting and mail windows) hides nothing and does not count. Every round's
 /// "open natively, or wait" decision asks this, and nothing else.
 pub(crate) fn mod_window_up() -> bool {

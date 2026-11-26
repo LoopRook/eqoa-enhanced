@@ -94,11 +94,11 @@ pub(crate) fn dispatch(play: &mut Play, action: &A1Action) -> DispatchOutcome {
             }
             // the game's own Link Item: the item's link goes into the chat line (opened if it is not). It goes
             // nowhere where the server offers no links, the line is full or already holds four
+            if let Some(no) = super::a6_play::links_unavailable(play) {
+                return no;
+            }
             if !play.link_item(0, idx as i32) {
-                return refuse(
-                    "not_ready",
-                    "the item could not be linked: this server offers no item links, or the chat line has no room",
-                );
+                return refuse("not_ready", "the item could not be linked: the chat line has no room");
             }
             DispatchOutcome::Completed { detail: Some(json!({"sent": true})) }
         }
