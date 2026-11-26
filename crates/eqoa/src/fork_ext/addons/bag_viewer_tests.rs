@@ -1272,7 +1272,7 @@ fn round6c_bag_viewer_junk_marks_and_auto_loot_choice_persist_across_reload_and_
     assert!(!bv.eval::<bool>("require('bags').is_junk(require('bags').grid.items[7].item)"), "an unmarked misc item is never junk: only the marks decide");
     bv.click(s8);
     bv.frames(2);
-    assert!(bv.menu_row("Unmark").is_some(), "menu switches to Unmark once marked");
+    assert!(bv.menu_row("Unmark junk").is_some(), "menu switches to Unmark junk once marked");
     bv.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
     bv.frames(1);
 
@@ -2812,6 +2812,44 @@ fn round65_bag_viewer_auto_loot_option_takes_all_but_junk_on_killed_target_body(
     );
     assert!(bv.eval::<bool>("not eqoa.windows.taken('loot')"), "auto-loot must release loot takeover after completion");
 
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// Owner 2026-11-25: Auto-loot switched on AFTER the kill. Your hits are remembered whether or not Auto-loot is on, so a
+/// corpse of your own recent kill that is already lying there is taken when it is switched on.
+#[test]
+fn owner1125b_auto_loot_switched_on_after_the_kill_takes_your_recent_kill() {
+    big_stack(owner1125b_auto_loot_switched_on_after_the_kill_body)
+}
+fn owner1125b_auto_loot_switched_on_after_the_kill_body() {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else { panic!("the disc is needed: set EQOA_ISO") };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_self_id(77);
+    bv.enable();
+    bv.open();
+    bv.frames(2);
+    // Auto-loot is OFF: you kill 9301 (your hit), and 9302 dies unhit (control: never yours)
+    bv.play.bags_spawn_npc(9301, "a wolf", 0, 1, [2.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9302, "a fox", 0, 1, [2.0, 1.0, 0.0]);
+    bv.play.bags_combat_hit(77, 9301, -12);
+    bv.frames(2);
+    bv.play.bags_entity_die(9301);
+    bv.play.bags_entity_die(9302);
+    bv.frames(3);
+    let before = bv.play.bags_sends_lost();
+    bv_auto(&bv, "non_junk"); // now switched on, the corpse already lying there
+    for _ in 0..6 {
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+    }
+    assert!(bv.play.bags_sends_lost() > before, "the corpse of your own recent kill is opened once Auto-loot is on");
+    assert!(bv.eval::<bool>("require('bags').eligible_corpses[9302] == nil"), "the fox you never hit was left alone");
     bv.clean();
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();

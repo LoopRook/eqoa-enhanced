@@ -163,12 +163,12 @@ fn multi_the_group_menu_is_titled_with_the_count_and_greys_what_cannot_apply_wit
     let lua = world();
     run(&lua, pack);
     assert_eq!(string(&lua, "B.menu.title"), "3 items selected");
-    assert_eq!(string(&lua, "labels()"), "Mark as junk|Unmark|Mark to bank|Sell (2)|Put in bank (2)|Destroy...");
+    assert_eq!(string(&lua, "labels()"), "Mark as junk|Unmark junk|Mark to bank|Sell (2)|Put in bank (2)|Destroy...");
     // nothing near: Sell and Put in bank are greyed, each with its reason; the marks work anywhere
     assert!(boolean(&lua, "row('Sell').enabled == false and row('Sell').reason == 'no merchant nearby'"));
     assert!(boolean(&lua, "row('Put in bank').enabled == false and row('Put in bank').reason == 'no banker nearby'"));
     assert!(boolean(&lua, "row('Mark as junk').enabled and row('Mark to bank').enabled and row('Destroy').enabled"));
-    assert!(boolean(&lua, "row('Unmark').enabled == false"), "nothing is marked yet");
+    assert!(boolean(&lua, "row('Unmark junk').enabled == false"), "nothing is marked yet");
     // a merchant in reach: enabled; one beyond the learned reach: greyed with the window's own words, a second click tries
     run(&lua, "put_npcs(3.0, 4.0); view(); X.clear(); ctrl(1); ctrl(2); group_menu(1)");
     assert!(boolean(&lua, "row('Sell').enabled and row('Put in bank').enabled"));
@@ -314,7 +314,7 @@ fn multi_marking_asks_once_for_gear_and_never_marks_a_worn_item() {
     assert_eq!(string(&lua, "B.result.text"), "Marked 2 items as junk; 1 worn item kept");
     assert_eq!(int(&lua, "X.n"), 0);
     // Unmark, and Mark to bank (instant: neither asks)
-    run(&lua, "view(); ctrl(1); ctrl(2); group_menu(1); choose('Unmark')");
+    run(&lua, "view(); ctrl(1); ctrl(2); group_menu(1); choose('Unmark junk')");
     assert!(boolean(&lua, "next(B.junk_ids) == nil"));
     assert_eq!(string(&lua, "B.result.text"), "Unmarked 2 items");
     run(&lua, "view(); ctrl(1); ctrl(3); group_menu(1); choose('Mark to bank')");
@@ -558,7 +558,7 @@ fn multi_a_bank_mark_can_be_taken_off_from_the_single_menu_and_the_group_menu() 
     // nothing marked: no Unmark bank row (the menu is the one it was)
     run(&lua, "view(); ctrl(1); ctrl(2); group_menu(1)");
     assert!(boolean(&lua, "row('Unmark bank') == nil"));
-    assert_eq!(string(&lua, "labels()"), "Mark as junk|Unmark|Mark to bank|Sell (2)|Put in bank (2)|Destroy...");
+    assert_eq!(string(&lua, "labels()"), "Mark as junk|Unmark junk|Mark to bank|Sell (2)|Put in bank (2)|Destroy...");
 
     // negative controls: the old single label, no group row, and a mark on a worn item kept
     let old_single = mutated(&[("add(\"Unmark bank\", true, nil", "add(\"Stop banking this\", true, nil")]);

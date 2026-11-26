@@ -23,7 +23,7 @@ local tokens, escape, tab_hits, slot_hits, menu_hits, action_hits, log_rect, gri
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
--- Bank tunar (the Bank tab, with the bank open): an amount typed in a box (digits only), Deposit and Withdraw, and an All
+-- Bank tunar (the Bank tab, a banker near or the bank open): an amount typed in a box (digits only), Deposit and Withdraw, and an All
 -- for each. The amounts are what the client says the pack and the bank hold (`eqoa.inventory.get().money`,
 -- `eqoa.bank.get().money`, which follow the game's own money events); a button that cannot work is greyed and a press
 -- on it says why. The keyboard is taken only while the box is typed in, as the auction price box takes it.
@@ -49,7 +49,12 @@ end
 -- why `amount` cannot be moved in `dir` now, or nil
 local function bm_why(dir, amount)
     local open, carried, banked = bm_numbers()
-    if not open then return "bank window is not open" end
+    if not open then
+        -- no window needed: a banker near is enough, as for Put in bank / Take out of bank (the mod opens its own hidden one)
+        if B.nearby_npc("bank", B.DRAW_TTL) == nil then return "no banker is near" end
+        local far = B.too_far("bank", B.DRAW_TTL)
+        if far then return far end
+    end
     if dir == "deposit" then
         if carried <= 0 then return "you carry no tunar" end
         if amount <= 0 then return "type an amount" end
@@ -64,12 +69,15 @@ end
 local function bm_send(dir, amount)
     bm_stop()
     local why = bm_why(dir, amount)
+    local open = bm_numbers()
     local label = (dir == "deposit" and "Deposit " or "Withdraw ") .. B.tunar(amount) .. " tunar"
     if why then
         B.result = {text = label .. ": " .. why, ok = false}
         return
     end
-    B.run_single(label, function() return eqoa.actions.bank_money(dir, amount) end)
+    local function go() B.run_single(label, function() return eqoa.actions.bank_money(dir, amount) end) end
+    if open then return go() end
+    B.open_talk_npc("bank", label, go) -- the mod's own hidden bank session, released as the other helpers release it
 end
 function BM.on_key(d)
     if not BM.field or not d.down then return false end
@@ -285,8 +293,11 @@ eqoa.events.on("loot.changed", function(e)
     B.note_loot_closed(e.data)
     if not B.open then B.on_loot_changed(e.data) end
 end)
--- Auto-loot listens only while it is on (the default is off), and then only to your hits and to the render event it
--- polls from (bags.lua `auto_poll`): never to every creature update of the zone.
+-- Your hits are remembered whether or not Auto-loot is on (one cheap handler per hit; owner 2026-11-25: a creature killed
+-- before Auto-loot was switched on is still your kill, within the same ENGAGED_SECS memory). Auto-loot itself listens only
+-- while it is on (the default is off), and then only to the render event it polls from (bags.lua `auto_poll`): never to
+-- every creature update of the zone.
+eqoa.events.on("combat.hit", function(e) B.on_combat_hit(e.data) end)
 local auto_tokens = {}
 local function auto_listeners(on)
     if on and #auto_tokens == 0 then
@@ -294,8 +305,7 @@ local function auto_listeners(on)
             local token = eqoa.events.on(name, fn)
             if token then auto_tokens[#auto_tokens + 1] = token end
         end
-        -- your hits, and one look a poll (AUTO_POLL_SECS) from the render event: never every creature update
-        add("combat.hit", function(e) B.on_combat_hit(e.data) end)
+        -- one look a poll (AUTO_POLL_SECS) from the render event: never every creature update
         add("render", function() B.auto_poll() end)
     elseif not on then
         for _, token in ipairs(auto_tokens) do eqoa.events.off(token) end

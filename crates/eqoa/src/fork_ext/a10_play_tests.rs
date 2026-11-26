@@ -2139,18 +2139,33 @@ mod mods {
     }
 
     #[test]
-    fn owner1125_bank_money_is_greyed_with_a_reason_while_the_bank_is_not_open() {
+    fn owner1125b_bank_money_works_near_a_banker_with_no_window_open() {
         let mut r = bank_money_rig(false);
-        assert_eq!(state_of(&r, "return tostring(eqoa.bank.get().open)"), "false");
+        assert_eq!(state_of(&r, "return tostring(eqoa.bank.get().open)"), "false", "no bank window is open");
+        // a banker near: Deposit opens the mod's own hidden bank itself, then moves the tunar
         bm_type(&mut r, "10");
         let (x, y) = bm_hit(&r, "Deposit tunar");
         r.press_px(x, y, "left", false);
-        assert_eq!(bm_calls(&r), "", "a closed bank sends nothing");
-        assert!(bm_result(&r).contains("bank window is not open"), "{}", bm_result(&r));
-        let (x, y) = bm_hit(&r, "Withdraw all tunar");
+        assert_eq!(state_of(&r, "return tostring(require('bags').pending_open ~= nil)"), "true", "the bank is being opened; {}", r.why());
+        assert_eq!(bm_calls(&r), "", "nothing is sent before the bank answers");
+        r.p.bank_opcode(0x124D, &[]);
+        for _ in 0..6 {
+            r.settle();
+        }
+        assert_eq!(bm_calls(&r), "Deposit 10 tunar", "the deposit went once the hidden bank opened; {}", r.why());
+        assert!(!bm_result(&r).contains("not open"), "{}", bm_result(&r));
+    }
+
+    #[test]
+    fn owner1125b_bank_money_too_far_from_the_banker_is_refused_with_the_reason() {
+        let mut r = bank_money_rig(false);
+        r.host.execute("require('bags').range.bank = {fail = 0, misses = {0, 0}}").unwrap();
+        bm_type(&mut r, "10");
+        let (x, y) = bm_hit(&r, "Deposit tunar");
         r.press_px(x, y, "left", false);
         assert_eq!(bm_calls(&r), "");
-        assert!(bm_result(&r).contains("bank window is not open"), "{}", bm_result(&r));
+        assert!(bm_result(&r).contains("too far from the banker"), "{}", bm_result(&r));
+        assert_eq!(state_of(&r, "return tostring(require('bags').pending_open ~= nil)"), "false");
     }
 
     #[test]

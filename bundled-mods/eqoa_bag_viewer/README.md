@@ -32,7 +32,7 @@ is greyed out ("too far from the banker"); the reach is learned from real answer
 (two silences at a distance grey it, an answer clears it) and a greyed button still
 tries on a second click. One more than 40 units away shows nothing at all.
 
-Auto-loot opens the corpse of a creature you hit as soon as it dies, in the middle of a fight
+Your hits are remembered whether or not Auto-loot is on (the same 120 seconds), so switching Auto-loot on takes the corpse of a creature you killed just before, if it is in reach. Auto-loot opens the corpse of a creature you hit as soon as it dies, in the middle of a fight
 too: it asks for the corpse by its id (`eqoa.actions.open_loot(id, {keep_target = true})`), so
 your target and your auto-attack stay as they are. If the server turns out not to accept that, the
 client falls back to targeting the corpse, which ends an auto-attack, and Auto-loot then waits for
@@ -100,7 +100,7 @@ selects every slot from the one you clicked last to this one (**Ctrl+Shift+click
 A plain click works as before and clears the selection. The line under the grid says how many are selected. **Right-click** any
 selected item for one menu titled **"N items selected"**:
 
-- **Mark as junk** and **Unmark** (marking asks once, with the same Yes or No as a single item, when some of the items are
+- **Mark as junk** and **Unmark junk** (marking asks once, with the same Yes or No as a single item, when some of the items are
   equipment, potions or other things the game's merchant would ask about), **Mark to bank**.
 - **Sell (N)** at a merchant and **Put in bank (N)** at a banker: greyed with the reason when none is near ("no merchant nearby",
   "too far from the merchant"; the same reach rules as the other buttons, and a second click tries anyway). They go item by item
@@ -126,9 +126,7 @@ On the Bank tab the line under the grid shows **Bank tunar** and **Carried** (th
 own has a box, **Deposit**, **All**, **Withdraw** and **All**. Click the box and type an amount (digits only; Enter,
 Escape or a click elsewhere ends the typing, and only while you type does the mod take the keyboard). **Deposit** and
 **Withdraw** move that amount; each **All** moves everything you carry or everything in the bank at once. A button is
-greyed when it cannot work (the box is empty, the amount is more than you carry or the bank holds, or the bank window is
-not open: use **Open bank**) and a click on it says why in the result line, which also shows the game's own answer, for
-example "Deposit 500 tunar: ok". The amounts follow the game's own money updates. The controller's d-pad still moves over
+greyed when it cannot work (the box is empty, the amount is more than you carry or the bank holds, or the banker is too far or not near) and a click on it says why in the result line, which also shows the game's own answer, for example "Deposit 500 tunar: ok". You do not open the bank first: with a banker near, **Deposit** and **Withdraw** open the mod's own hidden bank themselves, move the tunar and let go, as **Put in bank** and **Bank marked** do. The amounts follow the game's own money updates. The controller's d-pad still moves over
 the items only. It uses `eqoa.actions.bank_money`; with the game's full map open the box lets go of the keyboard.
 
 ## List on auction (at a bank)
