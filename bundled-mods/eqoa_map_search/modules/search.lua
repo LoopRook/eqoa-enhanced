@@ -39,7 +39,7 @@ local function load_step()
         end
     end
     if done then
-        M.by_name[j.kind]=j.by_name;M.npc_cache=nil;M.build=nil
+        M.by_name[j.kind]=j.by_name;M.index_stale=true;M.rows_stale=true;M.build=nil
         M[j.kind]=j.out
         if j.kind=="journal" then local names={};local n=0;for _,p in ipairs(j.out) do if not names[p.name] then names[p.name]=true;n=n+1 end end;M.journal_names=n end
         table.remove(M.jobs,1);M.dirty=true
@@ -75,7 +75,7 @@ local function observe_state()
     local p,map=eqoa.player.get(),eqoa.map.get()
     if not p or not map then M.in_world=false;M.live={};M.group={};M.places={};M.refresh=false;return end
     M.in_world=true
-    if M.world~=map.world_id then M.npc_cache=nil;M.dirty=true end
+    if M.world~=map.world_id then M.rows_stale=true;M.dirty=true end
     M.world=map.world_id;M.player=p.position or M.player;M.waypoint=map.waypoint
     M.live={}
     local entities=eqoa.entities.list()
@@ -85,7 +85,7 @@ local function observe_state()
     local signature={}
     for _,e in ipairs(M.live) do signature[#signature+1]=e.id..":"..e.name..":"..e.world..":"..(e.level or 0) end
     signature=table.concat(signature,"|")
-    if signature~=M.live_signature then M.npc_cache=nil;M.live_signature=signature end
+    if signature~=M.live_signature then M.rows_stale=true;M.dirty=true;M.live_signature=signature end
     local group=eqoa.group.get();M.group={}
     if group and group.members then for _,g in ipairs(group.members) do if g.id~=p.id then M.group[#M.group+1]=g end end end
     if M.places_world~=M.world then
@@ -136,7 +136,7 @@ local function observe_guide()
 end
 function M.observe() if M.open then observe_state() end end
 function M.clear() M.guide=nil;eqoa.map.clear_guide() end
-function M.toggle() M.message=nil;M.message_until=nil;M.open=not M.open;M.build=nil;M.last_query=nil;M.enter_pending=false;if M.open then M.npc_cache=nil;M.refresh=true end;M.selected=1;M.offset=1;M.dirty=true;eqoa.input.capture_text(M.open) end
+function M.toggle() M.message=nil;M.message_until=nil;M.open=not M.open;M.build=nil;M.last_query=nil;M.enter_pending=false;if M.open then M.rows_stale=true;M.refresh=true end;M.selected=1;M.offset=1;M.dirty=true;eqoa.input.capture_text(M.open) end
 function M.close() M.open=false;M.build=nil;M.enter_pending=false;eqoa.input.capture_text(false) end
 local function sort_rows(rows)
     -- Compute distances once. Recomputing square roots inside every comparison
@@ -147,38 +147,127 @@ local function sort_rows(rows)
         return a.name<b.name
     end)
 end
-local function build_start()
-    if M.tab==1 and M.build and not M.build.candidates and M.build.tab==1 then
-        M.dirty=false;return
-    end
-    local candidates
-    if M.tab==1 and M.npc_cache then
-        candidates=M.last_tab==1 and M.last_query and M.query:sub(1,#M.last_query)==M.last_query and M.rows or M.npc_cache
-    end
-    M.build={tab=M.tab,words=words(),names={},source=1,index=1,rows={},sources={M.catalog,M.journal,M.live},candidates=candidates}
-    M.dirty=false
+-- The creature search keeps two things apart so typing is never behind a scan of the catalogue:
+--  * a STATIC name index (M.npc_cache: one entry per creature name with its lowercase searchable text and journal levels), built
+--    once in the background after the catalogue or the journal loads (index_step, a slice a frame) and reused by every query and
+--    every opening of the panel; it is not rebuilt when creatures come or go;
+--  * the per-query rows, made only for the names a query matches (decorate: the nearest live creature or recorded spawn, the
+--    count and the levels), in slices with a point budget, the first rows shown as they are made. A query that only adds letters
+--    to the last finished one filters that one's rows (no new scan).
+-- Per-frame work is bounded by these slices, so no frame runs long however large the catalogue is.
+local INDEX_SLICE,FILTER_SLICE,DECORATE_POINTS=1500,5000,4000
+local EMPTY={}
+local function index_entry(key)
+    local cat,jr=M.by_name.catalog[key],M.by_name.journal[key]
+    local first=(cat and cat[1]) or (jr and jr[1]);if not first then return nil end
+    local parts={first.name:lower()}
+    local lo,hi
+    if jr then for _,p in ipairs(jr) do
+        parts[#parts+1]=p.searchable
+        if p.level and p.level>0 then lo=math.min(lo or p.level,p.level);hi=math.max(hi or p.level,p.level) end
+    end end
+    return {name=first.name,key=key,searchable=table.concat(parts," "),lo=lo,hi=hi}
 end
-local function npc_step(b)
-    local sources=b.sources
-    for _=1,1000 do
-        local source=sources[b.source]
-        if not source then return true end
-        local p=source[b.index]
-        if not p then b.source=b.source+1;b.index=1 else
-            b.index=b.index+1
-            local searchable=p.name
-            if b.source==2 then searchable=p.searchable end
-            if b.source~=3 or p.world==M.world then
-                local r=b.names[p.key]
-                if not r then r={name=p.name,kind="npc",key=p.key,count=0};b.names[p.key]=r end
-                r.parts=r.parts or {p.name:lower()}
-                if b.source==2 then r.parts[#r.parts+1]=searchable end
-                if p.world==M.world and (not r.at or (b.source==3 and r.count==0) or ((b.source==3 or r.count==0) and distance(p)<distance(r.at))) then r.at=p end
-                if b.source==3 then r.count=r.count+1 end
-                if p.level and p.level>0 then r.lo=math.min(r.lo or p.level,p.level);r.hi=math.max(r.hi or p.level,p.level) end
-            end
+local function index_step()
+    -- not while a load is still being read; and the old index goes first, so two never sit in memory together
+    if M.index_stale and #M.jobs==0 then M.index_stale=false;M.npc_cache=nil;M.done_rows=nil;M.index_job={phase=1,key=nil,out={},seen={}};M.index_count=(M.index_count or 0)+1 end
+    local j=M.index_job;if not j then return end
+    local n=0
+    while n<INDEX_SLICE do
+        local src=j.phase==1 and M.by_name.catalog or M.by_name.journal
+        local k=next(src,j.key)
+        if k==nil then
+            if j.phase==1 then j.phase=2;j.key=nil
+            else M.npc_cache=j.out;M.index_job=nil;M.rows_stale=true;if M.want_index then M.want_index=false;M.dirty=true end;return end
+        else
+            j.key=k;n=n+1
+            if not j.seen[k] then j.seen[k]=true;local e=index_entry(k);if e then j.out[#j.out+1]=e end end
         end
     end
+end
+-- The live creatures of this world by name, and the names no catalogue or journal knows.
+local function live_index()
+    local by,only,seen={},{},{}
+    for _,e in ipairs(M.live) do if e.world==M.world then
+        local l=by[e.key];if not l then l={};by[e.key]=l end;l[#l+1]=e
+        if not seen[e.key] and not M.by_name.catalog[e.key] and not M.by_name.journal[e.key] then
+            seen[e.key]=true;only[#only+1]={name=e.name,key=e.key,searchable=e.name:lower()}
+        end
+    end end
+    M.live_by_key,M.live_only=by,only
+end
+-- One row for a matched name; returns it and the number of points looked at (the slice's cost).
+local function decorate(s)
+    local r={name=s.name,kind="npc",key=s.key,count=0,searchable=s.searchable,lo=s.lo,hi=s.hi}
+    local cost=1
+    local live=M.live_by_key[s.key]
+    if live then
+        local nearest
+        for _,p in ipairs(live) do
+            r.count=r.count+1
+            if not nearest or distance(p)<distance(nearest) then nearest=p end
+            if p.level and p.level>0 then r.lo=math.min(r.lo or p.level,p.level);r.hi=math.max(r.hi or p.level,p.level) end
+        end
+        r.at=nearest;cost=cost+#live
+    else
+        local best,bd
+        for _,list in ipairs({M.by_name.catalog[s.key] or EMPTY,M.by_name.journal[s.key] or EMPTY}) do
+            cost=cost+#list
+            for _,p in ipairs(list) do if p.world==M.world then
+                local d=distance(p);if not bd or d<bd then best,bd=p,d end
+            end end
+        end
+        r.at=best
+    end
+    local level=not r.lo and "level unknown" or (r.lo==r.hi and "level "..r.lo or "levels "..r.lo.."-"..r.hi)
+    if r.count>0 then r.detail="Spawned nearby: "..r.count.."; "..level
+    elseif r.at then r.detail="Not detected (range/spawn unknown)" else r.detail="Other world; not detected" end
+    return r,cost
+end
+local function build_start()
+    local fresh=not (M.last_tab==M.tab and M.last_query==M.query)
+    local b={tab=M.tab,words=words(),rows={},matched={},index=1,fresh=fresh}
+    if M.tab==1 then
+        local reuse=M.last_tab==1 and M.last_query and M.done_rows and not M.rows_stale and M.query:sub(1,#M.last_query)==M.last_query
+        if reuse then b.stage="reuse";b.candidates=M.done_rows
+        else live_index();b.stage="filter";b.sources={M.npc_cache,M.live_only};b.src=1 end
+    end
+    M.build=b
+    M.dirty=false
+end
+-- One bounded slice of the creature search; true when its rows are complete.
+local function creature_step(b)
+    if b.stage=="reuse" then
+        local c=b.candidates
+        for _=1,FILTER_SLICE do
+            local r=c[b.index];if not r then break end
+            b.index=b.index+1
+            if matches(r.searchable,b.words,true) then b.rows[#b.rows+1]=r end
+        end
+        return b.index>#c
+    elseif b.stage=="filter" then
+        local n=0
+        while n<FILTER_SLICE do
+            local src=b.sources[b.src]
+            if not src then b.stage="decorate";b.index=1;return false end
+            local s=src[b.index]
+            if not s then b.src=b.src+1;b.index=1 else
+                b.index=b.index+1;n=n+1
+                if matches(s.searchable,b.words,true) then b.matched[#b.matched+1]=s end
+            end
+        end
+        return false
+    end
+    local budget=DECORATE_POINTS
+    while budget>0 do
+        local s=b.matched[b.index];if not s then return true end
+        b.index=b.index+1
+        local r,cost=decorate(s);budget=budget-cost
+        b.rows[#b.rows+1]=r
+    end
+    if b.index>#b.matched then return true end
+    -- a typed query shows its first rows at once, the rest follow (sorted by distance when all are made)
+    if b.fresh and #b.rows>0 then M.rows=b.rows end
     return false
 end
 local function other_rows(b)
@@ -198,30 +287,20 @@ local function other_rows(b)
     end
 end
 local function build_step()
-    if M.dirty then build_start() end
+    if M.dirty then
+        -- the creature list needs its name index; until it is ready the panel says "Searching..."
+        if M.tab==1 and not M.npc_cache then M.want_index=true;return end
+        build_start()
+    end
     local b=M.build;if not b then return end
     if M.tab==1 then
-        if not b.candidates then
-            if not npc_step(b) then return end
-            for _,r in pairs(b.names) do
-                if r.count>0 then
-                    local level=not r.lo and "level unknown" or (r.lo==r.hi and "level "..r.lo or "levels "..r.lo.."-"..r.hi)
-                    r.detail="Spawned nearby: "..r.count.."; "..level
-                elseif r.at then r.detail="Not detected (range/spawn unknown)" else r.detail="Other world; not detected" end
-                r.searchable=table.concat(r.parts," ");r.parts=nil
-                b.rows[#b.rows+1]=r
-            end
-            sort_rows(b.rows);M.npc_cache=b.rows;M.row_by_key=b.names
-            b.candidates=b.rows;b.rows={};b.index=1;b.words=words()
-            return
+        if not creature_step(b) then return end
+        if b.stage=="decorate" then
+            sort_rows(b.rows)
+            M.row_by_key={};for _,r in ipairs(b.rows) do M.row_by_key[r.key]=r end
+            M.rows_stale=false
         end
-        for _=1,500 do
-            local r=b.candidates[b.index];if not r then break end
-            b.index=b.index+1
-            if matches(r.searchable,b.words,true) then b.rows[#b.rows+1]=r end
-        end
-        if b.index<=#b.candidates then return end
-        M.last_query=M.query
+        M.done_rows=b.rows;M.last_query=M.query
     else other_rows(b);sort_rows(b.rows) end
     M.last_tab=M.tab;M.rows=b.rows;M.build=nil;M.selected=math.min(M.selected,math.max(1,#M.rows))
     M.offset=math.max(1,math.min(M.offset,M.selected,math.max(1,#M.rows-5)))
@@ -283,6 +362,7 @@ end
 local OPEN_REFRESH=0.25
 function M.step()
     load_step()
+    index_step()
     local now=M.now or 0
     if M.open then
         if M.refresh or now>=(M.next_observe or 0) then M.next_observe=now+OPEN_REFRESH;M.observe() end

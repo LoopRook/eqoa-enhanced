@@ -13,10 +13,16 @@ mod off. Putting an item up for sale is done from the Bag Viewer (see its README
 
 **Search tab**
 
-- **Name**, **Level** (from and to), **Type** (the game's wear slots), **Class** and **Race** narrow the search;
+- **Name**, **Seller**, **Level** (from and to), **Price** (from and to), **Type** (the game's wear slots), **Class** and
+  **Race** narrow the search (the number boxes take digits only; Tab moves from box to box);
   **Search** (or **Enter** in a box) asks the server. Class and Race are the game's own lists, "Any" first, then **My
   class** / **My race** (your own, when the client knows them), then the names in the game's order; the wheel scrolls
   a list. **< Page** and **Page >** turn the pages.
+- **Click a column title** (Name, High bid, Buy now, Time left) to order the rows shown: once for ascending, again for
+  descending; a small ^ or v marks the active title, and a lot with no value in that column stays last. The game's own
+  search has no sort of its own, so the order is of the page on screen only, and the line **ordered within this page** under the
+  list says so (it shows whenever an order is on, because the server does not say whether there are more pages). A
+  click on a row opens the lot shown on that row, in any order.
 - The list shows each lot: its name and count, the high bid ("no bids"), the buy-now price and the time left, under
   column titles that are each as wide as their title and their biggest number (no title runs into the next). Your own
   lots are in yellow. Click a lot to see the seller and the lowest bid you may make.

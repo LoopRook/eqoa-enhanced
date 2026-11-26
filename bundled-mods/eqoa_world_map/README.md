@@ -18,8 +18,11 @@ and **resize** (drag the corner). Its place and size are kept.
   the waypoint to remove it (a waypoint you placed in the game's own map is taken over first, then cleared). A waypoint you
   set here stays when you turn the mod off. Pins are kept for each world (up to 60 in a world, the whole of Tunaria for
   instance).
-- **Find a place...** looks through camps, coaches, towns, quests, community marks and your pins by name; click a result (or press Enter for the
-  first) to go there. It does not need Map Search to be on.
+- **Find a place or creature...** looks through camps, coaches, towns, quests, community marks and your pins by name, and (from two
+  letters) the creatures you can see now and your group members, nearest first, listed as "(creature, level N)" or "(group)"; click a
+  result (or press Enter for the first) to centre the map on it and mark it. It does not need Map Search to be on. Recorded spawn
+  locations (the observations Map Search (F2) keeps, which are not a promise of a living spawn) come from that mod's own
+  catalogue file, which no other mod can read: they are not offered here, so use Map Search for a creature that is not near.
 - **Use the game's map** gives you the game's own map for that opening (Places, community markers, the list of places). The
   next press of the map key opens this one again. Turning the mod off, or switching on **Use the game's windows**, gives the
   game's map back (switch it off again and the mod takes the map key back by itself).

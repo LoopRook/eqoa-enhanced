@@ -17,6 +17,8 @@
     "eqoa.effects.list",
     "eqoa.effects.buffs",
     "eqoa.effects.pet",
+    "eqoa.icons.resource",
+    "eqoa.hud.frame",
     "eqoa.casts.list",
     "eqoa.casts.get",
     "eqoa.actions.remove_effect",

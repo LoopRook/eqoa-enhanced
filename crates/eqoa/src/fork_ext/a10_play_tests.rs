@@ -1223,7 +1223,7 @@ mod mods {
     }
 
     fn auction_rig_mod() -> Rig {
-        rig_with("eqoa_auction", 380.0, 336.0, "shift+u", "u", |_| {})
+        rig_with("eqoa_auction", 380.0, 364.0, "shift+u", "u", |_| {})
     }
 
     #[test]
@@ -1360,9 +1360,9 @@ mod mods {
         let page = r.p.bank.auction.page as i64;
         r.p.bank_opcode(0x1206, &page_reply(page, &[(501, 1, 400)]));
         r.settle();
-        r.tap(60.0, 114.0);
+        r.tap(60.0, 132.0);
         let n = sent().len();
-        r.tap(256.0, 266.0);
+        r.tap(256.0, 295.0);
         assert_eq!(sent().len(), n, "negative control: the click alone bids nothing; {}", r.why());
         let q = confirm::current_for_test().expect("the question is up");
         assert!(!q.yes && q.text.contains("Bid 10 tunar") && q.text.contains("buyout is 400"), "{}", q.text);
@@ -1373,7 +1373,7 @@ mod mods {
         // answered; buy now asks with its price
         r.p.bank.state = 0;
         r.settle();
-        r.tap(330.0, 266.0);
+        r.tap(330.0, 295.0);
         let q = confirm::current_for_test().expect("the buy now question is up");
         assert!(q.text.contains("Buy out") && q.text.contains("400"), "{}", q.text);
         assert_eq!(sent().len(), n + 1);
@@ -1386,7 +1386,7 @@ mod mods {
 
     #[test]
     fn mods_auction_with_no_auction_on_the_server_the_window_says_so_and_sends_nothing() {
-        let mut r = rig_with("eqoa_auction", 380.0, 336.0, "shift+u", "u", |p| p.dump.bank.p78cc = false);
+        let mut r = rig_with("eqoa_auction", 380.0, 364.0, "shift+u", "u", |p| p.dump.bank.p78cc = false);
         r.settle();
         r.tap(200.0, 67.0);
         assert!(sent().is_empty(), "{}", r.why());
@@ -1399,7 +1399,7 @@ mod mods {
             ("eqoa_auction", 380.0, "shift+u", "u", vec!["auction_search"]),
         ] {
             for how in ["zoning", "state.reset", "world.entered"] {
-                let mut r = rig_with(id, w, 336.0, combo, key, |_| {});
+                let mut r = rig_with(id, w, if id == "eqoa_auction" { 364.0 } else { 336.0 }, combo, key, |_| {});
                 assert!(ws::any_open_of(&kinds), "{id}: open; {}", r.why());
                 // a box is being typed in, so the Enter claim is held
                 if id == "eqoa_auction" {
@@ -1613,7 +1613,7 @@ mod mods {
             p.dump.bank.items.items[1].item.value = 80;
         });
         r.settle();
-        r.host.execute("local B = require('bags'); B.select(6)").unwrap();
+        r.host.execute("local B = require('bags'); B.select(6); local H = require('helpers'); H.bank_near_seen, H.bank_refresh_wanted = true, false").unwrap();
         for _ in 0..6 {
             r.settle();
         }
@@ -2025,6 +2025,74 @@ mod mods {
         assert_eq!(state_of(&r, "return tostring(require('eqoa_auction_state').layout.search[2].w > 60)"), "true");
     }
 
+    /// Owner 2026-11-26: the Search tab has Seller and Price (from, to) boxes that reach the search, typed in and released
+    /// as the Name and Level boxes are (Tab moves on, Enter searches, a click elsewhere ends the typing).
+    #[test]
+    fn owner1126_auction_seller_and_price_boxes_reach_the_search() {
+        // what the action itself sends for the same fields, from a fresh rig (the same page number)
+        let (mut p, host) = super::auction_rig();
+        let (ok, code, reason) = act(&mut p, &host, "return eqoa.actions.auction_search({name = 'Iron', seller = 'Zed', min_price = 100, max_price = 900})");
+        assert!(ok, "{code} {reason}");
+        let want = sent().last().cloned().unwrap();
+        let (mut p2, host2) = super::auction_rig();
+        let (ok, code, reason) = act(&mut p2, &host2, "return eqoa.actions.auction_search({name = 'Iron'})");
+        assert!(ok, "{code} {reason}");
+        assert_ne!(sent().last().unwrap(), &want, "control: the seller and the prices change the bytes");
+        let mut r = auction_rig_mod();
+        let n = sent().len();
+        let (x, y) = au_hit(&r, "box name");
+        r.press_px(x, y, "left", false);
+        r.type_text("Iron");
+        r.key("tab", "");
+        r.type_text("Zed");
+        assert_eq!(state_of(&r, "return require('eqoa_auction_state').field"), "seller", "Tab went Name -> Seller");
+        let (x, y) = au_hit(&r, "box min_price");
+        r.press_px(x, y, "left", false);
+        r.type_text("10a0"); // digits only
+        r.key("tab", "");
+        r.type_text("900");
+        assert_eq!(state_of(&r, "local s = require('eqoa_auction_state'); return s.seller .. '|' .. s.min_price .. '|' .. s.max_price"), "Zed|100|900");
+        r.key("enter", "");
+        r.settle();
+        assert_eq!(sent().len(), n + 1, "Enter in a box searches; {}", r.why());
+        assert_eq!(sent().last().unwrap(), &want, "the seller and the price range reach the game's search");
+        assert_eq!(state_of(&r, "return tostring(require('eqoa_auction_state').field)"), "nil", "the typing is released");
+    }
+
+    /// Clicking a column title orders the rows shown, ascending then descending; a click on a row acts on the lot shown there;
+    /// the line under the list says the order is within this page; the header still fits at the window's width.
+    #[test]
+    fn owner1126_auction_columns_order_the_rows_shown_and_a_click_acts_on_the_lot_shown() {
+        let mut r = auction_rig_mod();
+        let (x, y) = au_hit(&r, "Search");
+        r.press_px(x, y, "left", false);
+        let page = r.p.bank.auction.page as i64;
+        r.p.bank_opcode(0x1206, &page_reply(page, &[(501, 1, 400), (502, 1, 100), (503, 1, 900), (504, 1, 0)]));
+        r.settle();
+        let shown = |r: &Rig| state_of(r, "local t = {} for _, id in ipairs(require('eqoa_auction_state').shown) do t[#t + 1] = id end return table.concat(t, ',')");
+        assert_eq!(shown(&r), "501,502,503,504", "the server's order until a title is clicked");
+        let (x, y) = au_hit(&r, "order buy");
+        r.press_px(x, y, "left", false);
+        assert_eq!(shown(&r), "502,501,503,504", "Buy now ascending, a lot with no price last");
+        let (x, y) = au_hit(&r, "order buy");
+        r.press_px(x, y, "left", false);
+        assert_eq!(shown(&r), "503,501,502,504", "Buy now descending, still last");
+        // the mark on the active title is measured into its column; the header still fits at this width
+        let ok = state_of(
+            &r,
+            "local L = require('eqoa_auction_state').layout.search;              for i, c in ipairs(L) do                if c.w + 1e-6 < c.title_w or c.w + 1e-6 < c.value_w then return 'column ' .. i .. ' narrower than its text' end                if L[i + 1] and c.x + c.w > L[i + 1].x then return 'column ' .. i .. ' runs into the next' end              end;              if L.name_w < 40 then return 'no room for the name' end; return 'ok'",
+        );
+        assert_eq!(ok, "ok", "{}", r.why());
+        // a click on the first row shown opens THAT lot (503 first), not the lot that was there by position (501)
+        let (x, y) = bv_point(&r, "for _, h in ipairs(require('eqoa_auction_state').row_hits) do if h.label == 'lot 503' then return h.x + h.w / 2, h.y + h.h / 2 end end error('no row lot 503')");
+        r.press_px(x, y, "left", false);
+        assert_eq!(state_of(&r, "return tostring(require('eqoa_auction_state').sel)"), "503");
+        // another title starts ascending again; Time left orders by minutes
+        let (x, y) = au_hit(&r, "order high");
+        r.press_px(x, y, "left", false);
+        assert_eq!(state_of(&r, "return require('eqoa_auction_state').sort.key .. require('eqoa_auction_state').sort.dir"), "high1");
+    }
+
     fn bm_hit(r: &Rig, label: &str) -> (f64, f64) {
         bv_point(r, &format!("for _, h in ipairs(require('bags').action_hits) do if h.label == '{label}' then return h.x + h.w / 2, h.y + h.h / 2 end end error('no action {label}')"))
     }
@@ -2054,7 +2122,8 @@ mod mods {
             p.dump.bank.items = net::dump::ItemList { p04: 0, items: vec![item(700_001, "Gold Ring", 21, 1)] };
         });
         r.settle();
-        r.host.execute("require('bags').select(6)").unwrap();
+        // closed-bank tests start before the tab's own refresh (it would have opened the bank)
+        r.host.execute(if open { "require('bags').select(6)" } else { "require('bags').select(6); local H = require('helpers'); H.bank_near_seen, H.bank_refresh_wanted = true, false" }).unwrap();
         for _ in 0..6 {
             r.settle();
         }
@@ -2071,8 +2140,7 @@ mod mods {
     }
 
     fn bank_money_open(r: &mut Rig) {
-        let (x, y) = bm_hit(r, "Open bank");
-        r.press_px(x, y, "left", false);
+        // the tab asks the banker by itself when it is shown: the reply opens the mod's hidden bank
         r.settle();
         r.p.bank_opcode(0x124D, &[]);
         for _ in 0..6 {

@@ -9,6 +9,7 @@ local PAD, LINE = 6, 12
 -- The window's size and place are the player's: drag the strip beside the tabs to move it, the corner to size it. They
 -- are kept in this mod's settings, in HUD units (the 640 by 448 picture).
 local HEAD = 10 -- the strip at the top that moves the window
+local ENTRY_ROWS_MAX = 4 -- the line being typed wraps to this many rows, then keeps its end (the caret) in view
 local DEF_W, DEF_H, MIN_W, MAX_W, MIN_H, MAX_H = 330, HEAD + 22 + 8 * 12, 200, 640, HEAD + 22 + 2 * 12, 300
 local MAX_LINES = 400
 local CHANNELS = {
@@ -658,10 +659,12 @@ eqoa.events.on("render", function()
         W, H = state.w, state.h
         ROWS = math.max(2, math.floor((H - HEAD - 22) / LINE))
         Ht = H + entry_h
-        local ly = state.ly or (448 - Ht - 24)
+        -- a line wrapped to more rows grows the window upward: its bottom edge stays where it was
+        local extra = state.session and (entry_h - 40) or 0
+        local ly = state.ly and (state.ly - extra) or (448 - Ht - 24)
         x0 = clamp(f.offset_x + state.lx * f.scale_x, 0, math.max(0, dw - W * k))
         y0 = clamp(f.offset_y + ly * f.scale_y, 0, math.max(0, dh - Ht * k))
-        state.eff_ly = ly
+        state.eff_ly = ly + (state.ly and extra or 0)
         state.rect = { x = x0, y = y0, w = W * k, h = Ht * k }
     end
     layout()
@@ -678,6 +681,22 @@ eqoa.events.on("render", function()
     if mkey ~= measure_key then
         measure_key = mkey
         widths, width_n, fits, fit_n, packed = {}, 0, {}, 0, nil
+    end
+    -- the line being typed, wrapped at the window's inner width (words kept whole, a long word broken inside); the last
+    -- ENTRY_ROWS_MAX rows show, so the caret at the end is always in view. A new height is laid out again at once.
+    local entry_rows, prompt
+    if state.session then
+        prompt = state.channel == "tell" and "To (name message): " or (state.channel == "reply" and "Reply: " or "")
+        local body = prompt .. state.text .. "_"
+        local rows = wrap_rows(body, (W - 2 * PAD) * k)
+        entry_rows = {}
+        for i = math.max(1, #rows - ENTRY_ROWS_MAX + 1), #rows do entry_rows[#entry_rows + 1] = body:sub(rows[i][1], rows[i][2]) end
+        local want_h = 40 + (#entry_rows - 1) * LINE
+        if want_h ~= entry_h then entry_h = want_h; layout() end
+        -- readable by the mod's tests: the widest shown row, the room a row has, and what the whole line would need
+        local widest = 0
+        for _, r in ipairs(entry_rows) do widest = math.max(widest, width(r)) end
+        state.entry_rows, state.entry_fit = entry_rows, { widest = widest, limit = (W - 2 * PAD) * k, full = width(body) }
     end
     -- follow a press that took the move strip or the corner to its release (ImGui's own mouse state)
     local d = state.drag
@@ -864,10 +883,9 @@ eqoa.events.on("render", function()
             end), "chan:" .. id)
             x = x + bw + 2
         end
-        local prompt = state.channel == "tell" and "To (name message): " or (state.channel == "reply" and "Reply: " or "")
-        text(PAD, y + 15, prompt .. state.text .. "_", c.white, W - 2 * PAD)
+        for i, row in ipairs(entry_rows) do text(PAD, y + 15 + (i - 1) * LINE, row, c.white, W - 2 * PAD) end
         local foot = state.note or "Enter sends, Esc cancels, Tab changes channel"
-        text(PAD, y + 28, foot, state.note and c.warn or c.muted, W - 2 * PAD)
+        text(PAD, y + 28 + (#entry_rows - 1) * LINE, foot, state.note and c.warn or c.muted, W - 2 * PAD)
     end
 
     eqoa.input.claim_pointer({ x = x0, y = y0, width = W * k, height = Ht * k })

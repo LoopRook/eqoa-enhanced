@@ -12,7 +12,7 @@ moves over the slots, confirm opens the item's menu (and presses a row), back cl
 The window shows the 40 pack slots as item icons with stack counts and a green
 **E** on worn items, the tunar you carry and used/capacity at the bottom.
 Tabs: **All**, **Usable**, **Equipment**, **Charged**, **Misc** (the game's own
-item-page tabs) and **Bank** (the bank's contents and its tunar, readable anywhere). Hover an item for its card: name, level, and for gear (items with a wear slot) class ("All classes" or "Class: Paladin, Cleric"),
+item-page tabs) and **Bank** (the bank's contents and its tunar, readable anywhere; with a banker in reach the tab refreshes itself when you show it, through the mod's own hidden bank session, with no button to press: out of reach, a plain line says "too far from the banker"). Hover an item for its card: name, level, and for gear (items with a wear slot) class ("All classes" or "Class: Paladin, Cleric"),
 race (only when the item is shut to some races), slot, stats, HP and
 durability, value, and its description at the bottom in grey (wrapped, at most three lines).
 When your class, race or level rule the item out, only that line turns red, with a red "You can't use this"
@@ -21,6 +21,10 @@ Items you set aside for a helper carry a small letter in the bottom-left corner 
 newest first ("12:41 Rusty Sword x1, from a decaying skeleton"; the corpse is named
 the corpse you asked to loot); the wheel scrolls it. Moving, selling,
 looting and banking stay in the game's windows.
+
+The **Auction** button (top right) opens the EQOA Auction mod's window and closes the Bags window so the two do not
+sit on top of each other. Bags does not come back by itself when Auction closes: `eqoa/1` gives a mod no way to read
+another mod's window, so press the Bags key (Shift+B) again.
 
 Buttons (this version): **Look at corpse** only shows the nearest corpse's items;
 **Take all** and **Take all but junk** take them. Mark items as junk from an item's
@@ -70,10 +74,17 @@ exactly as before, and a helper acts only on its button or on its own switch.
 - **Restock**: an item's menu has **Keep up to N (Restock)** (N starts at what the bags hold; the menu steps it by 5). Near
   a merchant, **Restock (N)** buys up to N of each kept item that merchant sells, counting everything of that kind in the
   pack, never more than N. It stops, and says why, when money or bag space runs out.
+- **Junk and bank marks are exclusive**: an item is either set aside to sell or set aside to bank, never both. Marking an item
+  (or a group) to bank takes its junk mark off, and marking it as junk takes its bank mark off; the menu then offers the other
+  mark ("Mark as junk" / "Unmark bank" after banking, "Bank this" / "Unmark junk" after junking). Saved marks from an older
+  version that carry both are settled when the mod loads: the **bank mark is kept and the junk mark dropped** (the safe one:
+  nothing gets sold).
 - **Bank marked**: **Bank this** in an item's menu; near a banker, **Bank marked (N)** deposits the marked stacks (never worn
   ones) and says so when the bank is full.
-- **Do it when I get near**: three switches under the buttons (Sell junk, Restock, Bank), kept for each character, off by
-  default. A helper acts once per approach (it arms again after you have been out of the NPC's reach by 5 more units),
+- **Do it when I get near**: three switches under the buttons (Sell junk, Restock, Bank), kept for each character. **Bank starts ON** for a
+  character with no saved choice (an item marked to bank is a clear instruction); **Sell junk and Restock start OFF** (they
+  sell items and spend tunar). A choice you have made, off included, is kept as it is; a character saved by an older version
+  with only some switches on keeps those, and Bank stays off for it. A helper acts once per approach (it arms again after you have been out of the NPC's reach by 5 more units),
   never while any game window or session of any kind is up, a batch is running, or you are in a fight.
 - **Sell 1 / Sell stack** in an item's menu: for a quick-slotted, no-trade or not ordinary item the game's own question
   comes up (the cases in which the game's own merchant window asks; `eqoa.actions.sell` asks the player itself since the

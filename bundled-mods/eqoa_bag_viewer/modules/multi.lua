@@ -154,12 +154,13 @@ end
 
 local function mark_junk(flag)
     local items = X.current()
-    local n, worn = 0, {}
+    local n, worn, unbanked = 0, {}, false
     for _, it in ipairs(items) do
         if flag and it.equipped then
             worn[#worn + 1] = it
         elseif flag and not B.is_junk(it) then
             B.junk_ids[tostring(it.id)] = true
+            if B.helpers and B.helpers.bank[tostring(it.id)] then B.helpers.bank[tostring(it.id)] = nil; unbanked = true end
             n = n + 1
         elseif not flag and B.is_junk(it) then
             B.junk_ids[tostring(it.id)] = nil
@@ -167,6 +168,7 @@ local function mark_junk(flag)
         end
     end
     B.save_junk()
+    if unbanked then B.helpers.save() end
     B.result = {text = string.format("%s %d %s%s%s", flag and "Marked" or "Unmarked", n, plural(n, "item", "items"),
         flag and " as junk" or "", worn_line(worn)), ok = true}
     X.clear()
@@ -176,13 +178,14 @@ end
 local function mark_bank(flag)
     local H = B.helpers
     if not H then return end
-    local n, worn = 0, {}
+    local n, worn, unjunked = 0, {}, false
     for _, it in ipairs((X.current())) do
         -- a worn item cannot be marked, but a mark it already has (made before it was put on) can always be taken off
         if flag and it.equipped then
             worn[#worn + 1] = it
         elseif flag and not H.is_banked(it) then
             H.bank[tostring(it.id)] = true
+            if B.junk_ids[tostring(it.id)] then B.junk_ids[tostring(it.id)] = nil; unjunked = true end
             n = n + 1
         elseif not flag and H.is_banked(it) then
             H.bank[tostring(it.id)] = nil
@@ -190,6 +193,7 @@ local function mark_bank(flag)
         end
     end
     H.save()
+    if unjunked then B.save_junk() end
     B.result = {text = flag and string.format("Marked %d %s to bank%s", n, plural(n, "item", "items"), worn_line(worn))
         or string.format("Unmarked %d %s for the bank", n, plural(n, "item", "items")), ok = true}
     X.clear()

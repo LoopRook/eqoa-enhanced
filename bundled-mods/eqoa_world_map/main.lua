@@ -258,19 +258,55 @@ local function commit_note()
     end_typing()
 end
 
+-- Creatures and group members for the box, from the same reads Map Search (F2) takes its live rows from: the creatures the
+-- client sees now (the filter Map Search's `live_valid` uses: alive, a plain creature or NPC, not searchable loot or a corpse),
+-- then the group's members, nearest first. Recorded spawn locations come from Map Search's catalogue, a file of that mod that
+-- no other mod can read, so they are not offered here. At least two letters, so one letter does not list the zone.
+local CREATURE_MOST = 20
+local function creature_results(q, map)
+    local out = {}
+    if #q < 2 then return out end
+    local me = eqoa.player.get()
+    local here = me and me.position
+    local function dist(x, z) return here and math.sqrt((x - here.x) ^ 2 + (z - here.z) ^ 2) or 0 end
+    local seen = {}
+    local named = eqoa.entities.named(q, false)
+    for _, e in ipairs(named or {}) do
+        local p = e.position
+        if e.is_creature and not e.corpse and e.hp_fraction and e.hp_fraction > 0 and e.search_flags == 0 and e.class_code
+            and e.class_code < 2 and e.name and p and (e.world_id == nil or e.world_id == map.world_id) then
+            out[#out + 1] = { name = e.name, kind = (e.level and e.level > 0) and ("creature, level " .. e.level) or "creature",
+                x = p.x, z = p.z, d = dist(p.x, p.z) }
+            seen[e.id] = true
+        end
+    end
+    table.sort(out, function(a, b) if a.d ~= b.d then return a.d < b.d end return a.name < b.name end)
+    while #out > CREATURE_MOST do out[#out] = nil end
+    local group = eqoa.group.get()
+    for _, g in ipairs(group and group.members or {}) do
+        local p = g.position
+        if g.name and g.name:lower():find(q, 1, true) and g.active and p and g.world_id == map.world_id and not seen[g.id] then
+            out[#out + 1] = { name = g.name, kind = "group", x = p.x, z = p.z, d = dist(p.x, p.z) }
+        end
+    end
+    return out
+end
+
 local function search_results()
     local out = {}
     local q = (state.search or ""):lower()
     if q == "" then return out end
     local map = eqoa.map.get()
     if not map then return out end
+    out = creature_results(q, map)
+    local creatures = #out
     refresh_markers(map.world_id)
     for _, m in ipairs(state.markers) do
         local name = m.label or m.name
         if name and name ~= "" and (m.kind == "camp" or m.kind == "coach" or m.kind == "town" or m.kind == "quest" or m.kind == "community")
             and name:lower():find(q, 1, true) then
             out[#out + 1] = { name = name, kind = m.kind, x = m.x, z = m.z }
-            if #out >= 40 then break end
+            if #out - creatures >= 40 then break end
         end
     end
     for _, p in ipairs(pins_here()) do
@@ -797,7 +833,7 @@ function draw(e)
     fill(sx, ty, sw, th, c.black)
     frame(sx, ty, sw, th, state.focus and c.red or c.border)
     local qtext = state.search or ""
-    if qtext == "" and not state.focus then ctext(sx + 6 * F, ty, th, "Find a place...", c.muted, sw - 12 * F)
+    if qtext == "" and not state.focus then ctext(sx + 6 * F, ty, th, "Find a place or creature...", c.muted, sw - 12 * F)
     else ctext(sx + 6 * F, ty, th, qtext .. (state.focus and "_" or ""), c.text, sw - 12 * F) end
     state.hits[#state.hits + 1] = { label = "search", x = sx, y = ty, w = sw, h = th, run = function()
         state.focus = true
@@ -1003,7 +1039,7 @@ function draw(e)
     elseif state.focus and (state.search or "") ~= "" then
         local ry = ty + th + 2 * F
         fill(sx, ry, sw, th, c.surface); frame(sx, ry, sw, th, c.border)
-        ctext(sx + 6 * F, ry, th, "No matching place", c.muted, sw - 12 * F)
+        ctext(sx + 6 * F, ry, th, "No matching place or creature", c.muted, sw - 12 * F)
     end
 
     -- the pin's note box

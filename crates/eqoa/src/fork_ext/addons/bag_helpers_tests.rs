@@ -387,8 +387,9 @@ fn line4_a_merchant_you_talk_to_yourself_opens_the_games_window_and_helpers_act_
     let lua = world();
     run(&lua, JUNK_PACK);
     run(&lua, "H.keep['1'] = 9; H.bank['1'] = true");
-    // all three automatic settings are off by default, for every character: standing at the merchant does nothing
-    assert!(!boolean(&lua, "H.any_auto()") && !boolean(&lua, "H.auto_on('sell') or H.auto_on('restock') or H.auto_on('bank')"));
+    // Sell junk and Restock are off by default (Bank is on since 2026-11-26, and no banker is near here): standing at the
+    // merchant does nothing
+    assert!(!boolean(&lua, "H.auto_on('sell') or H.auto_on('restock')") && boolean(&lua, "H.is_on('Hero', 'bank')"));
     run(&lua, "for i = 1, 8 do later(1); H.auto_poll(true) end");
     assert_eq!(int(&lua, "#TALKS + #BATCHES + #TAKEOVERS"), 0, "nothing is done unasked");
     // the player talks to the merchant: the game's own window opens, and no helper takes it over or acts on it
@@ -413,7 +414,8 @@ fn line4_automatic_helpers_default_off_act_once_per_approach_and_wait_for_a_quie
     let lua = world();
     run(&lua, JUNK_PACK);
     run(&lua, "H.set_auto('sell', true)");
-    assert!(boolean(&lua, "H.auto_on('sell') and not H.auto_on('restock') and not H.auto_on('bank')"));
+    // turning one on keeps the others as they were by default: Bank on, Restock off
+    assert!(boolean(&lua, "H.auto_on('sell') and not H.auto_on('restock') and H.auto_on('bank')"));
     // standing near: it acts once ...
     run(&lua, "later(1); H.auto_poll(true)");
     assert_eq!(int(&lua, "#TALKS"), 1);
@@ -463,7 +465,7 @@ fn line4_marks_and_the_automatic_choices_are_saved_and_come_back() {
     assert_eq!(int(&lua, "H.keep['1']"), 8);
     let file = string(&lua, "FILES['helpers.cfg']");
     assert!(file.contains("keep:1=8\n") && file.contains("bank:1\n"), "{file}");
-    assert!(file.contains("auto:Hero:restock=1") && file.contains("auto:Hero:bank=1") && !file.contains("sell"), "{file}");
+    assert!(file.contains("auto:Hero:restock=1") && file.contains("auto:Hero:bank=1") && file.contains("auto:Hero:sell=0"), "{file}");
     // a fresh start reads the same file back; another character has none of the automatic choices
     run(&lua, "H.keep, H.bank, H.auto_by_char = {}, {}, {}; H.load()");
     assert_eq!(int(&lua, "H.keep['1']"), 8);
@@ -473,7 +475,7 @@ fn line4_marks_and_the_automatic_choices_are_saved_and_come_back() {
     // a file with unknown lines (a newer version) is read without harm
     run(&lua, "FILES['helpers.cfg'] = 'keep:5=2\\nfuture:thing\\nauto:Hero:time_travel=1\\nbank:7\\n'; H.load()");
     assert_eq!(int(&lua, "H.keep['5']"), 2);
-    assert!(boolean(&lua, "H.is_banked({id = 7}) and not H.any_auto()"));
+    assert!(boolean(&lua, "H.is_banked({id = 7}) and not H.auto_on('sell') and not H.auto_on('restock')"));
     // negative control: without saving nothing comes back
     let bad = mutated(&[("eqoa.files.write(FILE,", "(function() end)(FILE,")]);
     run(&bad, "set_pack({item(1, 'Rat Pelt', {q = 3})}); H.start_keep(INV_ITEMS[1]); H.keep = {}; H.load()");
@@ -517,14 +519,82 @@ fn line5_sell_by_hand_asks_first_for_quick_slotted_no_trade_and_non_ordinary_ite
 
 #[test]
 fn the_automatic_helpers_do_not_listen_to_the_world_unless_one_is_on() {
-    // the render poll is only registered by main.lua while some character has an automatic helper on
+    // the render poll is only registered by main.lua while some character has an automatic helper on (Bank is on for a
+    // character with no saved choice, so a fresh one listens; the choice "off" ends it)
     let lua = world();
-    assert!(!boolean(&lua, "H.any_auto()"));
+    assert!(boolean(&lua, "H.any_auto()"), "the Bank default needs the poll");
+    run(&lua, "H.set_auto('bank', false)");
+    assert!(!boolean(&lua, "H.any_auto()"), "turning it off leaves nothing on");
+    assert!(string(&lua, "FILES['helpers.cfg']").contains("auto:Hero:bank=0"), "the off is saved");
     run(&lua, "H.set_auto('bank', true)");
     assert!(boolean(&lua, "H.any_auto()"));
-    run(&lua, "H.set_auto('bank', false)");
-    assert!(!boolean(&lua, "H.any_auto()"), "turning it off again leaves nothing on");
-    assert_eq!(string(&lua, "FILES['helpers.cfg']"), "", "and nothing saved");
+}
+
+/// Owner 2026-11-26: Bank starts ON for a character with no saved choice (a mark to bank is a clear instruction); Sell junk
+/// and Restock (which sell and spend) start OFF; a saved choice, off included, is kept, and another character is unaffected.
+#[test]
+fn line4_bank_starts_on_for_a_fresh_character_the_others_off_and_a_saved_off_stays_off() {
+    let lua = world();
+    run(&lua, "B.character = 'Hero'");
+    assert!(boolean(&lua, "H.auto_on('bank') and not H.auto_on('sell') and not H.auto_on('restock')"));
+    // a saved off stays off after a reload, and turning another helper on does not bring Bank back
+    run(&lua, "H.set_auto('bank', false); H.auto_by_char = {}; H.load()");
+    assert!(boolean(&lua, "not H.auto_on('bank')"), "the saved off");
+    run(&lua, "H.set_auto('restock', true); H.auto_by_char = {}; H.load()");
+    assert!(boolean(&lua, "H.auto_on('restock') and not H.auto_on('bank') and not H.auto_on('sell')"));
+    // an older file (a choice for Restock only, no Bank line) is a saved choice: Bank stays as it was, off
+    run(&lua, "FILES['helpers.cfg'] = 'auto:Hero:restock=1\\n'; H.auto_by_char = {}; H.load()");
+    assert!(boolean(&lua, "H.auto_on('restock') and not H.auto_on('bank')"));
+    // another character with nothing saved gets the default
+    run(&lua, "B.character = 'Fresh'");
+    assert!(boolean(&lua, "H.auto_on('bank') and not H.auto_on('restock')"));
+    // and it acts: a banker near and a marked item talks to the banker without a click
+    let lua = world();
+    run(&lua, "B.character = 'Hero'; set_pack({item(20, 'Moonstone')}); H.bank['20'] = true; put_npcs(nil, 4.0); later(1); H.auto_poll(true)");
+    assert_eq!(string(&lua, "TALKS[1].kind"), "bank");
+    // negative control: with the default flipped back to off, nothing happens
+    let bad = mutated(&[("H.DEFAULT_AUTO = {sell = false, restock = false, bank = true}", "H.DEFAULT_AUTO = {sell = false, restock = false, bank = false}")]);
+    run(&bad, "B.character = 'Hero'; set_pack({item(20, 'Moonstone')}); H.bank['20'] = true; put_npcs(nil, 4.0); later(1); H.auto_poll(true)");
+    assert_eq!(int(&bad, "#TALKS"), 0, "negative control: off by default does nothing");
+    // and the saved off is lost when the explicit off is not written
+    let bad = mutated(&[("(v and \"=1\" or \"=0\")", "(v and \"=1\" or \"=1\")")]);
+    run(&bad, "B.character = 'Hero'; H.set_auto('bank', false); H.auto_by_char = {}; H.load()");
+    assert!(boolean(&bad, "H.auto_on('bank')"), "negative control: an unsaved off comes back on");
+}
+
+/// Owner 2026-11-26: no "Open bank" button; the Bank tab refreshes itself the same way (the mod's hidden bank session)
+/// whenever a banker is in reach and the tab is shown: once on showing the tab, not every frame, again when the session it
+/// held has ended; out of reach it asks nothing.
+#[test]
+fn bank_tab_refreshes_itself_near_a_banker_once_and_asks_nothing_out_of_reach() {
+    let lua = world();
+    run(&lua, "put_npcs(nil, 4.0); B.tab = 1; H.bank_tab_tick()");
+    assert_eq!(int(&lua, "#TALKS"), 0, "another tab: nothing");
+    run(&lua, "B.tab = 6; H.bank_tab_tick()");
+    assert_eq!(string(&lua, "TALKS[1].kind"), "bank", "showing the tab asks, without a click");
+    run(&lua, "for i = 1, 30 do later(0.1); H.bank_tab_tick() end");
+    assert_eq!(int(&lua, "#TALKS"), 1, "not every frame (one ask is still unanswered)");
+    run(&lua, "open_bank()");
+    assert!(boolean(&lua, "TAKEN.bank == true"), "the session is held while the tab is shown");
+    run(&lua, "for i = 1, 30 do later(0.1); H.bank_tab_tick() end");
+    assert_eq!(int(&lua, "#TALKS"), 1, "an open bank is current: no second ask");
+    // the session ends (after the mod's own bank action): the tab asks again
+    run(&lua, "BANK.open = false; B.on_bank_changed({cause = 'close'}); later(1); H.bank_tab_tick()");
+    assert_eq!(int(&lua, "#TALKS"), 2, "asked again when the session ended");
+    // leaving the tab and coming back asks again
+    run(&lua, "open_bank(); B.tab = 1; H.bank_tab_tick(); BANK.open = false; B.tab = 6; later(1); H.bank_tab_tick()");
+    assert_eq!(int(&lua, "#TALKS"), 3);
+    // out of reach (30 units, past the 10 of the default reach): no ask, and the status text is the old one
+    let far = world();
+    run(&far, "put_npcs(nil, 30.0); B.tab = 6; H.bank_tab_tick()");
+    assert_eq!(int(&far, "#TALKS"), 0, "too far: nothing asked");
+    assert_eq!(string(&far, "B.too_far('bank')"), "too far from the banker");
+    run(&far, "put_npcs(nil, 4.0); later(1); H.bank_tab_tick()");
+    assert_eq!(int(&far, "#TALKS"), 1, "in reach later: asks then");
+    // negative control: without the tab test it asks from any tab
+    let bad = mutated(&[("    if B.tab ~= 6 then\n        H.bank_refresh_wanted", "    if false then\n        H.bank_refresh_wanted")]);
+    run(&bad, "put_npcs(nil, 4.0); B.tab = 1; H.bank_tab_tick()");
+    assert_eq!(int(&bad, "#TALKS"), 1, "negative control: asks on the wrong tab");
 }
 
 const RESTOCK_SETUP: &str = r#"

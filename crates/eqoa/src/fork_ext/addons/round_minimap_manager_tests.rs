@@ -665,7 +665,8 @@ fn round_minimap_card_stays_inside_the_window_wherever_the_minimap_is_moved_body
     let (dx, dy) = rm.dot_at(rm.me[0] + 40.0, rm.me[2] + 30.0);
     assert!(rm.hover(dx, dy).is_some());
     let home = inside(&rm, "home");
-    assert!(home[2] < 400.0, "the long name is wrapped: card {} wide", home[2]);
+    let lines: Vec<String> = rm.state("round_minimap.card_text");
+    assert!(lines.len() > 3, "the long name is wrapped onto several lines: {lines:?}");
     // Move HUD: far left and down
     hudlayout::frame_begin();
     hudlayout::note(Piece::Minimap, [474.0, 50.0, 586.0, 162.0], [0.0, 0.0]);
@@ -1203,6 +1204,30 @@ fn round_minimap_search_button_and_box_keep_the_native_sizes_at_every_scale_body
         rm.manager.shutdown();
         super::super::input::reset_input_state();
     }
+}
+
+/// Owner 2026-11-26: the hover card's text follows the UI scale (the World Map's size rule: 11 base pixels times the
+/// client's scale), so it is not tiny on a large window. The control: the old card drew at the default font's one size at
+/// every window, so its height did not grow with the window.
+#[test]
+fn round_minimap_card_text_follows_the_ui_scale() {
+    big_stack(round_minimap_card_text_follows_the_ui_scale_body)
+}
+fn round_minimap_card_text_follows_the_ui_scale_body() {
+    let mut heights = Vec::new();
+    for win in [(640u32, 480u32), (1024, 768), (1920, 1080)] {
+        let Some(mut rm) = Rm::sized(|p| p == "eqoa_round_minimap", 0, win, 1) else { return };
+        rm.frames(4);
+        let (dx, dy) = rm.dot_at(rm.me[0] + 40.0, rm.me[2] + 30.0);
+        assert!(rm.hover(dx, dy).is_some(), "a card on the dot at {win:?}");
+        let [got, want]: [f64; 2] = rm.state("(function() local f = eqoa.hud.frame() return {round_minimap.card_font_scale, 11 * math.min(f.scale_x, f.scale_y) / 13} end)()");
+        assert!((got - want).abs() < 1e-6, "{win:?}: text scale {got} is 11 x the UI scale / 13 = {want}");
+        let card: [f64; 4] = rm.state("(function() local c = round_minimap.card_rect return {c.x, c.y, c.w, c.h} end)()");
+        assert!(card[0] >= 0.0 && card[0] + card[2] <= win.0 as f64 && card[1] >= 0.0 && card[1] + card[3] <= win.1 as f64, "{win:?}: card {card:?} on the screen");
+        heights.push(card[3]);
+        rm.manager.shutdown();
+    }
+    assert!(heights[2] > heights[0] * 1.2, "the card grows with the window: {heights:?} (a fixed-size card would not)");
 }
 
 /// A creature name that is one word wider than any card (no space to wrap at) is cut with an

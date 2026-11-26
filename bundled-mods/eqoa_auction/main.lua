@@ -6,11 +6,15 @@
 local ui = eqoa.imgui
 
 -- Sizes are in HUD frame pixels (640x448), scaled as the HUD is.
-local W, H, PAD, LINE = 380, 336, 8, 13
+local W, H, PAD, LINE = 380, 364, 8, 13
 local ROWS = 8
 -- the game's wear slots a search can name (its own picker's list); the words come from the game
 local WEARS = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 27 }
-local LIMITS = { name = 40, min_level = 3, max_level = 3, bid = 9 }
+local LIMITS = { name = 40, seller = 23, min_level = 3, max_level = 3, min_price = 9, max_price = 9, bid = 9 }
+-- the search boxes in Tab order; the numeric ones take digits only
+local FIELDS = { "name", "seller", "min_level", "max_level", "min_price", "max_price" }
+local SEARCH_FIELD, NUMERIC_FIELD = {}, { min_level = true, max_level = true, min_price = true, max_price = true }
+for _, f in ipairs(FIELDS) do SEARCH_FIELD[f] = true end
 -- the game's own class and race pickers (its lists, in its order: the names are in order); the value is the class or
 -- race id the search takes. Alchemist and Ogre are shown by the game only on servers that offer them: a search for
 -- one where it is not offered finds nothing.
@@ -22,7 +26,7 @@ local RACE_NAMES = { [0] = "Human", "Elf", "Dark Elf", "Gnome", "Dwarf", "Troll"
 
 local state = {
     open = false, tab = "search", session = nil, tokens = {}, escape = nil, enter = nil,
-    name = "", min_level = "", max_level = "", wear = nil, class = nil, race = nil, opts = nil, layout = {}, bid = "", count = 1, sel = nil, scroll = 0,
+    name = "", seller = "", min_level = "", max_level = "", min_price = "", max_price = "", sort = nil, wear = nil, class = nil, race = nil, opts = nil, layout = {}, bid = "", count = 1, sel = nil, scroll = 0,
     field = nil, result = nil, last_req = nil, picking = false, pick_scroll = 0, searched = false,
     hits = {}, row_hits = {}, list_rect = nil, pick_rect = nil, field_rect = nil, a = nil, was_down = false, fresh = false,
 }
@@ -127,9 +131,12 @@ end
 
 local function search()
     stop_typing()
-    local args = { name = state.name ~= "" and state.name or nil, wear = state.wear, class = state.class, race = state.race }
+    local args = { name = state.name ~= "" and state.name or nil, seller = state.seller ~= "" and state.seller or nil,
+        wear = state.wear, class = state.class, race = state.race }
     if state.min_level ~= "" then args.min_level = tonumber(state.min_level) end
     if state.max_level ~= "" then args.max_level = tonumber(state.max_level) end
+    if state.min_price ~= "" then args.min_price = tonumber(state.min_price) end
+    if state.max_price ~= "" then args.max_price = tonumber(state.max_price) end
     state.sel, state.scroll, state.searched = nil, 0, true
     run(function() return eqoa.actions.auction_search(args) end)
 end
@@ -206,13 +213,15 @@ local function open(page)
             local f = state.field
             if key == "escape" then stop_typing()
             elseif key == "enter" or key == "return" then
-                if f == "name" or f == "min_level" or f == "max_level" then search() else stop_typing() end
+                if SEARCH_FIELD[f] then search() else stop_typing() end
             elseif key == "tab" then
-                state.field = f == "name" and "min_level" or (f == "min_level" and "max_level" or "name")
+                local at_ = 1
+                for i, name in ipairs(FIELDS) do if name == f then at_ = i end end
+                state.field = SEARCH_FIELD[f] and FIELDS[at_ % #FIELDS + 1] or "name"
             elseif key == "backspace" then state[f] = chop(state[f])
             elseif d.text and #d.text > 0 then
                 local t = d.text
-                if f ~= "name" then t = t:gsub("%D", "") else t = t:gsub("[\r\n]", " ") end
+                if NUMERIC_FIELD[f] or f == "bid" then t = t:gsub("%D", "") else t = t:gsub("[\r\n]", " ") end
                 if clen(state[f]) + clen(t) <= LIMITS[f] then state[f] = state[f] .. t end
             end
         elseif key == "escape" and not d["repeat"] then
@@ -279,6 +288,45 @@ local function time_left(minutes)
     if minutes <= 0 then return "ended" end
     if minutes >= 60 then return math.floor(minutes / 60) .. "h " .. (minutes % 60) .. "m" end
     return minutes .. "m"
+end
+
+-- Ordering the lots on screen: a click on a column title orders the rows shown (the page the server sent) ascending, a
+-- second click descending. The server's own page order is its lot order and `auction_search` has no sort, so the order is
+-- for this page only. A lot without a value for the column (no buy-now price, no time yet) goes last either way. Rows are
+-- handed out as the lot records themselves, so a click acts on the lot it shows (select_lot(l)), never on a position.
+local SORT_TITLES = { name = "Name", high = "High bid", buy = "Buy now (each)", time = "Time left" }
+local function sort_value(l, key)
+    if key == "name" then return (l.name or ""):lower() end
+    if key == "high" then return l.high_bid or -1 end
+    if key == "buy" then return (l.buyout or 0) > 0 and l.buyout or nil end
+    return l.minutes_left
+end
+local function ordered(results)
+    local s = state.sort
+    if not s or #results < 2 then return results end
+    local rows = {}
+    for i, l in ipairs(results) do rows[i] = { l = l, i = i, v = sort_value(l, s.key) } end
+    table.sort(rows, function(a, b)
+        if a.v == nil or b.v == nil then
+            if a.v == b.v then return a.i < b.i end
+            return b.v == nil
+        end
+        if a.v == b.v then return a.i < b.i end
+        if s.dir == 1 then return a.v < b.v end
+        return a.v > b.v
+    end)
+    local out = {}
+    for i, r in ipairs(rows) do out[i] = r.l end
+    return out
+end
+local function sort_by(key)
+    local s = state.sort
+    if s and s.key == key then s.dir = -s.dir else state.sort = { key = key, dir = 1 } end
+    state.scroll = 0
+end
+local function sort_title(key)
+    local s = state.sort
+    return SORT_TITLES[key] .. ((s and s.key == key) and (s.dir == 1 and " ^" or " v") or "")
 end
 
 function draw()
@@ -358,7 +406,7 @@ function draw()
         local shown = state[field] .. (state.field == field and "_" or "")
         while #shown > 0 and ui.CalcTextSize(shown) > (bw - 8) * k do shown = drop_first(shown) end
         text(bx + 4, y, shown, col.text)
-        state.hits[#state.hits + 1] = hit(bx, y - 2, bw, 14, function() start_typing(field); state.picking = false end)
+        state.hits[#state.hits + 1] = hit(bx, y - 2, bw, 14, function() start_typing(field); state.picking = false end, "box " .. field)
         if state.field == field then state.field_rect = { x = x0 + bx * k, y = y0 + (y - 2) * k, w = bw * k, h = 14 * k } end
     end
 
@@ -421,13 +469,18 @@ function draw()
         end
         button(PAD, 77, 170, "Class: " .. chosen_label("class", state.class, "Any class"), true, function() open_picker("class") end)
         button(PAD + 180, 77, 130, "Race: " .. chosen_label("race", state.race, "Any race"), true, function() open_picker("race") end)
-        list_y = 108
-        local cs = columns("search", { { "High bid", "999999999" }, { "Buy now (each)", "999999999" }, { "Time left", "23h 59m" } })
+        box(PAD, 99, 170, "Seller", "seller")
+        box(PAD + 176, 99, 90, "Price", "min_price")
+        box(PAD + 270, 99, 94, "to", "max_price")
+        list_y = 126
+        local cs = columns("search", { { sort_title("high"), "999999999" }, { sort_title("buy"), "999999999" }, { sort_title("time"), "23h 59m" } })
+        results = ordered(results)
         state.list_rect = { x = x0 + PAD * k, y = y0 + list_y * k, w = (W - 2 * PAD) * k, h = ROWS * LINE * k }
         if #results == 0 then
             text(PAD + 2, list_y, busy and "Searching..." or (state.searched and "Nothing found" or "Type what to look for and press Search"), col.muted)
         end
         local chosen
+        state.shown = {} -- the lot ids in the order drawn (for the mod's tests)
         for i = 1, ROWS do
             local l = results[state.scroll + i]
             if l then
@@ -437,12 +490,23 @@ function draw()
                 text(cs[1].x, y, l.high_bid and tostring(l.high_bid) or "no bids", col.muted, cs[1].w)
                 text(cs[2].x, y, l.buyout > 0 and tostring(l.buyout) or "", col.good, cs[2].w)
                 text(cs[3].x, y, time_left(l.minutes_left), (l.minutes_left or 1) <= 0 and col.warn or col.muted, cs[3].w)
-                state.row_hits[#state.row_hits + 1] = hit(PAD, y, W - 2 * PAD, LINE, function() select_lot(l) end)
+                state.row_hits[#state.row_hits + 1] = hit(PAD, y, W - 2 * PAD, LINE, function() select_lot(l) end, "lot " .. l.lot)
+                state.shown[#state.shown + 1] = l.lot
             end
         end
         header(cs, list_y - 12)
+        -- the column titles are the ordering buttons (the name's is the first word of the row)
+        local keys = { "high", "buy", "time" }
+        for i, key in ipairs(keys) do
+            state.hits[#state.hits + 1] = hit(cs[i].x, list_y - 13, cs[i].w, LINE, function() sort_by(key) end, "order " .. key)
+        end
+        text(PAD + 2, list_y - 12, sort_title("name"), col.muted, cs.name_w)
+        state.hits[#state.hits + 1] = hit(PAD, list_y - 13, cs.name_w + 2, LINE, function() sort_by("name") end, "order name")
+        if state.sort and #results > 0 then
+            text(PAD + 2, list_y + ROWS * LINE, "ordered within this page", col.muted, W - 2 * PAD)
+        end
         -- the lot chosen
-        local dy = list_y + ROWS * LINE + 6
+        local dy = list_y + ROWS * LINE + 16
         if chosen then
             text(PAD, dy, chosen.name, col.white, W - 2 * PAD)
             text(PAD, dy + LINE, "Seller " .. chosen.seller .. "   Lowest bid " .. floor_of(chosen)
@@ -511,8 +575,8 @@ function draw()
     -- the pickers (type, class, race): a short list of the game's own choices, the wheel scrolls it
     if state.picking and state.tab == "search" and state.opts then
         local px, pw = PAD + 180, 150
-        local py = 92
-        if state.picking == "class" then px, pw, py = PAD, 170, 96 elseif state.picking == "race" then py = 96 end
+        local py = 112 -- under the Seller and Price row, so a pick never covers a box
+        if state.picking == "class" then px, pw = PAD, 170 end
         local ph = 6 * LINE + 8
         fill(px, py, pw, ph, col.raised)
         frame(px, py, pw, ph, col.white)
