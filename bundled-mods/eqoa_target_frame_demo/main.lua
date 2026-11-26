@@ -88,38 +88,45 @@ eqoa.events.on("render", function()
         return
     end
 
+    -- Drawn on the game's target panel as it is now: moved (Move HUD) and grown about its corner with HUD Scale or
+    -- the PC interface's piece size (174 wide at 100%). Every size below is its 100% size times k; at 100% the
+    -- numbers are the ones this mod always drew.
     local layout = eqoa.hud.layout()
     local panel = layout and layout.target and layout.target.panel
-    local x = panel and panel.frame_x or 20
-    local y = panel and panel.frame_y or 348
+    local k = (panel and panel.frame_width and panel.frame_width > 0) and panel.frame_width / 174 or 1
+    local sc = (k ~= 1) and k or nil
+    local function px(v) return math.floor(v * k + 0.5) end
+    local x = panel and math.floor(panel.frame_x + 0.5) or 20
+    local y = panel and math.floor(panel.frame_y + 0.5) or 348
     local w = 186
     local h = target.power and 62 or 50
 
-    hud_panel({ x = x, y = y, w = w, h = h, anchor = "left", vertical = "bottom" })
+    hud_panel({ x = x, y = y, w = px(w), h = px(h), anchor = "left", vertical = "bottom" })
 
     local title = target.name and target.name ~= "" and target.name or "Target"
     if target.level then
         title = title .. " (" .. tostring(target.level) .. ")"
     end
     hud_text({
-        x = x + 10,
-        y = y + 8,
+        x = x + px(10),
+        y = y + px(8),
         text = title,
         color = disposition_color(target.disposition_name),
-        scale = 0.85,
+        scale = 0.85 * k,
         shadow = true,
-        clip_width = w - 20,
+        clip_width = px(w - 20),
         anchor = "left",
         vertical = "bottom",
     })
 
     local hp = target.hp_fraction or 0
     hud_gauge({
-        x = x + 10,
-        y = y + 28,
+        x = x + px(10),
+        y = y + px(28),
         art = 7,
         fill = hp,
         lit = true,
+        scale = sc,
         anchor = "left",
         vertical = "bottom",
     })
@@ -127,11 +134,11 @@ eqoa.events.on("render", function()
     if target.hp_fraction ~= nil then
         local pct = math.floor(target.hp_fraction * 100 + 0.5)
         hud_text({
-            x = x + w - 10,
-            y = y + 26,
+            x = x + px(w - 10),
+            y = y + px(26),
             text = tostring(pct) .. "%",
             color = MUTED,
-            scale = 0.75,
+            scale = 0.75 * k,
             align = "right",
             shadow = true,
             anchor = "left",
@@ -141,11 +148,12 @@ eqoa.events.on("render", function()
 
     if target.power ~= nil then
         hud_gauge({
-            x = x + 10,
-            y = y + 42,
+            x = x + px(10),
+            y = y + px(42),
             art = 9,
             fill = target.power,
             lit = true,
+            scale = sc,
             anchor = "left",
             vertical = "bottom",
         })

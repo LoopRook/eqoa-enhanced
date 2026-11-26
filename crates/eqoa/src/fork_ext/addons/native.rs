@@ -1330,6 +1330,8 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.input.Pad", "raw_left" | "raw_right") => Some("eqoa.input.RawAxes"),
         ("eqoa.player.Stats", "rows" | "columns") => Some("eqoa.player.StatItem"),
         ("eqoa.player.Stats", "resists") => Some("eqoa.player.Stats"),
+        ("eqoa.player.Stats", "figures") => Some("eqoa.player.StatFigures"),
+        ("eqoa.player.StatFigures", "melee" | "ranged" | "defence") => Some("eqoa.player.StatRange"),
         (
             "eqoa.player.Stats",
             "strength" | "stamina" | "agility" | "dexterity" | "wisdom" | "intelligence"
@@ -1340,6 +1342,12 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.hud.Layout", "group_members") => Some("eqoa.hud.GroupMemberLayout"),
         ("eqoa.hud.Layout", "target") => Some("eqoa.hud.TargetLayout"),
         ("eqoa.hud.Layout", "minimap") => Some("eqoa.hud.Rect"),
+        (
+            "eqoa.hud.Layout",
+            "quests" | "meter" | "effects" | "chat" | "chat1" | "chat2" | "chat3" | "settings"
+            | "breath" | "quick_menus" | "spell_bars" | "utility_bars" | "equipment_bar"
+            | "target_info" | "raid_prompts" | "stats" | "focus",
+        ) => Some("eqoa.hud.Rect"),
         ("eqoa.hud.Layout", "pet") => Some("eqoa.hud.SinglePanelLayout"),
         (
             "eqoa.hud.PlayerLayout"
@@ -1429,8 +1437,10 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.player.Stats",
-            "rows columns resists strength stamina agility dexterity wisdom intelligence charisma armor max_hp hp_max max_power power fire cold lightning arcane poison disease",
+            "rows columns resists strength stamina agility dexterity wisdom intelligence charisma armor max_hp hp_max max_power power fire cold lightning arcane poison disease hot pot figures",
         ),
+        ("eqoa.player.StatFigures", "melee ranged defence"),
+        ("eqoa.player.StatRange", "low high text"),
         (
             "eqoa.player.StatItem",
             "name short word stat_id current base min max without_min without_max change effect_change shift",
@@ -1496,7 +1506,10 @@ fn install_fields(lua: &Lua) {
             "eqoa.hud.Rect",
             "frame_x frame_y frame_width frame_height x y width height",
         ),
-        ("eqoa.hud.Layout", "player group_members target pet minimap"),
+        (
+            "eqoa.hud.Layout",
+            "player group_members target pet minimap hud_scale pc_mode hud_unlocked quests meter effects chat chat1 chat2 chat3 settings breath quick_menus spell_bars utility_bars equipment_bar target_info raid_prompts stats focus",
+        ),
         ("eqoa.hud.PlayerLayout", "panel health power exp"),
         ("eqoa.hud.TargetLayout", "panel health power"),
         ("eqoa.hud.GroupMemberLayout", "index panel health power"),
@@ -1510,6 +1523,8 @@ fn install_fields(lua: &Lua) {
             || matches!(path, "eqoa.player.Stats" | "eqoa.player.StatItem")
         {
             Some(3)
+        } else if matches!(path, "eqoa.player.StatFigures" | "eqoa.player.StatRange") {
+            Some(8)
         } else {
             Some(2)
         };
@@ -1531,7 +1546,11 @@ fn install_fields(lua: &Lua) {
                 Some(6)
             } else if (path, field) == ("eqoa.hotbar.HotbarSlot", "item") {
                 Some(5)
-            } else if matches!((path, field), ("eqoa.entities.Entity", "head_mark" | "merc_tag")) {
+            } else if matches!((path, field), ("eqoa.entities.Entity", "head_mark" | "merc_tag"))
+                || matches!((path, field), ("eqoa.player.Stats", "hot" | "pot" | "figures"))
+                || (path == "eqoa.hud.Layout"
+                    && !matches!(field, "player" | "group_members" | "target" | "pet" | "minimap"))
+            {
                 Some(8)
             } else if (path, field) == ("eqoa.abilities.Ability", "learned") {
                 Some(8)

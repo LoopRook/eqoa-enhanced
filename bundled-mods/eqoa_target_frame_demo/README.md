@@ -6,3 +6,4 @@ A small example mod for `eqoa/1` that replaces the game's target frame.
 - Hides the native target piece with `eqoa.hud.hide("target")`.
 - Draws a replacement target panel with name, level, disposition color, health bar, health percentage, and power bar (when known), following Move HUD.
 - Disabling the mod releases the claim and restores the game's target frame immediately.
+- Follows HUD Scale (and the PC interface's piece size) as well as Move HUD, in both interfaces.

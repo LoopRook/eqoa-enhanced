@@ -29,7 +29,53 @@ impl Default for HudState {
     }
 }
 
-type LayoutKey = ((u32, u32), HudState, [[f32; 2]; 5], [f32; 5]);
+/// What the layout record is worked out from besides the five stock pieces' moves and sizes: HUD Scale (percent), the
+/// interface, Move HUD, and the other pieces' rectangles as last drawn.
+type Extras = (u8, bool, bool, Vec<(u8, [f32; 4])>);
+type LayoutKey = ((u32, u32), HudState, [[f32; 2]; 5], [f32; 5], Extras);
+
+/// The pieces `eqoa.hud.layout()` gives a rectangle for beyond the five it always lists, by the name `Piece` has
+/// (snake_case). Each is there only while the game draws it.
+const EXTRA_PIECES: [(crate::hudlayout::Piece, &str); 17] = {
+    use crate::hudlayout::Piece::*;
+    [
+        (Quests, "quests"),
+        (Meter, "meter"),
+        (Effects, "effects"),
+        (Chat, "chat"),
+        (Chat1, "chat1"),
+        (Chat2, "chat2"),
+        (Chat3, "chat3"),
+        (Settings, "settings"),
+        (Breath, "breath"),
+        (QuickMenus, "quick_menus"),
+        (SpellBars, "spell_bars"),
+        (UtilityBars, "utility_bars"),
+        (EquipmentBar, "equipment_bar"),
+        (TargetInfo, "target_info"),
+        (RaidPrompts, "raid_prompts"),
+        (Stats, "stats"),
+        (Focus, "focus"),
+    ]
+};
+
+/// The anchor words `transform_rect` takes for the sides a piece is kept at.
+fn anchor_words(piece: crate::hudlayout::Piece) -> (&'static str, &'static str) {
+    use crate::hudlayout::Edge;
+    let (h, v) = piece.own();
+    (
+        match h {
+            Edge::Start => "left",
+            Edge::Middle => "center",
+            Edge::End => "right",
+        },
+        match v {
+            Edge::Start => "top",
+            Edge::Middle => "center",
+            Edge::End => "bottom",
+        },
+    )
+}
 
 thread_local! {
     // JSON and Lua records stay reusable until a piece actually moves, the
@@ -162,7 +208,18 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
     // HUD Scale (either interface) and the PC's per-piece size: drawn about the piece's own corner
     let sizes = [Piece::Player, Piece::Group, Piece::Target, Piece::Pet, Piece::Minimap]
         .map(|piece| crate::hudlayout::scale(piece, beyond).factor);
-    let key = (window_size, state, shifts, sizes);
+    let hud_scale_percent = crate::settings::client().display_ui().hud_scale;
+    let pc_mode = crate::settings::pc_mode();
+    let unlocked = crate::hudlayout::unlocked();
+    // the other pieces as the last HUD frame drew them (frame pixels, after the side and top they are kept at)
+    let drawn: Vec<(u8, [f32; 4])> = crate::hudlayout::drawn_all()
+        .into_iter()
+        .filter_map(|(piece, r)| {
+            let k = EXTRA_PIECES.iter().position(|(p, _)| *p == piece)?;
+            r.iter().all(|v| v.is_finite()).then_some((k as u8, r))
+        })
+        .collect();
+    let key = (window_size, state, shifts, sizes, (hud_scale_percent, pc_mode, unlocked, drawn));
     if let Some(value) = LAYOUT_CACHE.with(|c| {
         c.borrow()
             .as_ref()
@@ -225,7 +282,10 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
         }));
     }
 
-    let result = std::rc::Rc::new(json!({
+    let mut result = json!({
+        "hud_scale": f32::from(hud_scale_percent) / 100.0,
+        "pc_mode": pc_mode,
+        "hud_unlocked": unlocked,
         "player": {
             "panel": to_rect(crate::hudlayout::Piece::Player, 10.0, 15.0, 190.0, 65.0, "left", "top"),
             "health": to_rect(crate::hudlayout::Piece::Player, 69.0, 36.0, 136.0, 8.0, "left", "top"),
@@ -242,7 +302,24 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
         "pet": {
             "panel": to_rect(crate::hudlayout::Piece::Pet, 20.0, state.pet_y as f32, 174.0, state.pet_h as f32, "left", "top"),
         },
-    }));
+    });
+    // The other pieces, as the game last drew them (moved and scaled already). `frame_*` are in the piece's own
+    // drawing coordinates, as the five above give theirs; `x`..`height` are window pixels.
+    for &(k, r) in &key.4.3 {
+        let (piece, name) = EXTRA_PIECES[k as usize];
+        let (own_h, own_v) = piece.own();
+        let off = |e: crate::hudlayout::Edge, span: f32| match e {
+            crate::hudlayout::Edge::Start => -span,
+            crate::hudlayout::Edge::Middle => 0.0,
+            crate::hudlayout::Edge::End => span,
+        };
+        let (fx, fy) = (r[0] - off(own_h, beyond.side), r[1] - off(own_v, beyond.top));
+        let (w, h) = (r[2] - r[0], r[3] - r[1]);
+        let (anc, vert) = anchor_words(piece);
+        let out = transform_rect([fx, fy, w, h], anc, vert, m);
+        result[name] = json!({"frame_x": fx, "frame_y": fy, "frame_width": w, "frame_height": h, "x": out[0], "y": out[1], "width": out[2], "height": out[3]});
+    }
+    let result = std::rc::Rc::new(result);
     LAYOUT_CACHE.with(|c| *c.borrow_mut() = Some((key, result.clone())));
     result
 }

@@ -229,7 +229,7 @@ impl Play {
                     bonuses: &m.bonuses,
                     p44: self.dump.player.p44 as i32,
                 };
-                crate::fork_ext::player_stats::view(&src).map(|v| v.to_json())
+                crate::fork_ext::player_stats::view_with(&src, &self.session.stat_figures).map(|v| v.to_json())
             })
             .flatten();
         let [inventory, bank, loot, merchant] = items::build(self);

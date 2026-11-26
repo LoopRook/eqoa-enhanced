@@ -45,6 +45,8 @@ pub enum HudCommand {
         art: i32,
         fill: f32,
         lit: bool,
+        /// drawn about its own top left corner, 1.0 as the game draws it (`eqoa.hud.gauge`'s `scale`)
+        scale: f32,
         anchor: render::ui::Anchor,
         vertical: render::ui::Vertical,
     },
@@ -56,6 +58,8 @@ pub enum HudCommand {
         w: Option<i32>,
         h: Option<i32>,
         color: Option<[f32; 4]>,
+        /// drawn about its own top left corner, 1.0 as asked (`eqoa.hud.image`'s `scale`)
+        scale: f32,
         anchor: render::ui::Anchor,
         vertical: render::ui::Vertical,
     },
@@ -481,11 +485,19 @@ fn draw_commands(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster<'_>, target_
                         art,
                         fill,
                         lit,
+                        scale,
                         anchor,
                         vertical,
                     } => {
                         ui.ui.anchor = anchor;
                         ui.ui.vertical = vertical;
+                        // A scaled gauge grows about its own top left corner (as a HUD piece grows about its
+                        // own); unscaled, nothing is set and the draw is what it always was.
+                        let before = ui.ui.hud_scale;
+                        if scale != 1.0 && before == render::ui::HudScale::IDENTITY {
+                            let origin = ui.ui.placed([x as f32, y as f32]);
+                            ui.ui.hud_scale = render::ui::HudScale { origin, factor: scale };
+                        }
                         crate::hud::draw_gauge(
                             vui,
                             ui,
@@ -495,6 +507,7 @@ fn draw_commands(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster<'_>, target_
                             lit,
                             fill.clamp(0.0, 1.0),
                         );
+                        ui.ui.hud_scale = before;
                     }
                     HudCommand::Image {
                         ui_id,
@@ -504,11 +517,17 @@ fn draw_commands(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster<'_>, target_
                         w,
                         h,
                         color,
+                        scale,
                         anchor,
                         vertical,
                     } => {
                         ui.ui.anchor = anchor;
                         ui.ui.vertical = vertical;
+                        let before = ui.ui.hud_scale;
+                        if scale != 1.0 && before == render::ui::HudScale::IDENTITY {
+                            let origin = ui.ui.placed([x as f32, y as f32]);
+                            ui.ui.hud_scale = render::ui::HudScale { origin, factor: scale };
+                        }
                         let alpha =
                             plate_color(color.unwrap_or([1.0; 4]), target_fade, target_alpha)[3];
                         if ui_id == 25 {
@@ -530,6 +549,7 @@ fn draw_commands(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster<'_>, target_
                             let size = [w.unwrap_or(-1), h.unwrap_or(-1)];
                             vui.blit_ex_size(ui, ui_id, [x, y], size, 3, alpha, 0);
                         }
+                        ui.ui.hud_scale = before;
                     }
                     HudCommand::Panel {
                         x,
@@ -663,6 +683,7 @@ mod tests {
                         art: 9,
                         fill: 1.0,
                         lit: true,
+                        scale: 1.0,
                         anchor: render::ui::Anchor::Left,
                         vertical: render::ui::Vertical::Top,
                     }
@@ -680,6 +701,7 @@ mod tests {
                     art: 9,
                     fill: 1.0,
                     lit: true,
+                    scale: 1.0,
                     anchor: render::ui::Anchor::Left,
                     vertical: render::ui::Vertical::Top,
                 }
@@ -698,6 +720,7 @@ mod tests {
                     art: 9,
                     fill: 1.0,
                     lit: true,
+                    scale: 1.0,
                     anchor: render::ui::Anchor::Left,
                     vertical: render::ui::Vertical::Top,
                 }

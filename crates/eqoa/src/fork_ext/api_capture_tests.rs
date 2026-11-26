@@ -85,7 +85,8 @@ fn round7c_play_records_match_declared_fields() {
             fields('player.SevenStats', p.attributes.total)
             fields('player.Resists', p.resists)
             local stats = eqoa.player.stats()
-            fields('player.Stats', stats)
+            -- figures: only once the server has sent the Stat Window's figures
+            fields('player.Stats', stats, 'figures')
             -- min/max/without_*: only a stat with a native range carries them
             fields('player.StatItem', stats.strength, 'min max without_min without_max')
             fields('Vec3', p.position)
@@ -134,7 +135,8 @@ fn round7c_play_records_match_declared_fields() {
             fields('combat.Counters', eqoa.combat.get_counters())
             fields('hud.Frame', eqoa.hud.frame())
             local layout = eqoa.hud.layout()
-            fields('hud.Layout', layout)
+            -- the other pieces: each only while the game draws it
+            fields('hud.Layout', layout, 'quests meter effects chat chat1 chat2 chat3 settings breath quick_menus spell_bars utility_bars equipment_bar target_info raid_prompts stats focus')
             fields('hud.PlayerLayout', layout.player)
             fields('hud.TargetLayout', layout.target)
             fields('hud.GroupMemberLayout', layout.group_members[1])
@@ -3704,4 +3706,98 @@ fn round7c_mod_pin_ownership_carries_across_characters_until_compared() {
     b.bags_broker_tick();
     assert_eq!(b.map.waypoint(0), None, "disabling the mod clears the pin it still owns");
     map_waypoint::reset_for_test();
+}
+
+/// What a mod needs to draw the game's Stat Window line for line (`statwnd::Facts`) is in the API: the Lua here is what
+/// a mod author would write from `eqoa.player.get()` and `eqoa.player.stats()`; its table must equal the Facts the game's
+/// own window draws, and so must the window's entries (labels, values, bonuses, rows). `Facts` is destructured with no
+/// `..`: a field upstream adds to the window stops this compiling until the API has it.
+fn stat_window_facts_from_lua(host: &Host) -> crate::statwnd::Facts {
+    let t: mlua::Table = host
+        .lua
+        .load(
+            r#"
+            local p = assert(eqoa.player.get())
+            local s = assert(eqoa.player.stats())
+            local order = {'strength','stamina','agility','dexterity','wisdom','intelligence','charisma'}
+            local f = {hp = {p.hp.current, p.hp.maximum}, power = {p.power.current, p.power.maximum},
+                hot = s.hot, pot = s.pot, ac = s.armor.current, stats = {}, resists = {
+                s.fire.current, s.cold.current, s.lightning.current, s.arcane.current, s.poison.current, s.disease.current}}
+            for i, n in ipairs(order) do f.stats[i] = {p.attributes.total[n], p.attributes.base[n]} end
+            local function r(x) return x and {x.low, x.high} or false end
+            if s.figures then f.figures = {melee = r(s.figures.melee), ranged = r(s.figures.ranged), defence = r(s.figures.defence)} end
+            return f
+        "#,
+        )
+        .eval()
+        .unwrap();
+    let pair = |t: mlua::Table| [t.get::<i32>(1).unwrap(), t.get::<i32>(2).unwrap()];
+    let two = |k: &str| pair(t.get(k).unwrap());
+    let opt = |f: &mlua::Table, k: &str| f.get::<mlua::Value>(k).ok().and_then(|v| v.as_table().map(|v| pair(v.clone())));
+    let stats: mlua::Table = t.get("stats").unwrap();
+    let resists: mlua::Table = t.get("resists").unwrap();
+    crate::statwnd::Facts {
+        hp: two("hp"),
+        power: two("power"),
+        hot: t.get("hot").unwrap(),
+        pot: t.get("pot").unwrap(),
+        ac: t.get("ac").unwrap(),
+        stats: std::array::from_fn(|i| pair(stats.get(i + 1).unwrap())),
+        resists: std::array::from_fn(|i| resists.get(i + 1).unwrap()),
+        figures: t.get::<Option<mlua::Table>>("figures").unwrap().map_or_else(Default::default, |f| net::statfig::Figures {
+            melee: opt(&f, "melee"),
+            ranged: opt(&f, "ranged"),
+            defence: opt(&f, "defence"),
+        }),
+    }
+}
+
+#[test]
+fn the_stat_window_can_be_rebuilt_from_the_api() {
+    use net::statfig::Figures;
+    let mut p = ready();
+    let host = Host::new().unwrap();
+    let mut cur = [0i32; 29];
+    let mut base = [0i32; 29];
+    for i in 0..7 {
+        cur[i] = 100 + i as i32;
+        base[i] = 90 + i as i32;
+    }
+    cur[2] = base[2];
+    cur[6] = base[6] - 5;
+    (cur[7], cur[8], cur[9], cur[10]) = (750, 1000, 460, 700);
+    (cur[12], cur[13], cur[14]) = (20, 14, 529);
+    for (k, s) in (22..28).enumerate() {
+        cur[s] = 10 * k as i32;
+    }
+    p.stats.stat = cur;
+    p.stats.base = base;
+    CORE.with(|c| c.borrow_mut().stats_received = true);
+    let word = |w: i32| format!("w{w}");
+    let figures = [
+        Figures::default(),
+        Figures { melee: Some([12, 31]), ranged: None, defence: Some([4, 17]) },
+        Figures { melee: Some([12, 31]), ranged: Some([9, 22]), defence: Some([7, 7]) },
+    ];
+    for figs in figures {
+        p.session.stat_figures = figs;
+        // a changed number moves the memoised record too
+        p.stats.stat[12] += 1;
+        p.forge_snapshot(None);
+        let mut expect = crate::statwnd::facts(&p.stats.stat, &p.stats.base);
+        expect.figures = figs;
+        let got = stat_window_facts_from_lua(&host);
+        // no `..`: a new Facts field must be answered by the API before this builds
+        let crate::statwnd::Facts { hp, power, hot, pot, ac, stats, resists, figures } = got;
+        assert_eq!((hp, power, hot, pot, ac, stats, resists, figures),
+            (expect.hp, expect.power, expect.hot, expect.pot, expect.ac, expect.stats, expect.resists, expect.figures));
+        assert_eq!(crate::statwnd::entries(&got, &word), crate::statwnd::entries(&expect, &word), "the window's own lines");
+        if !figs.any() {
+            host.execute("assert(eqoa.player.stats().figures == nil, 'no figures from the server: nil')").unwrap();
+        }
+    }
+    // the text is the window's own ("7" when both ends agree, "12-31" otherwise)
+    host.execute("local f = eqoa.player.stats().figures; assert(f.defence.text == '7' and f.melee.text == '12-31' and f.ranged.text == '9-22' and f.ranged.low == 9)").unwrap();
+    // the existing fields did not move
+    host.execute("local s = eqoa.player.stats(); assert(s.hp_max.current == 1000 and s.strength.current == 100 and s.fire.current ~= nil and #s.rows == 16)").unwrap();
 }

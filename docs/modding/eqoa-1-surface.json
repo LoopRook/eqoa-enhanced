@@ -10736,16 +10736,100 @@
     },
     {
       "children": [
+        "eqoa.hud.Layout.breath",
+        "eqoa.hud.Layout.chat",
+        "eqoa.hud.Layout.chat1",
+        "eqoa.hud.Layout.chat2",
+        "eqoa.hud.Layout.chat3",
+        "eqoa.hud.Layout.effects",
+        "eqoa.hud.Layout.equipment_bar",
+        "eqoa.hud.Layout.focus",
         "eqoa.hud.Layout.group_members",
+        "eqoa.hud.Layout.hud_scale",
+        "eqoa.hud.Layout.hud_unlocked",
+        "eqoa.hud.Layout.meter",
         "eqoa.hud.Layout.minimap",
+        "eqoa.hud.Layout.pc_mode",
         "eqoa.hud.Layout.pet",
         "eqoa.hud.Layout.player",
-        "eqoa.hud.Layout.target"
+        "eqoa.hud.Layout.quests",
+        "eqoa.hud.Layout.quick_menus",
+        "eqoa.hud.Layout.raid_prompts",
+        "eqoa.hud.Layout.settings",
+        "eqoa.hud.Layout.spell_bars",
+        "eqoa.hud.Layout.stats",
+        "eqoa.hud.Layout.target",
+        "eqoa.hud.Layout.target_info",
+        "eqoa.hud.Layout.utility_bars"
       ],
       "path": "eqoa.hud.Layout",
       "reason": null,
       "revision": 1,
       "round": 3,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.breath",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.chat",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.chat1",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.chat2",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.chat3",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.effects",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.equipment_bar",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.focus",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -10758,10 +10842,42 @@
     },
     {
       "children": [],
+      "path": "eqoa.hud.Layout.hud_scale",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.hud_unlocked",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.meter",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.hud.Layout.minimap",
       "reason": null,
       "revision": 1,
       "round": 3,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.pc_mode",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -10782,10 +10898,74 @@
     },
     {
       "children": [],
+      "path": "eqoa.hud.Layout.quests",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.quick_menus",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.raid_prompts",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.settings",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.spell_bars",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.stats",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.hud.Layout.target",
       "reason": null,
       "revision": 1,
       "round": 3,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.target_info",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.hud.Layout.utility_bars",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -15973,7 +16153,9 @@
         "eqoa.player.Player",
         "eqoa.player.Resists",
         "eqoa.player.SevenStats",
+        "eqoa.player.StatFigures",
         "eqoa.player.StatItem",
+        "eqoa.player.StatRange",
         "eqoa.player.Stats",
         "eqoa.player.Training",
         "eqoa.player.Vital",
@@ -16522,6 +16704,42 @@
     },
     {
       "children": [
+        "eqoa.player.StatFigures.defence",
+        "eqoa.player.StatFigures.melee",
+        "eqoa.player.StatFigures.ranged"
+      ],
+      "path": "eqoa.player.StatFigures",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.player.StatFigures.defence",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.player.StatFigures.melee",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.player.StatFigures.ranged",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
         "eqoa.player.StatItem.base",
         "eqoa.player.StatItem.change",
         "eqoa.player.StatItem.current",
@@ -16648,6 +16866,42 @@
     },
     {
       "children": [
+        "eqoa.player.StatRange.high",
+        "eqoa.player.StatRange.low",
+        "eqoa.player.StatRange.text"
+      ],
+      "path": "eqoa.player.StatRange",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.player.StatRange.high",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.player.StatRange.low",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.player.StatRange.text",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [
         "eqoa.player.Stats.agility",
         "eqoa.player.Stats.arcane",
         "eqoa.player.Stats.armor",
@@ -16656,13 +16910,16 @@
         "eqoa.player.Stats.columns",
         "eqoa.player.Stats.dexterity",
         "eqoa.player.Stats.disease",
+        "eqoa.player.Stats.figures",
         "eqoa.player.Stats.fire",
+        "eqoa.player.Stats.hot",
         "eqoa.player.Stats.hp_max",
         "eqoa.player.Stats.intelligence",
         "eqoa.player.Stats.lightning",
         "eqoa.player.Stats.max_hp",
         "eqoa.player.Stats.max_power",
         "eqoa.player.Stats.poison",
+        "eqoa.player.Stats.pot",
         "eqoa.player.Stats.power",
         "eqoa.player.Stats.resists",
         "eqoa.player.Stats.rows",
@@ -16742,10 +16999,26 @@
     },
     {
       "children": [],
+      "path": "eqoa.player.Stats.figures",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.player.Stats.fire",
       "reason": null,
       "revision": 1,
       "round": 3,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.player.Stats.hot",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -16794,6 +17067,14 @@
       "reason": null,
       "revision": 1,
       "round": 3,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.player.Stats.pot",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
