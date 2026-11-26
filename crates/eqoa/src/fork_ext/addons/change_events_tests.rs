@@ -210,6 +210,20 @@ fn craft_mail_auction_events_arrive_after_a_zone_change() {
     }
 }
 
+/// A world dropped with a crafting, mail or auction window's state still held clears it, and that clear's `open = false`
+/// change is not left to be told in the next world. Negative control: without `change_events::world_changed()` at the end
+/// of `fork_ext::play::dropped`, the change is still pending after the drop.
+#[test]
+fn a_dropped_world_leaves_no_change_event_pending() {
+    fresh();
+    let _h = listener();
+    let p = crate::play::Play::bundled_ui_fixture();
+    change_events::note(change_events::Sys::Craft, 1, false);
+    assert!(change_events::pending_for_test(), "the change is waiting to be told");
+    drop(p);
+    assert!(!change_events::pending_for_test(), "the old world's change is gone with the world");
+}
+
 // ---- the faction page --------------------------------------------------------------------------------------------------
 
 fn page(standing: i32) -> Value {

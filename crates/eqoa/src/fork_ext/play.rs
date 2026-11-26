@@ -1152,6 +1152,10 @@ pub(super) fn dropped(_play: &mut Play) {
     // round A11: nor of a mercenary, dye or fishing window
     #[cfg(not(target_arch = "wasm32"))]
     a11_play::dropped();
+    // the clears above tell a mod's `changed` events (`open = false`); the world they belong to is gone, so none
+    // is left for the next one
+    #[cfg(not(target_arch = "wasm32"))]
+    super::addons::change_events::world_changed();
 }
 
 /// Round A11: whether a window the server opens (a mercenary's, the dye picker, a fishing session) must act as the game
