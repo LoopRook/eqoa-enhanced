@@ -388,8 +388,8 @@ pub(crate) fn route_mod_key_based(
     // The paste key while a mod's text entry has the keyboard is not the letter V: the clipboard's text comes instead
     // (`request_paste`, `poll_paste`), so a mod never asks for the clipboard.
     let text = if editor && down && paste_key_held(&plain) {
-        if !repeat {
-            request_paste();
+        if !repeat && let Some(vm) = text_capture_holder() {
+            request_paste(vm);
         }
         None
     } else {
@@ -424,56 +424,165 @@ pub(crate) fn route_mod_key_based(
 }
 
 // ---- paste into a mod's text entry ----------------------------------------------------------------------------------
+//
+// The player's paste key, pressed while a mod's text entry holds the keyboard, brings the clipboard's text to that one mod
+// as typed text, so a mod never asks for the clipboard. The recipient is fixed at the press (the VM whose text capture was
+// renewed last), the text is handed to that VM alone (`Core::emit_to`), and it is dropped if that mod no longer holds the
+// capture when the text comes, or the world's generation changed, or a newer press took over. One read at a time.
 
-/// Ctrl+V (Cmd+V on a Mac), as the game's own edit boxes take it (`viewer::clipboard_key`).
+/// The most characters a paste brings.
+const PASTE_MOST: usize = 4096;
+/// A clipboard read that has not answered by then is let go: a later press may ask again, and the late answer is dropped.
+const PASTE_STALE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Ctrl+V (Cmd+V on a Mac), as the game's own edit boxes take it (`viewer::clipboard_key`). Not with Alt held: Windows
+/// reports AltGr as Ctrl+Alt, and AltGr+V is a letter on some layouts.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 fn paste_key_held(plain: &str) -> bool {
-    let held = if cfg!(target_os = "macos") { SUPER.with(|m| m.get()) } else { modifiers().0 };
-    held && plain == "v"
+    let (ctrl, alt, _) = modifiers();
+    let held = if cfg!(target_os = "macos") { SUPER.with(|m| m.get()) } else { ctrl };
+    held && !alt && plain == "v"
 }
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn paste_key_held(_: &str) -> bool {
     false
 }
 
+/// The VM a text capture's owner name belongs to (`"\u{1f}<vm>:..."`).
+fn owner_vm(owner: &str) -> Option<u64> {
+    owner.strip_prefix('\u{1f}')?.split(':').next()?.parse().ok()
+}
+
+/// The VMs whose text capture is live (renewed within the lapse), each with when it was last renewed.
+fn live_text_captures() -> Vec<(u64, Instant)> {
+    INPUT_STATE.with(|s| {
+        let now = Instant::now();
+        let s = s.borrow();
+        s.text_capture_owners
+            .iter()
+            .filter(|(_, at)| now.duration_since(**at).as_secs_f32() <= TEXT_CAPTURE_LAPSE_SECS)
+            .filter_map(|(owner, at)| Some((owner_vm(owner)?, *at)))
+            .collect()
+    })
+}
+
+/// The one mod a paste is for: the one whose text capture was renewed last.
+fn text_capture_holder() -> Option<u64> {
+    live_text_captures().into_iter().max_by_key(|(_, at)| *at).map(|(vm, _)| vm)
+}
+
+/// A paste asked for and not yet answered.
+struct PendingPaste {
+    vm: u64,
+    generation: u64,
+    epoch: u64,
+    asked: Instant,
+}
+
+thread_local! {
+    static PENDING_PASTE: RefCell<Option<PendingPaste>> = const { RefCell::new(None) };
+}
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-static PASTED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+static PASTED: std::sync::Mutex<Vec<(u64, Option<String>)>> = std::sync::Mutex::new(Vec::new());
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 static PASTE_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+static PASTE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 #[cfg(test)]
 thread_local! {
     /// What the clipboard holds in a test: read at once, with no other program and no thread.
-    pub(crate) static TEST_CLIPBOARD: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_CLIPBOARD: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
-/// Reads the clipboard off the frame thread (another program answers when it answers); `poll_paste` takes the text on a
-/// later frame. The player's own paste key asks, nothing a mod does.
+/// A test's way to give mod `vm` the text capture (or take it away), as `eqoa.input.capture_text` does.
+#[cfg(test)]
+pub(crate) fn set_text_capture_for_test(vm: u64, on: bool) {
+    let owner = format!("\u{1f}{vm}:native:text");
+    INPUT_STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        if on {
+            s.text_capture_owners.insert(owner, Instant::now());
+        } else {
+            s.text_capture_owners.remove(&owner);
+        }
+        s.text_capture = !s.text_capture_owners.is_empty();
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn paste_text_for_test(raw: &str) -> String {
+    paste_text(raw)
+}
+
+/// The paste key was pressed for mod `vm`: reads the clipboard off the frame thread (another program answers when it
+/// answers); `poll_paste` takes the text on a later frame. Only one read is in flight (a press while one is waiting does
+/// nothing, until it is stale). The player's own key asks; nothing a mod does can.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-fn request_paste() {
-    use std::sync::atomic::Ordering::Release;
+fn request_paste(vm: u64) {
+    use std::sync::atomic::Ordering::{Relaxed, Release};
+    let generation = super::native_core::CORE.with(|c| c.borrow().generation);
+    let epoch = PENDING_PASTE.with_borrow_mut(|pending| {
+        if pending.as_ref().is_some_and(|p| p.asked.elapsed() < PASTE_STALE) {
+            return None;
+        }
+        let epoch = PASTE_EPOCH.fetch_add(1, Relaxed) + 1;
+        *pending = Some(PendingPaste { vm, generation, epoch, asked: Instant::now() });
+        Some(epoch)
+    });
+    let Some(epoch) = epoch else { return };
     // a test never reads the real clipboard
     #[cfg(test)]
     {
-        if let Some(text) = TEST_CLIPBOARD.with_borrow_mut(Option::take) {
-            PASTED.lock().unwrap().push(text);
-            PASTE_READY.store(true, Release);
-        }
-        return;
+        let text = TEST_CLIPBOARD.with_borrow_mut(Option::take);
+        PASTED.lock().unwrap().push((epoch, text));
+        PASTE_READY.store(true, Release);
     }
     #[cfg(not(test))]
-    let _ = std::thread::Builder::new().name("mod-paste".into()).spawn(|| {
-        if let Ok(text) = arboard::Clipboard::new().and_then(|mut board| board.get_text()) {
-            PASTED.lock().unwrap().push(text);
+    if std::thread::Builder::new()
+        .name("mod-paste".into())
+        .spawn(move || {
+            let text = arboard::Clipboard::new().and_then(|mut board| board.get_text()).ok();
+            PASTED.lock().unwrap().push((epoch, text));
             PASTE_READY.store(true, Release);
-        }
-    });
+        })
+        .is_err()
+    {
+        PENDING_PASTE.with_borrow_mut(|pending| *pending = None);
+    }
 }
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-fn request_paste() {}
+fn request_paste(_: u64) {}
 
-/// Each frame: text a paste has read goes to the mod whose text entry has the keyboard, as typed text (the `text` of one
-/// `input.key` event for the key V), single-line, with control characters left out and no more than an edit box
-/// takes (`editbox::paste_chars`); the mod holds its own limit as it does for typing. Nothing if the entry has gone.
+/// A clipboard's text as a mod's text entry takes it: a line break (`\r\n` is one) or a tab a space, the other control
+/// characters left out, everything else kept as it is, at most `PASTE_MOST` characters.
+fn paste_text(raw: &str) -> String {
+    let mut out = String::new();
+    let mut chars = raw.chars().peekable();
+    let mut count = 0;
+    while let Some(c) = chars.next() {
+        if count >= PASTE_MOST {
+            break;
+        }
+        match c {
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                out.push(' ');
+            }
+            '\n' | '\t' | '\u{85}' | '\u{2028}' | '\u{2029}' => out.push(' '),
+            c if c.is_control() => continue,
+            c => out.push(c),
+        }
+        count += 1;
+    }
+    out
+}
+
+/// Each frame: text a paste has read goes to the one mod it was pressed for, as the `text` of one `input.key` event for the
+/// key V (see `paste_text`; the mod holds its own length limit as it does for typing). Dropped when the answer is not the
+/// press still waiting for one, when it came too late, when the world changed, or when that mod no longer holds a text
+/// capture. No other mod is told of it.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 pub(crate) fn poll_paste() {
     use std::sync::atomic::Ordering::{Acquire, Release};
@@ -481,13 +590,20 @@ pub(crate) fn poll_paste() {
         return;
     }
     PASTE_READY.store(false, Release);
-    for pasted in std::mem::take(&mut *PASTED.lock().unwrap()) {
-        let text = crate::editbox::paste_chars(&pasted, false);
-        if text.is_empty() || !is_text_capture_active() {
+    for (epoch, text) in std::mem::take(&mut *PASTED.lock().unwrap()) {
+        let pending = PENDING_PASTE.with_borrow_mut(|p| if p.as_ref().is_some_and(|p| p.epoch == epoch) { p.take() } else { None });
+        let Some(p) = pending else { continue };
+        let generation = super::native_core::CORE.with(|c| c.borrow().generation);
+        if p.generation != generation || p.asked.elapsed() > PASTE_STALE || !live_text_captures().iter().any(|(vm, _)| *vm == p.vm) {
             continue;
         }
+        let text = paste_text(&text.unwrap_or_default());
+        if text.is_empty() {
+            continue;
+        }
+        let vm = p.vm;
         super::native_core::defer(256 + text.len(), move |c| {
-            c.emit("input.key", serde_json::json!({"key":"v","combo":"v","down":true,"repeat":false,"synthetic":false,"text":text}));
+            c.emit_to(vm, "input.key", serde_json::json!({"key":"v","combo":"v","down":true,"repeat":false,"synthetic":false,"text":text}));
         });
     }
 }

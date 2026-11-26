@@ -139,6 +139,8 @@ pub(crate) struct Event {
     /// shared by every VM the event is published to (a copy of it is a count, not a tree)
     pub data: std::sync::Arc<Json>,
     pub bytes: usize,
+    /// Told to this one VM only (the player's paste goes to the mod whose text entry had the keyboard, `input::poll_paste`).
+    pub only_vm: Option<u64>,
 }
 
 impl Event {
@@ -351,6 +353,15 @@ impl Core {
     }
 
     pub fn emit(&mut self, name: &str, data: Json) {
+        self.emit_scoped(name, data, None);
+    }
+
+    /// `emit`, told to the one VM `only_vm` and to no other (and not a gesture: it carries no player action of its own).
+    pub(crate) fn emit_to(&mut self, vm: u64, name: &str, data: Json) {
+        self.emit_scoped(name, data, Some(vm));
+    }
+
+    fn emit_scoped(&mut self, name: &str, data: Json, only_vm: Option<u64>) {
         let _timed = super::addon_perf::section("events.emit");
         match self.stream_counts.get_mut(name) {
             Some(n) => *n += 1,
@@ -376,11 +387,12 @@ impl Core {
         self.event_bytes += bytes;
         let event = Event {
             player_command: false,
-            player_action: ((name == "input.key"
-                && data["down"] == true
-                && data["synthetic"] != true
-                && data["repeat"] != true)
-                || (name == "pointer.pressed" && data["inside_window"] == true))
+            player_action: (only_vm.is_none()
+                && ((name == "input.key"
+                    && data["down"] == true
+                    && data["synthetic"] != true
+                    && data["repeat"] != true)
+                    || (name == "pointer.pressed" && data["inside_window"] == true)))
                 .then(|| std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0))),
             name: name.into(),
             seq: self.seq,
@@ -392,6 +404,7 @@ impl Core {
             generation: self.generation,
             data: std::sync::Arc::new(data),
             bytes,
+            only_vm,
         };
         if event.name.starts_with("cooldown.") {
             self.forge_cooldowns.push(&event);

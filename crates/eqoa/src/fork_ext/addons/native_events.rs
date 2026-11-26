@@ -570,6 +570,7 @@ fn local(name: &str, data: serde_json::Value) -> Event {
             name: name.into(),
             data: std::sync::Arc::new(data),
             bytes: 0,
+            only_vm: None,
             seq: c.seq,
             time: super::native_core::time_unborrowed(&c),
             tick: c.tick,
@@ -1063,7 +1064,9 @@ pub(crate) fn publish(event: &Event) {
                 if b.active
                     && (!matches!(event.name.as_str(), "guide.lost" | "windows.session" | "windows.key" | "confirm.closed")
                         || event.data["owner"].as_u64() == Some(b.vm))
-                    // the player's key for a piece goes to the mod that holds the piece hidden, and only to it
+                    // an event made for one mod (the player's paste) goes to that mod and to no other
+                    && event.only_vm.is_none_or(|vm| vm == b.vm)
+                    // the player's key for a piece goes to every mod that holds the piece hidden, and to no other
                     && (event.name != "hud.piece_requested"
                         || event.data["piece"].as_str().is_some_and(|piece| super::visibility::vm_holds(b.vm, piece)))
                     // a click or wheel goes to the window in front under the pointer only (`pointer_api::covered`)
