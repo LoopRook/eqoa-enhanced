@@ -1433,11 +1433,11 @@ fn a4_master_loot_read_actions_and_refusals() {
             p.session.record.as_mut().unwrap().clear();
             api_capture::items::set_source_for_test(Some((111, "Corpse A".into())));
             let call = if assign {
-                r#"local loot = assert(eqoa.loot.get()); return eqoa.actions.loot_assign(loot.items[1].ref, 20)"#
+                r#"local loot = assert(eqoa.loot.get()); assert(eqoa.actions.loot_assign(loot.items[1].ref, 20))"#
             } else {
-                r#"return eqoa.actions.loot_abandon()"#
+                r#"assert(eqoa.actions.loot_abandon())"#
             };
-            h.lua.load(format!("assert(({call}))")).exec().unwrap();
+            h.lua.load(call).exec().unwrap();
             step_actions(&mut p);
             assert!(crate::fork_ext::addons::confirm::current_for_test().is_some(), "{what}: the question is up");
             if changed {

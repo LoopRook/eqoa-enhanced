@@ -840,7 +840,9 @@ fn a13_world_map_asks_for_its_picture_at_scale_one_or_more_even_when_zoomed_clos
     // 2026-11-26 (H2): the API refuses a picture closer than 1 unit a pixel; the mod magnifies the 1-unit picture.
     // Negative control: asking for the saved 0.25 itself gives "The map picture is not available" (terrain nil).
     fresh();
-    let mut rig = rig_with(json!({"version": 1, "scale": 0.25}));
+    let mut rig = rig([1024.0, 768.0], None);
+    // the zoom a player left it at (the saved view scale, which the window restores on opening)
+    rig.host.execute("world_map.last_scale = 0.25").unwrap();
     rig.open();
     rig.frames(2);
     assert_eq!(rig.lua_f64("world_map.view.scale"), 0.25, "reopened at the saved zoom");
