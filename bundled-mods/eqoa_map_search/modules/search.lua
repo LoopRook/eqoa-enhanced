@@ -2,13 +2,13 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 local M = {open=false,query="",tab=1,selected=1,offset=1,rows={},catalog={},journal={},jobs={},by_name={catalog={},journal={}},dirty=true,refresh=true,world=0,player={x=0,z=0},live={},group={},places={}}
 local data=require("spawns")
-local valid,spawn=data.valid,data.add
+local valid,spawn,spawn_text=data.valid,data.lean,data.text
 local function distance(p) local x,z=p.x-M.player.x,p.z-M.player.z;return math.sqrt(x*x+z*z) end
 local function matches(s,words,lowered) if not lowered then s=s:lower() end;for _,w in ipairs(words) do if not s:find(w,1,true) then return false end end;return true end
 local function words() local out={};for w in M.query:lower():gmatch("%S+") do out[#out+1]=w end;return out end
 function M.load(value,kind)
     if type(value)~="table" then return end
-    M.jobs[#M.jobs+1]={value=value,kind=kind,out={},name=nil,row=nil,index=0,id=nil,by_name={}}
+    M.jobs[#M.jobs+1]={value=value,kind=kind,out={},name=nil,row=nil,index=0,id=nil,by_name={},names=0}
 end
 local function load_step()
     local j=M.jobs[1];if not j then return end
@@ -16,7 +16,10 @@ local function load_step()
     for _=1,500 do
         local before=#j.out
         if not j.row then
-            j.name,j.row=next(j.value,j.name);j.index=0;j.id=nil
+            -- the finished name's raw rows are let go as the walk moves on, so the raw file and the converted spawns are never both whole in memory
+            local prev=j.name
+            j.name,j.row=next(j.value,prev);j.index=0;j.id=nil
+            if prev~=nil then j.value[prev]=nil end
             if not j.name then done=true;break end
             if type(j.row)~="table" then j.row=nil end
         end
@@ -33,16 +36,17 @@ local function load_step()
             end
         end
         if #j.out>before then
-            local p=j.out[#j.out];local list=j.by_name[p.key]
-            if not list then list={};j.by_name[p.key]=list end
-            list[#list+1]=p
+            if j.counted~=j.name then j.counted=j.name;j.names=j.names+1;j.lower=j.name:lower() end
+            local list=j.by_name[j.lower]
+            if not list then list={name=j.name};j.by_name[j.lower]=list end
+            list[#list+1]=j.out[#j.out]
         end
     end
     if done then
         M.by_name[j.kind]=j.by_name;M.index_stale=true;M.rows_stale=true;M.build=nil
         M.index_job=nil -- its walk is over the table this load just replaced; the stale flag starts a fresh one
         M[j.kind]=j.out
-        if j.kind=="journal" then local names={};local n=0;for _,p in ipairs(j.out) do if not names[p.name] then names[p.name]=true;n=n+1 end end;M.journal_names=n end
+        if j.kind=="journal" then M.journal_names=j.names end
         table.remove(M.jobs,1);M.dirty=true
     end
 end
@@ -160,14 +164,15 @@ local INDEX_SLICE,FILTER_SLICE,DECORATE_POINTS=1500,5000,4000
 local EMPTY={}
 local function index_entry(key)
     local cat,jr=M.by_name.catalog[key],M.by_name.journal[key]
-    local first=(cat and cat[1]) or (jr and jr[1]);if not first then return nil end
-    local parts={first.name:lower()}
+    local first=(cat and cat[1] and cat) or (jr and jr[1] and jr);if not first then return nil end
+    local name=first.name
+    local parts={name:lower()}
     local lo,hi
     if jr then for _,p in ipairs(jr) do
-        parts[#parts+1]=p.searchable
+        parts[#parts+1]=spawn_text(key,p.level,p.world,p.x,p.z)
         if p.level and p.level>0 then lo=math.min(lo or p.level,p.level);hi=math.max(hi or p.level,p.level) end
     end end
-    return {name=first.name,key=key,searchable=table.concat(parts," "),lo=lo,hi=hi}
+    return {name=name,key=key,searchable=table.concat(parts," "),lo=lo,hi=hi}
 end
 local function index_step()
     -- not while a load is still being read; and the old index goes first, so two never sit in memory together
