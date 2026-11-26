@@ -1524,12 +1524,14 @@ fn install_fields(lua: &Lua) {
     ] {
         let round = if path.starts_with("eqoa.map.") || matches!(path, "eqoa.input.Pointer" | "eqoa.options.Button") {
             Some(4)
+        } else if path == "eqoa.hud.LayoutPieces" {
+            Some(8)
         } else if path.starts_with("eqoa.hud.")
             || path.starts_with("eqoa.options.")
             || matches!(path, "eqoa.player.Stats" | "eqoa.player.StatItem")
         {
             Some(3)
-        } else if matches!(path, "eqoa.player.StatFigures" | "eqoa.player.StatRange" | "eqoa.hud.LayoutPieces") {
+        } else if matches!(path, "eqoa.player.StatFigures" | "eqoa.player.StatRange") {
             Some(8)
         } else {
             Some(2)
