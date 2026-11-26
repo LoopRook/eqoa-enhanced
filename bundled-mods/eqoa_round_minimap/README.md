@@ -3,7 +3,7 @@
 Enabled by default. It hides the game's square minimap and shows a round one in the same
 place and size, with a ring. Move HUD moves it. N toggles it (the game's own setting) and
 the wheel zooms it. Hovering a creature, player or pet shows its name, level, kind and
-distance; hovering a camp, coach or quest mark the minimap draws shows its name (not towns; camps and coaches follow Map Markers). The whole minimap goes while a full map is up (the game's own, or the World Map mod's window: any other mod that is hiding the minimap takes it away) and returns when the map closes. Disable the mod and
+distance (the card's text follows the UI scale, 11 base pixels times it, as the World Map's does, so it stays readable on a large window; the World Map's own Text size choice is not shared between mods, so this card follows the UI scale alone); hovering a camp, coach or quest mark the minimap draws shows its name (not towns; camps and coaches follow Map Markers). The whole minimap goes while a full map is up (the game's own, or the World Map mod's window: any other mod that is hiding the minimap takes it away) and returns when the map closes. Disable the mod and
 the game's square minimap returns untouched.
 
 The picture is the game's own minimap (terrain, indoor view, camps, coaches, quest marks,

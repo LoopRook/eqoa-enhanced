@@ -182,8 +182,22 @@ end
 -- the last UTF-8 character, to cut
 local utf8_last = "^(.*)[%z" .. string.char(1) .. "-" .. string.char(127, 194) .. "-" .. string.char(244) .. "][" .. string.char(128) .. "-" .. string.char(191) .. "]*$"
 
+-- The card's text follows the World Map mod's size rule (the text is 11 base pixels times the client's UI scale, as the Auction
+-- and Bag Viewer windows draw theirs); the World Map's own "Text size" choice is that mod's setting and is not readable from
+-- here, so it is the UI scale alone. The default font is 13 pixels, so the window's font scale is 11 * scale / 13.
+local TEXT_BASE = 11
+local function card_font_scale()
+    local f = eqoa.hud.frame()
+    local k = f and math.min(f.scale_x or 1, f.scale_y or 1) or 1
+    if not (k > 0) then k = 1 end
+    return TEXT_BASE * k / 13
+end
+
 local function draw_card(ui, dl, v, g, c, win_w, win_h)
     if font then ui.PushFont(font) end
+    local fscale = card_font_scale()
+    ui.SetWindowFontScale(fscale)
+    round_minimap.card_font_scale = fscale -- read by its tests
     local most = 260 * g.k
     local lines = {}
     for _, l in ipairs(c.lines) do
@@ -223,6 +237,7 @@ local function draw_card(ui, dl, v, g, c, win_w, win_h)
         local _, th = ui.CalcTextSize(l[1])
         yy = yy + th + 2
     end
+    ui.SetWindowFontScale(1)
     if font then ui.PopFont() end
 end
 
