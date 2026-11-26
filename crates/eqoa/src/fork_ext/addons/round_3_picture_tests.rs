@@ -1019,6 +1019,9 @@ fn fresh_hud_mod_load_defaults_and_live_stats_key_and_menu_wiring() {
         .execute("assert(eqoa.options.get('stats_box') == true)")
         .unwrap();
     assert!(options::toggle_by_item(2000));
+    // the mod's own key is an extra: unbound until the player binds it (the game's Stat Window key opens the box)
+    assert_eq!(crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle").as_deref().unwrap_or(""), "");
+    assert!(crate::fork_ext::bindpage::set_key("eqoa_stats_box", "toggle", "y"));
     let b = Key::Character("y".into());
     input::route_mod_key(&b, true, false, false, true, false);
     native_events::dispatch(&stats).unwrap();
