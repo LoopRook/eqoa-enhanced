@@ -1,5 +1,7 @@
 # EQOA Stats Box
 
-Displays the authentic Summary stats box in the HUD, showing attributes, hit points, power, and resists across two columns with dynamic color shifts. Toggled via the Controls page keybind (default `y`, moved from `b` so the Bag Viewer can have it) or the Enhanced HUD options toggle. Clicking the stats box opens the Summary window.
+Displays the authentic Summary stats box in the HUD, showing attributes, hit points, power, and resists across two columns with dynamic color shifts. Clicking the stats box opens the Summary window.
 
-While the Stats Box is on, it replaces the game's own Stat Window (F4, `/stats`): that window is not drawn, takes no click, and F4 and `/stats` do nothing, so the two never show the same figures twice. Turn the Stats Box off, disable the mod, or use "Use the game's windows", and the game's Stat Window works again as it always did (the player's own on/off choice for it is kept). Uses `eqoa.hud.hide('stat_window')`; declared as `hud.stat_window` in `replaces`.
+The Stats Box replaces the game's own Stat Window, so it answers the game's own key: **the game's Stat Window key (F4 unless you rebound it on the Controls page, in either interface) and `/stats` open and close the Stats Box**; `/stats on` and `/stats off` show and hide it. The game's Stat Window itself never shows while the mod is on, whether the box is up or not, so the two never swap or show the same figures twice. The box is also an option in the Enhanced HUD options. The mod's own key on the Controls page ("Toggle Stats Box") is an extra and is not bound until you bind it (it was `y`).
+
+Disable the mod, or turn on "Use the game's windows", and the game's Stat Window and its key work again as they always did (your own on/off choice for it is kept). Uses `eqoa.hud.hide('stat_window')` and listens for the `hud.piece_requested` event; declared as `hud.stat_window` in `replaces`.

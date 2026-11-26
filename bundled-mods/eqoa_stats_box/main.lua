@@ -9,8 +9,16 @@ local lowered_red = { 1.0, 0.45, 0.4, 1.0 }
 
 eqoa.options.toggle({ id = "stats_box", label = "Stats Box", default = false })
 
-eqoa.input.bind({ id = "toggle", label = "Toggle Stats Box", default_key = "y" }, function()
+-- The game's own Stat Window key (F4, or whatever the player has bound it to) and `/stats` open and close this box: the box
+-- replaces that window, so it answers the window's key. This key is an extra and is unbound until the player binds it.
+eqoa.input.bind({ id = "toggle", label = "Toggle Stats Box", default_key = "" }, function()
     eqoa.actions.toggle_stats_box()
+end)
+eqoa.events.on("hud.piece_requested", function(e)
+    local d = e.data
+    if d.piece ~= "stat_window" then return end
+    local shown = eqoa.options.get("stats_box") == true
+    if d.action == "toggle" or (d.action == "show") ~= shown then eqoa.actions.toggle_stats_box() end
 end)
 
 -- Stats change on server channels, not on every display frame. Copy only the
@@ -24,8 +32,9 @@ for _, event in ipairs({ "player.stats_changed", "state.reset", "enabled", "even
     eqoa.events.on(event, invalidate)
 end
 
--- The game's own Stat Window (F4, /stats) shows the same figures: while this mod's box is on, it is held back. It
--- comes back the moment the box is turned off, the mod is disabled, fails or the world is left (a claim ends then).
+-- The game's own Stat Window (F4, /stats) shows the same figures: while this mod is on, it is held back, whether or not
+-- the box is up (the game's key then asks this mod, above). It comes back the moment the mod is disabled or fails, the
+-- player turns on "Use the game's windows", or the world is left (a claim ends then and is made again on entering).
 local claim
 local function hold_stat_window(on)
     if on and not claim then
@@ -41,7 +50,7 @@ eqoa.events.on("state.reset", function() hold_stat_window(false) end)
 local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
 
 eqoa.events.on("render", function()
-    hold_stat_window(eqoa.options.get("stats_box") == true)
+    hold_stat_window(true)
     if map_up() then return end
     if not eqoa.options.get("stats_box") then return end
     if not eqoa.hud.visible("stats_box") then return end

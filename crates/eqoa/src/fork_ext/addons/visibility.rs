@@ -98,6 +98,31 @@ impl HudClaimsRegistry {
     }
 }
 
+thread_local! {
+    /// Each running mod's VM with the instance its hide claims are kept under and the registry they are in, so an event
+    /// meant for the mod that holds a piece (`hud.piece_requested`) finds it. Entries of a mod that is gone are dropped
+    /// on the next look.
+    static HOLDERS: RefCell<Vec<(u64, InstanceToken, std::rc::Weak<RefCell<HudClaimsRegistry>>)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Does the mod running as VM `vm` hold a hide claim on the HUD element `element` right now (the claim `hidden_by` lists)?
+pub(crate) fn vm_holds(vm: u64, element: &str) -> bool {
+    HOLDERS.with(|h| {
+        let mut h = h.borrow_mut();
+        h.retain(|(_, _, registry)| registry.strong_count() > 0);
+        h.iter().filter(|(v, _, _)| *v == vm).any(|(_, token, registry)| {
+            registry.upgrade().is_some_and(|r| {
+                native_leaves(element).is_some_and(|leaves| {
+                    let r = r.borrow();
+                    leaves.iter().any(|leaf| {
+                        r.claims.get(*leaf).and_then(|instances| instances.get(token)).is_some_and(|set| !set.is_empty())
+                    })
+                })
+            })
+        })
+    })
+}
+
 struct Intent {
     desired: HashMap<String, HashSet<String>>,
     active: bool,
@@ -688,6 +713,13 @@ fn install_native(host: &Host, lease: &VisibilityLease) -> mlua::Result<()> {
         .borrow_mut()
         .identities
         .insert(lease.intent.borrow().token, host.addon_id());
+    HOLDERS.with(|h| {
+        h.borrow_mut().push((
+            super::native_events::bus(lua).borrow().vm,
+            lease.intent.borrow().token,
+            Rc::downgrade(&lease.intent.borrow().hud_claims),
+        ));
+    });
     let claims = Rc::new(RefCell::new(HashMap::<u64, (u64, Vec<&'static str>)>::new()));
     let active = claims.clone();
     let intent = lease.intent.clone();

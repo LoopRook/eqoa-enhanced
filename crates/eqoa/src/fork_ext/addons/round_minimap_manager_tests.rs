@@ -899,6 +899,83 @@ fn round_minimap_follows_hud_scale_in_both_interfaces_body() {
     crate::settings::testing::reset(false);
 }
 
+/// The Stats Box replaces the game's Stat Window, so while the mod is on the game's window never shows (the box up or not)
+/// and the game's own key and `/stats` open and close the box, in both interfaces; with the mod off, or "Use the game's
+/// windows" on, they are the game's. A mod that does not hold the window is not told. (Owner's report 2026-11-26: the mod's
+/// own key and the game's F4 swapped the two windows.)
+#[test]
+fn stats_box_answers_the_games_stat_window_key_and_command() {
+    big_stack(stats_box_answers_the_games_stat_window_key_and_command_body)
+}
+fn stats_box_answers_the_games_stat_window_key_and_command_body() {
+    use crate::settings;
+    for pc in [true, false] {
+        super::super::options::reset_in_memory();
+        crate::fork_ext::bindpage::reset_in_memory();
+        let Some(mut rm) = Rm::with(|p| p == "eqoa_stats_box" || p == "eqoa_round_minimap", 0) else { return };
+        settings::set_ui_mode(pc).unwrap();
+        let note = if pc { "PC interface" } else { "controller interface" };
+        rm.frames(4);
+        let stats = lua(&rm.manager, "eqoa_stats_box");
+        let other = lua(&rm.manager, "eqoa_round_minimap");
+        other.load("heard = 0; eqoa.events.on('hud.piece_requested', function() heard = heard + 1 end)").exec().unwrap();
+        let shown = |s: &Lua| s.load("return eqoa.options.get('stats_box') == true").eval::<bool>().unwrap();
+        let heard = || other.load("return heard").eval::<i64>().unwrap();
+        rm.frames(4);
+        assert!(rm.manager.entries.iter().all(|e| e.status == Status::Enabled), "{:?}", rm.manager.diagnostics());
+        // the window is held back with the box off, which is when the game's window used to come back
+        assert!(!shown(&stats), "{note}: the box starts off");
+        assert!(rm.manager.is_hud_element_hidden("stat_window"), "{note}: the game's Stat Window is held while the box is off");
+        assert!(!crate::hud::fork_hud::stat_window_visible(), "{note}: and the game is told so");
+        // the game's key opens the box and closes it; the player's own Stat Window setting is not touched
+        for (step, want) in [("F4", true), ("F4", false), ("F4", true)] {
+            rm.play.toggle_stat_window();
+            rm.frames(3);
+            assert_eq!(shown(&stats), want, "{note}: {step} gives the box {want}");
+            assert!(!settings::stat_window(), "{note}: the game's own setting stays as it was");
+            assert!(rm.manager.is_hud_element_hidden("stat_window"), "{note}: the game's window stays held");
+        }
+        // /stats toggles; on and off say what they mean whichever way the box is
+        rm.play.chat_line("/stats");
+        rm.frames(3);
+        assert!(!shown(&stats), "{note}: /stats closes it");
+        rm.play.chat_line("/stats off");
+        rm.frames(3);
+        assert!(!shown(&stats), "{note}: /stats off leaves it closed");
+        rm.play.chat_line("/stats on");
+        rm.frames(3);
+        assert!(shown(&stats), "{note}: /stats on opens it");
+        rm.play.chat_line("/stats on");
+        rm.frames(3);
+        assert!(shown(&stats), "{note}: /stats on leaves it open");
+        rm.play.chat_line("/stats off");
+        rm.frames(3);
+        assert!(!shown(&stats), "{note}: /stats off closes it");
+        assert_eq!(heard(), 0, "{note}: a mod that does not hold the window is not told of the key");
+        // the mod's own key is an extra: unbound until the player binds it
+        assert!(crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle").unwrap_or_default().is_empty(), "{note}: the extra key is unbound by default");
+        // "Use the game's windows": the game's window and key are the game's again, and the box is left alone
+        super::super::window_takeover::set_use_game_windows(true);
+        rm.frames(2);
+        assert!(crate::hud::fork_hud::stat_window_visible(), "{note}: the switch gives the game's window back");
+        rm.play.toggle_stat_window();
+        rm.frames(3);
+        assert!(settings::stat_window(), "{note}: the game's key turns the game's window with the switch on");
+        assert!(!shown(&stats), "{note}: and not the box");
+        super::super::window_takeover::set_use_game_windows(false);
+        // the mod off: the game's key is the game's, as upstream
+        rm.manager.queue(Command::Enable("eqoa_stats_box".into(), false));
+        rm.frames(3);
+        assert!(!rm.manager.is_hud_element_hidden("stat_window"), "{note}: the mod off lets go of the window");
+        assert!(crate::hud::fork_hud::stat_window_visible());
+        rm.play.toggle_stat_window();
+        assert!(!settings::stat_window(), "{note}: with the mod off F4 turns the game's window as before");
+        super::super::window_takeover::forget_switch_for_test();
+        rm.manager.shutdown();
+    }
+    crate::settings::testing::reset(false);
+}
+
 /// A waypoint cropped by the circle gets a rim arrow in its own colour: a personal one magenta, the
 /// group's orange as on the stock minimap, whichever corner.
 #[test]

@@ -6,6 +6,7 @@ use super::Play;
 impl Play {
     /// F4 (`binds`' "stat_window"): the Stat Window shown or hidden, kept.
     pub fn toggle_stat_window(&mut self) {
+        if crate::hud::fork_hud::stat_window_toggle_held() { return; }
         self.set_stat_window(!crate::settings::stat_window());
     }
 
@@ -13,7 +14,7 @@ impl Play {
     /// server that turns it off (`qol::STAT_CAPS`), that said instead.
     fn set_stat_window(&mut self, on: bool) {
         use crate::settings::qol;
-        if !crate::hud::fork_hud::stat_window_visible() { return; }
+        if crate::hud::fork_hud::stat_window_set_held(on) { return; }
         if qol::off(qol::STAT_CAPS) {
             self.add_chat("The Stat Window is off on this server.".into(), [1.0; 4]);
             return;
