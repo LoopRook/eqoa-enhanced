@@ -614,6 +614,42 @@ pub(crate) fn start_dialog_session(vm: u64, addon: &str, kind: TakeoverKind, dat
     })
 }
 
+/// The session a mod holds of a server strip kind (`raid_ready`, `raid_roll`), whoever's it is.
+pub(crate) fn held_session(kind: TakeoverKind) -> Option<Session> {
+    if !is_active() {
+        return None;
+    }
+    with(|s| s.sessions.iter().find(|x| x.held == Some(kind)).cloned())
+}
+
+/// A strip the server pushed (the raid ready check, the loot rolls), held for `vm`: opened with `data`, told as
+/// `windows.session` with `opened_from = "request"` (a request of other players, like a friend request).
+pub(crate) fn start_held_data(vm: u64, addon: &str, kind: TakeoverKind, data: serde_json::Value) -> Session {
+    with(|s| {
+        s.next_id += 1;
+        s.next_revision += 1;
+        let session = Session {
+            id: format!("ws-{}", s.next_id),
+            kind: kind.name().into(),
+            vm,
+            addon: addon.into(),
+            origin: "server",
+            opened_from: "request".into(),
+            revision: s.next_revision,
+            held: Some(kind),
+            data,
+        };
+        s.sessions.push(session.clone());
+        emit_opened(&session);
+        session
+    })
+}
+
+/// Ends one session by `ref`, told to its mod with `reason`.
+pub(crate) fn end_by_id(id: &str, reason: &str) {
+    end_where(reason, |x| x.id == id);
+}
+
 /// Round A2: the registry ends one of its dialog sessions (answered, passed, walked away, ...), told to the mod.
 pub(crate) fn end_dialog_session(id: &str, reason: &str) {
     end_where(reason, |x| x.id == id);
@@ -648,6 +684,15 @@ pub(crate) fn pass(vm: u64, id: &str) -> std::result::Result<(), (&'static str, 
             }
             Ok(())
         });
+    }
+    if matches!(session.held, Some(TakeoverKind::RaidReady | TakeoverKind::RaidRoll)) {
+        return Err((
+            "unsupported",
+            format!(
+                "the game's '{}' strip cannot be passed back: release the claim (eqoa.windows.release) and the game's strip draws again",
+                session.kind
+            ),
+        ));
     }
     let Some(kind) = session.held else {
         return Err((

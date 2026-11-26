@@ -19,7 +19,7 @@ fn sample(field: &str) -> Value {
         "offer" => json!({"seq": 1, "name": "Sword", "list": "inventory", "key": 3}),
         "inventory" => json!({"open": true, "slot": 1, "name": "Kel", "stats": [1, 2, 3, 4, 5, 6, 7], "records": []}),
         "spells" => json!({"open": true, "slot": 1, "name": "Kel", "slots": ["0", "0", "0", "0", "0", "0", "0", "0", "0", "0"], "spells": []}),
-        "entries" | "links" | "catch" | "slots" | "options" => json!([]),
+        "entries" | "links" | "catch" | "slots" | "options" | "rolls" | "choices" => json!([]),
         "available" | "own_out" | "waiting" | "alpha" | "open" | "no_dye" | "casting" | "ready" | "list" => json!(true),
         "token" | "current" | "perfect_from" | "perfect_to" | "fair_from" | "fair_to" => json!(5),
         _ => json!("x"),

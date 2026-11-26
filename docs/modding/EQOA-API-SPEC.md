@@ -250,6 +250,7 @@ Every event is an `Event = {name:string, seq:uint, time:number, tick:uint, frame
 | `trade.request`, `trade.accepted`, `trade.closed` | `{kind, id, name}`; `{kind, side}`; `{kind, reason}` | A held trade request arrived; a trade's accept was sent, given or refused; a held trade or wager ended (§7, "Trade, duels and the blacksmith"). |
 | `trade.changed`, `duel.changed`, `blacksmith.changed` | `{before, after, changed:string[]}` | What `eqoa.trade.get`, `eqoa.duel.get` or `eqoa.blacksmith.get` returns changed (§7). |
 | `merc.changed`, `dye.changed`, `fishing.changed` | `{revision:uint, open:bool}` | What `eqoa.merc.get()`, `eqoa.dye.get()` or `eqoa.fishing.get()` returns changed (round A11, §7). `open` is whether the game's own window is up, so one stream tells a window's opening, its changes and its closing; a closing is `open = false` with the last revision. Read the state with the matching `get`. |
+| `craft.changed`, `mail.changed`, `auction.changed`, `raid.changed`, `factions.changed` | `{revision:uint, open:bool}` | What `eqoa.craft.get()`, `eqoa.mail.get()`, `eqoa.auction.get()`, `eqoa.raid.get()` or `eqoa.factions.list()` returns changed (§7; same shape as `merc.changed`: no payload, read the state with the matching call). At most one per game step for each, never when nothing a mod can read changed, and only for a mod that subscribed. `revision` goes up with every change (for `craft`, `mail` and `auction` it is the `revision` of the state the read returns). `open` is whether there is something to read: for crafting, mail and the auction, the mod's window is open and the client has read the game's state (a closing is `open = false` with the last revision); for `raid.changed`, the character is in a raid or a ready check or loot roll is up; for `factions.changed`, a page has arrived. A raid member's health and power bars and the seconds left on a strip do not count as changes (read them with `eqoa.raid.get()` when you draw; `group.changed` follows the group). |
 | `action.result`, `batch.progress`, `batch.result` | an `ActionResult` / `BatchResult` | §8 |
 | `resource.ready`, `resource.failed` | `{kind:string, request?, handle?, value?, path?, error?}` | Something loaded or saved in the background finished. `kind` is `"texture"`, `"font"`, `"sound"`, `"json"`, `"json_saved"`, `"import"` or `"export"` (§5). `resource.ready` carries `handle` for a texture, font or sound (and the decoded value for `json`), `request` for the file kinds (`json`, `json_saved`, `import`, `export`), `value` only for `json` and `path` only for `import` and `export`. `resource.failed` carries `error`, whose `capability` is the function that made the request (`eqoa.textures.load`, `eqoa.textures.rgba`, `eqoa.fonts.load`, `eqoa.sound.load`, `eqoa.files.load_json`, ...). More kinds may be added. |
 | `shared.changed` | `{mod:string, path:string}` | A file another mod shares was saved or removed (§5). |
@@ -379,7 +380,7 @@ Two reads of what the server sends, with an ask for each (section 8). Both answe
 
 | Function | Returns |
 |---|---|
-| `eqoa.factions.list()` | `FactionPage`: the page of faction standings the server last sent for the last `eqoa.actions.request_factions`. `unavailable` before a page has come, and again after a new request until its answer. A reply for an older request is dropped, as the game drops it. |
+| `eqoa.factions.list()` | `FactionPage`: the page of faction standings the server last sent for the last `eqoa.actions.request_factions`. `unavailable` before a page has come, and again after a new request until its answer. A reply for an older request is dropped, as the game drops it. `factions.changed` (§3) is told when the page it returns changes (a page arrived, or its standings did). |
 | `eqoa.combat.record()` | `CombatRecord`: the combat record as the server last sent it (on a server that keeps one; `unavailable` says which: it keeps none, or none has come yet). |
 
 - `FactionPage = {page:uint, pages:uint, entries:Faction[]}` and `Faction = {name:string, standing:int}`. `page` counts from 1; `pages` is the page count the server gave (0 if it gave none). `standing` is the server's number; the game draws it clamped to -2000..2000, red below zero and blue above.
@@ -485,6 +486,32 @@ The bridge is a fixed set of functions, not all of Dear ImGui. These are support
 These exist only as refusals (`unsupported`, with a diagnostic): BeginTooltip, EndTooltip, BeginItemTooltip, GetForegroundDrawList, PushStyleVar, PopStyleVar, PushItemWidth, PopItemWidth, SetNextWindowFocus, SetWindowFocus, and the mouse functions GetMousePos, GetMousePosOnOpeningCurrentPopup, GetMouseWheel, ResetMouseDragDelta, IsMouseClicked, IsMouseDoubleClicked, IsMousePosValid, SetMousePos and SetMouseCursor. For the mouse's position use `eqoa.input.pointer()` and the pointer events. Any other ImGui name is an unknown key (nil, with a diagnostic).
 
 **Mouse buttons and drags.** `IsMouseDragging(button?, threshold?)`, and (added 2026-11-23 for the Spellbook's drag and drop) `IsMouseDown(button?)`, `IsMouseReleased(button?)` and `GetMouseDragDelta(button?, lock_threshold?)`, read ImGui's own mouse state for the frame being drawn, so they work only between `Begin` and `End` of a mod's render (outside a frame they refuse like every ImGui call). `button` is 0 left, 1 right, 2 middle, 3 and 4 the extra buttons (the default is 0); any other value is an argument error. `IsMouseDown` is true while the button is held; `IsMouseReleased` is true for the one frame after it was let go; `GetMouseDragDelta` returns two numbers, how far the pointer has moved in window pixels since the button went down (still readable on the release frame, `0, 0` otherwise), and with a `lock_threshold` (default ImGui's own, about 6 pixels) it returns `0, 0` until the pointer has moved that far (`0` reports every movement). The threshold must be finite. The pointer's position is `eqoa.input.pointer()`; a press is the `pointer.pressed` event, so a mod follows a press to its release with these.
+
+**Window flags and conditions.** Two enum tables are globals of every mod: `ImGuiWindowFlags`, the `flags` argument of `ImGui.Begin`, and `ImGuiCond`, the `cond` argument of `SetNextWindowPos`, `SetNextWindowSize` and the other calls that take one. The values are Dear ImGui's own numbers. A flag is added with `+` (or `bit.bor`) to the others; a bit that is in no name below is an argument error (`unsupported window flags`). Each name is a supported capability, listed in the support table as `ImGuiWindowFlags.<Name>` and `ImGuiCond.<Name>` and frozen with the rest of `eqoa/1`: none will change its value or go away, and more may be added. A name that is in no row below is `nil`.
+
+| `ImGuiWindowFlags` | Value | `ImGuiWindowFlags` | Value |
+|---|---|---|---|
+| `None` | 0 | `NoFocusOnAppearing` | 4096 |
+| `NoTitleBar` | 1 | `NoBringToFrontOnFocus` | 8192 |
+| `NoResize` | 2 | `AlwaysVerticalScrollbar` | 16384 |
+| `NoMove` | 4 | `AlwaysHorizontalScrollbar` | 32768 |
+| `NoScrollbar` | 8 | `NoNavInputs` | 65536 |
+| `NoScrollWithMouse` | 16 | `NoNavFocus` | 131072 |
+| `NoCollapse` | 32 | `NoNav` | 196608 |
+| `AlwaysAutoResize` | 64 | `NoDecoration` | 43 |
+| `NoBackground` | 128 | `NoInputs` | 197120 |
+| `NoSavedSettings` | 256 | `MenuBar` | 1024 |
+| `NoMouseInputs` | 512 | `HorizontalScrollbar` | 2048 |
+
+`NoDecoration` is `NoTitleBar + NoResize + NoScrollbar + NoCollapse`, `NoNav` is `NoNavInputs + NoNavFocus` and `NoInputs` is `NoMouseInputs + NoNavInputs + NoNavFocus`, so do not add a composite to a name it already holds.
+
+| `ImGuiCond` | Value | Means |
+|---|---|---|
+| `None` | 0 | no condition: the call acts as ImGui's default |
+| `Always` | 1 | set every frame |
+| `Once` | 2 | set once, the first time the call is made for that window |
+| `FirstUseEver` | 4 | set when the window has no saved place or size |
+| `Appearing` | 8 | set when the window appears after being hidden |
 
 A draw list from `GetWindowDrawList()` or `GetBackgroundDrawList()` is valid for the current frame only. Its methods (called with `:`): `AddLine`, `AddRect`, `AddRectFilled`, `AddTriangle`, `AddTriangleFilled`, `AddCircle`, `AddCircleFilled`, `AddNgon`, `AddNgonFilled`, `AddText` (as `(pos, color, text)` or `(font, size, pos, color, text)`), `AddImage`, `AddImageRounded`, `PushClipRect`, `PopClipRect`. Colours are ImGui's packed numbers (`ImGui.GetColorU32`); textures are the handles from `eqoa.textures`, `eqoa.icons` and `eqoa.map.view`. Each method is in the capability registry and the support table as `ImDrawList.<Name>` (for example `eqoa.capabilities.has("ImDrawList.AddNgon")`).
 
@@ -797,6 +824,10 @@ Operating a window (rows, dialogs, text boxes) is done with actions (§8).
 
 `LootRollSession = {kind:"raid_roll", origin:"server", revision:uint, data:LootRollData}` with `LootRollData = {rolls:LootRollItem[]}` and `LootRollItem = {id:uint, item_name:string, item_id:Id, icon:uint?, may_need:bool, choices:string[], seconds_remaining:number, duration:number, deadline_ms:int}`.
 
+**As window sessions.** A mod that holds `"raid_ready"` or `"raid_roll"` (`eqoa.windows.takeover`, scope `"all"`, §7 "Taking over a window") gets each ready check and each loot roll as a session too, like the other windows the server opens: `windows.session` with `phase = "opened"`, `origin = "server"` and `opened_from = "request"` when a check or a roll comes up, `"changed"` when its data does, and `"closed"` when it is gone, and `eqoa.windows.session("raid_ready")` / `("raid_roll")` reads it. `data` is what the table "What a session's `data` holds" (§7) gives: for `raid_ready` `{id, asker, duration, deadline_ms, choices}` (the `ReadyCheckData` above), for `raid_roll` `{rolls}` (the `LootRollItem`s of every roll up). **`seconds_remaining` is not in a session's `data`** (it would change every step): read it from `eqoa.raid.ready_check()` / `eqoa.raid.loot_rolls()`, or count down from `duration` and `deadline_ms`. A session for the ready check lasts while the check is up; one for the loot rolls lasts while any roll is up, and is told `"changed"` when one is added or answered. It ends with `reason = "answered"` when the mod answered (`ready_check_answer`, or the last `loot_roll`), `"timeout"` when its own timer ran out, `"server"` when it ended early some other way, and with the usual `"released"`, `"game_windows"`, `"zoning"` and `"left_world"` (a held session; the table in §7). A session that ended because the world changed is not opened again for the same check. The strips do not stop the game's other windows from opening (`eqoa.windows.pass` and `close_session` do not apply: `unsupported`; release the claim and the game's strip draws again). Closing is the game's own timer or an answer, never a call.
+
+**`raid.changed`** (§3) tells when `eqoa.raid.get()` changed: a member joined, left, moved groups or took or lost a role, the loot rule, the combat flag, `leads` or `helps` changed, or a ready check or loot roll came, changed or went. It does not fire for a member's health or power alone. It needs no claim and no window.
+
 ### Friends, ignore, guild, who and group search (round A7)
 
 `eqoa.social`, `eqoa.guild`, `eqoa.who` and `eqoa.lfg` read community lists and incoming prompts. Reading needs no capability; sending searches or changing registration (`eqoa.who.request`, `eqoa.lfg.search`, `eqoa.lfg.register`, `eqoa.lfg.unregister`) requires each function's own capability and returns a `RequestId`.
@@ -888,7 +919,7 @@ A **session** is one opening of a window a mod shows. It is the handle that belo
 
 **The client's question is the client's.** `"Are you sure?"` (§8) is drawn after every mod window and kept in front each frame; a mod window cannot cover it, and `ImGui.Begin` refuses any window id beginning `###eqoa-client-` (an ordinary Lua error), so a mod can neither open nor add to the client's own windows. The controller focus is suspended, too, while the full World Map is open.
 
-**What a session's `data` holds.** `data` is always a table. These are the fields each kind's `data` has; every other kind (the windows a mod opens itself, a held corpse, merchant, bank, friend request, guild invitation, trade, duel, blacksmith and map, and the raid strips) has an empty one. All the field names below are declared on `eqoa.windows.SessionData`, so **reading a field the kind does not carry is `nil`, never a diagnostic**; a name that is in no row is `unknown_symbol`. `data` is told on `"opened"`, `"changed"` and `"closed"` events alike (a copy as it was then).
+**What a session's `data` holds.** `data` is always a table. These are the fields each kind's `data` has; every other kind (the windows a mod opens itself, a held corpse, merchant, bank, friend request, guild invitation, trade, duel, blacksmith and map) has an empty one. All the field names below are declared on `eqoa.windows.SessionData`, so **reading a field the kind does not carry is `nil`, never a diagnostic**; a name that is in no row is `unknown_symbol`. `data` is told on `"opened"`, `"changed"` and `"closed"` events alike (a copy as it was then).
 
 <!-- session-data-table -->
 | Kind | `data` fields | Types and where they are described |
@@ -903,6 +934,8 @@ A **session** is one opening of a window a mod shows. It is the handle that belo
 | `mercenary_spells` | `available`, `own_out`, `waiting`, `spells` | what `eqoa.merc.get()` returns, without `revision` and `inventory` (round A11) |
 | `dye_picker` | `token`, `target`, `title`, `slots`, `current`, `alpha`, `open`, `no_dye` | what `eqoa.dye.get()` returns, without `revision` (round A11) |
 | `fishing` | `open`, `state`, `casting`, `ready`, `perfect_from`, `perfect_to`, `fair_from`, `fair_to`, `list`, `catch`, `message` | what `eqoa.fishing.get()` returns, without `revision` and `power` (round A11) |
+| `raid_ready` | `id`, `asker`, `duration`, `deadline_ms`, `choices` | what `eqoa.raid.ready_check().data` has, without `seconds_remaining` (the raid strips, below) |
+| `raid_roll` | `rolls` | `eqoa.raid.LootRollItem[]`, each without `seconds_remaining` (the raid strips, below) |
 <!-- /session-data-table -->
 
 **What ends a session and what an event says.** One list of the values these fields take. A mod must treat a value it does not know as "ended" (more may be added, VERSIONING.md). None of these events or values was in a release before the one that freezes this list.
@@ -924,13 +957,13 @@ A **session** is one opening of a window a mod shows. It is the handle that belo
 | `"death"` | the character died | held kinds, questions |
 | `"walked_away"` | the player moved 25 units from where it began | dialogs, hidden corpse, merchant and bank, fishing |
 | `"idle"` | the mod had not looked at it for 120 seconds | dialogs, offers, A11 windows |
-| `"answered"` | an answer was sent through `dialog_answer` or `close_window` | dialogs with several answers, plain closes, A11 windows |
-| `"server"` | the server closed the window | A11 windows |
+| `"answered"` | an answer was sent through `dialog_answer` or `close_window`, or (a raid strip) through `ready_check_answer` or `loot_roll` | dialogs with several answers, plain closes, A11 windows, the raid ready check and loot rolls |
+| `"server"` | the server closed the window (a raid strip: it ended before its time and the mod had not answered) | A11 windows, the raid ready check and loot rolls |
 | `"withdrawn"` | the server withdrew the invitation | `group_invite` |
 | `"ended"` | a newer session of the same kind took its place, or its holder went | held kinds |
 | `"key"` | the Start key or the chat key was pressed again | `start_menu`, `chat_entry` |
 | `"command"` | a menu command ran | `start_menu` |
-| `"timeout"` | nobody answered within 45 seconds and the client refused it | friend request, guild invitation, trade request, duel invitation |
+| `"timeout"` | nobody answered within 45 seconds and the client refused it; a raid strip: its own timer ran out | friend request, guild invitation, trade request, duel invitation, the raid ready check and loot rolls |
 | `"in_guild"` | the invitation was refused: the player is already in a guild | guild invitation |
 | `"accepted"`, `"declined"` | the player (or the mod, for an invitation it may answer) said Yes or No | group invitation, resurrection and summons offers, friend request, guild invitation, trade request, duel invitation |
 | `"cancelled"`, `"completed"`, `"gone"` | a trade request or wager was cancelled, a wager was completed, or a duel invitation was withdrawn | trade, duel |
@@ -1014,7 +1047,7 @@ A mod can show its own recipe book and experiment tray. It opens a `"recipe_book
 
 **Why the session matters.** The game reads the server's crafting replies (the recipe list, a recipe's detail, a combine's result and its "keep this recipe?" question) only while its own recipe book or experiment is up. While a mod holds a `"recipe_book"` or `"experiment"` session the client reads them for the mod's window instead, and hands the mod the words the game's window would have shown. The actions below are refused (`window_closed`) without such a session of the calling mod, and (`not_ready`) while the game's own crafting window is up. Opening the session copies the bags into the crafting tray's list and empties the tray, as the game's Experiment does; closing it empties the tray. While the game's own recipe book or experiment is up, the client changes nothing of the game's crafting state for a mod (the transition waits until the game's window closes), the actions are refused `not_ready`, and the replies are the game's. The tray's list follows the real bags while the window is open and no request is out: an item sold, destroyed or looted shows at the next step, and a tray entry no longer held is dropped. Only the rows the game's Experiment lists are offered (a component that is not a tool). Limits: if the player opens the game's own recipe book while a mod's combine is unanswered, the game's window takes that reply and its keep-this-recipe question is not shown to the mod; the question is one per client, so another mod holding a crafting window can see and answer it; the list and detail requests are refused `busy` while the question is unanswered.
 
-`eqoa.craft.get()` returns an `eqoa.craft.State`, or nil when no mod crafting window is open (the client reads the state at its next game step after the session opens, so read again). Needs `eqoa.craft.get`.
+`eqoa.craft.get()` returns an `eqoa.craft.State`, or nil when no mod crafting window is open (the client reads the state at its next game step after the session opens, so read again). Needs `eqoa.craft.get`. **`craft.changed`** (§3) is told when the state's `revision` goes up (and once more, with `open = false`, when it is gone), so a mod need not poll.
 
 | Field | Meaning |
 |---|---|
@@ -1084,7 +1117,7 @@ A mod can show its own inbox, mail compose form and auction. It opens a `"mail_i
 
 **The question comes first.** These steps do nothing when called: they ask the player "Are you sure?" (the client's own question, starting on No, which a mod cannot answer, skip or lengthen) and the client carries the step out only on the player's Yes, after checking again that the mail, lot or item is still what the question named: `mail_delete`, `mail_send` when the mail carries tunar or an item (a plain mail goes out at once, as in the game's compose window), `auction_bid`, `auction_buyout` and `auction_sell`. They complete with `detail.asked = true`; the answer arrives as `confirm.closed`. Mods & Addons shows them under **Asks you first**; the other steps are shown as **Mail and auction: can send plain mail, take what a mail carries, search the auction, ...**.
 
-`eqoa.mail.get()` returns an `eqoa.mail.State`, or nil when no mod mail window is open (the inbox is asked for as the session opens; read again after a step). Needs `eqoa.mail.get`.
+`eqoa.mail.get()` returns an `eqoa.mail.State`, or nil when no mod mail window is open (the inbox is asked for as the session opens; read again after a step). Needs `eqoa.mail.get`. **`mail.changed`** (§3) is told when the state's `revision` goes up, and once more with `open = false` when it is gone. The server gives no signal of new mail while no mod mail window is open, so none can be told then: a mod that wants to know of new mail asks for the inbox (`mail_refresh`) every so often.
 
 | Field | Meaning |
 |---|---|
@@ -1108,7 +1141,7 @@ A mod can show its own inbox, mail compose form and auction. It opens a `"mail_i
 | `eqoa.actions.mail_take(id)` | Takes what a mail carries (the game's Take row): `not_ready` until the mail has been read and the server has said it carries something, `busy` while the last Take is unanswered (or 15 seconds). A mail's `id` is the whole u32 the game keeps. |
 | `eqoa.actions.mail_send({to, subject, body, tunar?, item?})` | Sends a mail from a `"mail_compose"` session, with the game's own checks (a name, a subject and some text; the live forms' recipient list and limits). `item = {slot, id, count}` is a row of `pack`. Carrying tunar or an item needs a server that offers it (`unsupported` otherwise), a single name in `to` (the client cannot tell whether the server gives it to each name of a list: `invalid_argument`), a subject of one line, no more tunar than carried and no more of the stack than it holds, and asks the player first (the question names the recipient as it will be sent and the postage). |
 
-`eqoa.auction.get()` returns an `eqoa.auction.State`, or nil when no mod auction window is open. Needs `eqoa.auction.get`.
+`eqoa.auction.get()` returns an `eqoa.auction.State`, or nil when no mod auction window is open. Needs `eqoa.auction.get`. **`auction.changed`** (§3) is told when the state's `revision` goes up (a page of results, the mod's lots or bids, the bidders, the sellable list or the status changed), and once more with `open = false` when it is gone. A lot's time left changes with the clock and the server tells nothing: a mod that shows it refreshes by asking again (`auction_page`, `auction_my_lots`, `auction_my_bids`).
 
 | Field | Meaning |
 |---|---|

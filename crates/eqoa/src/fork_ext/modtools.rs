@@ -249,6 +249,8 @@ fn markdown(doc: &Json) -> String {
                 .push(row);
         } else if path.starts_with("eqoa.imgui")
             || path.starts_with("ImGui.")
+            || path.starts_with("ImGuiWindowFlags.")
+            || path.starts_with("ImGuiCond.")
             || path.contains("DrawList.")
         {
             imgui.push(row);

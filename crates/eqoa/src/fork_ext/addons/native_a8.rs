@@ -95,12 +95,17 @@ pub(crate) fn publish(mut state: Json) {
         });
         state["revision"] = json!(next);
         *s = Some(state);
+        // `craft.changed`: one event a step, told by `change_events::flush`
+        super::change_events::note(super::change_events::Sys::Craft, next, true);
     });
 }
 
 /// No mod crafting window is open: nothing to read.
 pub(crate) fn clear() {
-    STATE.with(|s| *s.borrow_mut() = None);
+    let was = STATE.with(|s| s.borrow_mut().take());
+    if let Some(old) = was {
+        super::change_events::note(super::change_events::Sys::Craft, old["revision"].as_u64().unwrap_or(0), false);
+    }
 }
 
 pub(crate) fn current() -> Option<Json> {
