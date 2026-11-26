@@ -1017,6 +1017,15 @@ fn install_math(lua: &Lua) -> Result<()> {
                 }
             };
             let lit: bool = t.fget::<Option<bool>>("lit")?.unwrap_or(true);
+            let scale: f32 = t.fget::<Option<f32>>("scale")?.unwrap_or(1.0);
+            if !scale.is_finite() || scale <= 0.0 {
+                return error(
+                    lua,
+                    "eqoa.hud.gauge",
+                    "invalid_argument",
+                    "scale must be a number above 0",
+                );
+            }
             let (anchor, vertical) = parse_anchor_vert(&t)?;
 
             let cmd = super::hud_layer::HudCommand::Gauge {
@@ -1025,6 +1034,7 @@ fn install_math(lua: &Lua) -> Result<()> {
                 art,
                 fill,
                 lit,
+                scale,
                 anchor,
                 vertical,
             };
@@ -1084,6 +1094,15 @@ fn install_math(lua: &Lua) -> Result<()> {
                 _ => None,
             };
             let (anchor, vertical) = parse_anchor_vert(&t)?;
+            let scale: f32 = t.fget::<Option<f32>>("scale")?.unwrap_or(1.0);
+            if !scale.is_finite() || scale <= 0.0 {
+                return error(
+                    lua,
+                    "eqoa.hud.image",
+                    "invalid_argument",
+                    "scale must be a number above 0",
+                );
+            }
 
             let cmd = match t.fget::<Value>("ui_id")? {
                 Value::String(s) if s.to_str()? == "panel" => super::hud_layer::HudCommand::Panel {
@@ -1102,6 +1121,7 @@ fn install_math(lua: &Lua) -> Result<()> {
                     w,
                     h,
                     color,
+                    scale,
                     anchor,
                     vertical,
                 },
@@ -1113,6 +1133,7 @@ fn install_math(lua: &Lua) -> Result<()> {
                     w,
                     h,
                     color,
+                    scale,
                     anchor,
                     vertical,
                 },

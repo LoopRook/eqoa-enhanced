@@ -1538,3 +1538,328 @@ fn bundled_readouts_follow_moved_stock_parts_and_reset() {
     }
     hud_layout::set_window_size(640, 448);
 }
+
+// ---- HUD Scale: the gauge's and the image's `scale`, `hud.layout()`'s new fields, and the three mods that follow them
+
+/// A command's kind, place and scale, as the three mods draw them.
+#[derive(Clone, Debug, PartialEq)]
+enum Drawn {
+    Gauge { art: i32, x: i32, y: i32, scale: f32, vertical: render::ui::Vertical },
+    Image { x: i32, y: i32, w: Option<i32>, scale: f32 },
+    Text { x: f32, y: f32, scale: f32, clip: Option<i32> },
+    Panel { x: i32, y: i32, w: i32, h: i32 },
+}
+
+fn drawn(commands: Vec<hud_layer::HudCommand>) -> Vec<Drawn> {
+    commands
+        .into_iter()
+        .map(|c| match c {
+            hud_layer::HudCommand::Gauge { art, x, y, scale, vertical, .. } => Drawn::Gauge { art, x, y, scale, vertical },
+            hud_layer::HudCommand::Image { x, y, w, scale, .. } => Drawn::Image { x, y, w, scale },
+            hud_layer::HudCommand::Text { x, y, scale, clip_width, .. } => Drawn::Text { x, y, scale, clip: clip_width },
+            hud_layer::HudCommand::Panel { x, y, w, h, .. } => Drawn::Panel { x, y, w, h },
+            _ => panic!("unexpected command"),
+        })
+        .collect()
+}
+
+/// The interface (`pc`), the HUD Scale (percent) and the saved piece places (`hud.opt` text), settings made fresh.
+fn hud_setup(pc: bool, percent: u8, places: &str, size: (u32, u32)) {
+    crate::settings::testing::reset(false);
+    crate::settings::set_ui_mode(pc).unwrap();
+    crate::settings::set_hud_scale_percent(percent);
+    crate::settings::save_hud_layout(places);
+    crate::hudlayout::testing_reset();
+    hud_layout::set_hud_state(true, true, false, 93, 20);
+    hud_layout::set_window_size(size.0, size.1);
+}
+
+fn target_fixture() {
+    native_core::CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.in_world = true;
+        c.view.player = serde_json::json!({"id":1,"target_id":2});
+        c.view.entities = vec![
+            serde_json::json!({"id":1,"name":"Me","hp_fraction":0.7,"power":0.3}),
+            serde_json::json!({"id":2,"name":"Casil","target_id":3,"hp_fraction":0.8,"power":0.6,"disposition_name":"Hostile"}),
+            serde_json::json!({"id":3,"name":"Luck","hp_fraction":0.4,"power":0.5}),
+        ];
+    });
+}
+
+fn render_mod(host: &Host, id: &str) -> Vec<Drawn> {
+    hud_layer::clear_all();
+    native_events::render(host).unwrap();
+    drawn(queued(id))
+}
+
+fn rect(v: &serde_json::Value, k: &str) -> [f32; 4] {
+    ["frame_x", "frame_y", "frame_width", "frame_height"].map(|f| v[k][f].as_f64().expect("a number") as f32)
+}
+
+/// The three mods at HUD Scale 100% draw what they drew before this change: the same numbers as the old Lua's
+/// formulas give from `hud.layout()`, and a scale of exactly 1 (so the engine draws nothing differently), unmoved
+/// and moved, in the PC interface and the Controller's.
+#[test]
+fn the_target_mods_draw_as_before_at_hud_scale_100() {
+    use render::ui::Vertical::Bottom;
+    let tree = bundled_tree();
+    for pc in [false, true] {
+        for places in ["", "target l 80 b -40\n"] {
+            hud_setup(pc, 100, places, (640, 448));
+            target_fixture();
+            let layout = hud_layout::hud_layout_json((640, 448));
+            let p = rect(&layout["target"], "panel");
+            let pw = rect(&layout["target"], "power");
+            let (x, y) = (p[0] as i32, p[1] as i32);
+            let (dx, dy) = (x - 20, y - 348);
+            let note = format!("pc={pc} places={places:?}");
+
+            options::reset_in_memory();
+            let host = load_hud_mod(&tree, "eqoa_mana_bars");
+            assert_eq!(
+                render_mod(&host, "eqoa_mana_bars"),
+                vec![Drawn::Gauge { art: 9, x: pw[0] as i32, y: pw[1] as i32, scale: 1.0, vertical: Bottom }],
+                "mana bars {note}"
+            );
+
+            options::reset_in_memory();
+            let host = load_hud_mod(&tree, "eqoa_target_of_target");
+            host.execute("eqoa.options.set('target_of_target', true)").unwrap();
+            assert_eq!(
+                render_mod(&host, "eqoa_target_of_target"),
+                vec![
+                    Drawn::Image { x: 20 + dx, y: 300 + dy, w: Some(174), scale: 1.0 },
+                    Drawn::Text { x: (20 + 87 + dx) as f32, y: (300 + 12 + dy) as f32, scale: 1.0, clip: Some(160) },
+                    Drawn::Gauge { art: 7, x: 30 + dx, y: 325 + dy, scale: 1.0, vertical: Bottom },
+                    Drawn::Gauge { art: 9, x: 30 + dx, y: 335 + dy, scale: 1.0, vertical: Bottom },
+                ],
+                "target of target {note}"
+            );
+
+            options::reset_in_memory();
+            let host = load_hud_mod(&tree, "eqoa_target_frame_demo");
+            assert_eq!(
+                render_mod(&host, "eqoa_target_frame_demo"),
+                vec![
+                    Drawn::Panel { x, y, w: 186, h: 62 },
+                    Drawn::Text { x: (x + 10) as f32, y: (y + 8) as f32, scale: 0.85, clip: Some(166) },
+                    Drawn::Gauge { art: 7, x: x + 10, y: y + 28, scale: 1.0, vertical: Bottom },
+                    Drawn::Text { x: (x + 176) as f32, y: (y + 26) as f32, scale: 0.75, clip: None },
+                    Drawn::Gauge { art: 9, x: x + 10, y: y + 42, scale: 1.0, vertical: Bottom },
+                ],
+                "target frame demo {note}"
+            );
+        }
+    }
+    hud_setup(false, 100, "", (640, 448));
+}
+
+/// At HUD Scale 150% (and with the target moved) each mod's bars sit on the game's target piece as `hud.layout()`
+/// gives it, grown by the piece's own factor, in both interfaces. Negative control (run red): the mods before this
+/// change draw at scale 1 at the unscaled place, which fails every position here.
+#[test]
+fn the_target_mods_follow_hud_scale_and_a_moved_piece_in_both_interfaces() {
+    let tree = bundled_tree();
+    let near = |a: f32, b: f32, what: &str| assert!((a - b).abs() <= 1.0, "{what}: {a} vs {b}");
+    for pc in [false, true] {
+        for places in ["", "target l 80 b -40\n"] {
+            hud_setup(pc, 150, places, (640, 448));
+            target_fixture();
+            let layout = hud_layout::hud_layout_json((640, 448));
+            assert_eq!(layout["hud_scale"].as_f64(), Some(1.5));
+            let p = rect(&layout["target"], "panel");
+            let pw = rect(&layout["target"], "power");
+            let k = p[2] / 174.0;
+            assert!((k - 1.5).abs() < 0.01, "the piece grows by HUD Scale (pc={pc}): {k}");
+            let note = format!("pc={pc} places={places:?}");
+            let gauge = |d: &Drawn| match d {
+                Drawn::Gauge { x, y, scale, .. } => (*x as f32, *y as f32, *scale),
+                other => panic!("not a gauge: {other:?}"),
+            };
+
+            // mana bars: on the game's power bar, 136 * k wide
+            options::reset_in_memory();
+            let host = load_hud_mod(&tree, "eqoa_mana_bars");
+            let out = render_mod(&host, "eqoa_mana_bars");
+            assert_eq!(out.len(), 1, "{note}");
+            let (x, y, s) = gauge(&out[0]);
+            near(x, pw[0], &format!("mana x {note}"));
+            near(y, pw[1], &format!("mana y {note}"));
+            near(s, pw[2] / 136.0, &format!("mana scale {note}"));
+            assert!((s - 1.5).abs() < 0.01, "{note}");
+
+            // target of target: its 100% places on the panel, each grown from the panel's corner
+            options::reset_in_memory();
+            let host = load_hud_mod(&tree, "eqoa_target_of_target");
+            host.execute("eqoa.options.set('target_of_target', true)").unwrap();
+            let out = render_mod(&host, "eqoa_target_of_target");
+            assert_eq!(out.len(), 4, "{note}");
+            let at = |ex: f32, ey: f32| (p[0] + (ex - 20.0) * k, p[1] + (ey - 348.0) * k);
+            match &out[0] {
+                Drawn::Image { x, y, w, scale } => {
+                    let (ex, ey) = at(20.0, 300.0);
+                    near(*x as f32, ex, &format!("tot image x {note}"));
+                    near(*y as f32, ey, &format!("tot image y {note}"));
+                    near(*scale, k, "tot image scale");
+                    assert_eq!(*w, Some(174));
+                }
+                other => panic!("{other:?}"),
+            }
+            match &out[1] {
+                Drawn::Text { x, y, scale, clip } => {
+                    let (ex, ey) = at(107.0, 312.0);
+                    near(*x, ex, &format!("tot name x {note}"));
+                    near(*y, ey, &format!("tot name y {note}"));
+                    near(*scale, k, "tot name scale");
+                    assert_eq!(*clip, Some((160.0 * k).round() as i32));
+                }
+                other => panic!("{other:?}"),
+            }
+            for (i, (ex, ey)) in [(2, (30.0, 325.0)), (3, (30.0, 335.0))] {
+                let (x, y, s) = gauge(&out[i]);
+                let (px, py) = at(ex, ey);
+                near(x, px, &format!("tot gauge {i} x {note}"));
+                near(y, py, &format!("tot gauge {i} y {note}"));
+                near(s, k, "tot gauge scale");
+            }
+
+            // the target frame demo: on the panel, every size times k
+            options::reset_in_memory();
+            let host = load_hud_mod(&tree, "eqoa_target_frame_demo");
+            let out = render_mod(&host, "eqoa_target_frame_demo");
+            assert_eq!(out.len(), 5, "{note}");
+            match &out[0] {
+                Drawn::Panel { x, y, w, h } => {
+                    near(*x as f32, p[0], &format!("demo panel x {note}"));
+                    near(*y as f32, p[1], &format!("demo panel y {note}"));
+                    near(*w as f32, 186.0 * k, "demo panel w");
+                    near(*h as f32, 62.0 * k, "demo panel h");
+                }
+                other => panic!("{other:?}"),
+            }
+            for (i, (ox, oy)) in [(2, (10.0, 28.0)), (4, (10.0, 42.0))] {
+                let (x, y, s) = gauge(&out[i]);
+                near(x, p[0] + ox * k, &format!("demo gauge {i} x {note}"));
+                near(y, p[1] + oy * k, &format!("demo gauge {i} y {note}"));
+                near(s, k, "demo gauge scale");
+            }
+        }
+    }
+    hud_setup(false, 100, "", (640, 448));
+}
+
+/// `eqoa.hud.layout()` says the HUD Scale, the interface and whether the HUD is unlocked, and gives the other
+/// pieces' rectangles while the game draws them; none of it is ever null, for a window of no size too.
+#[test]
+fn hud_layout_says_the_scale_the_interface_and_the_unlocked_state_and_more_pieces() {
+    fn no_null(path: &str, v: &serde_json::Value, bad: &mut Vec<String>) {
+        match v {
+            serde_json::Value::Null => bad.push(path.to_string()),
+            serde_json::Value::Array(a) => a.iter().enumerate().for_each(|(i, x)| no_null(&format!("{path}[{i}]"), x, bad)),
+            serde_json::Value::Object(o) => o.iter().for_each(|(k, x)| no_null(&format!("{path}.{k}"), x, bad)),
+            _ => {}
+        }
+    }
+    for pc in [false, true] {
+        hud_setup(pc, 125, "", (640, 480));
+        crate::hudlayout::set_unlocked(false);
+        let l = hud_layout::hud_layout_json((640, 480));
+        assert_eq!((l["hud_scale"].as_f64(), l["pc_mode"].as_bool(), l["hud_unlocked"].as_bool()), (Some(1.25), Some(pc), Some(false)));
+        crate::hudlayout::set_unlocked(true);
+        let l = hud_layout::hud_layout_json((640, 480));
+        assert_eq!(l["hud_unlocked"].as_bool(), Some(true), "Move HUD on: the cached record follows");
+        crate::hudlayout::set_unlocked(false);
+        assert!(l.get("quests").is_none(), "a piece the game did not draw has no rectangle");
+        // the quest tracker and the stat window drawn in the last frame
+        crate::hudlayout::frame_begin();
+        crate::hudlayout::note(crate::hudlayout::Piece::Quests, [500.0, 120.0, 620.0, 200.0], [0.0; 2]);
+        crate::hudlayout::note(crate::hudlayout::Piece::Stats, [6.0, 150.0, 202.0, 250.0], [0.0; 2]);
+        crate::hudlayout::frame_end();
+        let l = hud_layout::hud_layout_json((640, 480));
+        let q = &l["quests"];
+        assert_eq!((q["frame_x"].as_f64(), q["frame_width"].as_f64(), q["frame_height"].as_f64()), (Some(500.0), Some(120.0), Some(80.0)), "pc={pc}");
+        assert_eq!((q["x"].as_f64(), q["y"].as_f64(), q["width"].as_f64(), q["height"].as_f64()), (Some(500.0), Some(120.0 * 480.0 / 448.0), Some(120.0), Some(80.0 * 480.0 / 448.0)), "window pixels: the frame at 640 x 480");
+        assert_eq!(l["stats"]["frame_x"].as_f64(), Some(6.0));
+        for size in [(0, 0), (0, 480), (640, 0), (1280, 720)] {
+            let mut bad = Vec::new();
+            no_null("layout", &hud_layout::hud_layout_json(size), &mut bad);
+            assert!(bad.is_empty(), "pc={pc} size={size:?}: {bad:?}");
+        }
+        crate::hudlayout::frame_begin();
+        crate::hudlayout::frame_end();
+        assert!(hud_layout::hud_layout_json((640, 480)).get("quests").is_none(), "gone when not drawn");
+    }
+    hud_setup(false, 100, "", (640, 448));
+}
+
+/// A mod can ask for `scale` on a gauge and an image; a bad one is refused; none is the old call.
+#[test]
+fn gauge_and_image_take_an_optional_scale() {
+    hud_setup(false, 100, "", (640, 448));
+    target_fixture();
+    let host = Host::new().unwrap();
+    hud_layer::clear_all();
+    host.execute(
+        r#"
+        assert(eqoa.hud.gauge({x=10, y=20, art=7, fill=0.5, scale=1.5}))
+        assert(eqoa.hud.gauge({x=10, y=20, art=7, fill=0.5}))
+        assert(eqoa.hud.image({ui_id=25, x=10, y=20, w=174, scale=2}))
+        for _, bad in ipairs({0, -1, 1/0, 0/0}) do
+            local ok, err = eqoa.hud.gauge({x=1, y=1, art=7, fill=1, scale=bad})
+            assert(ok == nil and err.code == 'invalid_argument', 'gauge scale ' .. tostring(bad))
+            ok, err = eqoa.hud.image({ui_id=25, x=1, y=1, scale=bad})
+            assert(ok == nil and err.code == 'invalid_argument', 'image scale ' .. tostring(bad))
+        end
+    "#,
+    )
+    .unwrap();
+    let q = drawn(hud_layer::MOD_QUEUES.with(|q| q.borrow().values().flatten().cloned().collect()));
+    assert_eq!(q.len(), 3, "the refused calls queue nothing: {q:?}");
+    assert!(matches!(q[0], Drawn::Gauge { scale, .. } if scale == 1.5));
+    assert!(matches!(q[1], Drawn::Gauge { scale, .. } if scale == 1.0), "no scale: the old call");
+    assert!(matches!(q[2], Drawn::Image { scale, .. } if scale == 2.0));
+}
+
+/// The engine side of `scale`: a gauge or an image asked at 1.5 grows about its own top left corner (the same place
+/// as unscaled), 1.5 times as wide and as tall; the layer's HUD scale is as it was after. Needs a graphics adapter:
+/// without one it prints SKIP and returns (the lead runs it where there is one).
+#[test]
+fn a_scaled_gauge_and_image_grow_about_their_own_corner() {
+    let _gpu = crate::GPU_TEST.lock().unwrap_or_else(|e| e.into_inner());
+    let Some((_, mut ui_mod, device, queue)) = layer_with_device() else {
+        eprintln!("SKIP: no graphics adapter");
+        return;
+    };
+    let assets = test_assets(&mut ui_mod, &device, &queue);
+    let vui = test_vui();
+    let bounds = |ui: &render::ui::Ui| {
+        let mut r = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+        for q in &ui.quads {
+            for p in &q.pos {
+                r = [r[0].min(p[0]), r[1].min(p[1]), r[2].max(p[0]), r[3].max(p[1])];
+            }
+        }
+        r
+    };
+    for (what, make) in [
+        ("gauge", (|s: f32| hud_layer::HudCommand::Gauge { x: 100, y: 200, art: 7, fill: 1.0, lit: true, scale: s, anchor: render::ui::Anchor::Left, vertical: render::ui::Vertical::Top }) as fn(f32) -> hud_layer::HudCommand),
+        ("image", |s: f32| hud_layer::HudCommand::Image { ui_id: 25, target_fade: false, x: 100, y: 200, w: Some(174), h: None, color: None, scale: s, anchor: render::ui::Anchor::Left, vertical: render::ui::Vertical::Top }),
+    ] {
+        let mut seen = Vec::new();
+        for s in [1.0, 1.5] {
+            ui_mod.begin((640, 448));
+            hud_layer::clear_all();
+            hud_layer::queue_command("scale_probe", make(s)).unwrap();
+            hud_layer::draw(&vui, &mut assets.raster(&mut ui_mod));
+            ui_mod.end();
+            assert!(ui_mod.hud_scale == render::ui::HudScale::IDENTITY, "{what}: the layer's HUD scale is put back");
+            seen.push(bounds(&ui_mod));
+        }
+        let (a, b) = (seen[0], seen[1]);
+        assert!(a[2] > a[0] && a[3] > a[1], "{what} drew something");
+        assert!((b[0] - a[0]).abs() < 0.01 && (b[1] - a[1]).abs() < 0.01, "{what}: the same top left: {a:?} {b:?}");
+        assert!(((b[2] - b[0]) - 1.5 * (a[2] - a[0])).abs() < 0.5, "{what}: 1.5 times as wide: {a:?} {b:?}");
+        assert!(((b[3] - b[1]) - 1.5 * (a[3] - a[1])).abs() < 0.5, "{what}: 1.5 times as tall: {a:?} {b:?}");
+    }
+}

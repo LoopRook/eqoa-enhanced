@@ -1342,6 +1342,12 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.hud.Layout", "group_members") => Some("eqoa.hud.GroupMemberLayout"),
         ("eqoa.hud.Layout", "target") => Some("eqoa.hud.TargetLayout"),
         ("eqoa.hud.Layout", "minimap") => Some("eqoa.hud.Rect"),
+        (
+            "eqoa.hud.Layout",
+            "quests" | "meter" | "effects" | "chat" | "chat1" | "chat2" | "chat3" | "settings"
+            | "breath" | "quick_menus" | "spell_bars" | "utility_bars" | "equipment_bar"
+            | "target_info" | "raid_prompts" | "stats" | "focus",
+        ) => Some("eqoa.hud.Rect"),
         ("eqoa.hud.Layout", "pet") => Some("eqoa.hud.SinglePanelLayout"),
         (
             "eqoa.hud.PlayerLayout"
@@ -1500,7 +1506,10 @@ fn install_fields(lua: &Lua) {
             "eqoa.hud.Rect",
             "frame_x frame_y frame_width frame_height x y width height",
         ),
-        ("eqoa.hud.Layout", "player group_members target pet minimap"),
+        (
+            "eqoa.hud.Layout",
+            "player group_members target pet minimap hud_scale pc_mode hud_unlocked quests meter effects chat chat1 chat2 chat3 settings breath quick_menus spell_bars utility_bars equipment_bar target_info raid_prompts stats focus",
+        ),
         ("eqoa.hud.PlayerLayout", "panel health power exp"),
         ("eqoa.hud.TargetLayout", "panel health power"),
         ("eqoa.hud.GroupMemberLayout", "index panel health power"),
@@ -1539,6 +1548,8 @@ fn install_fields(lua: &Lua) {
                 Some(5)
             } else if matches!((path, field), ("eqoa.entities.Entity", "head_mark" | "merc_tag"))
                 || matches!((path, field), ("eqoa.player.Stats", "hot" | "pot" | "figures"))
+                || (path == "eqoa.hud.Layout"
+                    && !matches!(field, "player" | "group_members" | "target" | "pet" | "minimap"))
             {
                 Some(8)
             } else if (path, field) == ("eqoa.abilities.Ability", "learned") {

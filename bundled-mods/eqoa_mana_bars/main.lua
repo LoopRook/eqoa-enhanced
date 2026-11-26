@@ -22,7 +22,11 @@ eqoa.events.on("render", function()
     if eqoa.hud.visible("target") then
         local target = eqoa.target.get()
         if target and target.id and target.power then
-            hud_gauge({ x = layout.target.power.frame_x, y = layout.target.power.frame_y, art = 9, fill = target.power, lit = true, vertical = "bottom" })
+            -- The bar sits on the game's own power bar: moved (Move HUD) and grown with HUD Scale or the PC
+            -- interface's piece size (the layout rectangle is 136 wide at 100%). Unscaled, the draw is unchanged.
+            local pw = layout.target.power
+            local k = (pw.frame_width and pw.frame_width > 0) and pw.frame_width / 136 or 1
+            hud_gauge({ x = math.floor(pw.frame_x + 0.5), y = math.floor(pw.frame_y + 0.5), art = 9, fill = target.power, lit = true, vertical = "bottom", scale = (k ~= 1) and k or nil })
         end
     end
 end)

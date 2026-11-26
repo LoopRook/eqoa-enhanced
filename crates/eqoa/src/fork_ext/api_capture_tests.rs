@@ -85,7 +85,8 @@ fn round7c_play_records_match_declared_fields() {
             fields('player.SevenStats', p.attributes.total)
             fields('player.Resists', p.resists)
             local stats = eqoa.player.stats()
-            fields('player.Stats', stats)
+            -- figures: only once the server has sent the Stat Window's figures
+            fields('player.Stats', stats, 'figures')
             -- min/max/without_*: only a stat with a native range carries them
             fields('player.StatItem', stats.strength, 'min max without_min without_max')
             fields('Vec3', p.position)
@@ -134,7 +135,8 @@ fn round7c_play_records_match_declared_fields() {
             fields('combat.Counters', eqoa.combat.get_counters())
             fields('hud.Frame', eqoa.hud.frame())
             local layout = eqoa.hud.layout()
-            fields('hud.Layout', layout)
+            -- the other pieces: each only while the game draws it
+            fields('hud.Layout', layout, 'quests meter effects chat chat1 chat2 chat3 settings breath quick_menus spell_bars utility_bars equipment_bar target_info raid_prompts stats focus')
             fields('hud.PlayerLayout', layout.player)
             fields('hud.TargetLayout', layout.target)
             fields('hud.GroupMemberLayout', layout.group_members[1])
