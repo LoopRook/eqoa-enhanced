@@ -1845,6 +1845,11 @@ mod.eqoa_map_search.clear=f4
         for pc in [false, true] {
             interface(pc);
             let stat = row_named("stat_window").unwrap();
+            // a key no game row has (a row on it would swap, and take F4 for itself)
+            let free = ["insert", "home", "end", "pageup", "pagedown", "f9", "f12"]
+                .into_iter()
+                .find(|k| game_row(&crate::settings::binds(), k).is_none())
+                .expect("a free key");
             register("alpha", "tog", "f4", "Toggle");
             assert_eq!(get_key("alpha", "tog").as_deref(), Some(""), "pc={pc}: F4 is the Stat Window's: refused");
             let steady = resolve_count_for_test();
@@ -1854,7 +1859,7 @@ mod.eqoa_map_search.clear=f4
             assert_eq!(resolve_count_for_test(), steady, "pc={pc}: a steady frame resolves nothing");
             // the player moves the Stat Window row to F8 on the Controls page: F4 is free
             edit_game(|b| {
-                b.bind_key_profile(stat, "f8", pc);
+                b.bind_key_profile(stat, free, pc);
             });
             assert_eq!(get_key("alpha", "tog").as_deref(), Some(""), "pc={pc}: control: not before the frame sync");
             sync_interface_mode();
@@ -1870,29 +1875,27 @@ mod.eqoa_map_search.clear=f4
             assert_eq!(get_key("alpha", "tog").as_deref(), Some(""), "pc={pc}: the game's key again");
             // Defaults (the whole of the game's bindings put back) after a move
             edit_game(|b| {
-                b.bind_key_profile(stat, "f8", pc);
+                b.bind_key_profile(stat, free, pc);
             });
             sync_interface_mode();
             assert_eq!(get_key("alpha", "tog").as_deref(), Some("f4"));
             edit_game(|b| *b = Binds::default());
             sync_interface_mode();
             assert_eq!(get_key("alpha", "tog").as_deref(), Some(""), "pc={pc}: Defaults give F4 back to the Stat Window");
-            // a macro trigger added on the Macros page takes the mod's key; removed, gives it back
+            // a macro trigger added on the Macros page takes the mod's key; removed, gives it back (macro triggers
+            // are the Controller keys, so this one is a key no row has in either interface)
+            register("alpha", "macro", free, "Macro key");
+            assert_eq!(get_key("alpha", "macro").as_deref(), Some(free), "pc={pc}: a free key is the mod's");
             edit_game(|b| {
-                b.bind_key_profile(stat, "f8", pc);
+                b.set_trigger(0, None, vec![Input::Key(free.into())]).unwrap();
             });
             sync_interface_mode();
-            assert_eq!(get_key("alpha", "tog").as_deref(), Some("f4"));
-            edit_game(|b| {
-                b.set_trigger(0, None, vec![Input::Key("f4".into())]).unwrap();
-            });
-            sync_interface_mode();
-            assert_eq!(get_key("alpha", "tog").as_deref(), Some(""), "pc={pc}: a macro trigger on F4 takes it");
+            assert_eq!(get_key("alpha", "macro").as_deref(), Some(""), "pc={pc}: a macro trigger on its key takes it");
             edit_game(|b| {
                 b.remove_trigger(0, 0);
             });
             sync_interface_mode();
-            assert_eq!(get_key("alpha", "tog").as_deref(), Some("f4"), "pc={pc}: and gives it back");
+            assert_eq!(get_key("alpha", "macro").as_deref(), Some(free), "pc={pc}: and gives it back");
             crate::settings::testing::reset(false);
             reset_in_memory();
         }

@@ -193,7 +193,7 @@ fn stat_figures_are_asked_for_while_a_mod_holds_the_stat_window_whatever_the_set
     let (mut p, sent) = play_with_recorder();
     p.session.stat_figures_offer = true;
     assert!(!crate::settings::stat_window(), "the player's setting is off");
-    let agree = |p: &mut Play| p.session.agree_stat_figures(crate::settings::stat_window() || crate::fork_ext::play::stat_figures_wanted());
+    let agree = |p: &mut Play| p.session.agree_stat_figures(crate::settings::stat_window() || super::fork_hooks::stat_figures_wanted());
     let asked = |p: &mut Play| {
         p.session.flush();
         let m: Vec<Vec<u8>> = super::commands::guaranteed(&sent.borrow()).into_iter().filter(|m| m.starts_with(&[0x84, 0x7E])).collect();
