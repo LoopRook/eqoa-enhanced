@@ -1324,6 +1324,7 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.windows.SessionData", "inventory") => Some("eqoa.merc.Inventory"),
         ("eqoa.windows.SessionData", "spells") => Some("eqoa.merc.Spells"),
         ("eqoa.windows.SessionData", "catch") => Some("eqoa.fishing.Catch"),
+        ("eqoa.windows.SessionData", "rolls") => Some("eqoa.raid.LootRollItem"),
         ("eqoa.chat.ChatTabs", "tabs") => Some("eqoa.chat.ChatTab"),
         ("eqoa.input.InputState", "pad") => Some("eqoa.input.Pad"),
         ("eqoa.input.Pad", "left" | "right") => Some("eqoa.Vec2"),

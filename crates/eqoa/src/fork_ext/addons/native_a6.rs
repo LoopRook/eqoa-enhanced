@@ -313,10 +313,13 @@ pub(crate) const SESSION_DATA: &[(&str, &str)] = &[
         "fishing",
         "open state casting ready perfect_from perfect_to fair_from fair_to list catch message",
     ),
+    // the raid strips a mod holds (round "gap events"): spec section 7, "Raid, ready checks and loot rolls"
+    ("raid_ready", "id asker duration deadline_ms choices"),
+    ("raid_roll", "rolls"),
 ];
 
 /// The union of `SESSION_DATA`, declared on `eqoa.windows.SessionData`.
-const SESSION_DATA_ALL: &str = "entries text links channel reply_to offer options talked_to name from     available own_out waiting inventory spells token target title slots current alpha open no_dye     state casting ready perfect_from perfect_to fair_from fair_to list catch message";
+const SESSION_DATA_ALL: &str = "entries text links channel reply_to offer options talked_to name from     available own_out waiting inventory spells token target title slots current alpha open no_dye     state casting ready perfect_from perfect_to fair_from fair_to list catch message id asker duration deadline_ms choices rolls";
 
 pub(crate) fn install(host: &Host) -> Result<()> {
     let lua = &host.lua;

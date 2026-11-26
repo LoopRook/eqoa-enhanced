@@ -25,6 +25,18 @@ pub(crate) fn imgui(lua: &Lua, imgui: &Table) -> Result<()> {
     for module in ["eqoa.imgui", "ImGui"] {
         describe_module(lua, module, Some(2), "bounded native bridge");
     }
+    // The enum globals mods pass to `ImGui.Begin` and `ImGui.SetNext...`: each name a table holds is a supported member
+    // (read from the tables the bridge installed, so the contract names what exists). Values are ImGui's own numbers.
+    for enum_name in ["ImGuiWindowFlags", "ImGuiCond"] {
+        if let Ok(values) = lua.globals().get::<Table>(enum_name) {
+            for pair in values.pairs::<String, Value>() {
+                let (name, v) = pair?;
+                if matches!(v, Value::Integer(_) | Value::Number(_)) {
+                    describe(lua, &format!("{enum_name}.{name}"), "supported", Some(2), "");
+                }
+            }
+        }
+    }
     // Not in the bounded ImGui bridge of `eqoa/1`, and not scheduled: each answers `unsupported` with what
     // to use instead.
     const MOUSE: &str = "the ImGui bridge has only IsMouseDown, IsMouseReleased, IsMouseDragging and GetMouseDragDelta for the mouse; for the pointer's position use eqoa.input.pointer(), and the pointer.pressed and pointer.wheel events";

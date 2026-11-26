@@ -85,6 +85,7 @@ pub(crate) fn snapshot_raid(_play: &Play) {
             members,
             ready,
             rolls,
+            now_ms: now,
         });
     }
 }
@@ -340,6 +341,8 @@ pub(crate) fn answer_ready(
     }
     play.raid.ready.close();
     play.make_ready(id, ready);
+    // the strip session (if a mod holds one) ends `answered`, not `server`
+    crate::fork_ext::addons::raid_strips::note_answered(TakeoverKind::RaidReady);
     snapshot_raid(play);
     Ok(())
 }
@@ -371,6 +374,7 @@ pub(crate) fn answer_roll(
     }
     play.raid.rolls.close(id);
     play.make_roll(id, choice);
+    crate::fork_ext::addons::raid_strips::note_answered(TakeoverKind::RaidRoll);
     snapshot_raid(play);
     Ok(())
 }

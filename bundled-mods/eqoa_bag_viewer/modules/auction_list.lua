@@ -35,6 +35,19 @@ local function ensure()
     return true
 end
 
+-- The client's reading of the auction for the two per-frame checks below (a form waiting for what can be put up, a sale
+-- waiting to settle): read again when `auction.changed` says it moved (`L.on_changed`), and every frame only while
+-- there is nothing to read yet (no event is owed for a state that has not been published). The frame counts of those
+-- checks stay: they are timeouts for what the server never says (an item the auction will not take, a sale with no reply).
+local function auction()
+    if L.stale or L.a == nil then
+        L.a, L.stale = eqoa.auction.get(), false
+    end
+    return L.a
+end
+
+function L.on_changed() L.stale = true end
+
 local function stop_typing()
     if L.form and L.form.field then L.form.field = nil end
     if L.enter then eqoa.input.release(L.enter); L.enter = nil end
@@ -53,6 +66,7 @@ function L.close()
     stop_typing()
     if L.session then eqoa.windows.close_session(L.session) end
     L.session, L.form, L.queue, L.run, L.hits, L.rect = nil, nil, nil, nil, {}, nil
+    L.a, L.stale = nil, false
 end
 
 -- the client ended the session (zoning, death, the player's switch) or the world was reset: nothing is kept
@@ -61,6 +75,7 @@ function L.on_session(d)
         stop_typing()
         L.session, L.form, L.queue, L.run = nil, nil, nil, nil
         L.hits, L.rect = {}, nil
+        L.a, L.stale = nil, false
         release_bank()
     end
 end
@@ -108,6 +123,7 @@ end
 local function start_form(it, group)
     local ok, why = ensure()
     if not ok then say("List on auction: " .. tostring(why), false); L.run = nil; return end
+    L.a, L.stale = nil, false -- nothing of an earlier window is read for this form
     L.form = { waiting = true, it = it, group = group, frames = 0, since = os.clock(), mode = "wait" }
 end
 
@@ -116,7 +132,7 @@ local function resolve_wait()
     local f = L.form
     if not (f and f.mode == "wait") then return end
     f.frames = f.frames + 1
-    local a = eqoa.auction.get()
+    local a = auction()
     local now = current(f.it)
     if not now then L.skip(f, "the item is no longer in the bank"); return end
     if a then
@@ -284,7 +300,7 @@ local function settle_tick()
     local f = L.form
     if not (f and f.mode == "settle") then return end
     f.settle = f.settle + 1
-    local a = eqoa.auction.get()
+    local a = auction()
     if a and a.pending == "sell" then f.seen = true end
     -- answered: the client has shown the sale pending and now idle (or a while has passed with no sign of it)
     if a and a.pending == "none" and (f.seen or f.settle > 20) or f.settle > SETTLE_FRAMES then

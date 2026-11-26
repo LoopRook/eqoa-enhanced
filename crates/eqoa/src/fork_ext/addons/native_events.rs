@@ -165,6 +165,11 @@ const EVENTS: &[&str] = &[
     "merc.changed",
     "dye.changed",
     "fishing.changed",
+    "craft.changed",
+    "mail.changed",
+    "auction.changed",
+    "raid.changed",
+    "factions.changed",
 ];
 fn install_event_fields(lua: &mlua::Lua) {
     for (name, fields) in [
@@ -249,6 +254,11 @@ fn install_event_fields(lua: &mlua::Lua) {
         ("merc.changed", "revision open"),
         ("dye.changed", "revision open"),
         ("fishing.changed", "revision open"),
+        ("craft.changed", "revision open"),
+        ("mail.changed", "revision open"),
+        ("auction.changed", "revision open"),
+        ("raid.changed", "revision open"),
+        ("factions.changed", "revision open"),
     ] {
         let payload = format!("eqoa.events.{name}.data");
         for field in fields.split_whitespace() {
@@ -287,7 +297,8 @@ fn event_round(name: &str) -> u8 {
         | "windows.key" | "confirm.closed" | "friends.changed" | "ignored.changed" | "guild.changed"
         | "who.result" | "lfg.result" | "lfg.changed" | "trade.request" | "trade.changed" | "trade.accepted"
         | "trade.closed" | "duel.changed" | "blacksmith.changed" | "merc.changed" | "dye.changed"
-        | "fishing.changed" => 8,
+        | "fishing.changed" | "craft.changed" | "mail.changed" | "auction.changed" | "raid.changed"
+        | "factions.changed" => 8,
         _ => 2,
     }
 }

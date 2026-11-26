@@ -85,7 +85,15 @@ pub(crate) fn set_factions(key: u64, build: impl FnOnce() -> Option<Json>) {
         let mut s = s.borrow_mut();
         if s.factions_key != Some(key) {
             s.factions_key = Some(key);
-            s.factions = build();
+            let page = build();
+            // `factions.changed`: the page the read returns is not the one it returned
+            if page != s.factions {
+                s.factions = page;
+                if super::change_events::wanted(super::change_events::Sys::Factions) {
+                    let revision = super::change_events::next_revision(super::change_events::Sys::Factions);
+                    super::change_events::note(super::change_events::Sys::Factions, revision, s.factions.is_some());
+                }
+            }
         }
     });
 }

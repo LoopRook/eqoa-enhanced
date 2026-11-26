@@ -1177,6 +1177,222 @@
     },
     {
       "children": [],
+      "path": "ImGuiCond.Always",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiCond.Appearing",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiCond.FirstUseEver",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiCond.None",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiCond.Once",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.AlwaysAutoResize",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.AlwaysHorizontalScrollbar",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.AlwaysVerticalScrollbar",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.HorizontalScrollbar",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.MenuBar",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoBackground",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoBringToFrontOnFocus",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoCollapse",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoDecoration",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoFocusOnAppearing",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoInputs",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoMouseInputs",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoMove",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoNav",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoNavFocus",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoNavInputs",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoResize",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoSavedSettings",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoScrollWithMouse",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoScrollbar",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.NoTitleBar",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "ImGuiWindowFlags.None",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "UiForge.CallbackType",
       "reason": null,
       "revision": 1,
@@ -6725,6 +6941,30 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.auction.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.auction.changed.data.open",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.auction.changed.data.revision",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.bank.changed",
       "reason": null,
       "revision": 1,
@@ -7597,6 +7837,30 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.craft.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.craft.changed.data.open",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.craft.changed.data.revision",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.disabling",
       "reason": null,
       "revision": 1,
@@ -7841,6 +8105,30 @@
       "reason": null,
       "revision": 1,
       "round": 2,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.factions.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.factions.changed.data.open",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.factions.changed.data.revision",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
       "status": "supported"
     },
     {
@@ -8301,6 +8589,30 @@
     },
     {
       "children": [],
+      "path": "eqoa.events.mail.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.mail.changed.data.open",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.mail.changed.data.revision",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.events.map.changed",
       "reason": null,
       "revision": 1,
@@ -8710,6 +9022,30 @@
     {
       "children": [],
       "path": "eqoa.events.quests.goals_changed.data.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.raid.changed",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.raid.changed.data.open",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.events.raid.changed.data.revision",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -19427,15 +19763,20 @@
     {
       "children": [
         "eqoa.windows.SessionData.alpha",
+        "eqoa.windows.SessionData.asker",
         "eqoa.windows.SessionData.available",
         "eqoa.windows.SessionData.casting",
         "eqoa.windows.SessionData.catch",
         "eqoa.windows.SessionData.channel",
+        "eqoa.windows.SessionData.choices",
         "eqoa.windows.SessionData.current",
+        "eqoa.windows.SessionData.deadline_ms",
+        "eqoa.windows.SessionData.duration",
         "eqoa.windows.SessionData.entries",
         "eqoa.windows.SessionData.fair_from",
         "eqoa.windows.SessionData.fair_to",
         "eqoa.windows.SessionData.from",
+        "eqoa.windows.SessionData.id",
         "eqoa.windows.SessionData.inventory",
         "eqoa.windows.SessionData.links",
         "eqoa.windows.SessionData.list",
@@ -19450,6 +19791,7 @@
         "eqoa.windows.SessionData.perfect_to",
         "eqoa.windows.SessionData.ready",
         "eqoa.windows.SessionData.reply_to",
+        "eqoa.windows.SessionData.rolls",
         "eqoa.windows.SessionData.slots",
         "eqoa.windows.SessionData.spells",
         "eqoa.windows.SessionData.state",
@@ -19469,6 +19811,14 @@
     {
       "children": [],
       "path": "eqoa.windows.SessionData.alpha",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.asker",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -19508,7 +19858,31 @@
     },
     {
       "children": [],
+      "path": "eqoa.windows.SessionData.choices",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
       "path": "eqoa.windows.SessionData.current",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.deadline_ms",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.duration",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -19541,6 +19915,14 @@
     {
       "children": [],
       "path": "eqoa.windows.SessionData.from",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.id",
       "reason": null,
       "revision": 1,
       "round": 8,
@@ -19653,6 +20035,14 @@
     {
       "children": [],
       "path": "eqoa.windows.SessionData.reply_to",
+      "reason": null,
+      "revision": 1,
+      "round": 8,
+      "status": "supported"
+    },
+    {
+      "children": [],
+      "path": "eqoa.windows.SessionData.rolls",
       "reason": null,
       "revision": 1,
       "round": 8,

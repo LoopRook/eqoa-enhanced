@@ -110,7 +110,8 @@ struct Slot {
 }
 
 impl Slot {
-    fn publish(&self, mut state: Json) {
+    /// The new revision when the state changed (the caller tells `change_events`).
+    fn publish(&self, mut state: Json) -> Option<u64> {
         let mut s = self.state.borrow_mut();
         if let Some(old) = s.as_ref() {
             let mut same = old.clone();
@@ -118,12 +119,18 @@ impl Slot {
             let mut now = state.clone();
             now["revision"] = Json::Null;
             if same == now {
-                return;
+                return None;
             }
         }
         self.revision.set(self.revision.get() + 1);
         state["revision"] = json!(self.revision.get());
         *s = Some(state);
+        Some(self.revision.get())
+    }
+
+    /// Nothing is left to read: the revision the last state had, if there was one.
+    fn clear(&self) -> Option<u64> {
+        self.state.borrow_mut().take().map(|old| old["revision"].as_u64().unwrap_or(0))
     }
 }
 
@@ -134,11 +141,15 @@ thread_local! {
 
 /// The client's reading of the gram client for the open mod mail window.
 pub(crate) fn publish_mail(state: Json) {
-    MAIL.with(|s| s.publish(state));
+    if let Some(revision) = MAIL.with(|s| s.publish(state)) {
+        super::change_events::note(super::change_events::Sys::Mail, revision, true);
+    }
 }
 
 pub(crate) fn clear_mail() {
-    MAIL.with(|s| *s.state.borrow_mut() = None);
+    if let Some(revision) = MAIL.with(Slot::clear) {
+        super::change_events::note(super::change_events::Sys::Mail, revision, false);
+    }
 }
 
 pub(crate) fn current_mail() -> Option<Json> {
@@ -147,11 +158,15 @@ pub(crate) fn current_mail() -> Option<Json> {
 
 /// The client's reading of the auction state for the open mod auction window.
 pub(crate) fn publish_auction(state: Json) {
-    AUCTION.with(|s| s.publish(state));
+    if let Some(revision) = AUCTION.with(|s| s.publish(state)) {
+        super::change_events::note(super::change_events::Sys::Auction, revision, true);
+    }
 }
 
 pub(crate) fn clear_auction() {
-    AUCTION.with(|s| *s.state.borrow_mut() = None);
+    if let Some(revision) = AUCTION.with(Slot::clear) {
+        super::change_events::note(super::change_events::Sys::Auction, revision, false);
+    }
 }
 
 pub(crate) fn current_auction() -> Option<Json> {

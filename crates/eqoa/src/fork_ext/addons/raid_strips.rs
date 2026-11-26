@@ -7,15 +7,19 @@
 
 use super::{
     action_broker::{ActionKind, enqueue_lua_with},
+    change_events::{self, Sys},
     host::Host,
     native::{bind, describe, error, record},
     native_core::CORE,
     native_items::resolve_item_handle,
     native_state::Ref,
+    window_sessions,
+    window_takeover::{self, TakeoverKind},
 };
 use mlua::{Lua, Result, Value};
 use serde_json::{Value as Json, json};
 use std::cell::RefCell;
+use std::hash::{Hash, Hasher};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RaidMemberSnap {
@@ -64,6 +68,21 @@ pub(crate) struct RaidSnapshot {
     pub members: Vec<RaidMemberSnap>,
     pub ready: Option<ReadyCheckSnap>,
     pub rolls: Vec<LootRollEntry>,
+    /// The game's clock (ms) when this was read: told by `fork_ext/win_raid.rs`, used to tell a strip that ran out.
+    pub now_ms: i64,
+}
+
+/// What a strip session of the raid ready check (0) or the loot rolls (1) is doing (`sync_sessions`).
+#[derive(Clone, Copy, Default)]
+struct StripSession {
+    /// The client opened a session for the holder and has not seen it end.
+    open: bool,
+    /// It ended some other way (zoning, the player's switch): the same check is not opened again.
+    blocked: bool,
+    /// The mod answered since the last sync: the end that follows is `answered`.
+    answered: bool,
+    /// The latest deadline the strip had, to tell a strip that ran out from one the server took away.
+    deadline_ms: i64,
 }
 
 #[derive(Default)]
@@ -74,6 +93,9 @@ struct RaidStripStore {
     rolls_key: Vec<(u32, i64, bool)>,
     rolls_revision: u64,
     master_loot: Option<net::raid::MasterLoot>,
+    /// What `raid.changed` last compared against (`change_key`); none until a mod listens, so the first look is a base line.
+    change_base: Option<u64>,
+    strips: [StripSession; 2],
 }
 
 thread_local! {
@@ -101,7 +123,154 @@ pub(crate) fn update(snapshot: RaidSnapshot) {
             s.rolls_revision = s.rolls_revision.saturating_add(1);
         }
         s.snapshot = snapshot;
+        // `raid.changed`: compared only while a mod listens
+        if change_events::wanted(Sys::Raid) {
+            let key = change_key(&s.snapshot);
+            let before = s.change_base.replace(key);
+            if before.is_some_and(|b| b != key) {
+                let open = s.snapshot.in_raid || s.snapshot.ready.is_some() || !s.snapshot.rolls.is_empty();
+                change_events::note(Sys::Raid, change_events::next_revision(Sys::Raid), open);
+            }
+        } else {
+            s.change_base = None;
+        }
     });
+    sync_sessions();
+}
+
+#[cfg(test)]
+pub(crate) fn change_base_for_test() -> bool {
+    STORE.with(|s| s.borrow().change_base.is_some())
+}
+
+/// What `raid.get` says, without what moves on its own: a member's health and power bars (`group.changed` and the
+/// bars are for those) and the seconds left on a strip (its deadline is what is read).
+fn change_key(snap: &RaidSnapshot) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (snap.in_raid, snap.leader_id, snap.helper_id, snap.assist_id, snap.loot_rule, snap.in_combat, snap.leads, snap.helps)
+        .hash(&mut h);
+    for m in &snap.members {
+        (m.id, &m.name, m.group, m.merc, m.leader, m.helper, m.assist).hash(&mut h);
+    }
+    snap.ready.as_ref().map(|r| (r.id, &r.asker, r.deadline_ms)).hash(&mut h);
+    for r in &snap.rolls {
+        (r.id, &r.item_name, &r.item_id, r.icon, r.may_need, r.deadline_ms).hash(&mut h);
+    }
+    h.finish()
+}
+
+/// The mod answered the strip of `kind` (`ready_check_answer`, `loot_roll`): the end that follows is told `answered`.
+pub(crate) fn note_answered(kind: TakeoverKind) {
+    if let Some(i) = strip_index(kind) {
+        STORE.with(|s| s.borrow_mut().strips[i].answered = true);
+    }
+}
+
+fn strip_index(kind: TakeoverKind) -> Option<usize> {
+    match kind {
+        TakeoverKind::RaidReady => Some(0),
+        TakeoverKind::RaidRoll => Some(1),
+        _ => None,
+    }
+}
+
+/// A strip's session data. The seconds left are not in it (they would change it every step): `eqoa.raid.ready_check()`
+/// and `eqoa.raid.loot_rolls()` give them, and `deadline_ms` is the game's clock at the end.
+fn ready_data(snap: &RaidSnapshot) -> Option<Json> {
+    snap.ready.as_ref().map(|r| {
+        json!({"id": r.id, "asker": r.asker, "duration": r.duration, "deadline_ms": r.deadline_ms, "choices": ["ready", "not_ready"]})
+    })
+}
+
+fn roll_data(snap: &RaidSnapshot) -> Option<Json> {
+    if snap.rolls.is_empty() {
+        return None;
+    }
+    let rolls: Vec<Json> = snap
+        .rolls
+        .iter()
+        .map(|r| {
+            let choices: &[&str] = if r.may_need { &["need", "greed", "pass"] } else { &["greed", "pass"] };
+            json!({
+                "id": r.id, "item_name": r.item_name, "item_id": r.item_id, "icon": r.icon, "may_need": r.may_need,
+                "choices": choices, "duration": r.duration, "deadline_ms": r.deadline_ms,
+            })
+        })
+        .collect();
+    Some(json!({"rolls": rolls}))
+}
+
+/// The ready check and the loot rolls a mod holds, as sessions (`windows.session`, spec section 7): opened when a check
+/// or a roll comes while the mod holds the kind, told changed when its data does, ended when it is gone.
+fn sync_sessions() {
+    if !window_takeover::has_activity() && !window_sessions::is_active() {
+        return;
+    }
+    for kind in [TakeoverKind::RaidReady, TakeoverKind::RaidRoll] {
+        let Some(i) = strip_index(kind) else { continue };
+        let (data, now) = STORE.with(|s| {
+            let s = s.borrow();
+            (if i == 0 { ready_data(&s.snapshot) } else { roll_data(&s.snapshot) }, s.snapshot.now_ms)
+        });
+        let holder = window_takeover::holder_vm(kind).zip(window_takeover::holder_of(kind));
+        let mine = window_sessions::held_session(kind);
+        let state = STORE.with(|s| s.borrow().strips[i]);
+        let mut next = state;
+        if let Some(d) = data.as_ref().and_then(|d| d["deadline_ms"].as_i64()) {
+            next.deadline_ms = d;
+        } else if let Some(rolls) = data.as_ref().and_then(|d| d["rolls"].as_array()) {
+            next.deadline_ms = rolls.iter().filter_map(|r| r["deadline_ms"].as_i64()).max().unwrap_or(0);
+        }
+        let holder_gone = holder.is_none();
+        let end_reason = |answered: bool| {
+            if window_takeover::use_game_windows() {
+                "game_windows"
+            } else if holder_gone {
+                "released"
+            } else if answered {
+                "answered"
+            } else if state.deadline_ms != 0 && now >= state.deadline_ms {
+                "timeout"
+            } else {
+                "server"
+            }
+        };
+        match (mine, holder, data) {
+            (Some(h), Some((vm, _)), Some(d)) if h.vm == vm => {
+                if h.data != d {
+                    window_sessions::set_data(&h.id, d);
+                }
+                next.open = true;
+                next.answered = false;
+            }
+            (Some(h), holder, d) => {
+                window_sessions::end_by_id(&h.id, end_reason(state.answered));
+                next.open = false;
+                next.answered = false;
+                next.blocked = false;
+                if let (Some((vm, addon)), Some(d)) = (holder, d) {
+                    window_sessions::start_held_data(vm, &addon, kind, d);
+                    next.open = true;
+                }
+            }
+            (None, Some((vm, addon)), Some(d)) => {
+                if next.open {
+                    // it ended some other way (zoning, a switch of the player's): not opened again for the same check
+                    next.open = false;
+                    next.blocked = true;
+                }
+                if !next.blocked {
+                    window_sessions::start_held_data(vm, &addon, kind, d);
+                    next.open = true;
+                    next.answered = false;
+                }
+            }
+            (None, _, None) | (None, None, Some(_)) => {
+                next = StripSession { deadline_ms: next.deadline_ms, ..StripSession::default() };
+            }
+        }
+        STORE.with(|s| s.borrow_mut().strips[i] = next);
+    }
 }
 
 pub(crate) fn set_master_loot_detail(detail: Option<net::raid::MasterLoot>) {

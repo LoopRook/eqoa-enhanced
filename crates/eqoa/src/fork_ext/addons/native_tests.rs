@@ -38,6 +38,9 @@ pub(crate) const FRAME_EVENTS: &[&str] = &["buffs.changed", "cast.started", "cas
 /// Round A11's events, driven in `a11_play_tests::a11_the_reads_say_what_the_windows_hold`.
 pub(crate) const A11_EVENTS: &[&str] = &["merc.changed", "dye.changed", "fishing.changed"];
 
+/// The change events of the systems that were poll-only (`change_events`), driven in `change_events_tests`.
+pub(crate) const CHANGE_EVENTS: &[&str] = &["craft.changed", "mail.changed", "auction.changed", "raid.changed", "factions.changed"];
+
 /// Round A1's events (window sessions, the pad focus, the question), driven in
 /// `a1_tests::a1_every_new_event_reaches_lua_with_its_declared_fields_and_the_records_match`.
 pub(crate) const A1_EVENTS: &[&str] = &["windows.session", "windows.key", "confirm.closed"];
@@ -246,6 +249,7 @@ fn round7c_supported_event_inventory_has_fixture_coverage() {
         .chain(A7_EVENTS)
         .chain(A9_EVENTS)
         .chain(A11_EVENTS)
+        .chain(CHANGE_EVENTS)
         .copied()
         .chain(["loot.changed", "merchant.changed"])
         .collect::<BTreeSet<_>>();
