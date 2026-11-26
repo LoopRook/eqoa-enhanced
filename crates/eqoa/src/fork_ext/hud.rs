@@ -128,7 +128,16 @@ fn stat_window_held(ask: StatAsk) -> bool {
 }
 
 pub(crate) fn compass_visible(_s: &HudState) -> bool {
+    #[cfg(test)]
+    PATCHES_DRAWN.with(|p| *p.borrow_mut() = Some(_s.patches.iter().map(|m| (m.id, m.pos)).collect()));
     published(|v| !v.compass)
+}
+
+/// The group's compass patches the last HUD frame was given (`Hud::draw_patch` asks `compass_visible` first), for
+/// the tests of the places they are filled from.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static PATCHES_DRAWN: std::cell::RefCell<Option<Vec<(u32, Option<[f32; 3]>)>>> = const { std::cell::RefCell::new(None) };
 }
 
 pub(crate) fn group_compass_marks_visible(_s: &HudState) -> bool {

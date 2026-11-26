@@ -293,3 +293,67 @@ fn sync_review_h3_a_hidden_chat_has_no_scroll_bar_to_press() {
     hide(&[]);
     interface(false);
 }
+
+/// A Channel 0x40 record (`Group::channel40`): id, hp known, hp, world, x, y, z.
+fn channel40_record(id: u32, world: i8, pos: [i16; 3]) -> Vec<u8> {
+    let mut v = id.to_le_bytes().to_vec();
+    v.extend([1, 100, world as u8]);
+    for c in pos {
+        v.extend(c.to_le_bytes());
+    }
+    v
+}
+
+/// The group's compass patches one HUD frame is given: its ids and places.
+fn compass_patches(p: &mut Play) -> Option<Vec<(u32, Option<[f32; 3]>)>> {
+    let (x, z) = (25275.115f32, 15766.627f32);
+    let Some(world) = crate::walker::tests::tunaria_round(x, z) else {
+        eprintln!("SKIP compass patches: no disc");
+        return None;
+    };
+    let instance = render::wgpu::Instance::new(render::wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let Some((device, _queue)) = pollster::block_on(instance.request_adapter(&render::wgpu::RequestAdapterOptions::default()))
+        .ok()
+        .and_then(|a| pollster::block_on(a.request_device(&Default::default())).ok())
+    else {
+        eprintln!("SKIP compass patches: no GPU adapter");
+        return None;
+    };
+    let mut ui = render::ui::Ui::new(&device, render::TARGET_FORMAT, render::DEPTH_FORMAT);
+    let walker = crate::walker::Walker::new(world, x, z, 0.0);
+    let _ = p.loading.wait.take();
+    p.hud = Some((crate::ui::Vui::new(Default::default(), Default::default(), vec![]), Default::default(), crate::hud::Hud::new()));
+    crate::hud::fork_hud::PATCHES_DRAWN.with(|d| *d.borrow_mut() = None);
+    p.draw_hud(&mut ui, &walker, 1000, glam::Mat4::IDENTITY, (640, 448));
+    Some(crate::hud::fork_hud::PATCHES_DRAWN.with(|d| d.borrow().clone()).expect("the HUD frame reached the compass"))
+}
+
+/// Review of sync 2026-11-26, upstream's bug at both plotting sites: a roster member that no Channel 0x40 record has
+/// placed (zero world and place), and one a later record left out (inactive, its old place kept), is not plotted on
+/// the compass: it is not a patch pointing at (0, 0, 0) or at where the groupmate once was. Control: the member the
+/// record names is plotted at its place. Negative control: without `m.active` in `draw_hud`'s patch place, the
+/// never-placed member and the left-out one both get a place. (The world map's dot is the same test at
+/// `map_frame`, which needs a window's device and is not run here.)
+#[test]
+fn sync_review_a_member_that_is_not_active_is_not_a_patch_on_the_compass() {
+    interface(true);
+    let mut p = tests::play();
+    p.session.self_id = Some(1);
+    p.player.world = 0;
+    p.group.in_group = true;
+    let names: Vec<String> = ["Me", "Never", "Gone", "Here"].iter().map(|s| s.to_string()).collect();
+    p.group.roster(&[1, 2, 3, 4], &names, Some(1));
+    let mut both = channel40_record(3, 0, [5, 0, 5]);
+    both.extend(channel40_record(4, 0, [10, 0, 20]));
+    p.group.channel40(&both);
+    // the next record leaves member 3 out: inactive, its old place still in the roster
+    p.group.channel40(&channel40_record(4, 0, [10, 0, 20]));
+    assert!(!p.group.members[1].active && !p.group.members[2].active && p.group.members[3].active, "the roster as the records left it");
+    assert_eq!(p.group.members[2].pos, [5.0, 0.0, 5.0], "the left-out member keeps its old place: the stale one to refuse");
+    let Some(patches) = compass_patches(&mut p) else { return };
+    let place = |id: u32| patches.iter().find(|m| m.0 == id).map(|m| m.1);
+    assert_eq!(place(2), Some(None), "never placed: no patch");
+    assert_eq!(place(3), Some(None), "left out of the last record: no patch");
+    assert_eq!(place(4), Some(Some([10.0, 0.0, 20.0])), "control: the member the record names is plotted");
+    interface(false);
+}

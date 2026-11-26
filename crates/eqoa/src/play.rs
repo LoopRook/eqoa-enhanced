@@ -11532,7 +11532,7 @@ impl Play {
                 .map(|(index, m)| {
                     // the entity's actor while it has one, else channel 0x40's place in this world
                     let actor = if Some(m.id) == me { self.self_at.map(|a| a.0) } else { self.actor_pos(m.id) };
-                    let pos = actor.or_else(|| (m.x == self.world_id()).then_some(m.pos));
+                    let pos = actor.or_else(|| (m.active && m.x == self.world_id()).then_some(m.pos));
                     crate::hud::PatchMember { index, id: m.id, pos }
                 })
                 .collect(),
