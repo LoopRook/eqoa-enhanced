@@ -235,7 +235,9 @@ local function open(page)
             if state.field then stop_typing() end
             return
         end
-        for _, h in ipairs(state.hits) do
+        -- last drawn first: what is on top (an open picker over the column titles) takes the click
+        for i = #state.hits, 1, -1 do
+            local h = state.hits[i]
             if inside(d.x, d.y, h) and h.run then h.run(); return end
         end
         if state.field and not inside(d.x, d.y, state.field_rect) then stop_typing() end
@@ -297,7 +299,7 @@ end
 local SORT_TITLES = { name = "Name", high = "High bid", buy = "Buy now (each)", time = "Time left" }
 local function sort_value(l, key)
     if key == "name" then return (l.name or ""):lower() end
-    if key == "high" then return l.high_bid or -1 end
+    if key == "high" then return l.high_bid end -- nil with no bids: such a lot goes last either way
     if key == "buy" then return (l.buyout or 0) > 0 and l.buyout or nil end
     return l.minutes_left
 end
