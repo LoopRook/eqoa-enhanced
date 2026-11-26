@@ -3725,7 +3725,7 @@ fn stat_window_facts_from_lua(host: &Host) -> crate::statwnd::Facts {
                 s.fire.current, s.cold.current, s.lightning.current, s.arcane.current, s.poison.current, s.disease.current}}
             for i, n in ipairs(order) do f.stats[i] = {p.attributes.total[n], p.attributes.base[n]} end
             local function r(x) return x and {x.low, x.high} or false end
-            if s.figures then f.figures = {melee = r(s.figures.melee), ranged = r(s.figures.ranged), defence = r(s.figures.defence)} end
+            if s.figures then f.figures = {melee = r(s.figures.melee), ranged = r(s.figures.ranged), defense = r(s.figures.defense)} end
             return f
         "#,
         )
@@ -3747,7 +3747,7 @@ fn stat_window_facts_from_lua(host: &Host) -> crate::statwnd::Facts {
         figures: t.get::<Option<mlua::Table>>("figures").unwrap().map_or_else(Default::default, |f| net::statfig::Figures {
             melee: opt(&f, "melee"),
             ranged: opt(&f, "ranged"),
-            defence: opt(&f, "defence"),
+            defence: opt(&f, "defense"),
         }),
     }
 }
@@ -3797,7 +3797,7 @@ fn the_stat_window_can_be_rebuilt_from_the_api() {
         }
     }
     // the text is the window's own ("7" when both ends agree, "12-31" otherwise)
-    host.execute("local f = eqoa.player.stats().figures; assert(f.defence.text == '7' and f.melee.text == '12-31' and f.ranged.text == '9-22' and f.ranged.low == 9)").unwrap();
+    host.execute("local f = eqoa.player.stats().figures; assert(f.defense.text == '7' and f.melee.text == '12-31' and f.ranged.text == '9-22' and f.ranged.low == 9)").unwrap();
     // the existing fields did not move
     host.execute("local s = eqoa.player.stats(); assert(s.hp_max.current == 1000 and s.strength.current == 100 and s.fire.current ~= nil and #s.rows == 16)").unwrap();
 }

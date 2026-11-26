@@ -1332,7 +1332,7 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.player.Stats", "rows" | "columns") => Some("eqoa.player.StatItem"),
         ("eqoa.player.Stats", "resists") => Some("eqoa.player.Stats"),
         ("eqoa.player.Stats", "figures") => Some("eqoa.player.StatFigures"),
-        ("eqoa.player.StatFigures", "melee" | "ranged" | "defence") => Some("eqoa.player.StatRange"),
+        ("eqoa.player.StatFigures", "melee" | "ranged" | "defense") => Some("eqoa.player.StatRange"),
         (
             "eqoa.player.Stats",
             "strength" | "stamina" | "agility" | "dexterity" | "wisdom" | "intelligence"
@@ -1440,7 +1440,7 @@ fn install_fields(lua: &Lua) {
             "eqoa.player.Stats",
             "rows columns resists strength stamina agility dexterity wisdom intelligence charisma armor max_hp hp_max max_power power fire cold lightning arcane poison disease hot pot figures",
         ),
-        ("eqoa.player.StatFigures", "melee ranged defence"),
+        ("eqoa.player.StatFigures", "melee ranged defense"),
         ("eqoa.player.StatRange", "low high text"),
         (
             "eqoa.player.StatItem",
