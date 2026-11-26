@@ -12,7 +12,7 @@ moves over the slots, confirm opens the item's menu (and presses a row), back cl
 The window shows the 40 pack slots as item icons with stack counts and a green
 **E** on worn items, the tunar you carry and used/capacity at the bottom.
 Tabs: **All**, **Usable**, **Equipment**, **Charged**, **Misc** (the game's own
-item-page tabs) and **Bank** (the bank's contents and its tunar, readable anywhere). Hover an item for its card: name, level, and for gear (items with a wear slot) class ("All classes" or "Class: Paladin, Cleric"),
+item-page tabs) and **Bank** (the bank's contents and its tunar, readable anywhere; with a banker in reach the tab refreshes itself when you show it, through the mod's own hidden bank session, with no button to press: out of reach, a plain line says "too far from the banker"). Hover an item for its card: name, level, and for gear (items with a wear slot) class ("All classes" or "Class: Paladin, Cleric"),
 race (only when the item is shut to some races), slot, stats, HP and
 durability, value, and its description at the bottom in grey (wrapped, at most three lines).
 When your class, race or level rule the item out, only that line turns red, with a red "You can't use this"
@@ -77,8 +77,10 @@ exactly as before, and a helper acts only on its button or on its own switch.
   nothing gets sold).
 - **Bank marked**: **Bank this** in an item's menu; near a banker, **Bank marked (N)** deposits the marked stacks (never worn
   ones) and says so when the bank is full.
-- **Do it when I get near**: three switches under the buttons (Sell junk, Restock, Bank), kept for each character, off by
-  default. A helper acts once per approach (it arms again after you have been out of the NPC's reach by 5 more units),
+- **Do it when I get near**: three switches under the buttons (Sell junk, Restock, Bank), kept for each character. **Bank starts ON** for a
+  character with no saved choice (an item marked to bank is a clear instruction); **Sell junk and Restock start OFF** (they
+  sell items and spend tunar). A choice you have made, off included, is kept as it is; a character saved by an older version
+  with only some switches on keeps those, and Bank stays off for it. A helper acts once per approach (it arms again after you have been out of the NPC's reach by 5 more units),
   never while any game window or session of any kind is up, a batch is running, or you are in a fight.
 - **Sell 1 / Sell stack** in an item's menu: for a quick-slotted, no-trade or not ordinary item the game's own question
   comes up (the cases in which the game's own merchant window asks; `eqoa.actions.sell` asks the player itself since the

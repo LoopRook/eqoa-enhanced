@@ -86,7 +86,7 @@ function H.load()
             for line in data:gmatch("[^\r\n]+") do
                 local id, n = line:match("^keep:(%d+)=(%d+)$")
                 local bid = line:match("^bank:(%d+)$")
-                local who, helper = line:match("^auto:(.+):(%a+)=1$")
+                local who, helper, flag = line:match("^auto:(.+):(%a+)=([01])$")
                 if id then
                     n = tonumber(n)
                     if n and n > 0 then H.keep[id] = n end
@@ -94,7 +94,7 @@ function H.load()
                     H.bank[bid] = true
                 elseif who and helper_valid(helper) then
                     H.auto_by_char[who] = H.auto_by_char[who] or {}
-                    H.auto_by_char[who][helper] = true
+                    H.auto_by_char[who][helper] = flag == "1"
                 end
                 -- anything else is ignored (a mark written by a newer version)
             end
@@ -125,7 +125,9 @@ function H.save()
     table.sort(who)
     for _, name in ipairs(who) do
         for _, h in ipairs(H.HELPERS) do
-            if H.auto_by_char[name][h.key] then lines[#lines + 1] = "auto:" .. name .. ":" .. h.key .. "=1" end
+            local v = H.auto_by_char[name][h.key]
+            -- an explicit off is kept ("=0"): a character with a saved choice never falls back to the default
+            if v ~= nil then lines[#lines + 1] = "auto:" .. name .. ":" .. h.key .. (v and "=1" or "=0") end
         end
     end
     eqoa.files.write(FILE, table.concat(lines, "\n") .. (#lines > 0 and "\n" or ""))
@@ -190,15 +192,30 @@ local function character()
     return B.character
 end
 
-function H.auto_on(helper)
-    local who = B.character
-    return who ~= nil and H.auto_by_char[who] ~= nil and H.auto_by_char[who][helper] == true
+-- What a character with no saved choice gets: Bank on (an item marked to bank is a clear instruction); Sell junk and
+-- Restock sell items and spend tunar, so they stay off until the player turns them on.
+H.DEFAULT_AUTO = {sell = false, restock = false, bank = true}
+
+-- Is the helper on for this character? A saved choice (even "off") wins; a character with none gets the default.
+function H.is_on(who, helper)
+    if who == nil then return false end
+    local flags = H.auto_by_char[who]
+    if flags == nil then return H.DEFAULT_AUTO[helper] == true end
+    return flags[helper] == true
 end
 
+function H.auto_on(helper)
+    return H.is_on(B.character, helper)
+end
+
+-- Does anything need the render poll? A saved "on" for any character, or the default for the character in the world (or
+-- one not known yet).
 function H.any_auto()
     for _, flags in pairs(H.auto_by_char) do
-        for _ in pairs(flags) do return true end
+        for _, v in pairs(flags) do if v == true then return true end end
     end
+    local who = B.character
+    if who == nil or H.auto_by_char[who] == nil then return H.DEFAULT_AUTO.bank == true end
     return false
 end
 
@@ -210,9 +227,12 @@ function H.set_auto(helper, on)
         B.dirty()
         return false
     end
-    H.auto_by_char[who] = H.auto_by_char[who] or {}
-    H.auto_by_char[who][helper] = on and true or nil
-    if next(H.auto_by_char[who]) == nil then H.auto_by_char[who] = nil end
+    if H.auto_by_char[who] == nil then
+        -- the first saved choice of a character keeps the defaults of the others, now as saved choices
+        H.auto_by_char[who] = {}
+        for k, v in pairs(H.DEFAULT_AUTO) do H.auto_by_char[who][k] = v end
+    end
+    H.auto_by_char[who][helper] = on and true or false
     H.armed[helper] = nil -- standing there now counts as an approach
     H.save()
     local label
@@ -592,11 +612,10 @@ function H.auto_poll(force)
     H.polls = H.polls + 1
     if not B.character then B.sync_character() end
     local who = B.character
-    local flags = who and H.auto_by_char[who]
-    if not flags then return end
+    if not who then return end
     for _, h in ipairs(H.HELPERS) do
         local key, kind = h.key, NPC_OF[h.key]
-        if flags[key] then
+        if H.is_on(who, key) then
             local dist = B.npc_distance(kind)
             local reach = nil
             if dist ~= nil then reach = B.within_reach(kind, dist) end
@@ -632,6 +651,41 @@ function H.auto_poll(force)
             H.armed[key] = nil
         end
     end
+end
+
+-- The Bank tab keeps itself current: with a banker in reach and the tab shown, the mod talks to the banker through its
+-- hidden session (the one the tab then holds), so the contents are what the server has now. It asks once on showing the
+-- tab, once when a banker comes into reach, and again when the session it held has ended (after the mod's own bank
+-- actions that let go of it); never every frame, and never into a busy moment. Out of reach it asks nothing (the tab's
+-- status line says "too far from the banker"). Called each time the window is drawn.
+function H.bank_tab_tick()
+    if B.tab ~= 6 then
+        H.bank_refresh_wanted, H.bank_near_seen, H.bank_was_open = true, nil, nil
+        return
+    end
+    local bank = eqoa.bank.get()
+    local open = bank ~= nil and bank.open == true
+    if open then
+        H.bank_was_open = true
+        return
+    end
+    if H.bank_was_open then H.bank_was_open, H.bank_refresh_wanted = nil, true end -- the session ended: ask again
+    if B.nearby_npc("bank", B.DRAW_TTL) == nil then
+        H.bank_near_seen = false
+        return
+    end
+    if H.bank_near_seen ~= true then H.bank_near_seen, H.bank_refresh_wanted = true, true end
+    if not H.bank_refresh_wanted then return end
+    if B.pending_open or B.batch_id or B.last_req or (B.multi and B.multi.busy and B.multi.busy()) then return end
+    if eqoa.merchant.get() ~= nil or eqoa.loot.get() ~= nil then return end
+    if B.auction_list and B.auction_list.busy and B.auction_list.busy() then return end
+    if B.too_far("bank", B.DRAW_TTL) then return end
+    H.bank_refresh_wanted = false
+    H.bank_refreshes = (H.bank_refreshes or 0) + 1
+    B.open_talk_npc("bank", "Bank", function()
+        B.result = {text = "Bank refreshed", ok = true}
+        B.dirty()
+    end)
 end
 
 -- A new world or login: nothing has been approached yet

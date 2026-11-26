@@ -5192,11 +5192,11 @@ fn a0_bag_viewer_helper_switches_marks_and_buttons_are_drawn_and_clickable_body(
     bv.enable();
     bv.open();
     bv.frames(2);
-    // the three switches are always there and all off
+    // the three switches are always there: Bank on for a character with no saved choice, the other two off
     for label in ["Auto sell junk", "Auto restock", "Auto bank"] {
         assert!(bv.action_hit(label).is_some(), "{label} is drawn");
     }
-    assert!(!bv.eval::<bool>("require('helpers').any_auto()"), "off by default");
+    assert!(bv.eval::<bool>("require('helpers').auto_on('bank') and not require('helpers').auto_on('sell') and not require('helpers').auto_on('restock')"), "Bank on, the others off by default");
     assert!(bv.action_hit("Restock (").is_none() && bv.action_hit("Bank marked").is_none(), "no buttons without a mark");
     // a click on a switch turns that helper on for this character and saves it
     let (x, y, _) = bv.action_hit("Auto restock").unwrap();
@@ -5206,7 +5206,7 @@ fn a0_bag_viewer_helper_switches_marks_and_buttons_are_drawn_and_clickable_body(
     assert!(bv.eval::<String>("eqoa.files.read('helpers.cfg')").contains("restock=1"));
     bv.click((x, y));
     bv.frames(2);
-    assert!(!bv.eval::<bool>("require('helpers').any_auto()"), "a second click turns it off again");
+    assert!(!bv.eval::<bool>("require('helpers').auto_on('restock')"), "a second click turns it off again");
 
     // the marks are in an item's menu: Bank this (Rat Pelt, slot 7) and Keep up to N (Healing Potion, slot 2)
     bv.click(bv.slot(7));

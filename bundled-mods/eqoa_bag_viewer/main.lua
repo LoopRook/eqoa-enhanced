@@ -407,11 +407,17 @@ function draw()
     local is_corpse = B.tab == 7
     if is_corpse then B.renew_loot_session() end
     local is_bank = B.tab == 6
+    HP.bank_tab_tick()
+    -- the Bank tab's status line (replaces the old "Open bank" button): only the reason a banker cannot be reached
+    local bank_status
+    if is_bank and not bank_open_now and B.nearby_npc("bank", B.DRAW_TTL) ~= nil then
+        bank_status = B.too_far("bank", B.DRAW_TTL)
+    end
     local has_ctx_btn = is_corpse
         or eqoa.merchant.get() ~= nil
         or eqoa.loot.get() ~= nil
         or B.nearby_npc("merchant", B.DRAW_TTL) ~= nil
-        or (is_bank and not (eqoa.bank.get() and eqoa.bank.get().open) and B.nearby_npc("bank", B.DRAW_TTL) ~= nil)
+        or bank_status ~= nil
     local money_y = has_ctx_btn and (bar2_y + 18) or bar2_y
     local row3_y = show_money and (money_y + 18) or money_y
     local row4_y = has_row3 and (row3_y + 18) or row3_y
@@ -617,7 +623,7 @@ function draw()
         }
     end
 
-    -- Row 2: Corpse (Open nearest corpse / Take all / Take all but junk), Merchant (Sell junk), or Bank (Open bank).
+    -- Row 2: Corpse (Open nearest corpse / Take all / Take all but junk), Merchant (Sell junk), or the Bank tab's status line.
     local function ctx_btn(bx, bw, lbl, col, bcol, run)
         fill(bx, bar2_y, bw, 16, c.raised)
         frame(bx, bar2_y, bw, 16, bcol)
@@ -648,23 +654,9 @@ function draw()
         local _, cnt, tunar = B.junk_sell_list()
         local lbl = string.format("Sell junk (%d %s, %s tunar)", cnt, cnt == 1 and "item" or "items", B.tunar(tunar))
         ctx_btn(PAD, W - 2 * PAD, lbl, cnt > 0 and c.text or c.muted, cnt > 0 and c.junk or c.border, B.start_sell_junk)
-    elseif is_bank and not (eqoa.bank.get() and eqoa.bank.get().open) and B.nearby_npc("bank", B.DRAW_TTL) ~= nil then
-        local far = B.too_far("bank", B.DRAW_TTL)
-        if far then
-            ctx_btn(PAD, W - 2 * PAD, "Open bank: " .. far, c.muted, c.border, function()
-                B.open_talk_npc("bank", "Open bank", function()
-                    B.result = {text = "Bank ready", ok = true}
-                    B.dirty()
-                end)
-            end)
-        else
-            ctx_btn(PAD, W - 2 * PAD, "Open bank", c.text, c.worn, function()
-                B.open_talk_npc("bank", "Open bank", function()
-                    B.result = {text = "Bank ready", ok = true}
-                    B.dirty()
-                end)
-            end)
-        end
+    elseif bank_status ~= nil then
+        -- not a button: the tab refreshes itself near a banker (`HP.bank_tab_tick`); this line says why it cannot
+        text(PAD, bar2_y + 2, bank_status, c.muted, W - 2 * PAD)
     elseif B.nearby_npc("merchant", B.DRAW_TTL) ~= nil then
         local _, cnt = B.junk_sell_list()
         local far = B.too_far("merchant", B.DRAW_TTL)
@@ -760,7 +752,7 @@ function draw()
         end
     end
 
-    -- Row 4: do it automatically when I get near (each helper's own choice, per character, off by default)
+    -- Row 4: do it automatically when I get near (each helper's own choice, per character; Bank starts on, the other two off)
     do
         local lead = "Do it when I get near:"
         text(PAD, row4_y + 2, lead, c.muted)
