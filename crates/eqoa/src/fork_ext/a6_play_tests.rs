@@ -1013,9 +1013,18 @@ fn a6_every_entry_of_the_discs_menu_leaves_the_player_able_to_go_on() {
         if command.starts_with("0x8010000:") {
             assert!(ws::get(r.hot.vm, "spellbook").is_some() && r.p.mode == 0, "{what}: EQOA Spellbook opened, not the game's page (mode {})", r.p.mode);
         }
-        // Support (the game's report routes) is the player's to press in the game's own menu: the hand-off opens it
+        // Support: Request Help and Help Status open the game's own Support windows in one click (the request form,
+        // mode 31, and the inbox, mode 32; owner 2026-11-26). Send Report is the report editor no mod may open: the
+        // hand-off opens the game's own Start menu for it, as before
         if command.starts_with("0xb0b1") {
-            assert_eq!(r.p.mode, 13, "{what}: the game's own Start menu opened for the Support forms");
+            let want = if command.starts_with("0xb0b1000:") {
+                31
+            } else if command.starts_with("0xb0b1001:") {
+                32
+            } else {
+                13
+            };
+            assert_eq!(r.p.mode, want, "{what}: the game's own Support window (or, for Send Report, its Start menu) opened");
         }
         // the game's window (if any) closes the way the game's own do
         match r.p.mode {
