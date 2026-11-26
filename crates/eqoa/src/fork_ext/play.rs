@@ -347,7 +347,7 @@ pub(crate) fn number_tags_wanted() -> bool {
     false
 }
 
-/// The Stat Window's offence and defence figures (`Session::agree_stat_figures`) are asked for while a mod holds the
+/// The Stat Window's offense and defense figures (`Session::agree_stat_figures`) are asked for while a mod holds the
 /// game's Stat Window back (`hud.hide("stat_window")`), whatever the player's own Stat Window setting says: the mod draws
 /// its own and reads `eqoa.player.stats().figures`, and F4 and `/stats` do nothing while it holds the window, so the
 /// setting cannot be turned on from the game. A server that turns the window off (`qol::STAT_CAPS`) is not asked, and

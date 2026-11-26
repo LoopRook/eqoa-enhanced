@@ -153,7 +153,7 @@ impl Row {
 pub struct View {
     pub rows: [[Row; 8]; 2],
     /// What the game's Stat Window also shows (`statwnd::Facts`): heal and power over time (the
-    /// channel's 12 and 13) and the server's offence and defence figures.
+    /// channel's 12 and 13) and the server's offense and defense figures.
     pub hot: i32,
     pub pot: i32,
     pub figures: net::statfig::Figures,
