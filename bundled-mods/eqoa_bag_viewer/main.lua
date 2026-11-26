@@ -370,6 +370,12 @@ eqoa.events.on("disabling", function()
 end)
 
 function draw()
+    -- the Auction button stepped aside (set below): close after this frame's work is done, not inside a click
+    if B.step_aside then
+        B.step_aside = nil
+        close()
+        return
+    end
     AL.tick()
     local grid = B.grid
     if grid == nil or B.is_grid_stale() then
@@ -590,6 +596,10 @@ function draw()
         run = function()
             if not eqoa.mods.send("eqoa_auction", "open") then
                 B.result = {text = "The Auction window is a mod: turn on EQOA Auction in Mods & Addons", ok = false}
+            else
+                -- eqoa/1 lets one mod read nothing of another's window, so Bags cannot come back by itself when
+                -- Auction closes: it steps aside (closes) and the Bags key (Shift+B) opens it again
+                B.step_aside = true
             end
         end,
     }

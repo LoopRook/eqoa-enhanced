@@ -22,6 +22,10 @@ newest first ("12:41 Rusty Sword x1, from a decaying skeleton"; the corpse is na
 the corpse you asked to loot); the wheel scrolls it. Moving, selling,
 looting and banking stay in the game's windows.
 
+The **Auction** button (top right) opens the EQOA Auction mod's window and closes the Bags window so the two do not
+sit on top of each other. Bags does not come back by itself when Auction closes: `eqoa/1` gives a mod no way to read
+another mod's window, so press the Bags key (Shift+B) again.
+
 Buttons (this version): **Look at corpse** only shows the nearest corpse's items;
 **Take all** and **Take all but junk** take them. Mark items as junk from an item's
 menu; **Sell junk** sells them at a merchant. **Auto-loot** is a choice under the
