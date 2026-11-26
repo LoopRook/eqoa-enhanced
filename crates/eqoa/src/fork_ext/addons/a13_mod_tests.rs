@@ -341,6 +341,55 @@ fn a13_world_map_sets_the_games_waypoint_and_searches_places_without_map_search(
     assert_eq!(rig.lua_f64("#world_map.results"), 0.0);
 }
 
+/// Owner 2026-11-26: the World Map's box finds creatures (the live ones Map Search lists, with the same filter) and group
+/// members as well as places; a pick centres the map on it; the box says "Find a place or creature...".
+#[test]
+fn owner1126_world_map_search_finds_live_creatures_and_places_still_work() {
+    fresh();
+    let entity = |id: u64, name: &str, hp: f64, corpse: bool, at: [f64; 2]| {
+        json!({
+            "ref": {"$ref": "entity", "key": id.to_string(), "generation": 0, "incarnation": 1},
+            "id": id, "name": name, "level": 7, "kind": "npc", "is_creature": true, "corpse": corpse, "hp_fraction": hp,
+            "search_flags": 0, "class_code": 0, "world_id": 0,
+            "position": {"x": at[0], "y": 0.0, "z": at[1]}, "actor_position": {"x": at[0], "y": 0.0, "z": at[1]},
+        })
+    };
+    CORE.with(|c| {
+        c.borrow_mut().view.entities = vec![
+            entity(8001, "Zzyzx Gnoll", 1.0, false, [25500.0, 15400.0]),
+            entity(8002, "Zzyzx Gnoll", 1.0, false, [25350.0, 15250.0]),
+            entity(8003, "Zzyzx Corpse", 0.0, true, [25310.0, 15210.0]),
+        ];
+    });
+    let mut rig = rig([1024.0, 768.0], None);
+    rig.open();
+    let at = rig.hit("search");
+    rig.press(at, "left");
+    for ch in "zzyzx".chars() {
+        rig.key(&ch.to_string(), &ch.to_string(), true);
+    }
+    rig.frames(2);
+    // the two live ones are listed (the corpse is not), the nearer first, marked as creatures
+    assert_eq!(rig.lua_f64("#world_map.results"), 2.0, "{}", rig.lua_str("#world_map.results"));
+    assert_eq!(rig.lua_str("world_map.results[1].kind:sub(1, 8) .. world_map.results[1].x"), "creature25350");
+    let before = (rig.lua_f64("world_map.view.x"), rig.lua_f64("world_map.view.z"));
+    rig.key("Enter", "", true);
+    let after = (rig.lua_f64("world_map.view.x"), rig.lua_f64("world_map.view.z"));
+    assert_eq!(after, (25350.0, 15250.0), "Enter centred the map on the nearer creature (from {before:?})");
+    assert!(rig.lua_f64("world_map.found.x") == 25350.0, "and marked it");
+    // control: one letter lists no creatures; a creature name no one has finds nothing
+    let at = rig.hit("search");
+    rig.press(at, "left");
+    rig.key("z", "z", true);
+    let creatures = "(function() local n = 0 for _, r in ipairs(world_map.results) do if r.kind:find('^creature') then n = n + 1 end end return n end)()";
+    assert_eq!(rig.lua_f64(creatures), 0.0, "control: one letter lists no creature");
+    // control: with no creature in view the same query finds nothing
+    CORE.with(|c| c.borrow_mut().view.entities = vec![]);
+    rig.key("z", "z", true);
+    rig.frames(2);
+    assert_eq!(rig.lua_f64(creatures), 0.0, "control: no creature in view, none listed");
+}
+
 #[test]
 fn a13_world_map_text_fits_its_window_at_the_default_and_the_smallest_size() {
     fresh();

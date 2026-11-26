@@ -23,6 +23,7 @@
     "eqoa.player.get",
     "eqoa.entities.dots",
     "eqoa.entities.find",
+    "eqoa.entities.named",
     "eqoa.group.get",
     "eqoa.target.get",
     "eqoa.input.get",
