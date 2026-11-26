@@ -768,6 +768,7 @@ const ID_NUMBERS: &[(&str, &[&str])] = &[
         &[
             "eqoa.mail.Entry.id", "eqoa.mail.Message.id", "eqoa.merc.Record.id", "eqoa.raid.LootRollItem.id",
             "eqoa.raid.ReadyCheckData.id", "eqoa.chat.ChatLink.id", "eqoa.windows.Confirm.id",
+            "eqoa.windows.SessionData.id",
         ],
     ),
     (
