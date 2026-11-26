@@ -3,9 +3,15 @@
 use super::super::named_profiles::{Character, CharacterSnapshot, DEFAULT, Document, Store};
 use super::*;
 use dear_imgui_rs::{Context, Ui};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 const SWITCH_RETRY_DELAY: Duration = Duration::from_secs(2);
+static NEXT_NAMED_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_named_session_id() -> u64 {
+    NEXT_NAMED_SESSION_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 pub(crate) enum ProfileAction {
     Load(String),
@@ -23,6 +29,10 @@ pub(super) struct NamedSession {
     pub data: Document,
     pub active: String,
     pub dirty: bool,
+    /// Globally unique id for this named-profile session (and bumped on every profile replacement).
+    pub session_id: u64,
+    /// Monotonic revision bumped whenever `data`, `active`, or `writable` changes.
+    pub generation: u64,
     pub(super) writable: bool,
     shutdown_save_failed: bool,
     pub(super) store: Store,
@@ -40,6 +50,9 @@ struct Setup {
     selected: String,
 }
 impl NamedSession {
+    pub(super) fn bump_generation(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+    }
     fn current_character(&self) -> Option<&Character> {
         self.retry
             .as_ref()
@@ -108,6 +121,8 @@ impl Manager {
             data,
             active: DEFAULT.into(),
             dirty: recorded && writable,
+            session_id: next_named_session_id(),
+            generation: 1,
             writable,
             shutdown_save_failed: false,
             store,
@@ -227,6 +242,7 @@ impl Manager {
         data.layout = ini;
         s.data = data;
         s.dirty = true;
+        s.bump_generation();
         Ok(())
     }
     pub(super) fn capture_shutdown_profile(&mut self) {
@@ -245,6 +261,7 @@ impl Manager {
             Ok(data) => {
                 s.data = data;
                 s.dirty = true;
+                s.bump_generation();
             }
             Err(error) => {
                 // Runtime force-flushes the layout after cleanup. It must not
@@ -370,6 +387,8 @@ impl Manager {
         s.data = data;
         s.dirty = false;
         s.writable = true;
+        s.session_id = next_named_session_id();
+        s.generation = 1;
     }
     fn load_named(
         &mut self,
@@ -625,7 +644,10 @@ impl Manager {
             if !s.apply_initial {
                 let mut ini = String::new();
                 context.save_ini_settings(&mut ini);
-                s.data.layout = ini;
+                if s.data.layout != ini {
+                    s.data.layout = ini;
+                    s.bump_generation();
+                }
             }
             let result = if s.writable && force {
                 // Quit: nothing runs after this, so wait for the disk (after the earlier background writes).

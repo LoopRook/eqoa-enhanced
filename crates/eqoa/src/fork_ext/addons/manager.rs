@@ -98,6 +98,15 @@ enum Disposition {
     Retire,
 }
 
+/// Identity of the settings source last pushed to an instance's `native_settings` slot.
+/// Legacy storage and each named-profile session/switch have distinct identities so a
+/// newly created or switched session can never collide with a previous generation number.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SettingsConfig {
+    Legacy(u64),
+    Named { session_id: u64, generation: u64 },
+}
+
 struct Instance {
     // Function and Lua closures drop before the bank's final renderer reference.
     function: Function,
@@ -111,6 +120,8 @@ struct Instance {
     active: bool,
     ejected: bool,
     resources_retired: bool,
+    /// Settings source/generation last pushed to `native_settings`.
+    settings_config: Option<SettingsConfig>,
 }
 
 struct Entry {
@@ -145,6 +156,9 @@ pub(crate) struct Manager {
     health_waiting: bool,
     health_claims: Rc<RefCell<super::health::HealthBarClaimsRegistry>>,
     hud_claims: Rc<RefCell<super::visibility::HudClaimsRegistry>>,
+    legacy_settings_gen: u64,
+    #[cfg(test)]
+    settings_configures: std::cell::Cell<u64>,
 }
 
 impl Manager {
@@ -176,6 +190,9 @@ impl Manager {
             health_waiting: false,
             health_claims: Rc::new(RefCell::new(super::health::HealthBarClaimsRegistry::new())),
             hud_claims: Rc::new(RefCell::new(super::visibility::HudClaimsRegistry::new())),
+            legacy_settings_gen: 0,
+            #[cfg(test)]
+            settings_configures: std::cell::Cell::new(0),
         };
         match manager.storage.disclosures() {
             Ok(disclosures) => manager.disclosures = disclosures,
@@ -664,6 +681,7 @@ impl Manager {
             active: false,
             ejected: false,
             resources_retired: false,
+            settings_config: None,
         })
     }
 
@@ -714,9 +732,14 @@ impl Manager {
                         .map(|value| {
                             s.data.addons.insert(entry.key.clone(), value);
                             s.dirty = true;
+                            s.bump_generation();
                         })
                         .map_err(|e| e.to_string())
                 } else {
+                    self.legacy_settings_gen = self.legacy_settings_gen.wrapping_add(1);
+                    if let Some(i) = entry.instance.as_mut() {
+                        i.settings_config = None;
+                    }
                     // The synchronous write must land after any earlier background write of this file.
                     self.flush_writes();
                     self.storage.save_profile(&entry.key, value)
@@ -795,6 +818,7 @@ impl Manager {
         {
             // Clear before invoking user code so a failing cleanup cannot repeat.
             i.active = false;
+            i.settings_config = None;
             i.sound_bank.borrow_mut().set_active(false);
             if let Err(e) = Self::invoke(i, 1, Value::Nil, rendering) {
                 entry.status = Status::Failed;
@@ -838,10 +862,23 @@ impl Manager {
         entry.limit_blocked = false;
         self.disable(entry, rendering, false, Disposition::Retire);
     }
-    fn configure_native_settings(&self, entry: &Entry) {
-        let Some(i) = &entry.instance else {
+    fn current_settings_config(&self) -> SettingsConfig {
+        match &self.named {
+            Some(s) => SettingsConfig::Named {
+                session_id: s.session_id,
+                generation: s.generation,
+            },
+            None => SettingsConfig::Legacy(self.legacy_settings_gen),
+        }
+    }
+    fn configure_native_settings(&self, entry: &mut Entry) {
+        let Some(i) = &mut entry.instance else {
             return;
         };
+        let target = self.current_settings_config();
+        if i.settings_config == Some(target) {
+            return;
+        }
         let key = entry.key.clone();
         let (value, writer): (Option<serde_json::Value>, super::native_settings::Writer) =
             if let Some(s) = &self.named {
@@ -873,6 +910,10 @@ impl Manager {
                 (value, writer)
             };
         super::native_settings::configure(&i.host, value, writer);
+        i.settings_config = Some(target);
+        #[cfg(test)]
+        self.settings_configures
+            .set(self.settings_configures.get().wrapping_add(1));
     }
     fn collect_native_settings(&mut self, entry: &Entry) {
         let Some(i) = &entry.instance else {
@@ -885,6 +926,7 @@ impl Manager {
         if let (Some(value), Some(s)) = (value, self.named.as_mut()) {
             s.data.addons.insert(entry.key.clone(), value);
             s.dirty = true;
+            s.bump_generation();
         }
     }
 
@@ -922,6 +964,7 @@ impl Manager {
                     let legacy_enable = if let Some(s) = &mut self.named {
                         s.data.enabled.insert(entry.key.clone(), enabled);
                         s.dirty = true;
+                        s.bump_generation();
                         None
                     } else {
                         Some((entry.key.as_str(), enabled))
