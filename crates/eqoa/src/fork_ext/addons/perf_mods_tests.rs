@@ -28,6 +28,51 @@ fn chat_with_long_lines(lines: usize) -> (Host, Bridge, Context) {
     (host, bridge, context)
 }
 
+/// Owner 2026-11-26: the line being typed wraps at the window's inner width (words whole, a long word broken inside), grows
+/// upward by a row each, to four rows, then shows its last four so the caret at the end stays in view.
+#[test]
+fn owner1126_chat_the_line_being_typed_wraps_inside_the_window_and_grows_upward() {
+    let (host, bridge, mut context) = chat_with_long_lines(3);
+    frames(&host, &bridge, &mut context, 3);
+    let vm = native_events::bus(&host.lua).borrow().vm;
+    let open = |text: &str| {
+        ws::open_client(vm, "eqoa_chat", "chat_entry", "key", json!({"channel": "say", "text": text}));
+        native_core::flush_deferred();
+    };
+    let probe = |host: &Host| -> (i64, f64, f64, f64, String, f64) {
+        host.lua
+            .load("local s = chat_probe.state; return #s.entry_rows, s.entry_fit.widest, s.entry_fit.limit, s.entry_fit.full, table.concat(s.entry_rows, '|'), s.rect.y + s.rect.h")
+            .eval()
+            .unwrap()
+    };
+    // a short line: one row, the old height
+    open("hello");
+    frames(&host, &bridge, &mut context, 3);
+    let (rows, _, _, _, _, bottom) = probe(&host);
+    assert_eq!(rows, 1);
+    // close it and type a long line of words: more than one row, none wider than the window, the bottom edge kept
+    host.lua.load("chat_probe.state.text = 'the quick brown fox jumps over the lazy dog and then it keeps on running past the edge of the window to be sure'").exec().unwrap();
+    frames(&host, &bridge, &mut context, 3);
+    let (rows, widest, limit, full, shown, bottom2) = probe(&host);
+    assert!(rows > 1 && rows <= 4, "wrapped to {rows} rows: {shown}");
+    assert!(widest <= limit + 0.01, "no row wider than the window: {widest} > {limit}");
+    assert!(full > limit, "control: on one row the line would have run off the right edge ({full} > {limit})");
+    assert!(shown.ends_with('_'), "the caret ends the last row: {shown}");
+    assert!((bottom2 - bottom).abs() < 0.5, "it grew upward: the bottom edge stayed ({bottom} -> {bottom2})");
+    // each row break fell on a word boundary: the rows put back together are the line
+    assert_eq!(shown.replace('|', " ").replace('_', ""), host.lua.load("return chat_probe.state.text").eval::<String>().unwrap(), "{shown}");
+    // one long word breaks inside itself, still inside the window
+    host.lua.load("chat_probe.state.text = string.rep('W', 60)").exec().unwrap();
+    frames(&host, &bridge, &mut context, 3);
+    let (rows, widest, limit, _, shown, _) = probe(&host);
+    assert!(rows > 1 && widest <= limit + 0.01, "a long word: {rows} rows, {widest} <= {limit}: {shown}");
+    // past four rows the last four show, with the caret
+    host.lua.load("chat_probe.state.text = string.rep('W', 110)").exec().unwrap();
+    frames(&host, &bridge, &mut context, 3);
+    let (rows, widest, limit, _, shown, _) = probe(&host);
+    assert!(rows <= 4 && widest <= limit + 0.01 && shown.ends_with('_'), "{rows} rows: {shown}");
+}
+
 #[test]
 fn perf_chat_measures_a_line_once_and_draws_the_next_frames_from_memory() {
     let (host, bridge, mut context) = chat_with_long_lines(60);

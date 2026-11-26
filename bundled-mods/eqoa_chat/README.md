@@ -23,6 +23,8 @@ A chat window of this mod's own, bottom left. The game's chat box is hidden whil
 - **Enter** (and the `/` key, and the **R** and **T** keys) opens the mod's entry line instead of the game's. On a
   **controller**, R3 still opens the game's own line (it has the pad's soft keyboard and a cancel button; a mod's line
   would take the whole pad while you type). Type, press **Enter** to send, **Esc** to cancel. An empty Enter just closes it.
+  A long line **wraps inside the window** (words kept whole, a long word broken inside it) and the window grows upward by a
+  row for each wrapped row, up to four rows; past that the last four show, so the end you are typing at stays in view.
 - **Channel picker.** **Say, Group, Guild, Shout, Tell, Reply** under the window while you type; click one or press
   **Tab** to go round (typing keeps going into the line). Say, Group, Guild and Shout also set the game's chat mode (what Community > Chat Modes sets),
   so the game and this window agree. **Tell**: type the player's name, a space, then the message. **Reply** goes to
