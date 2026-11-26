@@ -514,7 +514,7 @@ mod tests {
         );
         assert_eq!(
             (w.cat_sel, cues.last()),
-            (in_ui.len() as i32 - 1, Some(&9)),
+            (in_other.len() as i32 - 1, Some(&9)),
             "fork category end stops"
         );
         assert!(
