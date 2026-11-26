@@ -822,6 +822,83 @@ fn round_minimap_stays_in_window_coordinates_at_aspects_and_render_scales_body()
     }
 }
 
+/// The round picture, its ring, the hover and the pointer claim follow the game's minimap piece: where it is and
+/// HUD Scale, in the PC interface and the controller one. (Owner's report 2026-11-26: at HUD Scale 85 on the PC
+/// interface the picture was drawn at 100% size over a ring that had shrunk, spilling past it.)
+#[test]
+fn round_minimap_follows_hud_scale_in_both_interfaces() {
+    big_stack(round_minimap_follows_hud_scale_in_both_interfaces_body)
+}
+fn round_minimap_follows_hud_scale_in_both_interfaces_body() {
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let mut at_100: Option<f64> = None;
+    for (pc, percent) in [(true, 100u8), (true, 85), (true, 150), (false, 100), (false, 75)] {
+        let Some(mut rm) = Rm::sized(|p| p == "eqoa_round_minimap", 0, RM_SIZE, 1) else { return };
+        crate::settings::set_ui_mode(pc).unwrap();
+        crate::settings::set_hud_scale_percent(percent);
+        crate::hudlayout::testing_reset();
+        super::super::hud_layout::set_hud_state(true, true, false, 93, 0);
+        super::super::hud_layout::set_window_size(RM_SIZE.0, RM_SIZE.1);
+        let note = format!("{} interface at HUD Scale {percent}%", if pc { "PC" } else { "controller" });
+        let layout = super::super::hud_layout::hud_layout_json(RM_SIZE);
+        assert_eq!(layout["pc_mode"].as_bool(), Some(pc), "{note}: the interface reached the layout");
+        assert!((layout["hud_scale"].as_f64().unwrap() - percent as f64 / 100.0).abs() < 1e-6, "{note}: the HUD Scale reached the layout: {:?}", layout["hud_scale"]);
+        rm.frames(4);
+        let t = rm.frames(2);
+        let pixels = rm_pixels(&rm.gpu, &t);
+        let px = |x: f64, y: f64| rm_px_in(&pixels, t.width(), x, y);
+        rm_png(&pixels, &format!("hudscale-{}-{percent}.png", if pc { "pc" } else { "controller" }));
+        let (cx, cy, r) = rm.circle();
+        let k = r / 50.0;
+        assert_eq!(rm.state::<Option<String>>("round_minimap.image_error"), None, "{note}");
+        // the circle is the stock piece's size, so it is as big as HUD Scale makes the minimap
+        let stock = rm.stock_rect();
+        assert!((r - (stock[2] - stock[0]) as f64 * 50.0 / 112.0).abs() < 0.5, "{note}: circle radius {r} against the piece {stock:?}");
+        match percent {
+            100 => {
+                if pc {
+                    at_100 = Some(r);
+                }
+            }
+            _ if pc => {
+                let base = at_100.expect("the 100% case runs first");
+                assert!((r - base * percent as f64 / 100.0).abs() < 1.0, "{note}: radius {r} is {percent}% of {base}");
+            }
+            _ => {}
+        }
+        let picture = |p: [u8; 4]| {
+            let c = RM_GREEN.map(|c| (c * 255.0) as i32);
+            (0..3).all(|i| (p[i] as i32 - c[i]).abs() < 12)
+        };
+        for (sx, sy) in [(0.5, 0.5), (-0.5, -0.5), (0.5, -0.5), (-0.5, 0.5)] {
+            assert!(picture(px(cx + sx * r, cy + sy * r)), "{note}: picture at ({sx}, {sy})");
+        }
+        // the picture fills the ring on every side and stops at it: nothing of it past the ring, nothing short
+        for (sx, sy) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
+            assert_eq!(px(cx + sx * r * 0.95, cy + sy * r * 0.95), RM_BG, "{note}: corner ({sx}, {sy}) cut off");
+            let ring = px(cx + sx * s * (r + 1.5 * k), cy + sy * s * (r + 1.5 * k));
+            assert!((0..3).all(|i| (ring[i] as i32 - 51).abs() < 14), "{note}: ring at the diagonal ({sx}, {sy}): {ring:?}");
+            assert_eq!(px(cx + sx * s * (r + 5.0 * k), cy + sy * s * (r + 5.0 * k)), RM_BG, "{note}: the picture spills past the ring at ({sx}, {sy})");
+            assert!(picture(px(cx + sx * s * (r - 2.0 * k), cy + sy * s * (r - 2.0 * k))), "{note}: the picture stops short of the ring at ({sx}, {sy})");
+        }
+        for (sx, sy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+            let ring = px(cx + sx * (r + 1.5 * k), cy + sy * (r + 1.5 * k));
+            assert!((0..3).all(|i| (ring[i] as i32 - 51).abs() < 14), "{note}: ring on the axis ({sx}, {sy}): {ring:?}");
+            assert!(picture(px(cx + sx * (r - 2.0 * k), cy + sy * (r - 2.0 * k))), "{note}: picture up to the ring ({sx}, {sy}): {:?} at ({}, {}), circle {:?}", px(cx + sx * (r - 2.0 * k), cy + sy * (r - 2.0 * k)), cx + sx * (r - 2.0 * k), cy + sy * (r - 2.0 * k), (cx, cy, r));
+            assert_eq!(px(cx + sx * (r + 5.0 * k), cy + sy * (r + 5.0 * k)), RM_BG, "{note}: nothing outside the ring ({sx}, {sy})");
+        }
+        // the dots, the hover and the claim are where the picture draws them
+        let (dx, dy) = rm.dot_at(rm.me[0] + 40.0, rm.me[2] + 30.0);
+        let dot = |p: [u8; 4]| p[0] > 200 && p[1] < 120 && p[2] > 200;
+        assert!((-3..=3).any(|ox| (-3..=3).any(|oy| dot(px(dx + ox as f64, dy + oy as f64)))), "{note}: the native dot is where the hit test looks");
+        assert_eq!(rm.hover(dx, dy).as_deref(), Some("Test Rat"), "{note}");
+        assert!(rm_claims(&rm, [cx as f32, cy as f32]), "{note}: the pointer is claimed at the centre");
+        assert!(!rm_claims(&rm, [(cx + r * 1.2) as f32, cy as f32]), "{note}: and not past the ring");
+        rm.manager.shutdown();
+    }
+    crate::settings::testing::reset(false);
+}
+
 /// A waypoint cropped by the circle gets a rim arrow in its own colour: a personal one magenta, the
 /// group's orange as on the stock minimap, whichever corner.
 #[test]

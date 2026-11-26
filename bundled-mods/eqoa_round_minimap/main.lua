@@ -271,13 +271,16 @@ local function draw()
     local lay = eqoa.hud.layout().minimap
     local g = geometry(lay)
     view_x, view_y = lay.x, lay.y
-    -- upstream's picture without its square frame, cut to the circle
+    -- upstream's picture without its square frame, cut to the circle. The layout's frame_* numbers are the piece as drawn
+    -- (moved, and grown by HUD Scale about its corner on either interface), so the border and the picture grow with them:
+    -- fs is how many frame pixels the piece draws one of upstream's (1 at HUD Scale 100%).
+    local fs = lay.frame_width / FRAME
     local uv = info.uv
     local du, dv = (uv[3] - uv[1]) * INSET / FRAME, (uv[4] - uv[2]) * INSET / FRAME
     local ok, err = eqoa.hud.image({
         texture = { texture = info.texture, width = info.width, height = info.height,
             uv = { uv[1] + du, uv[2] + dv, uv[3] - du, uv[4] - dv } },
-        x = lay.frame_x + INSET, y = lay.frame_y + INSET, w = SIZE, h = SIZE,
+        x = lay.frame_x + INSET * fs, y = lay.frame_y + INSET * fs, w = SIZE * fs, h = SIZE * fs,
         anchor = "right", vertical = "top", shape = "circle",
     })
     round_minimap.image_error = not ok and err and err.message or nil
