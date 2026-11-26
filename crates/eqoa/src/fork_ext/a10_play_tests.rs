@@ -1617,6 +1617,7 @@ mod mods {
         for _ in 0..6 {
             r.settle();
         }
+        quiet_bank_tab(&mut r);
         let diag = state_of(&r, "local B = require('bags'); return 'open=' .. tostring(B.open) .. ' grid=' .. tostring(B.grid) .. ' tab=' .. tostring(B.tab) .. ' rect=' .. tostring(B.rect) .. ' inv=' .. tostring(eqoa.inventory.get())");
         assert!(state_of(&r, "return tostring(require('bags').rect ~= nil)") == "true", "the Bags window is drawn: {diag}; {}", r.why());
         r
@@ -2031,11 +2032,12 @@ mod mods {
     fn owner1126_auction_seller_and_price_boxes_reach_the_search() {
         // what the action itself sends for the same fields, from a fresh rig (the same page number)
         let (mut p, host) = super::auction_rig();
-        let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_search({name = 'Iron', seller = 'Zed', min_price = 100, max_price = 900})");
-        assert!(ok);
+        let (ok, code, reason) = act(&mut p, &host, "return eqoa.actions.auction_search({name = 'Iron', seller = 'Zed', min_price = 100, max_price = 900})");
+        assert!(ok, "{code} {reason}");
         let want = sent().last().cloned().unwrap();
-        let (ok, _, _) = act(&mut p, &host, "return eqoa.actions.auction_search({name = 'Iron'})");
-        assert!(ok);
+        let (mut p2, host2) = super::auction_rig();
+        let (ok, code, reason) = act(&mut p2, &host2, "return eqoa.actions.auction_search({name = 'Iron'})");
+        assert!(ok, "{code} {reason}");
         assert_ne!(sent().last().unwrap(), &want, "control: the seller and the prices change the bytes");
         let mut r = auction_rig_mod();
         let n = sent().len();
@@ -2082,7 +2084,7 @@ mod mods {
         );
         assert_eq!(ok, "ok", "{}", r.why());
         // a click on the first row shown opens THAT lot (503 first), not the lot that was there by position (501)
-        let (x, y) = au_hit(&r, "lot 503");
+        let (x, y) = bv_point(&r, "for _, h in ipairs(require('eqoa_auction_state').row_hits) do if h.label == 'lot 503' then return h.x + h.w / 2, h.y + h.h / 2 end end error('no row lot 503')");
         r.press_px(x, y, "left", false);
         assert_eq!(state_of(&r, "return tostring(require('eqoa_auction_state').sel)"), "503");
         // another title starts ascending again; Time left orders by minutes
@@ -2124,6 +2126,9 @@ mod mods {
         for _ in 0..6 {
             r.settle();
         }
+        if !open {
+            quiet_bank_tab(&mut r);
+        }
         if open {
             bank_money_open(&mut r);
         }
@@ -2136,9 +2141,19 @@ mod mods {
         r
     }
 
+    /// The Bank tab now asks the banker itself when it is shown (no "Open bank" button). The tests that start from a closed
+    /// bank (to test what opens it) let the session go and say the tab has asked already.
+    fn quiet_bank_tab(r: &mut Rig) {
+        r.host
+            .execute("eqoa.windows.release('bank'); local H = require('helpers'); H.bank_near_seen, H.bank_refresh_wanted, H.bank_was_open = true, false, nil")
+            .unwrap();
+        for _ in 0..3 {
+            r.settle();
+        }
+    }
+
     fn bank_money_open(r: &mut Rig) {
-        let (x, y) = bm_hit(r, "Open bank");
-        r.press_px(x, y, "left", false);
+        // the tab asks the banker by itself when it is shown: the reply opens the mod's hidden bank
         r.settle();
         r.p.bank_opcode(0x124D, &[]);
         for _ in 0..6 {
