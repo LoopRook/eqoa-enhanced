@@ -243,32 +243,14 @@ fn a_server_offer_gets_no_crash_report_without_the_players_yes() {
 
 /// The page keeps no report for a server (`write_page`, wasm only, takes the
 /// same `keep_for_server` check as `write`; a native test cannot call it, so
-/// its source is held: the check is its first line), and the page's own
-/// `sendCrash` (web/notices.js) returns before it can reach a `fetch`, says
-/// plainly that Enhanced sends no crash report, and never says "sent". (There
-/// is no JavaScript test harness in the repository: a source-level check.)
+/// its source is held: the check is its first line). 0.7.0's page has no
+/// crash POST, so the page guard of develop is not part of this hotfix.
 #[test]
-fn the_browser_build_keeps_and_sends_no_crash_report() {
+fn the_browser_build_keeps_no_crash_report() {
     let source = include_str!("../crashfile.rs");
     let body = source.split("pub fn write_page").nth(1).unwrap();
     assert!(body.lines().nth(1).unwrap().contains("report_consent::keep_for_server()"), "write_page asks first");
     assert!(!crate::fork_ext::report_consent::keep_for_server());
-
-    let js = include_str!("../../../../web/notices.js").replace("\r\n", "\n");
-    let send = js.split("async function sendCrash").nth(1).expect("sendCrash");
-    let send = &send[..send.find("\nfunction notice").expect("the next function")];
-    let guard = send.find("if (NO_UPLOAD)").expect("the guard");
-    let fetch = send.find("fetch(").expect("upstream's send, kept below the guard");
-    assert!(guard < fetch, "the guard is before the fetch");
-    assert!(send[guard..fetch].contains("return;"), "and returns");
-    assert!(!send[..guard].contains("await") && !send[..guard].contains("sent.add"), "nothing runs before the guard");
-    let words = js.split("const NO_UPLOAD = '").nth(1).expect("NO_UPLOAD").split("';").next().unwrap();
-    assert!(words.contains("does not send crash reports") && words.contains("console"), "{words}");
-    assert!(!words.to_lowercase().contains("sent") && !words.contains("sending"));
-    // the crash notice shows the plain words in place of "Sending..." and "was sent"
-    let crash = js.split("function crash(title, detail)").nth(1).unwrap();
-    assert!(crash.contains("say(NO_UPLOAD ? '\\n' + NO_UPLOAD :"), "the first line says it");
-    assert!(crash.contains("NO_UPLOAD ? '\\n' + NO_UPLOAD : `\\nThe crash report could not be sent"), "the failure line says it");
 }
 
 /// "Delete" in the offer removes upstream's copies in `crashes/` too (and
