@@ -169,7 +169,8 @@ local function index_entry(key)
     return {name=first.name,key=key,searchable=table.concat(parts," "),lo=lo,hi=hi}
 end
 local function index_step()
-    if M.index_stale then M.index_stale=false;M.index_job={phase=1,key=nil,out={},seen={}};M.index_count=(M.index_count or 0)+1 end
+    -- not while a load is still being read; and the old index goes first, so two never sit in memory together
+    if M.index_stale and #M.jobs==0 then M.index_stale=false;M.npc_cache=nil;M.done_rows=nil;M.index_job={phase=1,key=nil,out={},seen={}};M.index_count=(M.index_count or 0)+1 end
     local j=M.index_job;if not j then return end
     local n=0
     while n<INDEX_SLICE do
