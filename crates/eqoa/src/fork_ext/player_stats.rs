@@ -152,6 +152,17 @@ impl Row {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct View {
     pub rows: [[Row; 8]; 2],
+    /// What the game's Stat Window also shows (`statwnd::Facts`): heal and power over time (the
+    /// channel's 12 and 13) and the server's offence and defence figures.
+    pub hot: i32,
+    pub pot: i32,
+    pub figures: net::statfig::Figures,
+}
+
+/// A figure's range as the API gives it: `{low, high, text}`, `text` the Stat Window's own
+/// (`statwnd::range`: "12-31", one number when both ends agree).
+fn range_json(r: Option<[i32; 2]>) -> Json {
+    r.map_or(Json::Null, |r| json!({"low": r[0], "high": r[1], "text": crate::statwnd::range(r)}))
 }
 
 impl View {
@@ -187,6 +198,17 @@ impl View {
         named.insert("rows".to_string(), json!(flat_rows));
         named.insert("columns".to_string(), json!(cols));
         named.insert("resists".to_string(), Json::Object(resists));
+        named.insert("hot".to_string(), json!(self.hot));
+        named.insert("pot".to_string(), json!(self.pot));
+        let g = &self.figures;
+        named.insert(
+            "figures".to_string(),
+            if g.any() {
+                json!({"melee": range_json(g.melee), "ranged": range_json(g.ranged), "defence": range_json(g.defence)})
+            } else {
+                Json::Null
+            },
+        );
         Json::Object(named)
     }
 }
@@ -206,6 +228,11 @@ pub struct Source<'a> {
 /// The rows as they stand, or none before the stat channel has come (no
 /// maximum hit points yet).
 pub fn view(s: &Source) -> Option<View> {
+    view_with(s, &net::statfig::Figures::default())
+}
+
+/// `view` with the server's Stat Window figures (`Session::stat_figures`).
+pub fn view_with(s: &Source, figures: &net::statfig::Figures) -> Option<View> {
     if s.stats.stat[8] <= 0 {
         return None;
     }
@@ -224,7 +251,7 @@ pub fn view(s: &Source) -> Option<View> {
         };
         (low[i], high[i]) = (cap(gear.min(gear + m)), cap(gear.max(gear + m)));
     }
-    let mut out = View::default();
+    let mut out = View { hot: s.stats.stat[12], pot: s.stats.stat[13], figures: *figures, ..View::default() };
     for (col, rows) in ROWS.iter().enumerate() {
         for (k, &(word, stat)) in rows.iter().enumerate() {
             let derived = |v: &[i32; 29]| crate::trainer::Data::derived(v, stat);
@@ -242,8 +269,14 @@ pub fn view(s: &Source) -> Option<View> {
 /// What `view` reads, flattened: the stat channel's totals and bases, the masteries, the stat cap
 /// and its bonuses, and the stats of every worn item (carried ones count for nothing). `view` is a
 /// pure function of these numbers, so the same numbers give the same view.
-fn inputs(s: &Source, key: &mut Vec<i64>, worn_items: bool) {
+fn inputs(s: &Source, figures: &net::statfig::Figures, key: &mut Vec<i64>, worn_items: bool) {
     key.clear();
+    for r in [figures.melee, figures.ranged, figures.defence] {
+        match r {
+            Some([a, b]) => key.extend([1, a as i64, b as i64]),
+            None => key.extend([0, 0, 0]),
+        }
+    }
     key.extend(s.stats.stat.iter().map(|&v| v as i64));
     key.extend(s.stats.base.iter().map(|&v| v as i64));
     key.extend_from_slice(s.mastery);
@@ -275,14 +308,19 @@ thread_local! {static MEMO: std::cell::RefCell<Memo> = std::cell::RefCell::new(M
 /// runs every frame and the record is rebuilt each time, but the stat channel, the worn items and
 /// the masteries change a few times an hour. The same `Rc` comes back while the inputs stand.
 pub fn view_json(s: &Source) -> Option<std::rc::Rc<Json>> {
-    view_json_with(s, true)
+    view_json_with(s, &net::statfig::Figures::default(), true)
 }
 
-fn view_json_with(s: &Source, worn_items: bool) -> Option<std::rc::Rc<Json>> {
+/// `view_json` with the server's Stat Window figures.
+pub fn view_json_figures(s: &Source, figures: &net::statfig::Figures) -> Option<std::rc::Rc<Json>> {
+    view_json_with(s, figures, true)
+}
+
+fn view_json_with(s: &Source, figures: &net::statfig::Figures, worn_items: bool) -> Option<std::rc::Rc<Json>> {
     MEMO.with(|m| {
         let mut m = m.borrow_mut();
         let m = &mut *m;
-        inputs(s, &mut m.scratch, worn_items);
+        inputs(s, figures, &mut m.scratch, worn_items);
         if m.seen && m.key == m.scratch {
             #[cfg(test)]
             {
@@ -290,7 +328,7 @@ fn view_json_with(s: &Source, worn_items: bool) -> Option<std::rc::Rc<Json>> {
             }
             return m.out.clone();
         }
-        m.out = view(s).map(|v| std::rc::Rc::new(v.to_json()));
+        m.out = view_with(s, figures).map(|v| std::rc::Rc::new(v.to_json()));
         std::mem::swap(&mut m.key, &mut m.scratch);
         m.seen = true;
         m.out.clone()
@@ -800,9 +838,9 @@ mod tests {
         stats.stat[8] = 300;
         check(&src!(), false);
         // the control: without the worn items in the key, an item's stat change is missed
-        let (a, b) = (view_json_with(&src!(), false), {
+        let (a, b) = (view_json_with(&src!(), &Default::default(), false), {
             inv.items[0].item.stats[1].value += 9; // armour: not under the trainable stats' cap
-            view_json_with(&src!(), false)
+            view_json_with(&src!(), &Default::default(), false)
         });
         assert_eq!(a, b, "the flawed key serves the old view");
         assert_ne!(b.as_deref().cloned(), direct(&src!()), "so it is stale, and the real key must not be");

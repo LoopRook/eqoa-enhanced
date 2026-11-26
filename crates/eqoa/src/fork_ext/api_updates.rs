@@ -104,7 +104,7 @@ impl PlayerData {
                     bonuses: &m.bonuses,
                     p44: p.dump.player.p44 as i32,
                 };
-                crate::fork_ext::player_stats::view_json(&src)
+                crate::fork_ext::player_stats::view_json_figures(&src, &p.session.stat_figures)
             })
             .flatten();
         Self {

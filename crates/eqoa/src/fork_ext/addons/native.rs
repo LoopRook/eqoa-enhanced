@@ -1330,6 +1330,8 @@ pub(super) fn nested_type(path: &str, key: &str) -> Option<&'static str> {
         ("eqoa.input.Pad", "raw_left" | "raw_right") => Some("eqoa.input.RawAxes"),
         ("eqoa.player.Stats", "rows" | "columns") => Some("eqoa.player.StatItem"),
         ("eqoa.player.Stats", "resists") => Some("eqoa.player.Stats"),
+        ("eqoa.player.Stats", "figures") => Some("eqoa.player.StatFigures"),
+        ("eqoa.player.StatFigures", "melee" | "ranged" | "defence") => Some("eqoa.player.StatRange"),
         (
             "eqoa.player.Stats",
             "strength" | "stamina" | "agility" | "dexterity" | "wisdom" | "intelligence"
@@ -1429,8 +1431,10 @@ fn install_fields(lua: &Lua) {
         ),
         (
             "eqoa.player.Stats",
-            "rows columns resists strength stamina agility dexterity wisdom intelligence charisma armor max_hp hp_max max_power power fire cold lightning arcane poison disease",
+            "rows columns resists strength stamina agility dexterity wisdom intelligence charisma armor max_hp hp_max max_power power fire cold lightning arcane poison disease hot pot figures",
         ),
+        ("eqoa.player.StatFigures", "melee ranged defence"),
+        ("eqoa.player.StatRange", "low high text"),
         (
             "eqoa.player.StatItem",
             "name short word stat_id current base min max without_min without_max change effect_change shift",
@@ -1510,6 +1514,8 @@ fn install_fields(lua: &Lua) {
             || matches!(path, "eqoa.player.Stats" | "eqoa.player.StatItem")
         {
             Some(3)
+        } else if matches!(path, "eqoa.player.StatFigures" | "eqoa.player.StatRange") {
+            Some(8)
         } else {
             Some(2)
         };
@@ -1531,7 +1537,9 @@ fn install_fields(lua: &Lua) {
                 Some(6)
             } else if (path, field) == ("eqoa.hotbar.HotbarSlot", "item") {
                 Some(5)
-            } else if matches!((path, field), ("eqoa.entities.Entity", "head_mark" | "merc_tag")) {
+            } else if matches!((path, field), ("eqoa.entities.Entity", "head_mark" | "merc_tag"))
+                || matches!((path, field), ("eqoa.player.Stats", "hot" | "pot" | "figures"))
+            {
                 Some(8)
             } else if (path, field) == ("eqoa.abilities.Ability", "learned") {
                 Some(8)
