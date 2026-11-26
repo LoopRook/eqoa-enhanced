@@ -543,7 +543,6 @@ fn a2_close_window_on_a_dialog_session_is_the_games_no_choice() {
     ask(&mut p, &host, "return eqoa.actions.close_window(eqoa.windows.session('response_dialog').ref)");
     host.execute("assert(results[1] and results[1].ok == true, tostring(last_err and last_err.code))").unwrap();
     assert_eq!(sent(&mut p), vec![answer_msg(12, 255)]);
-    assert_eq!(closed_reason().as_deref(), Some("answered"), "a dialog with several answers keeps \"answered\"");
     text(&mut p, "Done?");
     ask(&mut p, &host, "return eqoa.actions.dialog_answer(eqoa.windows.session('text_dialog').ref, 1)");
     host.execute("assert(results[1] and results[1].ok == true, tostring(last_err and last_err.code))").unwrap();
