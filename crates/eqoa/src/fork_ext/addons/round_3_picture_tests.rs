@@ -1779,7 +1779,9 @@ fn hud_layout_says_the_scale_the_interface_and_the_unlocked_state_and_more_piece
         let l = hud_layout::hud_layout_json((640, 480));
         let q = &l["quests"];
         assert_eq!((q["frame_x"].as_f64(), q["frame_width"].as_f64(), q["frame_height"].as_f64()), (Some(500.0), Some(120.0), Some(80.0)), "pc={pc}");
-        assert_eq!((q["x"].as_f64(), q["y"].as_f64(), q["width"].as_f64(), q["height"].as_f64()), (Some(500.0), Some(120.0 * 480.0 / 448.0), Some(120.0), Some(80.0 * 480.0 / 448.0)), "window pixels: the frame at 640 x 480");
+        for (key, want) in [("x", 500.0), ("y", 120.0 * 480.0 / 448.0), ("width", 120.0), ("height", 80.0 * 480.0 / 448.0)] {
+            assert!((q[key].as_f64().unwrap() - want).abs() < 0.01, "window {key} at 640 x 480: {} vs {want}", q[key]);
+        }
         assert_eq!(l["stats"]["frame_x"].as_f64(), Some(6.0));
         for size in [(0, 0), (0, 480), (640, 0), (1280, 720)] {
             let mut bad = Vec::new();
