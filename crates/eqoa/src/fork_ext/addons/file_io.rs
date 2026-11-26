@@ -1853,7 +1853,7 @@ mod tests {
     #[test]
     fn round4_json_private_journal_flushes_on_drop_and_reloads() {
         let (scratch, h, addon) = fixture();
-        h.lua.set_memory_limit(128 * 1024 * 1024).unwrap();
+        h.lua.set_memory_limit(crate::fork_ext::addons::async_json::JSON_HEAP).unwrap();
         let data = h
             .lua
             .app_data_ref::<super::super::sandbox::Mounts>()
@@ -1867,7 +1867,7 @@ mod tests {
         let bytes = fs::read(&file).expect("shutdown must flush accepted save before returning");
         assert!(bytes.len() > 13 * 1024 * 1024);
         let next = Host::new().unwrap();
-        next.lua.set_memory_limit(128 * 1024 * 1024).unwrap();
+        next.lua.set_memory_limit(crate::fork_ext::addons::async_json::JSON_HEAP).unwrap();
         install(&next, &addon, Some(scratch.0.join("config"))).unwrap();
         next.execute("finished=false;eqoa.events.on('resource.ready',function(e) assert(e.data.request==req and e.data.value.stage==99 and #e.data.value.payload==14*1024*1024-128);finished=true end);req=assert(eqoa.files.load_json('journal.json'))").unwrap();
         drive_json(&next, "finished");
@@ -2016,7 +2016,7 @@ mod tests {
     #[test]
     fn round4_catalogue_materialisation_benchmark_asserts_real_workload() {
         let (_scratch, h, addon) = fixture();
-        h.lua.set_memory_limit(128 * 1024 * 1024).unwrap();
+        h.lua.set_memory_limit(crate::fork_ext::addons::async_json::JSON_HEAP).unwrap();
         let bytes = include_bytes!("../../../../../mods/resources/map-entities.json");
         let v: serde_json::Value = serde_json::from_slice(bytes).unwrap();
         fn nodes(v: &serde_json::Value) -> usize {
