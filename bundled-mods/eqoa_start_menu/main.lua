@@ -92,11 +92,30 @@ local function open_in_mod(e)
     return true
 end
 
--- The game's own Support entries (Request Help, Help Status, Send Report) are the player's to press in the game's own
--- menu: the client never runs a report route for a mod, so this menu would do nothing. They hand the player over to the
--- game's own Start menu the way Items does (the one entry the client marks `native`), and the session ends.
+-- The game's own Support entries (Request Help, Help Status, Send Report). The client never runs a report route for a mod
+-- (`menu_command` answers `permission_denied`), but it opens the two Support windows when asked (`eqoa.actions.open_window`,
+-- open-only: the form, its topics and what is sent are the player's and the game's). Request Help and Help Status open
+-- their window in one click and the menu closes. Send Report is the game's report editor, which no mod may open, so it
+-- hands the player over to the game's own Start menu the way Items does (the one entry the client marks `native`), and the
+-- session ends.
+local SUPPORT_WINDOWS = { ["0xb0b1000"] = "support", ["0xb0b1001"] = "support_inbox" } -- Request Help, Help Status
 local function is_report_route(e)
     return e.command ~= nil and e.command:match("^0xb0b1%x%x%x:") ~= nil
+end
+
+-- Opens the game's Support window for this entry, when it has one. True when the entry was handled (the menu is closed so
+-- the window can open); a refusal is said in the menu's note.
+local function open_support_window(e)
+    local msg = e.command and e.command:match("^(0x%x+):")
+    local kind = msg and SUPPORT_WINDOWS[msg:lower()]
+    if not kind or not state.session then return false end
+    local req, err = eqoa.actions.open_window(kind)
+    if not req then
+        state.note = err and (err.message or err.code) or "the Support window did not open"
+        return true
+    end
+    close()
+    return true
 end
 
 local function native_command(list)
@@ -115,10 +134,12 @@ local function choose(index)
     if e.entries then
         state.path[#state.path + 1] = index
         state.selected, state.scroll = 1, 0
+    elseif open_support_window(e) then
+        return
     elseif is_report_route(e) and state.session then
         local command = native_command(state.session.data and state.session.data.entries)
         if not command then
-            state.note = "Support is in the game's own Start menu"
+            state.note = "Send Report is in the game's own Start menu, under Support"
             return
         end
         local _, err = eqoa.actions.menu_command(state.session.ref, command)

@@ -3802,3 +3802,12 @@ fn the_stat_window_can_be_rebuilt_from_the_api() {
     // the existing fields did not move
     host.execute("local s = eqoa.player.stats(); assert(s.hp_max.current == 1000 and s.strength.current == 100 and s.fire.current ~= nil and #s.rows == 16)").unwrap();
 }
+
+/// The Support windows open as documented (open-only): Request Help (mode 31) and Help Status (mode 32), as the game's own
+/// Start menu opens them. The Start menu mod's Support entries ask for these two.
+#[test]
+fn the_support_windows_open_when_a_mod_asks() {
+    let mut p = ready();
+    round7w_assert_opens(&mut p, "support", 31);
+    round7w_assert_opens(&mut p, "support_inbox", 32);
+}

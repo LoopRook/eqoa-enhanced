@@ -18,6 +18,7 @@
     "eqoa.windows.session",
     "eqoa.windows.focus",
     "eqoa.actions.menu_command",
+    "eqoa.actions.open_window",
     "eqoa.mods.send",
     "eqoa.log.write",
     "eqoa.hud.frame",
