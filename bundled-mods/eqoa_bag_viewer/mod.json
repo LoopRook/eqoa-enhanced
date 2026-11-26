@@ -56,6 +56,7 @@
     "eqoa.windows.focus",
     "eqoa.actions.destroy",
     "eqoa.actions.destroy_many",
+    "eqoa.actions.sell_many",
     "eqoa.actions.link_item",
     "eqoa.actions.hide_look",
     "eqoa.blacksmith.get",

@@ -227,20 +227,15 @@ fn multi_sell_goes_in_pack_order_skips_the_worn_reports_a_refusal_and_finds_each
     assert_eq!(int(&lua, "X.n"), 0, "the selection is cleared when the action finishes");
     assert!(boolean(&lua, "B.batch_id == nil and RELEASED[#RELEASED] == 'merchant'"), "the merchant session is let go at the end");
 
-    // gear, a potion or a quick-slotted item in the group: the game's merchant would ask, so the group asks once first
+    // gear, a potion or a quick-slotted item in the group: the game's merchant would ask, and the CLIENT asks (one question
+    // for the whole `sell_many`), so the mod calls once and asks nothing of its own
     let ask = world();
     run(&ask, "view({it_(1, 'Rusty Sword', {tabs = {'equipment'}}), it_(2, 'Rat Pelt')}); put_npcs(3.0, nil); open_merchant({}); ctrl(1); ctrl(2); group_menu(1); choose('Sell (2)')");
-    assert_eq!(int(&ask, "#BATCHES"), 0, "nothing is sold before the player says Yes");
-    assert_eq!(string(&ask, "B.menu.title"), "Sell these items?");
-    assert_eq!(string(&ask, "B.result.text"), "1 is gear, a potion, quick-slotted or no-trade: sell them all?");
-    run(&ask, "choose('No')");
-    assert_eq!(int(&ask, "#BATCHES"), 0, "No sells nothing");
-    run(&ask, "group_menu(1); choose('Sell (2)'); choose('Yes')");
-    assert_eq!(int(&ask, "#steps_of(1)"), 2);
-    // negative control: without the question the gear is sold at the first click
-    let blind_sell = mutated(&[("if not row.confirmed and row.ask and (row.enabled or row.far_kind) then", "if false then")]);
-    run(&blind_sell, "view({it_(1, 'Rusty Sword', {tabs = {'equipment'}}), it_(2, 'Rat Pelt')}); put_npcs(3.0, nil); open_merchant({}); ctrl(1); ctrl(2); group_menu(1); choose('Sell (2)')");
-    assert_eq!(int(&blind_sell, "#BATCHES"), 1, "negative control: sold with no question");
+    assert_eq!(int(&ask, "#BATCHES"), 1, "one sell_many call");
+    assert!(boolean(&ask, "BATCHES[1].sell_many == true"), "the group goes through sell_many, which asks for the group");
+    assert!(boolean(&ask, "not (B.menu ~= nil and B.menu.asking == true)"), "the mod asks no question of its own");
+    // negative control: the mod's own group question (the old behaviour) is gone
+    assert!(boolean(&ask, "B.ask_to_sell == nil"));
 
     // all goes well: "Sold 3 of 3"
     let ok = world();
@@ -265,7 +260,7 @@ fn multi_sell_goes_in_pack_order_skips_the_worn_reports_a_refusal_and_finds_each
         ("if not cur or cur.equipped then", "if not cur then"),
     ]);
     run(&worn, setup);
-    run(&worn, "choose('Sell (5)'); choose('Yes')"); // the sword is gear, so the group asks first
+    run(&worn, "choose('Sell (5)')"); // the client (not the mod) asks about gear: the call is made once
     assert_eq!(int(&worn, "#steps_of(1)"), 5, "negative control: the worn sword would be sold");
     // 2. a refusal ends the whole group instead of going on
     let no_go_on = mutated(&[("if entry and not STOP_CODES[code] and d.state == \"refused\" then", "if false then")]);
@@ -443,13 +438,15 @@ fn multi_destroy_waits_for_a_closed_merchant_and_for_other_group_actions_and_sel
     let grown = "view({it_(1, 'Rat Pelt', {q = 2}), it_(2, 'Chipped Tooth')}); put_npcs(3.0, nil); open_merchant({}); ctrl(1); ctrl(2); set_pack({it_(1, 'Rat Pelt', {q = 5}), it_(2, 'Chipped Tooth')}); view(); group_menu(1); choose('Sell (2)')";
     let lua = world();
     run(&lua, grown);
-    assert_eq!(string(&lua, "steps_of(1)[1].item .. ':' .. steps_of(1)[1].count"), "ref1:2", "the 2 that were selected, not the 5 there now");
+    // `sell_many` sells whole stacks only: a stack that grew since it was selected is skipped (never sold whole, never in part)
+    assert_eq!(int(&lua, "#steps_of(1)"), 1);
+    assert_eq!(string(&lua, "steps_of(1)[1].item"), "ref2", "the grown Rat Pelt is left out");
     let shrunk = world();
     run(&shrunk, "view({it_(1, 'Rat Pelt', {q = 4}), it_(2, 'Chipped Tooth')}); put_npcs(3.0, nil); open_merchant({}); ctrl(1); ctrl(2); set_pack({it_(1, 'Rat Pelt', {q = 1}), it_(2, 'Chipped Tooth')}); view(); group_menu(1); choose('Sell (2)')");
     assert_eq!(int(&shrunk, "steps_of(1)[1].count"), 1, "a stack that shrank sells what is there");
-    let whole = mutated(&[("local qty = math.min(entry and entry.qty or math.huge, it.quantity or 1)", "local qty = it.quantity or 1")]);
+    let whole = mutated(&[("elseif run.kind == \"sell\" and (entry.qty or cur.quantity) < (cur.quantity or 1) then", "elseif false then")]);
     run(&whole, grown);
-    assert_eq!(int(&whole, "steps_of(1)[1].count"), 5, "negative control: the grown stack is sold whole");
+    assert_eq!(string(&whole, "steps_of(1)[1].item"), "ref1", "negative control: without the skip the grown stack is in the sale");
 }
 
 #[test]

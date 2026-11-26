@@ -917,13 +917,21 @@ function M.start_sell_junk()
         end
         return false
     end
-    local bid, err = eqoa.actions.batch({steps = steps, require_window = "merchant"})
+    -- one call: the client asks the player once where the game's merchant window would ask (a potion, gear, a
+    -- quick-slotted or no-trade stack), and sells every stack in turn on their Yes (or at once when none needs asking)
+    local refs = {}
+    for i, step in ipairs(steps) do
+        if i > M.SELL_MANY_MAX then break end
+        refs[#refs + 1] = step.item
+    end
+    local bid, err = M.start_sell_many(refs)
     if not bid then
         release_takeover("merchant")
         local msg = err and (err.message or err.code) or "refused"
         M.result = {text = "Sell junk: " .. msg, ok = false}
         return false
     end
+    count = #refs
     M.batch_id = bid
     M.batch_kind = "sell"
     M.batch_verb = "Sold"
@@ -1024,10 +1032,45 @@ function M.stop_batch()
         M.dirty()
     end
     if not M.batch_id then return end
+    -- a sale in the client's hands (`sell_many`) is not a batch: it is the player's own answer that ends it
+    if M.batch_id == M.SELL_MANY then return end
     local stopped = eqoa.actions.stop_batch(M.batch_id)
     if stopped then
         M.result = {text = "Stopping batch...", ok = nil}
     end
+end
+
+-- Sell junk and the multi-select Sell go through `eqoa.actions.sell_many`: the client asks the player ONE question for the
+-- whole sale where the game's merchant window would ask (quick-slotted, no-trade or not a misc item), so the mod asks none
+-- of its own. It is not a batch: `M.batch_id` holds this name while one is under way, and the end arrives as
+-- `confirm.closed` (`sell_many_closed`), turned here into the same result a batch gives.
+M.SELL_MANY = "sell_many"
+M.SELL_MANY_MAX = 60
+
+function M.start_sell_many(refs)
+    local req, err = eqoa.actions.sell_many(refs)
+    if not req then return nil, err end
+    M.sell_req = req
+    return M.SELL_MANY, nil
+end
+
+function M.sell_many_closed(d)
+    local det = d.detail or {}
+    local out = {batch_id = M.SELL_MANY, total = det.total or M.batch_total, completed = det.sent_count or 0}
+    if d.answer == "yes" or d.answer == "not_asked" then
+        local skipped = det.skipped or {}
+        if det.reason then
+            out.ok, out.state, out.reason = false, "stopped", det.reason
+        elseif #skipped > 0 then
+            out.ok, out.state, out.reason = false, "stopped", string.format("%d moved or gone", #skipped)
+        else
+            out.ok = true
+        end
+    else
+        out.ok, out.state = false, "stopped"
+        out.reason = d.answer == "no" and "you chose not to sell" or tostring(d.answer)
+    end
+    M.on_batch_result(out)
 end
 
 function M.on_batch_progress(d)
@@ -1172,16 +1215,15 @@ function M.build_menu(it, fx, fy)
                 M.run_single(label, function() return eqoa.actions.sell(it.ref, qty) end)
             end)
         end
-        -- an item the game's own merchant window would ask about is asked about here too (`ask_to_sell`)
-        local risk = M.sell_risk(it)
-        local risk_why = risk and M.risk_text(risk) or nil
+        -- an item the game's own merchant window would ask about is asked about by the client itself: `sell` puts its
+        -- own Yes or No question to the player (starting on No), so the menu does not ask a second time
         local p1 = merch_open and eqoa.merchant.price(it.ref, "sell", 1) or nil
         add("Sell 1" .. (p1 and (" (" .. M.tunar(p1) .. "t)") or ""), sell_deny == nil, sell_deny,
-            function() return sell_or_talk("Sell 1", 1) end, nil, sell_far_kind, risk_why)
+            function() return sell_or_talk("Sell 1", 1) end, nil, sell_far_kind)
         if (it.quantity or 1) > 1 then
             local ps = merch_open and eqoa.merchant.price(it.ref, "sell", it.quantity) or nil
             add("Sell stack (" .. it.quantity .. (ps and (", " .. M.tunar(ps) .. "t)") or ")"), sell_deny == nil,
-                sell_deny, function() return sell_or_talk("Sell stack", it.quantity) end, nil, sell_far_kind, risk_why)
+                sell_deny, function() return sell_or_talk("Sell stack", it.quantity) end, nil, sell_far_kind)
         end
 
         local near_bank = M.nearby_npc("bank") ~= nil
@@ -1254,6 +1296,8 @@ end
 function M.on_confirm_closed(d)
     if M.auction_list and M.auction_list.on_confirm_closed(d) then return end
     if d and d.kind == "destroy_many" and M.multi then M.multi.on_destroy_closed(d); return end
+    if d and d.kind == "sell_many" and M.batch_id == M.SELL_MANY then M.sell_many_closed(d); return end
+    if d and d.kind == "sell" then M.sell_closed(d); return end
     if not d or d.kind ~= "destroy" then return end
     if d.answer == "yes" then
         local sent = d.detail and d.detail.sent
@@ -1264,6 +1308,37 @@ function M.on_confirm_closed(d)
     else
         M.result = {text = "Destroy: kept (" .. tostring(d.answer) .. ")", ok = true}
     end
+    M.dirty()
+end
+
+-- The client's own question about one sale (the game's merchant window asks the same): its answer. The merchant's
+-- window a talk opened is kept until the sale has been answered (`inventory.changed`), so the Yes still finds it.
+function M.sell_closed(d)
+    local sent = d.detail and d.detail.sent
+    if d.answer == "yes" then
+        M.result = {text = sent and "Sell: sent" or ("Sell: not sold (" .. tostring(d.detail and d.detail.reason) .. ")"),
+            ok = sent == true}
+        -- the sale goes out on the step after the Yes: the window is let go when the server's answer changes the pack
+        if sent then M.sell_hold_armed = true else M.release_sell_hold() end
+    elseif d.answer == "no" then
+        M.result = {text = "Sell: kept", ok = true}
+        M.release_sell_hold()
+    else
+        M.result = {text = "Sell: kept (" .. tostring(d.answer) .. ")", ok = true}
+        M.release_sell_hold()
+    end
+    M.dirty()
+end
+
+function M.release_sell_hold()
+    local kind = M.sell_hold
+    M.sell_hold, M.sell_hold_armed = nil, nil
+    if kind then release_takeover(kind) end
+end
+
+-- The pack changed: if it was the answer to a sale the player said Yes to, the merchant's window is let go.
+function M.on_pack_changed()
+    if M.sell_hold and M.sell_hold_armed then M.release_sell_hold() end
     M.dirty()
 end
 
@@ -1295,28 +1370,11 @@ function M.ask_to_mark(row)
         rows = {yes, no}, fx = menu and menu.fx or 8, fy = menu and menu.fy or 46, asking = true}
 end
 
--- Selling an item the game's merchant window would ask about: the menu asks first (Yes sells it, No keeps it). The
--- question names the item and why; only the player's click on Yes goes on.
-function M.ask_to_sell(row)
-    local menu = M.menu
-    local yes = {label = row.label, text = "Yes, sell it: it is " .. row.confirm, enabled = true, run = row.run,
-        confirmed = true}
-    local no = {label = "No", text = "No, keep it", enabled = true, local_only = true, run = function() end}
-    M.menu = {title = "Sell " .. (menu and menu.title or "this item") .. "?", ref = menu and menu.ref,
-        rows = {yes, no}, fx = menu and menu.fx or 8, fy = menu and menu.fy or 46, asking = true}
-end
-
 function M.trigger_menu(row)
     if not row then return end
     if row.group and M.multi then M.multi.trigger(row); return end -- a row of the multi-select menu
     if row.mark_ask and not row.confirmed and row.enabled and row.run then
         M.ask_to_mark(row)
-        return
-    end
-    if row.confirm and not row.confirmed and row.run and (row.enabled or row.far_kind) then
-        -- the greyed-for-distance gate speaks first (its second click is the player's "try anyway")
-        if not row.enabled and row.far_kind and M.far_gate(row.far_kind, row.label) then return end
-        M.ask_to_sell(row)
         return
     end
     if row.local_only and row.enabled and row.run then
@@ -2000,6 +2058,19 @@ function M.on_action_result(d)
         M.dirty()
         return
     end
+    -- the `sell_many` call's own result: refused (nothing sold, the run is over), or the question is up (the end of
+    -- either run is the `confirm.closed` that follows)
+    if M.sell_req and d.request_id == M.sell_req and d.ok ~= nil then
+        M.sell_req = nil
+        if d.ok == false then
+            M.on_batch_result({batch_id = M.SELL_MANY, ok = false, completed = 0, total = M.batch_total, state = "stopped",
+                code = d.code, reason = d.reason or d.code or "refused"})
+        elseif eqoa.windows.confirm() ~= nil then
+            M.result = {text = "Sell: answer the question on the screen", ok = nil}
+        end
+        M.dirty()
+        return
+    end
     -- the open's own result says how the client opened the corpse; the corpse's list (loot.changed) may have ended the
     -- pending open before it arrives
     if M.keep_req and d.request_id == M.keep_req and d.ok ~= nil and d.phase ~= "dispatch" then
@@ -2032,6 +2103,18 @@ function M.on_action_result(d)
     end
     if M.last_req == nil or d.request_id ~= M.last_req then return end
     local label = M.pending_label or d.kind
+    -- a sale that completes at the call (phase "dispatch") is the client's question put to the player: an unasked sale
+    -- completes later, when the merchant has answered
+    if d.ok == true and d.state == "completed" and d.phase == "dispatch" and d.kind == "sell" then
+        -- the client put its own question to the player; the answer is `confirm.closed` (`sell_closed`)
+        -- (the answer may already have been heard when this result is: then the result line is the answer's)
+        if eqoa.windows.confirm() ~= nil then
+            M.result = {text = label .. ": answer the question on the screen", ok = nil}
+        end
+        M.sell_hold, M.held_for_req, M.last_req = M.held_for_req, nil, nil
+        M.dirty()
+        return
+    end
     if d.state == "dispatched" and d.phase == "dispatch" then
         M.result = {text = label .. ": waiting for server...", ok = nil}
     elseif d.ok == true then

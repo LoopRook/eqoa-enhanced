@@ -27,6 +27,8 @@ pub(crate) enum A1Action {
     Destroy { item: ResolvedItemSpec, count: Option<i64> },
     /// Bag Viewer multi-select: asks once about several whole stacks (`destroy_many`).
     DestroyMany { items: Vec<ResolvedItemSpec> },
+    /// Sells whole pack stacks to the open merchant; asks once where the game's window would ask (`sell_many`).
+    SellMany { items: Vec<ResolvedItemSpec> },
     LinkItem { item: ResolvedItemSpec },
     HideLook { item: ResolvedItemSpec, hide: bool },
     /// Round A2: `dialog_answer(ref, option)` (`Some`, 1-based) or `close_window(ref)` (`None`) on a dialog or offer
@@ -39,6 +41,7 @@ impl A1Action {
         match self {
             Self::Destroy { .. } => "destroy",
             Self::DestroyMany { .. } => "destroy_many",
+            Self::SellMany { .. } => "sell_many",
             Self::LinkItem { .. } => "link_item",
             Self::HideLook { .. } => "hide_look",
             Self::SessionAnswer { option: Some(_), .. } => "dialog_answer",
@@ -287,38 +290,47 @@ pub(crate) fn install(host: &Host) -> Result<()> {
     // Bag Viewer multi-select: one question for a list of whole stacks (never more than the pack holds at once)
     const MAX_DESTROY_MANY: usize = 64;
     describe(lua, "eqoa.actions.destroy_many", "supported", Some(ROUND), "");
-    bind(
-        lua,
-        "actions",
-        "destroy_many",
-        lua.create_function(|lua, items: Value| {
-            enqueue_lua_with(lua, "eqoa.actions.destroy_many", || {
-                let Value::Table(list) = items else {
-                    return Err(("invalid_argument", "items must be a list of inventory item handles".into()));
-                };
-                let n = list.raw_len();
-                if n == 0 || n > MAX_DESTROY_MANY {
-                    return Err(("invalid_argument", format!("items must hold 1 to {MAX_DESTROY_MANY} item handles")));
-                }
-                let mut specs: Vec<ResolvedItemSpec> = Vec::with_capacity(n);
-                for i in 1..=n {
-                    let handle: Value =
-                        list.raw_get(i).map_err(|_| ("invalid_argument", "items must be a plain list".to_string()))?;
-                    let spec = resolve_item_handle(&handle)?;
-                    if spec.list != "inventory" {
-                        return Err((
-                            "invalid_argument",
-                            format!("destroy_many requires inventory item handles, got '{}'", spec.list),
-                        ));
+    describe(lua, "eqoa.actions.sell_many", "supported", Some(ROUND), "");
+    for (name, sell) in [("destroy_many", false), ("sell_many", true)] {
+        let symbol: &'static str = if sell { "eqoa.actions.sell_many" } else { "eqoa.actions.destroy_many" };
+        bind(
+            lua,
+            "actions",
+            name,
+            lua.create_function(move |lua, items: Value| {
+                enqueue_lua_with(lua, symbol, || {
+                    let Value::Table(list) = items else {
+                        return Err(("invalid_argument", "items must be a list of inventory item handles".into()));
+                    };
+                    let n = list.raw_len();
+                    if n == 0 || n > MAX_DESTROY_MANY {
+                        return Err(("invalid_argument", format!("items must hold 1 to {MAX_DESTROY_MANY} item handles")));
                     }
-                    if specs.iter().any(|s| s.inv_index == spec.inv_index) {
-                        return Err(("invalid_argument", "the same item is listed twice".into()));
+                    let mut specs: Vec<ResolvedItemSpec> = Vec::with_capacity(n);
+                    for i in 1..=n {
+                        let handle: Value = list
+                            .raw_get(i)
+                            .map_err(|_| ("invalid_argument", "items must be a plain list".to_string()))?;
+                        let spec = resolve_item_handle(&handle)?;
+                        if spec.list != "inventory" {
+                            return Err((
+                                "invalid_argument",
+                                format!("{name} requires inventory item handles, got '{}'", spec.list),
+                            ));
+                        }
+                        if specs.iter().any(|s| s.inv_index == spec.inv_index) {
+                            return Err(("invalid_argument", "the same item is listed twice".into()));
+                        }
+                        specs.push(spec);
                     }
-                    specs.push(spec);
-                }
-                Ok(ActionKind::A1(A1Action::DestroyMany { items: specs }))
-            })
-        })?,
-    )?;
+                    Ok(ActionKind::A1(if sell {
+                        A1Action::SellMany { items: specs }
+                    } else {
+                        A1Action::DestroyMany { items: specs }
+                    }))
+                })
+            })?,
+        )?;
+    }
     Ok(())
 }

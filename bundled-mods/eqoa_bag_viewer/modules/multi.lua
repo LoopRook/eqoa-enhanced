@@ -282,12 +282,6 @@ function X.on_destroy_closed(d)
     B.dirty()
 end
 
-local function ask_text_sell(items)
-    local risky = 0
-    for _, it in ipairs(items) do if B.sell_risk(it) then risky = risky + 1 end end
-    return risky
-end
-
 -- The group menu for the selected items (right-click on one of them). `fx`, `fy` is where it opens.
 function X.build_menu(fx, fy)
     local items = X.current()
@@ -349,15 +343,11 @@ function X.build_menu(fx, fy)
         local sell_far = not merch_open and near_merch and B.too_far("merchant") or nil
         local sell_deny = (#usable == 0 and "all selected items are worn")
             or ((not merch_open and not near_merch) and "no merchant nearby") or sell_far or nil
-        local risky = ask_text_sell(usable)
-        local sell_ask
-        if risky > 0 then
-            sell_ask = string.format("%d %s gear, a potion, quick-slotted or no-trade", risky, risky == 1 and "is" or "are")
-        end
+        -- the client asks the player ONE question for the whole sale where the game's merchant window would ask
+        -- (`eqoa.actions.sell_many`), so this row asks none of its own
         row(string.format("Sell (%d)", #usable), sell_deny == nil, sell_deny,
             function() X.start("sell", usable, worn) end,
-            {far_kind = (#usable > 0 and sell_far) and "merchant" or nil, ask = sell_ask,
-                ask_title = "Sell these items?", ask_yes = "Yes, sell them", ask_q = "sell them all?"})
+            {far_kind = (#usable > 0 and sell_far) and "merchant" or nil})
         local near_bank = B.nearby_npc("bank") ~= nil
         local dep_far = not bank_open and near_bank and B.too_far("bank") or nil
         local dep_deny = (#usable == 0 and "all selected items are worn")
@@ -456,13 +446,24 @@ function X.launch()
         local cur = find(entry.list, entry.key)
         if not cur or cur.equipped then
             run.skipped[#run.skipped + 1] = entry
+        elseif run.kind == "sell" and (entry.qty or cur.quantity) < (cur.quantity or 1) then
+            -- a stack that grew since it was selected is not sold whole (`sell_many` sells whole stacks only)
+            run.skipped[#run.skipped + 1] = entry
         else
             steps[#steps + 1] = step_for(run.kind, cur, entry)
             entries[#entries + 1] = entry
         end
     end
     if #steps == 0 then X.finish(nil); return end
-    local bid, err = eqoa.actions.batch({steps = steps, require_window = k.npc})
+    local bid, err
+    if run.kind == "sell" then
+        -- one call for the whole run: the client asks the player once where the game would ask, then sells in order
+        local refs = {}
+        for _, step in ipairs(steps) do refs[#refs + 1] = step.item end
+        bid, err = B.start_sell_many(refs)
+    else
+        bid, err = eqoa.actions.batch({steps = steps, require_window = k.npc})
+    end
     if not bid then
         -- nothing of this batch was tried: those items are not counted as done, and not as failed either
         X.finish(tostring(err and (err.message or err.code) or "refused"))

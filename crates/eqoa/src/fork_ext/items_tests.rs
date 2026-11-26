@@ -2045,6 +2045,7 @@ fn round6b_merchant_buy_sell_bank_move_bank_money_and_loot() {
     worn_sword.equip_slot = 0;
     let mut bag_pot = potion();
     bag_pot.equip_slot = -1;
+    bag_pot.quick_slot = -1; // a plain misc item: a sale of it is not asked about (`a1_sell_*` tests cover the asked cases)
     let mut bank_gem = gem();
     bank_gem.equip_slot = -1;
 
@@ -2238,6 +2239,7 @@ fn round6b_transactions_route_through_native_consumers_and_camera_hook() {
     p.dump.player.p38 = 500;
     let mut bag_pot = potion();
     bag_pot.equip_slot = -1;
+    bag_pot.quick_slot = -1; // a plain misc item: a sale of it is not asked about (`a1_sell_*` tests cover the asked cases)
     let mut bank_gem = gem();
     bank_gem.equip_slot = -1;
     p.dump.inventory = list(&[bag_pot]);
@@ -2375,6 +2377,7 @@ fn round6c_no_false_confirmations_unrelated_invadd_or_corpse_close() {
     let mut bag1 = potion();
     bag1.key = 101;
     bag1.equip_slot = -1;
+    bag1.quick_slot = -1; // a plain misc item: a sale of it is not asked about
     let mut bag2 = gem();
     bag2.key = 102;
     bag2.equip_slot = -1;
@@ -2883,6 +2886,7 @@ fn round6f3_player_sale_while_broker_sale_in_flight_is_unknown_and_stops_batch()
     let mut a = potion();
     a.key = 101;
     a.equip_slot = -1;
+    a.quick_slot = -1; // a plain misc item: not asked about
     let mut b = gem();
     b.key = 102;
     b.equip_slot = -1;
@@ -2919,6 +2923,7 @@ fn round6f3_staged_sale_refused_when_player_sale_shrinks_the_stack() {
     let mut a = potion();
     a.key = 101;
     a.equip_slot = -1;
+    a.quick_slot = -1; // a plain misc item: not asked about
     a.quantity = 3;
     p.dump.inventory = list(&[a]);
     p.bags_open_merchant(88);
@@ -2995,6 +3000,7 @@ fn round65_window_takeover_keeps_mode_zero_draws_nothing_and_auto_releases() {
     p.dump.player.p38 = 500;
     let mut bag_pot = potion();
     bag_pot.equip_slot = -1;
+    bag_pot.quick_slot = -1; // a plain misc item: a sale of it is not asked about (`a1_sell_*` tests cover the asked cases)
     p.dump.inventory = list(&[bag_pot]);
     p.dump.bank.items = list(&[]);
 
@@ -3587,6 +3593,7 @@ fn round65_window_takeover_scopes_own_and_all() {
     p.dump.player.p34 = 500;
     let mut bag_pot = potion();
     bag_pot.equip_slot = -1;
+    bag_pot.quick_slot = -1; // a plain misc item: a sale of it is not asked about (`a1_sell_*` tests cover the asked cases)
     p.dump.inventory = list(&[bag_pot]);
     p.self_at = Some(([0.0, 0.0, 0.0], None));
     p.entities.slots = vec![
@@ -4279,6 +4286,7 @@ fn round7c_game_windows_switch_is_saved_and_stops_a_claimed_batch() {
     let mut a = potion();
     a.key = 101;
     a.equip_slot = -1;
+    a.quick_slot = -1; // a plain misc item: a sale of it is not asked about
     let mut b = gem();
     b.key = 102;
     b.equip_slot = -1;
@@ -4381,6 +4389,7 @@ fn round7c_sale_batch(scope: &str) -> (Play, Host) {
     let mut a = potion();
     a.key = 101;
     a.equip_slot = -1;
+    a.quick_slot = -1; // a plain misc item: a sale of it is not asked about
     let mut b = gem();
     b.key = 102;
     b.equip_slot = -1;
@@ -4499,6 +4508,7 @@ fn round7c_merchant_list_after_a_hidden_sale_stays_hidden() {
     let mut a = potion();
     a.key = 101;
     a.equip_slot = -1;
+    a.quick_slot = -1; // a plain misc item: a sale of it is not asked about
     let mut b = gem();
     b.key = 102;
     b.equip_slot = -1;
@@ -4610,6 +4620,7 @@ fn round7c_switch_on_leaves_helper_claims_working() {
     let mut a = potion();
     a.key = 101;
     a.equip_slot = -1;
+    a.quick_slot = -1; // a plain misc item: a sale of it is not asked about
     let mut b = gem();
     b.key = 102;
     b.equip_slot = -1;

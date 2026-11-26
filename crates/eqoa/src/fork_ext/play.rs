@@ -3052,17 +3052,9 @@ fn dispatch_broker_action(
                     reason: format!("member {member_id} is not eligible for master loot on this corpse"),
                 };
             }
-            play.session.send_raid_command(net::raid::Command::Assign {
-                key: it.inv_index,
-                id: *member_id,
-            });
-            DispatchOutcome::Completed {
-                detail: Some(serde_json::json!({
-                    "inventory_key": it.inv_index,
-                    "member_id": member_id,
-                    "sent": true
-                })),
-            }
+            // the game's own window asks "Assign <item> to <name>?" first, so the client does (`a1_play`)
+            let member = ml.members.iter().find(|(id, _)| *id == *member_id).map(|(_, n)| n.clone()).unwrap_or_default();
+            a1_play::loot_assign_question(it.inv_index, &it.item.name, *member_id, &member)
         }
         ActionKind::LootAbandon { item } => {
             if !loot_session_open(play) {
@@ -3104,10 +3096,8 @@ fn dispatch_broker_action(
                     };
                 }
             }
-            play.session.send_raid_command(net::raid::Command::Abandon);
-            DispatchOutcome::Completed {
-                detail: Some(serde_json::json!({"sent": true})),
-            }
+            // the game's own window asks before abandoning, so the client does (`a1_play`)
+            a1_play::loot_abandon_question()
         }
         ActionKind::Buy { ware, count } => {
             if !merchant_session_open(play) {
@@ -3233,6 +3223,11 @@ fn dispatch_broker_action(
                     code: "invalid_argument",
                     reason: format!("sell count {} exceeds stack size {}", count, it.quantity),
                 };
+            }
+            // where the game's own window asks before it sells (quick slot, no-trade, not a misc item), so does the
+            // client: the question goes to the player and only their Yes sells (`a1_play::sell_question`)
+            if let Some(asked) = a1_play::sell_question(play, it.inv_index, *count) {
+                return asked;
             }
             let unit_price = crate::merchant::sell_price(it, play.npcw.shop.sell_rate) as i64;
             let total_price = unit_price.saturating_mul(*count);

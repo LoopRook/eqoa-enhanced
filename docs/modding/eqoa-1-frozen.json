@@ -323,6 +323,7 @@
   "eqoa.actions.request_factions",
   "eqoa.actions.select_row",
   "eqoa.actions.sell",
+  "eqoa.actions.sell_many",
   "eqoa.actions.set_channel",
   "eqoa.actions.status",
   "eqoa.actions.stop",

@@ -1782,7 +1782,10 @@ impl BrokerState {
                         let outcome = {
                             let _vm_guard =
                                 DispatchVmGuard::enter(vm_id, self.vms.get(&vm_id).map(|v| v.addon_id.clone()));
-                            dispatch(&step_kind)
+                            DISPATCHING_BATCH_STEP.with(|b| b.set(true));
+                            let outcome = dispatch(&step_kind);
+                            DISPATCHING_BATCH_STEP.with(|b| b.set(false));
+                            outcome
                         };
                         let used = DISPATCH_CLAIMS.with(|c| c.replace([false; 3]));
                         let vm_state = self.vms.get_mut(&vm_id).expect("vm exists");
@@ -2126,6 +2129,8 @@ thread_local! {
     static EXPIRED_LOOT_TIMEOUT: Cell<bool> = const { Cell::new(false) };
     static DISPATCHING_VM: Cell<Option<u64>> = const { Cell::new(None) };
     static DISPATCHING_ADDON: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The dispatch under way is a step of a batch (a batch cannot put a question to the player).
+    static DISPATCHING_BATCH_STEP: Cell<bool> = const { Cell::new(false) };
     /// Claims the action being dispatched armed (indexed by `TakeoverKind`), read back by a batch step.
     static DISPATCH_CLAIMS: Cell<[bool; 3]> = const { Cell::new([false; 3]) };
 }
@@ -2161,6 +2166,11 @@ pub(crate) fn note_dispatch_claim(kind: super::window_takeover::TakeoverKind) {
         used[kind as usize] = true;
         c.set(used);
     });
+}
+
+/// Whether the action being dispatched is a step of `eqoa.actions.batch`.
+pub(crate) fn dispatching_batch_step() -> bool {
+    DISPATCHING_BATCH_STEP.with(Cell::get)
 }
 
 pub(crate) fn current_dispatch_vm() -> Option<u64> {

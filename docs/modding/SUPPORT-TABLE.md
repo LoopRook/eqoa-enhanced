@@ -145,6 +145,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.actions.request_factions` | supported | 8 |  |
 | `eqoa.actions.select_row` | supported | 6 |  |
 | `eqoa.actions.sell` | supported | 6 |  |
+| `eqoa.actions.sell_many` | supported | 8 |  |
 | `eqoa.actions.set_channel` | supported | 2 |  |
 | `eqoa.actions.status` | supported | 6 |  |
 | `eqoa.actions.stop` | supported | 6 |  |
