@@ -62,7 +62,7 @@ fn owner1126_chat_the_line_being_typed_wraps_inside_the_window_and_grows_upward(
     // each row break fell on a word boundary: the rows put back together are the line
     assert_eq!(shown.replace('|', " ").replace('_', ""), host.lua.load("return chat_probe.state.text").eval::<String>().unwrap(), "{shown}");
     // one long word breaks inside itself, still inside the window
-    host.lua.load("chat_probe.state.text = string.rep('W', 60)").exec().unwrap();
+    host.lua.load("chat_probe.state.text = string.rep('W', 100)").exec().unwrap();
     frames(&host, &bridge, &mut context, 3);
     let (rows, widest, limit, _, shown, _) = probe(&host);
     assert!(rows > 1 && widest <= limit + 0.01, "a long word: {rows} rows, {widest} <= {limit}: {shown}");
