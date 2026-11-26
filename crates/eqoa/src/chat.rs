@@ -92,6 +92,8 @@ struct Message {
     color: [f32; 4],
     time: u32,
     links: Vec<net::itemlink::ChatLink>,
+    /// the speaker's name in it (`speaker`), where a click opens a tell
+    name: Option<(u16, u16)>,
     end_seq: u64,
 }
 
@@ -107,6 +109,9 @@ pub struct ChatLine {
     seq: u64,
     /// The item links on this row (the client's, `itemlink`).
     pub links: Vec<RowLink>,
+    /// The speaker's name on this row, a message's first (`speaker`): where it
+    /// lies in the row's text (UTF-16 units), start and length.
+    pub name: Option<(u16, u16)>,
 }
 
 /// An item link's part of a row: where it lies in the row's text (UTF-16 units),
@@ -167,19 +172,21 @@ pub struct ChatText {
     src: Vec<usize>,
     spans: Vec<(usize, usize, u32, u64)>,
     link_inst: u64,
+    /// While a line is added: its speaker's name (`speaker`), for its first row.
+    name: Option<(u16, u16)>,
 }
 
 impl ChatText {
     /// `Init(app, width)`: lines wrap at `width - 30`.
     pub fn new(width: i32) -> Self {
-        let mut t = ChatText { width: width - 30, messages: VecDeque::new(), lines: Vec::new(), head: 0, tail: 0, seq: 0, src: Vec::new(), spans: Vec::new(), link_inst: 0 };
+        let mut t = ChatText { width: width - 30, messages: VecDeque::new(), lines: Vec::new(), head: 0, tail: 0, seq: 0, src: Vec::new(), spans: Vec::new(), link_inst: 0, name: None };
         t.reset();
         t
     }
 
     pub fn reset(&mut self) {
         self.messages.clear();
-        self.lines = (0..LINES).map(|_| ChatLine { text: Vec::new(), color: [1.0; 4], kind: 0, time: 0, seq: 0, links: Vec::new() }).collect();
+        self.lines = (0..LINES).map(|_| ChatLine { text: Vec::new(), color: [1.0; 4], kind: 0, time: 0, seq: 0, links: Vec::new(), name: None }).collect();
         self.head = 0;
         self.tail = 0;
     }
@@ -220,7 +227,7 @@ impl ChatText {
     /// `AddText`: wraps at the width, at most 63 characters a line, at the
     /// last space when there is one; a continuation line starts with a
     /// space. `width` measures a run of text in the font. (The game's lines
-    /// all come through `add_text_linked`, links or none.)
+    /// all come through `add_text_named`, links or none.)
     #[cfg(test)]
     pub fn add_text(&mut self, s: &[u16], c: [f32; 4], now: u32, width: impl Fn(&[u16]) -> i32) {
         self.add_text_linked(s, c, now, width, &[]);
@@ -230,9 +237,17 @@ impl ChatText {
     /// link's place in `s` (UTF-16 units) and the server's id. The rows are
     /// `AddText`'s, character for character; each row keeps the part of each
     /// link it holds (`ChatLine::links`).
+    #[cfg(test)]
     pub fn add_text_linked(&mut self, s: &[u16], c: [f32; 4], now: u32, width: impl Fn(&[u16]) -> i32, links: &[net::itemlink::ChatLink]) {
-        self.wrap(s, c, now, width, links);
-        self.remember(Message { text: s.to_vec(), color: c, time: now, links: links.to_vec(), end_seq: self.seq });
+        self.add_text_named(s, c, now, width, links, None);
+    }
+
+    /// `add_text_linked` for a line with its speaker's name (`speaker`, the
+    /// client's): its place in `s` (UTF-16 units), kept on the line's first row
+    /// (`ChatLine::name`) where the row holds it whole.
+    pub fn add_text_named(&mut self, s: &[u16], c: [f32; 4], now: u32, width: impl Fn(&[u16]) -> i32, links: &[net::itemlink::ChatLink], name: Option<(u16, u16)>) {
+        self.wrap(s, c, now, width, links, name);
+        self.remember(Message { text: s.to_vec(), color: c, time: now, links: links.to_vec(), name, end_seq: self.seq });
     }
 
     fn remember(&mut self, message: Message) {
@@ -248,14 +263,15 @@ impl ChatText {
         self.reset();
         self.width = width - 30;
         for mut m in messages {
-            self.wrap(&m.text, m.color, m.time, measure, &m.links);
+            self.wrap(&m.text, m.color, m.time, measure, &m.links, m.name);
             m.end_seq = self.seq;
             self.remember(m);
         }
     }
 
-    fn wrap(&mut self, s: &[u16], c: [f32; 4], now: u32, width: impl Fn(&[u16]) -> i32, links: &[net::itemlink::ChatLink]) {
+    fn wrap(&mut self, s: &[u16], c: [f32; 4], now: u32, width: impl Fn(&[u16]) -> i32, links: &[net::itemlink::ChatLink], name: Option<(u16, u16)>) {
         self.src.clear();
+        self.name = name;
         self.spans = links
             .iter()
             .map(|l| {
@@ -307,12 +323,16 @@ impl ChatText {
         }
         self.add_line(c, now);
         self.spans.clear();
+        self.name = None;
     }
 
     /// `AddLine`: the line at the tail is finished; the ring moves on.
     fn add_line(&mut self, c: [f32; 4], now: u32) {
         let links = self.row_links();
+        // the speaker's name, on the line's first row, whole there
+        let name = self.name.take().filter(|&(a, n)| n > 0 && a as usize + n as usize <= self.lines[self.tail].text.len());
         let l = &mut self.lines[self.tail];
+        l.name = name;
         l.color = c;
         l.kind = 1;
         l.time = now;
@@ -328,6 +348,7 @@ impl ChatText {
         // The new tail line starts empty (it is overwritten as it fills).
         self.lines[self.tail].text.clear();
         self.lines[self.tail].links.clear();
+        self.lines[self.tail].name = None;
         self.src.clear();
     }
 
@@ -449,6 +470,14 @@ struct LinkHit {
     inst: u64,
 }
 
+/// A speaker's name as the last frame drew it (`speaker`): its place (as
+/// `contains` takes a point) and the name, its tags left out.
+#[derive(Clone, Debug)]
+struct NameHit {
+    rect: [i32; 4],
+    name: String,
+}
+
 /// The button let go (`WndChat::release`).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Let {
@@ -460,7 +489,13 @@ pub enum Let {
     Click(f64, f64),
     /// a click on an item link (`itemlink`): its id and its name as drawn
     Link(u32, String),
+    /// a click on a speaker's name (`speaker`, `click_names`): the name, a
+    /// tell's to it
+    Name(String),
 }
+
+/// A speaker's name under the pointer (`speaker`): a light wash.
+const NAME_LIT: [f32; 4] = [1.0, 1.0, 1.0, 0.25];
 
 /// The highlight, over the rows: a wash the words read through.
 const SELECTED: [f32; 4] = [0.30, 0.55, 1.0, 0.40];
@@ -626,6 +661,106 @@ pub fn kind_of(text: &str, color: [f32; 4]) -> Kind {
     Kind::System
 }
 
+/// The tags a drawn name may carry before it (go-eqoa-server's
+/// `entity.nameTags`, and a raid line's leader's and helper's marks): a tell
+/// goes to the name without them (`entity.PlainName`).
+const NAME_TAGS: [&str; 8] = ["[GM]", "[Test]", "[OG]", "[HC]", "[Banner]", "[AFK]", "[L]", "[H]"];
+
+/// What follows the speaker's name in a player's line, as go-eqoa-server words
+/// them (`handlers/chat.go`): a tell and a whisper to the player, the group's,
+/// the raid's, the guild's, a shout, and a say's or the guild handler's
+/// "Name: " (`SAID`, which is held to more, as the server's own notices are
+/// worded so too).
+const SPEECH: [&str; 8] = [" tells you, '", " whispers, '", " tells the group: ", " tells the raid: ", " tells the guild: ", " shouts: ", " says, '", " says out of character, '"];
+const SAID: &str = ": ";
+
+/// Words a server's notice starts with as a say starts with its speaker's name
+/// ("Usage: ...", "Note: ..."): never taken for one.
+const NOT_NAMES: [&str; 48] = [
+    "You", "Usage", "Note", "Error", "Warning", "Tip", "Hint", "Help", "Notice", "Info", "Server", "System",
+    "Status", "Quest", "Quests", "Craft", "Loot", "Combat", "Group", "Raid", "Guild", "Trade", "Mail", "Auction",
+    "Duel", "Pet", "Pets", "Spell", "Spells", "Mastery", "Target", "Tell", "Shout", "Welcome", "Announcement", "Death",
+    "Corpse", "World", "Position", "Failed", "Bind", "Items", "Effects", "Faction", "Factions", "Weather", "Respawn",
+    "Hardcore",
+];
+
+/// A drawn name without the tags before it (`NAME_TAGS`; "[GM] [OG] Bob",
+/// "[OG][HC]Bob" are "Bob"), trimmed: go-eqoa-server's `entity.PlainName`.
+pub fn plain_name(name: &str) -> &str {
+    name[untagged(name)..].trim_end()
+}
+
+/// Where `s` starts past its leading spaces and the tags before a name.
+fn untagged(s: &str) -> usize {
+    let mut at = s.len() - s.trim_start().len();
+    let mut again = true;
+    while again {
+        again = false;
+        for t in NAME_TAGS {
+            let rest = &s[at..];
+            if rest.len() > t.len() && rest.is_char_boundary(t.len()) && rest[..t.len()].eq_ignore_ascii_case(t) {
+                at += t.len();
+                at += s[at..].len() - s[at..].trim_start().len();
+                again = true;
+            }
+        }
+    }
+    at
+}
+
+/// Whether `name` could be a player's: an optional other shard's mark ("v.",
+/// `shardchat.Realm.Name`) and 3 to 15 letters (the server's creation rule,
+/// `isValidName`).
+fn player_name(name: &str) -> bool {
+    let own = match name.split_once('.') {
+        Some((realm, own)) => {
+            if realm.is_empty() || realm.len() > 7 || !realm.bytes().all(|b| b.is_ascii_lowercase()) {
+                return false;
+            }
+            own
+        }
+        None => name,
+    };
+    (3..=15).contains(&own.len()) && own.bytes().all(|b| b.is_ascii_alphabetic())
+}
+
+/// The speaker of a player's line (the client's, Heirloom 3140: "Names are
+/// clickable in the chat channels and if you click it it brings up a /tell
+/// with their name populated"): where the name lies in `text` (UTF-16 units,
+/// start and length), its tags before it left out (`plain_name`), for each line
+/// form that starts with a player's name (`SPEECH`). A say's "Name: " is held
+/// to more: a say's white or the guild's colour, a capital, not a notice's word
+/// (`NOT_NAMES`). An NPC's say reads as a player's: what knows the creatures
+/// (`Play::add_chat`) tells them apart.
+pub fn speaker(text: &str, color: [f32; 4]) -> Option<(u16, u16)> {
+    if text.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let name_at = untagged(text);
+    let rest = &text[name_at..];
+    let end = rest.find([' ', ':'])?;
+    let (name, after) = rest.split_at(end);
+    if !player_name(name) {
+        return None;
+    }
+    let said = if SPEECH.iter().any(|w| after.starts_with(w)) {
+        true
+    } else if after.starts_with(SAID) {
+        let c = rgb(color);
+        let own = name.rsplit('.').next().unwrap_or(name);
+        (c == [255, 255, 255] || c == [64, 255, 204])
+            && own.starts_with(|ch: char| ch.is_ascii_uppercase())
+            && !NOT_NAMES.iter().any(|w| w.eq_ignore_ascii_case(own))
+    } else {
+        false
+    };
+    if !said {
+        return None;
+    }
+    let start = text[..name_at].encode_utf16().count();
+    Some((start as u16, name.len() as u16))
+}
+
 /// The tabs: the rings of the tabs not shown (the one shown is `WndChat::text`),
 /// which is shown, which have lines unread, where the last frame drew each name.
 struct Tabs {
@@ -747,6 +882,10 @@ pub struct WndChat {
     /// The lines selected: the one it began on and the one it has come to.
     sel: Option<(u64, u64)>,
     drag: Option<Drag>,
+    /// The scroll bar the last frame drew, and how far down its knob the pointer
+    /// holds it while a grab is on (`scrollbar`).
+    bar: Option<vi::ui::VBar>,
+    bar_grip: Option<f32>,
     /// What `FOR_COPY` was last told of (the lines' count, the selection).
     told: Option<(u64, Option<(u64, u64)>)>,
     /// The wheel's part of a line not yet stepped.
@@ -767,6 +906,12 @@ pub struct WndChat {
     link_hits: Vec<LinkHit>,
     pub show_links: bool,
     walk: Option<u64>,
+    /// The speakers' names the last frame drew (`speaker`), whether a click on
+    /// one opens a tell to it (the PC interface's: Heirloom 3140), and the
+    /// pointer over the box (the name under it washed).
+    name_hits: Vec<NameHit>,
+    pub click_names: bool,
+    pointer: Option<[f32; 2]>,
     /// Chat Always Shown (the module's doc): open at five rows, every line.
     pub always: bool,
     pub size: ChatSize,
@@ -805,7 +950,7 @@ impl WndChat {
     /// `Init`: the window is 462 wide and lines wrap at its width less 45.
     pub fn new() -> Self {
         let size = ChatSize::ORIGINAL;
-        WndChat { mode: 0, height: 0, target: 0, lines: 0, text: ChatText::new(size.wrap_width()), window: Window::default(), scroll: 0, top: 0, bottom: 0, history_held: false, held: 0, repeat: 0.0, cues: Vec::new(), shown: Vec::new(), sel: None, drag: None, told: None, wheel: 0.0, following: false, arrived: 0, down_gap: f32::INFINITY, link_hits: Vec::new(), show_links: true, walk: None, always: false, size, opacity: 75, typing: false, row_height: 17, tabs: Tabs::default(), panes: std::array::from_fn(|_| None), pane_title: None, control_hit: None, last_activity: None, hovered: false, wake_on_message: false, wake_any_tab: false, pc_tabs: false }
+        WndChat { mode: 0, height: 0, target: 0, lines: 0, text: ChatText::new(size.wrap_width()), window: Window::default(), scroll: 0, top: 0, bottom: 0, history_held: false, held: 0, repeat: 0.0, cues: Vec::new(), shown: Vec::new(), sel: None, drag: None, bar: None, bar_grip: None, told: None, wheel: 0.0, following: false, arrived: 0, down_gap: f32::INFINITY, link_hits: Vec::new(), show_links: true, walk: None, name_hits: Vec::new(), click_names: false, pointer: None, always: false, size, opacity: 75, typing: false, row_height: 17, tabs: Tabs::default(), panes: std::array::from_fn(|_| None), pane_title: None, control_hit: None, last_activity: None, hovered: false, wake_on_message: false, wake_any_tab: false, pc_tabs: false }
     }
 
     /// A pointer action or active interaction restores this pane without
@@ -825,6 +970,7 @@ impl WndChat {
             || self.tabs.hits.iter().any(|(r, _)| p[0] >= r[0] as f32 && p[0] < r[2] as f32 && p[1] >= r[1] as f32 && p[1] < r[3] as f32));
         if hovered || self.hovered { self.activity(now); }
         self.hovered = hovered;
+        self.pointer = p.filter(|_| hovered);
         hovered
     }
 
@@ -883,27 +1029,34 @@ impl WndChat {
 
     /// A line for the box (`add_text_linked`), into the tab its kind goes to;
     /// one not shown is marked unread.
+    #[cfg(test)]
     pub fn add_line(&mut self, text: &str, c: [f32; 4], now: u32, width: impl Fn(&[u16]) -> i32, links: &[net::itemlink::ChatLink]) {
+        self.add_line_named(text, c, now, width, links, None);
+    }
+
+    /// `add_line` with the line's speaker's name (`speaker`), a click on which
+    /// opens a tell to it.
+    pub fn add_line_named(&mut self, text: &str, c: [f32; 4], now: u32, width: impl Fn(&[u16]) -> i32, links: &[net::itemlink::ChatLink], name: Option<(u16, u16)>) {
         let t = self.tabs.routes[kind_of(text, c).index()] as usize;
         let wide: Vec<u16> = text.encode_utf16().collect();
         if t > 0 && let Some(pane) = self.panes[t - 1].as_mut() {
             if self.wake_on_message { pane.activity(now); }
             let at_end = pane.scroll == 1 && pane.bottom == pane.text.end();
             let seq = pane.text.seq;
-            pane.text.add_text_linked(&wide, c, now, width, links);
+            pane.text.add_text_named(&wide, c, now, width, links, name);
             if at_end && !pane.selecting() { pane.set_scroll(1); }
             else if pane.scroll == 1 { pane.arrived += (pane.text.seq - seq) as usize; }
         } else if t == self.tabs.active {
             if self.wake_on_message { self.activity(now); }
             let seq = self.text.seq;
-            self.text.add_text_linked(&wide, c, now, width, links);
+            self.text.add_text_named(&wide, c, now, width, links, name);
             if self.scroll == 1 { self.arrived += (self.text.seq - seq) as usize; }
         } else {
             // a tab not shown is marked unread; only Any Tab wakes Main for
             // it (Heirloom petition 2953)
             if self.wake_on_message && self.wake_any_tab { self.activity(now); }
             let ring = self.tabs.parked[t].get_or_insert_with(|| ChatText::new(self.size.wrap_width()));
-            ring.add_text_linked(&wide, c, now, width, links);
+            ring.add_text_named(&wide, c, now, width, links, name);
             self.tabs.unread[t] = true;
         }
     }
@@ -1306,6 +1459,7 @@ impl WndChat {
         }
         self.shown.clear();
         self.link_hits.clear();
+        self.name_hits.clear();
         let mut row = (self.lines - 1).max(0);
         let mut i = ChatText::prev(it);
         let stop = ChatText::prev(self.text.first());
@@ -1315,13 +1469,18 @@ impl WndChat {
                 && l.text[0] != 0
                 && (self.scroll == 1 || (self.scroll == 0 && l.kind == 1) || self.fixed())
             {
-                let (text, color, seq) = (l.text.clone(), l.color, l.seq);
+                let (text, color, seq, name) = (l.text.clone(), l.color, l.seq, l.name);
                 let links = if self.show_links { l.links.clone() } else { Vec::new() };
                 let (mid, step) = (self.window.row_center(vui, ui, row)[1], h - 4);
                 if links.is_empty() {
                     self.window.text_box(vui, ui, &text, 25, row, self.window.size[0] - 45, 1, color, 0);
                 } else {
                     self.draw_linked_row(vui, ui, &text, &links, row, color, [mid - step / 2, mid - step / 2 + step]);
+                }
+                if self.click_names
+                    && let Some((a, n)) = name
+                {
+                    self.note_name(vui, ui, &text, a as usize, n as usize, [mid - step / 2, mid - step / 2 + step]);
                 }
                 self.shown.push(Shown { seq, top: mid - step / 2, bottom: mid - step / 2 + step });
                 row -= 1;
@@ -1331,13 +1490,15 @@ impl WndChat {
         self.draw_tabs(vui, ui);
         self.drag_on(dt);
         self.tell_copy();
+        self.bar = None;
         if self.scroll_indicator(crate::settings::pc_mode()) {
             let n = self.text.count();
             let rows = self.size.rows as usize;
             let t = if n > rows { self.text.index(self.top) as f32 / (n - rows) as f32 } else { 0.0 };
             let tl = self.window.top_left();
             let at = [tl[0] + 10, tl[1] + 10];
-            self.window.draw_vscroll(vui, ui, at, self.window.bottom_right()[1] - tl[1] - 40, t);
+            // where it went is the box's own to grab (`bar_press`), not a window's
+            self.bar = self.window.draw_vscroll_bar(vui, ui, at, self.window.bottom_right()[1] - tl[1] - 40, t);
         }
         let step = (dt * 200.0) as i32;
         if self.height < self.target {
@@ -1430,6 +1591,72 @@ impl WndChat {
         }
     }
 
+    /// The left button down at point `p` on the scroll bar the box drew: its
+    /// knob taken (the history goes where the pointer holds it), or a press on
+    /// the track above or below it pages the history as its keys do. True when
+    /// the bar's.
+    pub fn bar_press(&mut self, p: [f32; 2]) -> bool {
+        let Some(bar) = self.bar.filter(|_| self.window.is_open() && self.scroll == 1) else { return false };
+        match crate::scrollbar::zone(&bar, p, crate::scrollbar::SLOP) {
+            Some(crate::scrollbar::Zone::Knob) => {
+                self.bar_grip = Some(crate::scrollbar::grip_at(&bar, p[1]));
+                true
+            }
+            Some(crate::scrollbar::Zone::Above) => {
+                self.page_history(true);
+                true
+            }
+            Some(crate::scrollbar::Zone::Below) => {
+                self.page_history(false);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// A grab of the knob is on.
+    pub fn bar_dragging(&self) -> bool {
+        self.bar_grip.is_some()
+    }
+
+    /// The pointer at `p` with the knob held: the history's view at the place
+    /// the knob would be.
+    pub fn bar_moved(&mut self, p: [f32; 2]) -> bool {
+        let (Some(grip), Some(bar)) = (self.bar_grip, self.bar) else { return false };
+        let n = self.text.count();
+        let rows = self.size.rows as usize;
+        if n <= rows || self.scroll != 1 {
+            return true;
+        }
+        let want = (crate::scrollbar::t_at(&bar, grip, p[1]) * (n - rows) as f32).round() as usize;
+        let cues = self.cues.len();
+        loop {
+            let at = self.text.index(self.top);
+            if at > want && self.top != self.text.first() {
+                self.scroll_up();
+            } else if at < want && self.bottom != self.text.end() {
+                self.scroll_down();
+            } else {
+                break;
+            }
+        }
+        self.cues.truncate(cues);
+        true
+    }
+
+    /// The knob let go (or the pointer gone): at the newest line the view is
+    /// live again, as the wheel's last notch down leaves it.
+    pub fn bar_release(&mut self) -> bool {
+        if self.bar_grip.take().is_none() {
+            return false;
+        }
+        self.wheel = 0.0;
+        if self.bottom == self.text.end() && !self.selecting() {
+            self.set_scroll(0);
+        }
+        true
+    }
+
     /// The left button let go.
     pub fn release(&mut self, scrolling: bool) -> Let {
         let Some(d) = self.drag.take() else { return Let::NotHeld };
@@ -1442,6 +1669,9 @@ impl WndChat {
         }
         if let Some((id, name)) = self.link_at(d.p0) {
             return Let::Link(id, name);
+        }
+        if let Some(name) = self.name_at(d.p0) {
+            return Let::Name(name);
         }
         Let::Click(d.press.0, d.press.1)
     }
@@ -1569,6 +1799,36 @@ impl WndChat {
             let [a, b, c, d] = h.rect;
             ui.fill_blended(crate::itemlink::LIT, [[a - 2, b], [c + 2, b], [c + 2, d], [a - 2, d]]);
         }
+        // and the speaker's name under the pointer, a click's tell (`speaker`)
+        if self.drag.is_none_or(|d| !d.moved)
+            && let Some(h) = self.pointer.and_then(|p| self.name_hit(p))
+        {
+            let [a, b, c, d] = h.rect;
+            ui.fill_blended(NAME_LIT, [[a - 2, b], [c + 2, b], [c + 2, d], [a - 2, d]]);
+        }
+    }
+
+    /// A speaker's name on a row (`speaker`): where it was drawn noted
+    /// (`name_hits`), as `draw_linked_row` notes a link's. The row's text
+    /// starts 25 in; `y` is the row's top and bottom.
+    fn note_name(&mut self, vui: &Vui, ui: &mut dyn Raster, text: &[u16], a: usize, n: usize, y: [i32; 2]) {
+        let Some(run) = text.get(a..a + n) else { return };
+        let x0 = self.window.top_left()[0] + 25 + self.window.text_width(vui, ui, &text[..a]);
+        let w = self.window.text_width(vui, ui, run);
+        self.name_hits.push(NameHit { rect: [x0, y[0], x0 + w, y[1]], name: String::from_utf16_lossy(run) });
+    }
+
+    fn name_hit(&self, p: [f32; 2]) -> Option<&NameHit> {
+        if !self.click_names {
+            return None;
+        }
+        self.name_hits.iter().find(|h| p[0] >= h.rect[0] as f32 && p[0] < h.rect[2] as f32 && p[1] >= h.rect[1] as f32 && p[1] < h.rect[3] as f32)
+    }
+
+    /// The speaker's name drawn at point `p` (as `contains` takes one), with
+    /// names clickable (`click_names`).
+    pub fn name_at(&self, p: [f32; 2]) -> Option<String> {
+        self.name_hit(p).map(|h| h.name.clone())
     }
 
     /// A row with item links (`itemlink`): its runs drawn one after another as
@@ -2588,6 +2848,89 @@ mod tests {
         }
     }
 
+    /// A knob to hold: the bar the last frame drew, with a knob of its own
+    /// size (the test's atlas has none).
+    fn knobbed(c: &mut WndChat) -> vi::ui::VBar {
+        let mut b = c.bar.expect("the history's bar is drawn");
+        b.knob = [7, 20];
+        b.w = 5;
+        c.bar = Some(b);
+        b
+    }
+
+    /// The scroll bar's knob dragged: the history goes where the pointer holds
+    /// the knob, in proportion, to the oldest line at the top of the track and
+    /// the newest at its foot (where it is live again on release); the control:
+    /// a press off the bar is none of its.
+    #[test]
+    fn the_knob_drags_the_history() {
+        let mut c = with_lines(205);
+        assert!(c.bar.is_none(), "live: no bar");
+        assert!(!c.bar_press([30.0, 40.0]));
+        assert!(c.pc_wheel(on(&c, 204), 4.0));
+        frame(&mut c, 0.016);
+        let bar = knobbed(&mut c);
+        let rows = c.size.rows as usize;
+        let n = c.text.count();
+        assert_eq!(n, 205);
+        // off the bar: not its press
+        assert!(!c.bar_press([bar.at[0] as f32 + 100.0, bar.at[1] as f32 + 50.0]));
+        assert!(!c.bar_dragging());
+        // on the knob, 5 down it
+        let top = crate::scrollbar::knob_top(&bar) as f32;
+        let x = bar.at[0] as f32 + 2.0;
+        assert!(c.bar_press([x, top + 5.0]));
+        assert!(c.bar_dragging());
+        // to the middle of the track
+        let travel = (bar.h - bar.knob[1]) as f32;
+        assert!(c.bar_moved([x, bar.at[1] as f32 + 5.0 + travel / 2.0]));
+        let want = ((n - rows) as f32 / 2.0).round() as usize;
+        assert_eq!(c.text.index(c.top), want, "the middle of the history");
+        assert_eq!(c.text.index(c.bottom) - c.text.index(c.top), rows, "the view is still whole rows");
+        // to the top and past it, then to the foot and past it
+        assert!(c.bar_moved([x, -500.0]));
+        assert_eq!(c.top, c.text.first(), "the oldest at the top");
+        assert!(c.bar_moved([x, 5000.0]));
+        assert_eq!(c.bottom, c.text.end(), "the newest at the foot");
+        assert!(c.cues.is_empty(), "silent, a step's tick not played a hundred times");
+        // let go at the foot: live
+        assert!(c.bar_release());
+        assert!(!c.bar_dragging());
+        assert_eq!(c.scroll, 0, "live again");
+        assert!(!c.bar_release(), "nothing more held");
+    }
+
+    /// Let go in the middle, the view stays; and a press on the track above or
+    /// below the knob pages as the page keys do.
+    #[test]
+    fn the_track_pages_and_a_release_in_the_middle_stays() {
+        let mut c = with_lines(205);
+        assert!(c.pc_wheel(on(&c, 204), 4.0));
+        frame(&mut c, 0.016);
+        let bar = knobbed(&mut c);
+        let rows = c.size.rows as usize;
+        let x = bar.at[0] as f32 + 2.0;
+        let at = c.text.index(c.top);
+        // the knob is near the foot: a press above it pages to older lines
+        assert!(c.bar_press([x, bar.at[1] as f32 + 1.0]));
+        assert!(!c.bar_dragging(), "a page is no grab");
+        assert_eq!(c.text.index(c.top), at - rows, "a page older");
+        frame(&mut c, 0.016);
+        let bar = knobbed(&mut c);
+        // below it: a page newer
+        assert!(c.bar_press([x, (bar.at[1] + bar.h) as f32 - 1.0]));
+        assert_eq!(c.text.index(c.top), at, "and a page back");
+        // a grab let go mid-history keeps the view
+        frame(&mut c, 0.016);
+        let bar = knobbed(&mut c);
+        assert!(c.bar_press([x, crate::scrollbar::knob_top(&bar) as f32 + 3.0]));
+        assert!(c.bar_moved([x, bar.at[1] as f32 + 3.0 + (bar.h - bar.knob[1]) as f32 * 0.25]));
+        let kept = c.text.index(c.top);
+        assert!(c.bar_release());
+        assert_eq!(c.scroll, 1, "still reading");
+        assert_eq!(c.text.index(c.top), kept);
+    }
+
     #[test]
     fn chat_history_wheel_resumes_live_at_the_bottom() {
         let mut c = with_lines(20);
@@ -2716,6 +3059,110 @@ mod tests {
         assert_eq!(r.0, vec![(line.to_string(), [1.0; 4])], "off: the plain line");
         assert!(c.press(on, (3.0, 3.0)));
         assert_eq!(c.release(false), Let::Click(3.0, 3.0), "off: the line's click");
+    }
+
+    /// The speaker's name in each line form that starts with a player's
+    /// (go-eqoa-server's words, `handlers/chat.go`), its tags left out; the
+    /// controls: an NPC's generic name, a server's notice, the player's own
+    /// tell, a line that only quotes a form, a name too long or not letters.
+    #[test]
+    fn a_speaker_is_found_in_each_line_form() {
+        const W: [f32; 4] = [1.0; 4];
+        let who = |t: &str, c: [f32; 4]| speaker(t, c).map(|(a, n)| String::from_utf16_lossy(&crate::ui::wide(t)[a as usize..(a + n) as usize]));
+        let shout = [63.0 / 255.0, 1.0, 63.0 / 255.0, 1.0];
+        let tell = [1.0, 127.0 / 255.0, 1.0, 1.0];
+        let group = [0.5, 0.5, 1.0, 1.0];
+        let guild = [64.0 / 255.0, 1.0, 204.0 / 255.0, 1.0];
+        let raid = [1.0, 140.0 / 255.0, 0.0, 1.0];
+        assert_eq!(who("Ann: hello there", W).as_deref(), Some("Ann"), "a say");
+        assert_eq!(who("Ann shouts: LFG Highpass", shout).as_deref(), Some("Ann"), "a shout");
+        assert_eq!(who("Ann tells you, 'hi'", tell).as_deref(), Some("Ann"), "a tell");
+        assert_eq!(who("Ann whispers, 'hi'", tell).as_deref(), Some("Ann"), "a whisper");
+        assert_eq!(who("Ann tells the group: pull", group).as_deref(), Some("Ann"), "the group");
+        assert_eq!(who("Ann tells the raid: pull", raid).as_deref(), Some("Ann"), "the raid");
+        assert_eq!(who("Ann: guild line", guild).as_deref(), Some("Ann"), "the guild handler's");
+        assert_eq!(who("Ann tells the guild: hi", guild).as_deref(), Some("Ann"), "the guild");
+        assert_eq!(who("v.Ann shouts: from the other shard", shout).as_deref(), Some("v.Ann"), "another shard's, its mark kept");
+        // the tags before it left out: the tell goes to the plain name
+        assert_eq!(who("[L] Ann tells the raid: pull", raid).as_deref(), Some("Ann"), "a raid leader's mark");
+        assert_eq!(who("[H] Ann tells the raid: pull", raid).as_deref(), Some("Ann"), "a raid helper's mark");
+        assert_eq!(who("[GM] Ann: hello", W).as_deref(), Some("Ann"));
+        assert_eq!(who("[OG][HC]Ann shouts: hi", shout).as_deref(), Some("Ann"));
+        assert_eq!(who("[GM] [OG] [AFK] Ann tells you, 'x'", tell).as_deref(), Some("Ann"));
+        assert_eq!(speaker("[GM] Ann: hello", W), Some((5, 3)), "UTF-16 units");
+        assert_eq!(speaker("\u{e9}\u{e9}", W), None);
+        // the controls
+        assert_eq!(who("a gnoll pup: grr", W), None, "an NPC's generic name");
+        assert_eq!(who("Usage: /tell <name> <text>", W), None, "a notice's word");
+        assert_eq!(who("Note: the ferry is late", W), None, "a notice's word");
+        assert_eq!(who("You told Ann, 'hi'", tell), None, "the player's own tell");
+        assert_eq!(who("You: hi", W), None);
+        assert_eq!(who("Ann: hello", [1.0, 0.0, 0.0, 1.0]), None, "a say's form in an error's red");
+        assert_eq!(who("ann: hello", W), None, "a say's lower-case head");
+        assert_eq!(who("Ann hits a gnoll for 5 points of damage.", W), None, "no speech");
+        assert_eq!(who("Ann says the word: go", W), None, "a form only quoted");
+        assert_eq!(who("Annabelleannabelle: hi", W), None, "past 15 letters");
+        assert_eq!(who("An: hi", W), None, "under 3");
+        assert_eq!(who("Ann2: hi", W), None, "not letters");
+        assert_eq!(who(" Ann: hi", W), None, "a continuation's space");
+        assert_eq!(who("[GM] Server restarting in 5 minutes", W), None);
+        assert_eq!(who("Ann", W), None);
+        assert_eq!(plain_name("[GM] [OG] Bob "), "Bob");
+        assert_eq!(plain_name("[og][hc]Bob"), "Bob");
+        assert_eq!(plain_name("[GM]"), "[GM]", "a tag alone is not stripped to nothing");
+    }
+
+    /// A line with its speaker's name: the name kept on the line's first row,
+    /// where it lies; a click on it (names clickable, the PC interface's) is a
+    /// tell's to it, the pointer over it washes it, beside it is the line's
+    /// click. The controls: names not clickable, the same place is the line's;
+    /// a wrapped line's other rows hold no name; a line added with none has none.
+    #[test]
+    fn a_click_on_a_speakers_name_is_a_tell() {
+        let mut c = WndChat::new();
+        c.click_names = true;
+        let line = "[L] Ann tells the raid: pull the next one when the healers have their power back up again please";
+        c.add_line_named(line, [1.0; 4], 0, width, &[], speaker(line, [1.0, 140.0 / 255.0, 0.0, 1.0]));
+        c.add_line("Note: nobody's", [1.0; 4], 0, width, &[]);
+        let (v, mut r) = (vui(), Runs(Vec::new()));
+        for _ in 0..30 {
+            r.0.clear();
+            c.draw(&v, &mut r, 0, 0.1);
+        }
+        let named: Vec<_> = (0..LINES).filter_map(|i| c.text.line(i)).filter(|l| l.drawn() && l.name.is_some()).collect();
+        assert_eq!(named.len(), 1, "the first row alone");
+        assert_eq!(named[0].name, Some((4, 3)));
+        assert_eq!(c.name_hits.len(), 1, "{:?}", c.name_hits);
+        let h = c.name_hits[0].clone();
+        assert_eq!(h.name, "Ann");
+        assert_eq!(h.rect[2] - h.rect[0], 24, "three letters of 8");
+        let on = [(h.rect[0] + h.rect[2]) as f32 / 2.0, (h.rect[1] + h.rect[3]) as f32 / 2.0];
+        c.hover(Some(on), 0);
+        assert!(c.name_hit(on).is_some(), "the pointer over it: washed");
+        assert!(c.press(on, (1.0, 1.0)));
+        assert_eq!(c.release(false), Let::Name("Ann".into()));
+        let beside = [h.rect[2] as f32 + 30.0, on[1]];
+        assert!(c.name_at(beside).is_none());
+        assert!(c.press(beside, (2.0, 2.0)));
+        assert_eq!(c.release(false), Let::Click(2.0, 2.0), "the line beside it");
+        c.click_names = false;
+        c.draw(&v, &mut r, 0, 0.1);
+        assert!(c.name_at(on).is_none());
+        assert!(c.press(on, (3.0, 3.0)));
+        assert_eq!(c.release(false), Let::Click(3.0, 3.0), "not clickable: the line's click");
+    }
+
+    /// A resize rewraps the history: the name stays on the line's first row.
+    #[test]
+    fn a_speakers_name_survives_a_rewrap() {
+        let mut t = ChatText::new(462);
+        let line = "Ann shouts: anyone selling a bone pick in freeport tonight";
+        t.add_text_named(&crate::ui::wide(line), [1.0; 4], 0, width, &[], speaker(line, [63.0 / 255.0, 1.0, 63.0 / 255.0, 1.0]));
+        t.rewrap(200, &width);
+        let named: Vec<_> = (0..LINES).filter_map(|i| t.line(i)).filter(|l| l.drawn() && l.name.is_some()).map(|l| (plain(&l.text), l.name)).collect();
+        assert_eq!(named.len(), 1, "{named:?}");
+        assert!(named[0].0.starts_with("Ann shouts"), "{named:?}");
+        assert_eq!(named[0].1, Some((0, 3)));
     }
 
     /// With the history held, left walks up through the links (the newest first,
