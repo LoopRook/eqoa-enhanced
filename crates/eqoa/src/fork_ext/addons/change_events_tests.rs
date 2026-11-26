@@ -445,7 +445,9 @@ fn raid_ready_check_is_a_session_with_its_data_and_its_end_reasons() {
     step(&h);
     assert_eq!(sessions(&h), "raid_ready:opened:nil:request raid_ready:closed:released:request");
     // `mod_window_up` is not touched by a strip: the game does not hold its other windows for it
-    assert!(!crate::fork_ext::a11_play::mod_window_up());
+    // (what `a11_play::mod_window_up` counts: no hidden game window, dialog, offer or client window)
+    assert!(!super::dialog_sessions::any_up() && !ws::client_window_up());
+    assert!(!window_takeover::is_hidden_active(TakeoverKind::Loot));
 }
 
 /// With no claim there is no session; a claim taken after the check came opens one for the check that is up.
@@ -578,14 +580,18 @@ fn imgui_window_flags_and_conditions_are_the_ones_the_spec_lists() {
             r#"
             local out = {}
             for _, g in ipairs({'ImGuiWindowFlags', 'ImGuiCond'}) do
-                for k, v in pairs(_G[g]) do out[#out + 1] = {g .. '.' .. k, v} end
+                for k, v in pairs(_G[g]) do out[#out + 1] = g .. '.' .. k .. '=' .. v end
             end
             return out
             "#,
         )
-        .eval::<Vec<(String, i64)>>()
+        .eval::<Vec<String>>()
         .unwrap()
         .into_iter()
+        .map(|s| {
+            let (name, value) = s.split_once('=').unwrap();
+            (name.to_string(), value.parse::<i64>().unwrap())
+        })
         .collect();
     assert_eq!(in_spec, have, "the spec's tables and the installed ones differ");
     assert!(have.len() >= 26, "{}", have.len());
