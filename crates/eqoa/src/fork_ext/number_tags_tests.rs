@@ -181,6 +181,49 @@ fn combat_hit_with_the_players_id_not_known_is_unknown_not_id() {
     crate::settings::testing::reset(false);
 }
 
+/// The Stat Window's figures (`eqoa.player.stats().figures`) are asked for while an enabled mod holds the game's Stat
+/// Window back, though the player's own Stat Window setting is off (F4 and `/stats` do nothing then, so it cannot be
+/// turned on); asked to stop when the mod lets go. The controls: with no mod the server is told 0; a server that turns the
+/// Stat Window off (`qol::STAT_CAPS`) is told 0 whatever a mod holds. The line in `Play::frame` is
+/// `settings::stat_window() || fork_hooks::stat_figures_wanted()`, which is what `agree` repeats here (`frame` needs a
+/// graphics adapter).
+#[test]
+fn stat_figures_are_asked_for_while_a_mod_holds_the_stat_window_whatever_the_setting_says() {
+    use crate::fork_ext::addons::{health::InstanceToken, visibility::{HudClaimsRegistry, publish_claims}};
+    let (mut p, sent) = play_with_recorder();
+    p.session.stat_figures_offer = true;
+    assert!(!crate::settings::stat_window(), "the player's setting is off");
+    let agree = |p: &mut Play| p.session.agree_stat_figures(crate::settings::stat_window() || crate::fork_ext::play::stat_figures_wanted());
+    let asked = |p: &mut Play| {
+        p.session.flush();
+        let m: Vec<Vec<u8>> = super::commands::guaranteed(&sent.borrow()).into_iter().filter(|m| m.starts_with(&[0x84, 0x7E])).collect();
+        sent.borrow_mut().clear();
+        m
+    };
+    let mut claims = HudClaimsRegistry::new();
+    publish_claims(&claims);
+    agree(&mut p);
+    assert_eq!(asked(&mut p), vec![vec![0x84, 0x7E, 0]], "control: no mod holds the window, the setting is off: stopped");
+    claims.disable("stat_window", InstanceToken(1), "test");
+    publish_claims(&claims);
+    agree(&mut p);
+    assert_eq!(asked(&mut p), vec![vec![0x84, 0x7E, 1]], "a mod holds the Stat Window: asked, the setting still off");
+    assert!(!crate::settings::stat_window(), "the player's own setting is not touched");
+    // a server that turns the Stat Window off is not asked, whatever a mod holds
+    crate::settings::qol::set_off(crate::settings::qol::STAT_CAPS);
+    agree(&mut p);
+    assert_eq!(asked(&mut p), vec![vec![0x84, 0x7E, 0]], "the server's Stat Window is off: stopped");
+    crate::settings::qol::set_off(0);
+    agree(&mut p);
+    assert_eq!(asked(&mut p), vec![vec![0x84, 0x7E, 1]], "asked again");
+    claims.enable("stat_window", InstanceToken(1), "test");
+    publish_claims(&claims);
+    agree(&mut p);
+    assert_eq!(asked(&mut p), vec![vec![0x84, 0x7E, 0]], "the mod let go: stopped");
+    publish_claims(&HudClaimsRegistry::new());
+    crate::settings::testing::reset(false);
+}
+
 /// A server whose client patch carries the colour itself (S2 `damage_rgb`) sends three colour bytes, not a tag: the hit
 /// from the player's id is unknown, not the player's (the old code said `by_player` true for a pet's hit there).
 #[test]

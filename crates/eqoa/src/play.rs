@@ -4717,7 +4717,7 @@ impl Play {
         // Stat Window: a server that sends its offence and defence figures
         // told whether the window is open (closed, or the stat caps the
         // game's, they are forgotten: `statwnd`)
-        self.session.agree_stat_figures(crate::settings::stat_window());
+        self.session.agree_stat_figures(crate::settings::stat_window() || fork_hooks::stat_figures_wanted());
         // Quest Markers: the server told what its row says (off, none drawn)
         self.session.agree_head_marks(crate::settings::head_marks());
         self.agree_number_tags();
