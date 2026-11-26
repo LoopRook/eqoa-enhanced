@@ -12383,6 +12383,7 @@ impl Play {
         let pt = (at[0] as f64, at[1] as f64);
         // the chat box, in play or in its history, as `chat_press` has it
         let lines = ((self.mode == 0 && !self.search.open) || self.mode == 33) && !crate::hideui::hidden();
+        let lines = lines && crate::hud::fork_hud::chat_window_visible();
         if lines && !self.links.covers(f) {
             let now = self.session.now();
             if let Some(c) = self.wnd_chat.as_mut() {

@@ -224,3 +224,72 @@ fn sync_m1_the_pet_panel_is_at_its_pc_place_in_the_pc_interface() {
     }
     interface(false);
 }
+
+// ---- Fixes after the review of the upstream sync of 2026-11-26 ----
+
+/// The window points on a coarse grid where the chat's scroll bar takes a press (`Play::bar_press`), each let go.
+fn bar_hits(p: &mut Play, size: (u32, u32)) -> Vec<[f32; 2]> {
+    let mut hits = Vec::new();
+    for y in (0..size.1).step_by(2) {
+        // the test's chat piece sits left of the window's edge (its local frame is not the window's): scan past it
+        for x in -600..size.0 as i32 {
+            let at = [x as f32, y as f32];
+            if p.bar_press(at, size) {
+                hits.push(at);
+            }
+            if let Some(c) = p.wnd_chat.as_mut() {
+                c.bar_release();
+                for t in 1..=crate::chat::TABS {
+                    if let Some(pane) = c.pane_mut(t) {
+                        pane.bar_release();
+                    }
+                }
+            }
+        }
+    }
+    hits
+}
+
+/// H3: a mod that hides the stock chat leaves no invisible scroll bar that takes a click or a drag (upstream's
+/// `Play::bar_press`). Control: with the chat shown the same points are its bar's; both interfaces; the box and the
+/// PC's detached pane. (Without the gate in `bar_press` the hidden chat's bar still takes the presses.)
+#[test]
+fn sync_review_h3_a_hidden_chat_has_no_scroll_bar_to_press() {
+    let size = (640, 448);
+    for (pc, detached) in [(true, false), (true, true), (false, false)] {
+        interface(pc);
+        hide(&[]);
+        let mode = if pc { 0 } else { 33 };
+        let mut p = chat_play(mode, detached);
+        let vui = crate::pointer::testing::vui();
+        let mut nr = crate::pointer::testing::NullRaster;
+        {
+            let wnd = p.wnd_chat.as_mut().unwrap();
+            for i in 0..300 {
+                let line = crate::ui::wide(&format!("history {i}"));
+                match (detached, wnd.pane_mut(1)) {
+                    (true, Some(pane)) => pane.text.add_text(&line, [1.0; 4], 0, |_| 0),
+                    _ => wnd.text.add_text(&line, [1.0; 4], 0, |_| 0),
+                }
+            }
+            // read the history: the wheel's notch takes the view off the newest line (the bar is drawn then)
+            wnd.wheel([0.0, 0.0], 4.0, true);
+            if let Some(pane) = wnd.pane_mut(1) {
+                pane.wheel([0.0, 0.0], 4.0, true);
+            }
+            for _ in 0..2 {
+                wnd.draw(&vui, &mut nr, 1000, 0.5);
+                if let Some(pane) = wnd.pane_mut(1) {
+                    pane.draw(&vui, &mut nr, 1000, 0.5);
+                }
+            }
+        }
+        let shown = bar_hits(&mut p, size);
+        assert!(!shown.is_empty(), "control: pc={pc} detached={detached}: the shown chat's bar takes a press");
+        hide(&["chat_window"]);
+        let hidden = bar_hits(&mut p, size);
+        assert!(hidden.is_empty(), "pc={pc} detached={detached}: hidden, the bar takes {} presses (first {:?})", hidden.len(), hidden.first());
+    }
+    hide(&[]);
+    interface(false);
+}
