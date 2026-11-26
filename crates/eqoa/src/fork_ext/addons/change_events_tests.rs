@@ -554,6 +554,30 @@ fn raid_strip_session_ends_with_the_world_and_is_not_reopened_for_the_same_check
     assert!(sessions(&h).ends_with("raid_ready:closed:zoning:request"), "{}", sessions(&h));
 }
 
+/// A session that ended with the player's death is not opened again for the rolls that were up, but a roll that comes
+/// later is new and opens one, though the first roll's timer has not run out. Negative control: with `blocked` a bare
+/// flag (cleared only when no roll is up), the second roll never opens a session.
+#[test]
+fn raid_roll_session_ended_by_death_does_not_block_a_later_roll() {
+    fresh();
+    let h = listener();
+    hold(&h, TakeoverKind::RaidRoll);
+    raid_strips::update(RaidSnapshot { rolls: vec![roll(1, 90000)], now_ms: 1000, ..Default::default() });
+    step(&h);
+    assert_eq!(sessions(&h), "raid_roll:opened:nil:request");
+    ws::end_all("death");
+    window_takeover::reset_all_for_test();
+    hold(&h, TakeoverKind::RaidRoll);
+    raid_strips::update(RaidSnapshot { rolls: vec![roll(1, 90000)], now_ms: 1100, ..Default::default() });
+    raid_strips::update(RaidSnapshot { rolls: vec![roll(1, 90000)], now_ms: 1200, ..Default::default() });
+    step(&h);
+    assert_eq!(sessions(&h), "raid_roll:opened:nil:request raid_roll:closed:death:request", "the same roll is not reopened");
+    clear_heard(&h);
+    raid_strips::update(RaidSnapshot { rolls: vec![roll(1, 90000), roll(2, 90000)], now_ms: 1300, ..Default::default() });
+    step(&h);
+    assert_eq!(sessions(&h), "raid_roll:opened:nil:request", "a roll that came later opens a session");
+}
+
 /// The strips cannot be passed or closed by a call; they are not a view that hides nothing.
 #[test]
 fn raid_strip_sessions_cannot_be_passed() {
