@@ -632,6 +632,33 @@ fn a8_the_one_line_in_play_rs_offers_the_reply_to_the_mod_before_the_games_own_a
 
 // ---- the bundled mod, driven by clicks against the real game state ----
 
+/// `craft.changed` through the real game step (`begin_iteration` flushes it): told when the window's reading comes and
+/// changes, once per changed step, nothing for a step with no change, and once more, `open = false`, when the window
+/// goes. Negative control: with the flush left out of `begin_iteration`, nothing is ever heard (the first assertion).
+#[test]
+fn a8_craft_changed_is_told_by_the_game_step_once_per_change_and_when_the_window_goes() {
+    let (mut p, host) = rig();
+    host.execute(
+        r#"heard = {}; eqoa.events.on("craft.changed", function(e) heard[#heard + 1] = tostring(e.data.open) .. ":" .. tostring(e.data.revision) end)"#,
+    )
+    .unwrap();
+    let count = |host: &Host| host.lua.load("return #heard").eval::<usize>().unwrap();
+    open(&mut p, &host, "recipe_book");
+    let opened = count(&host);
+    assert_eq!(opened, 1, "the window's first reading is one event");
+    step(&mut p, &host);
+    assert_eq!(count(&host), opened, "a step with no change tells nothing");
+    let book = recipe_list(0x0102_0304, &[(11, "Iron Ring", 3, 0), (12, "Silk Hood", 3, 1)]);
+    assert!(reply(&mut p, &book));
+    step(&mut p, &host);
+    assert_eq!(count(&host), opened + 1, "the book arrived: one event");
+    host.execute("assert(eqoa.craft.get().revision == tonumber(heard[#heard]:match(':(%d+)$')), heard[#heard])").unwrap();
+    host.execute("assert(eqoa.windows.close_session(s_recipe_book.ref))").unwrap();
+    step(&mut p, &host);
+    assert_eq!(count(&host), opened + 2, "the window went: one event");
+    host.execute("assert(heard[#heard]:match('^false:'), heard[#heard])").unwrap();
+}
+
 mod e2e {
     use super::*;
     use crate::fork_ext::addons::{
