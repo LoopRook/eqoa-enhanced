@@ -108,6 +108,12 @@ fn stat_window_hidden_is_not_drawn_and_takes_no_click_in_either_interface() {
     let mut p = fixture_play();
     p.loading.wait = None;
     p.take_modules(None);
+    // a character in the world: a mod's claims are only read while the HUD is ready (the health packet has come),
+    // as in play; without it `effective_visibility` ignores every claim and the window is never held back
+    let mut hp = vec![0u8; 233];
+    hp[28..32].copy_from_slice(&2500_i32.to_le_bytes());
+    hp[32..36].copy_from_slice(&3000_i32.to_le_bytes());
+    p.forge_health.receive(&hp);
     p.attach_ui(&mut renderer, &device, &queue, render::TARGET_FORMAT, &lib);
     let scene = source.scene(&lib);
     let (walker, _, _) = source.walker(&mut lib, &scene).expect("offline world walker");
