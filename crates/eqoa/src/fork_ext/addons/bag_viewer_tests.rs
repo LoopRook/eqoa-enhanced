@@ -1365,6 +1365,8 @@ fn round6c_bag_viewer_merchant_sell_junk_batch_stop_close_zone_and_corpse_loot_b
     bv.play.bags_broker_tick();
     bv.frames(1);
     assert_eq!(bv.play.bags_sends_lost(), sends_after_s1, "step 2 waits for step 1 server reply");
+    // 2026-11-26 (M2): a sale in the client's hands has nothing for Stop to stop, so no Stop button is drawn for it
+    assert!(bv.action_hit("Stop").is_none(), "no dead Stop button while sell_many runs");
 
     // Server confirms step 1 (Rat Pelt at inv slot 1); the merchant is then closed -> the run stops cleanly. (A sale in the
     // client's hands (`sell_many`) has no Stop button: the player's own answer to its question ends it, and so does the

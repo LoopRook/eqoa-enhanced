@@ -604,7 +604,8 @@ function draw()
         seg_x = seg_x + bw + 3
     end
     text(PAD, expl_y, B.auto_explain(), B.auto_mode == "off" and c.muted or c.text, W - 2 * PAD)
-    if B.batch_id ~= nil or B.pending_open ~= nil then
+    -- (a sale in the client's hands, `sell_many`, ends with the player's own answer: there is nothing for Stop to stop)
+    if (B.batch_id ~= nil and B.batch_id ~= B.SELL_MANY) or B.pending_open ~= nil then
         local sw = math.max(44, ui.CalcTextSize("Stop") / k + 14)
         local sx = W - PAD - sw
         fill(sx, bar_y, sw, 16, c.raised)
