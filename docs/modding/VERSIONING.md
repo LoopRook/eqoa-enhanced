@@ -19,7 +19,7 @@ For a mod that declares `"api": "eqoa/1"`, once frozen, none of these change:
   there");
 - the order events arrive in, and how long a reference (handle) stays valid;
 - the default of an optional argument;
-- the numbers of existing enums.
+- the numbers of existing enums (the one exception: `ImGuiWindowFlags` and `ImGuiCond` freeze their names only; their integers are whatever the client's Dear ImGui uses, may change with an ImGui update, and a mod must use the names, never literal numbers).
 
 ## What may be added (and does not break you)
 
