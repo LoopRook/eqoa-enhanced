@@ -4,7 +4,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## 2026-11-26 · Enhanced 0.7.1
 
-- **No crash report leaves your PC unless you send it yourself.** Since 0.4.x a crash left a second copy that the client could send to a game server at your next login, even if you chose Delete. That copy is no longer kept, none is sent, and a copy an older version already left is never sent. **Delete** in the crash offer now removes every copy of the report. A run that was cut short without a crash is worded as "did not close normally", not as a crash.
+- **No crash report leaves your PC unless you send it yourself.** Since 0.5.0 a crash left a second copy that the client could send to a game server at your next login, even if you chose Delete. That copy is no longer kept, none is sent, and a copy an older version already left is never sent. **Delete** in the crash offer now removes every copy of the report. A run that was cut short without a crash is worded as "did not close normally", not as a crash.
 - **A mod's Deposit deposits.** A mod that asked to deposit tunar in the bank (`eqoa.actions.bank_money`) took tunar out of the bank instead, and a Withdraw put it in. Each now does what it says.
 
 ## 2026-11-21 · Enhanced 0.7.0
