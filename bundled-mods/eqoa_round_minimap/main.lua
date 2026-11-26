@@ -226,8 +226,29 @@ local function draw_card(ui, dl, v, g, c, win_w, win_h)
     if font then ui.PopFont() end
 end
 
+-- The minimap steps aside while a full map is up: the game's own (`eqoa.map.get().open`), or a mod's map window. A mod's map
+-- cannot be read from here (a window session is its holder's), so the contract is the hide claim: any mod other than this one
+-- that is hiding the minimap (the World Map mod does while its window is open) takes the whole minimap away, picture, ring,
+-- dots, arrow, hover and its claims on the pointer and the wheel; it comes back when that claim is released.
+local function map_window_up()
+    local m = eqoa.map.get()
+    if m and m.open == true then return true end
+    for _, id in ipairs(eqoa.hud.hidden_by("minimap") or {}) do
+        if id ~= "eqoa_round_minimap" then return true end
+    end
+    return false
+end
+
 local function draw()
     if not ensure() then return end
+    if map_window_up() then
+        shown = false
+        card = nil
+        round_minimap.shown, round_minimap.card, round_minimap.card_rect, round_minimap.arrows = false, nil, nil, {}
+        round_minimap.suppressed = true
+        return
+    end
+    round_minimap.suppressed = false
     local info = view.texture
     shown = info ~= nil
     round_minimap.shown, round_minimap.card, round_minimap.card_rect, round_minimap.arrows = shown, nil, nil, {}

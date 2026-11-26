@@ -7,7 +7,7 @@ The map key (and the compass and the minimap click) opens this mod's map instead
 picture, drawn with the same detail tiles the game's map uses, in a dark and red window you can **move** (drag the top strip)
 and **resize** (drag the corner). Its place and size are kept.
 
-- **Wheel** zooms, **dragging** pans. **W, A, S, D** pan too, **+** and **-** zoom, and **Esc** closes the map (the keys of the
+- **Wheel** zooms (in to a quarter of a world unit a pixel, about a street in a city: the ground is the game's finest picture drawn up to 4 times larger, so it turns to soft blocks at the closest), **dragging** pans. The round minimap (and the game's own) goes while this window is up and comes back when it closes. **W, A, S, D** pan too, **+** and **-** zoom, and **Esc** closes the map (the keys of the
   game's own map that a mod can take; the arrow keys stay the game's). These keys are the map's only while it is up: with it
   closed, W, A, S and D walk your character as always.
 - **Hover** a dot or a mark (creatures and players near you, camps, coaches, towns, quests, pins, your waypoint) for a card
