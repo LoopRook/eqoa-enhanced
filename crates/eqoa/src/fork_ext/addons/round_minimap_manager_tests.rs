@@ -833,7 +833,10 @@ fn round_minimap_follows_hud_scale_in_both_interfaces_body() {
     let s = std::f64::consts::FRAC_1_SQRT_2;
     let mut at_100: Option<f64> = None;
     for (pc, percent) in [(true, 100u8), (true, 85), (true, 150), (false, 100), (false, 75)] {
-        let Some(mut rm) = Rm::sized(|p| p == "eqoa_round_minimap", 0, RM_SIZE, 1) else { return };
+        let Some(mut rm) = Rm::sized(|p| p == "eqoa_round_minimap", 0, RM_SIZE, 1) else {
+            eprintln!("SKIP round_minimap_follows_hud_scale_in_both_interfaces: no GPU adapter");
+            return;
+        };
         crate::settings::set_ui_mode(pc).unwrap();
         crate::settings::set_hud_scale_percent(percent);
         crate::hudlayout::testing_reset();
@@ -912,7 +915,10 @@ fn stats_box_answers_the_games_stat_window_key_and_command_body() {
     for pc in [true, false] {
         super::super::options::reset_in_memory();
         crate::fork_ext::bindpage::reset_in_memory();
-        let Some(mut rm) = Rm::with(|p| p == "eqoa_stats_box" || p == "eqoa_round_minimap", 0) else { return };
+        let Some(mut rm) = Rm::with(|p| p == "eqoa_stats_box" || p == "eqoa_round_minimap", 0) else {
+            eprintln!("SKIP stats_box_answers_the_games_stat_window_key_and_command: no GPU adapter");
+            return;
+        };
         settings::set_ui_mode(pc).unwrap();
         let note = if pc { "PC interface" } else { "controller interface" };
         rm.frames(4);
@@ -955,14 +961,28 @@ fn stats_box_answers_the_games_stat_window_key_and_command_body() {
         // the mod's own key is an extra: unbound until the player binds it
         assert!(crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle").unwrap_or_default().is_empty(), "{note}: the extra key is unbound by default");
         // "Use the game's windows": the game's window and key are the game's again, and the box is left alone
+        // with the box open BEFORE the switch (review point 4): the box stands down, the game's window is the game's,
+        // and the box comes back as it was when the switch goes off
+        let standing_down = || stats.load("return stats_box.standing_down").eval::<bool>().unwrap();
+        rm.play.toggle_stat_window();
+        rm.frames(3);
+        assert!(shown(&stats) && !standing_down(), "{note}: the box is open and drawing");
         super::super::window_takeover::set_use_game_windows(true);
-        rm.frames(2);
+        rm.frames(3);
         assert!(crate::hud::fork_hud::stat_window_visible(), "{note}: the switch gives the game's window back");
+        assert!(standing_down(), "{note}: the box stands down while the game's windows are in use, so the two are never both up");
+        assert!(shown(&stats), "{note}: its option is left as it was");
         rm.play.toggle_stat_window();
         rm.frames(3);
         assert!(settings::stat_window(), "{note}: the game's key turns the game's window with the switch on");
-        assert!(!shown(&stats), "{note}: and not the box");
+        assert!(shown(&stats), "{note}: and not the box");
         super::super::window_takeover::set_use_game_windows(false);
+        rm.frames(3);
+        assert!(!standing_down() && shown(&stats), "{note}: the box is back as it was when the switch goes off");
+        assert!(!crate::hud::fork_hud::stat_window_visible(), "{note}: and the game's window is held again");
+        rm.play.toggle_stat_window();
+        rm.frames(3);
+        assert!(!shown(&stats), "{note}: the key closes it again");
         // the mod off: the game's key is the game's, as upstream
         rm.manager.queue(Command::Enable("eqoa_stats_box".into(), false));
         rm.frames(3);

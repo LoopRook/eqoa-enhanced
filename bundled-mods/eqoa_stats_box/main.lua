@@ -49,8 +49,16 @@ eqoa.events.on("state.reset", function() hold_stat_window(false) end)
 -- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
 local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
 
+-- what the mod last worked out; read by its tests
+stats_box = { standing_down = false }
+
 eqoa.events.on("render", function()
     hold_stat_window(true)
+    -- With "Use the game's windows" on, the game's Stat Window and its key are the player's again (the window reads as visible
+    -- here although this mod still holds its claim): the box stands down, draws nothing and takes no click, and comes back as
+    -- it was (the option is left alone) when the switch goes off. The other replacing mods end their windows the same way.
+    stats_box.standing_down = eqoa.hud.visible("stat_window") == true
+    if stats_box.standing_down then return end
     if map_up() then return end
     if not eqoa.options.get("stats_box") then return end
     if not eqoa.hud.visible("stats_box") then return end
