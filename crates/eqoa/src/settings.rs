@@ -3803,6 +3803,7 @@ mod store {
 
     /// The tests keep nothing on disk.
     pub fn dir() -> Option<std::path::PathBuf> {
+        if let Some(d) = crate::fork_ext::report_consent::test_config_dir() { return Some(d); }
         None
     }
 

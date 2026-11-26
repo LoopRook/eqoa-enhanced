@@ -283,6 +283,7 @@ fn storage() -> Option<web_sys::Storage> {
 /// Keeps the page's report as it stops (`web::start`'s hook): one, the last.
 #[cfg(target_arch = "wasm32")]
 pub fn write_page(text: &str) {
+    if !crate::fork_ext::report_consent::keep_for_server() { return; }
     if let Some(s) = storage() {
         let _ = s.set_item(PAGE_KEY, text);
     }

@@ -76,8 +76,9 @@ changed-only state writes and the snapshot's enabled-addon cache (refreshed at
 most once per 30 seconds, off the frame thread). The crash handler can also read
 the latest redacted in-memory snapshot.
 Historical HTTP transport exists only in tests against numeric loopback fixtures;
-the fork dialog only saves locally; the upstream game-server crash path uses the Enhanced identity hook. The obsolete browser report policy
-was removed after upstream deleted browser reporting. Keep map/community
+the fork dialog only saves locally; the upstream game-server crash path uses the Enhanced identity hook. The browser report policy is back
+(upstream's 389c7dec made the page POST crashes again): web/notices.js's `NO_UPLOAD` guard at the top of `sendCrash`
+reaches no report server and says so on the page, and `crashfile::write_page` keeps nothing for a server (`fork_ext/report_consent.rs`). Keep map/community
 suggestions distinct from bug-report uploads.
 
 ## Upstream sync and conflicts
