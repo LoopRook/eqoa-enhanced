@@ -100,6 +100,12 @@ function H.load()
             end
         end
     end
+    -- an item saved with both marks keeps the bank mark and loses junk (nothing gets sold)
+    local dropped = false
+    for id in pairs(H.bank) do
+        if B.junk_ids[id] then B.junk_ids[id] = nil; dropped = true end
+    end
+    if dropped then B.save_junk() end
     H.loaded = true
 end
 
@@ -167,7 +173,10 @@ function H.set_bank(it, flag)
     if not it then return end
     if flag then
         H.bank[mark_key(it)] = true
-        B.result = {text = "Marked " .. it.name .. " to bank", ok = true}
+        -- junk (sell) and bank are exclusive: marking one takes the other off
+        local was_junk = B.junk_ids[mark_key(it)] == true
+        if was_junk then B.junk_ids[mark_key(it)] = nil; B.save_junk() end
+        B.result = {text = "Marked " .. it.name .. " to bank" .. (was_junk and " (no longer marked as junk)" or ""), ok = true}
     else
         H.bank[mark_key(it)] = nil
         B.result = {text = "Stopped banking " .. it.name, ok = true}

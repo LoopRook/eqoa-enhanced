@@ -70,6 +70,11 @@ exactly as before, and a helper acts only on its button or on its own switch.
 - **Restock**: an item's menu has **Keep up to N (Restock)** (N starts at what the bags hold; the menu steps it by 5). Near
   a merchant, **Restock (N)** buys up to N of each kept item that merchant sells, counting everything of that kind in the
   pack, never more than N. It stops, and says why, when money or bag space runs out.
+- **Junk and bank marks are exclusive**: an item is either set aside to sell or set aside to bank, never both. Marking an item
+  (or a group) to bank takes its junk mark off, and marking it as junk takes its bank mark off; the menu then offers the other
+  mark ("Mark as junk" / "Unmark bank" after banking, "Bank this" / "Unmark junk" after junking). Saved marks from an older
+  version that carry both are settled when the mod loads: the **bank mark is kept and the junk mark dropped** (the safe one:
+  nothing gets sold).
 - **Bank marked**: **Bank this** in an item's menu; near a banker, **Bank marked (N)** deposits the marked stacks (never worn
   ones) and says so when the bank is full.
 - **Do it when I get near**: three switches under the buttons (Sell junk, Restock, Bank), kept for each character, off by

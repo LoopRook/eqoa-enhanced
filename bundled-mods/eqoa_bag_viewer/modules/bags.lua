@@ -764,7 +764,11 @@ function M.set_junk(it, flag)
     if not it then return end
     if flag then
         M.junk_ids[tostring(it.id)] = true
-        M.result = {text = "Marked " .. it.name .. " as junk", ok = true}
+        -- junk (sell) and bank are exclusive: marking one takes the other off
+        local H = M.helpers
+        local was_banked = H and H.bank[tostring(it.id)] == true
+        if was_banked then H.bank[tostring(it.id)] = nil; H.save() end
+        M.result = {text = "Marked " .. it.name .. " as junk" .. (was_banked and " (no longer marked to bank)" or ""), ok = true}
     else
         M.junk_ids[tostring(it.id)] = nil
         M.result = {text = "Unmarked " .. it.name, ok = true}

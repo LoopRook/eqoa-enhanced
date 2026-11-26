@@ -114,3 +114,8 @@ fd41e9fdac2dd4a4ada2374cc4ff6b6c654533943441cfd2a141431e5f04969b  eqoa_bag_viewe
 809947ccd2a31d6bb13372f8ddd13b18af19093b3c68c7e212526b752c7d1eef  eqoa_round_minimap/mod.json
 1182ce197a5f12ae824838f8921ab8b629f10c3ae5f7158f66aad7c80fe23077  eqoa_world_map/main.lua
 f8af0454fb38cf83820438b01b51eb876f61d5956282d12a2a7afd92969ce689  eqoa_world_map/mod.json
+# Before the 2026-11-26 owner mod changes (junk/bank marks, bank tab, auction search, chat entry wrap, minimap card, effects strip).
+15b49360a760c55f06f1abab8cc76a5781ed616d831eb8767a062744a08cb11b  eqoa_bag_viewer/README.md
+a73d2568211d9b9fbd58883cc6ea5367587e9659db3f755635ebf808e8c12727  eqoa_bag_viewer/modules/bags.lua
+767112654c378875005c22b00e3dc2e463f90d2f415743a5545982922817e952  eqoa_bag_viewer/modules/helpers.lua
+3110ad167fc0745bfc51a7e533b0af983a28052b54076f733ff98009629d394b  eqoa_bag_viewer/modules/multi.lua

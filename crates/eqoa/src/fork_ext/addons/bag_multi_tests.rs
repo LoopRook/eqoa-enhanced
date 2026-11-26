@@ -575,3 +575,45 @@ fn multi_a_bank_mark_can_be_taken_off_from_the_single_menu_and_the_group_menu() 
     run(&worn_kept, "ctrl(1); ctrl(3); group_menu(1); choose('Unmark bank')");
     assert!(boolean(&worn_kept, "H.bank['3'] == true"), "negative control: a worn item's mark stayed");
 }
+
+/// Owner 2026-11-26: junk (sell) and bank marks are exclusive. Marking one takes the other off, in the single menu and the
+/// group menu; a saved file that has both keeps the bank mark.
+#[test]
+fn multi_junk_and_bank_marks_are_exclusive_and_a_saved_clash_keeps_the_bank_mark() {
+    let setup = r#"
+        view({it_(1, "Rat Pelt", {q = 3}), it_(2, "Chipped Tooth")})
+        B.junk_ids["1"] = true
+    "#;
+    let lua = world();
+    run(&lua, setup);
+    // single menu: a junk item offers Unmark junk and Bank this; banking it takes the junk mark off
+    run(&lua, "B.build_menu(INV_ITEMS[1])");
+    assert!(boolean(&lua, "row('Unmark junk') ~= nil and row('Bank this') ~= nil"), "{}", string(&lua, "labels()"));
+    run(&lua, "choose('Bank this')");
+    assert!(boolean(&lua, "H.bank['1'] == true and B.junk_ids['1'] == nil and not B.is_junk(INV_ITEMS[1])"));
+    assert!(boolean(&lua, "FILES['junk.cfg']:find('1', 1, true) == nil"), "the junk file is saved without it");
+    run(&lua, "B.build_menu(INV_ITEMS[1])");
+    assert!(boolean(&lua, "row('Mark as junk') ~= nil and row('Unmark bank') ~= nil and row('Unmark junk') == nil"), "{}", string(&lua, "labels()"));
+    // and the reverse: marking junk drops the bank mark
+    run(&lua, "choose('Mark as junk')");
+    assert!(boolean(&lua, "B.junk_ids['1'] == true and H.bank['1'] == nil"));
+    assert!(boolean(&lua, "FILES['helpers.cfg']:find('bank:1', 1, true) == nil"));
+    // group menu both ways
+    run(&lua, "view(); X.clear(); ctrl(1); ctrl(2); group_menu(1); choose('Mark to bank')");
+    assert!(boolean(&lua, "H.bank['1'] and H.bank['2'] and next(B.junk_ids) == nil"));
+    run(&lua, "view(); X.clear(); ctrl(1); ctrl(2); group_menu(1); choose('Mark as junk'); choose('Yes')");
+    assert!(boolean(&lua, "next(H.bank) == nil and B.junk_ids['1'] and B.junk_ids['2']"), "{}", string(&lua, "labels()"));
+    // a saved file with both marks: the bank mark stays, junk goes (nothing is sold)
+    run(&lua, "FILES['junk.cfg'] = '1\n2\n'; FILES['helpers.cfg'] = 'bank:2\n'; B.load_junk(); H.load()");
+    assert!(boolean(&lua, "B.junk_ids['1'] == true and B.junk_ids['2'] == nil and H.bank['2'] == true"));
+    assert!(boolean(&lua, "FILES['junk.cfg']:find('2', 1, true) == nil"), "the cleaned marks are written back");
+
+    // negative controls: each switch removed gives the old clash
+    let bad = mutated(&[("if was_junk then B.junk_ids[mark_key(it)] = nil; B.save_junk() end", "")]);
+    run(&bad, setup);
+    run(&bad, "B.build_menu(INV_ITEMS[1]); choose('Bank this')");
+    assert!(boolean(&bad, "H.bank['1'] and B.junk_ids['1']"), "negative control: both marks");
+    let bad = mutated(&[("if dropped then B.save_junk() end", ""), ("if B.junk_ids[id] then B.junk_ids[id] = nil; dropped = true end", "")]);
+    run(&bad, "FILES['junk.cfg'] = '2\n'; FILES['helpers.cfg'] = 'bank:2\n'; B.load_junk(); H.load()");
+    assert!(boolean(&bad, "B.junk_ids['2'] == true and H.bank['2'] == true"), "negative control: a saved clash survives");
+}
