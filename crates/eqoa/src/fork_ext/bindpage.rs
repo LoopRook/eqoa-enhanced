@@ -57,6 +57,10 @@ struct PcRowIndex {
 
 thread_local! {
     static PC_ROW_INDEX: RefCell<Option<PcRowIndex>> = const { RefCell::new(None) };
+    /// The game's bindings as `resolve` last judged the mods' keys against them: `sync_interface_mode` resolves again
+    /// when they are not the bindings now (a key moved or freed on the Controls page, a macro trigger added, changed or
+    /// removed on the Macros page, Defaults), so the mods' keys follow the game's with no upstream hook.
+    static RESOLVED_AGAINST: RefCell<Option<Binds>> = const { RefCell::new(None) };
 }
 
 fn pc_tag() -> u8 {
@@ -238,10 +242,12 @@ pub fn set_addon_enabled(addon_id: &str, enabled: bool) {
     resolve(&game, &mut binds);
 }
 
-/// Re-resolves mod defaults once if the active keyboard interface (PC vs Controller) changed.
+/// Re-resolves mod defaults once if the active keyboard interface (PC vs Controller) changed, or the game's own
+/// bindings did (the Controls and Macros pages). The steady frame costs one comparison of the bindings with the ones
+/// last resolved against (no clone): `perf_sync_interface_mode_*` measures it.
 pub(crate) fn sync_interface_mode() {
     let tag = pc_tag();
-    if RESOLVED_PC.load(Ordering::Relaxed) == tag {
+    if RESOLVED_PC.load(Ordering::Relaxed) == tag && crate::settings::with_binds(|game| RESOLVED_AGAINST.with(|r| r.borrow().as_ref() == Some(game))) {
         return;
     }
     let game = crate::settings::with_binds(Clone::clone);
@@ -256,6 +262,7 @@ pub fn reset_in_memory() {
     ANY_COMBO.store(false, std::sync::atomic::Ordering::Relaxed);
     RESOLVED_PC.store(0, Ordering::Relaxed);
     PC_ROW_INDEX.with(|idx| *idx.borrow_mut() = None);
+    RESOLVED_AGAINST.with(|r| *r.borrow_mut() = None);
     *SESSION.lock().unwrap() = None;
 }
 
@@ -683,6 +690,13 @@ fn resolve(game: &Binds, binds: &mut [ModBind]) {
     #[cfg(test)]
     RESOLVE_COUNT.fetch_add(1, Ordering::Relaxed);
     RESOLVED_PC.store(pc_tag(), Ordering::Relaxed);
+    RESOLVED_AGAINST.with(|r| {
+        let mut r = r.borrow_mut();
+        // a clone only when the bindings differ from the ones kept (the first resolve, or after an edit)
+        if r.as_ref() != Some(game) {
+            *r = Some(game.clone());
+        }
+    });
     for b in binds.iter_mut() {
         b.refused.clear();
         match &b.stored {
@@ -1808,6 +1822,99 @@ mod.eqoa_map_search.clear=f4
         assert_eq!(resolve_count_for_test(), before + 4);
         assert_eq!(get_key("alpha", "seven").as_deref(), Some(""), "7 is taken again in PC mode");
 
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+    }
+
+    // ---- batch 8 review H1: the mods' keys follow the game's bindings as they change -----------------------------
+
+    /// Binds as the Controls and Macros pages leave them: the player's edit, then `set_binds` (no hook of ours runs).
+    fn edit_game(f: impl FnOnce(&mut Binds)) {
+        let mut b = crate::settings::binds();
+        f(&mut b);
+        crate::settings::set_binds(b);
+    }
+
+    /// A key the game refused to a mod is the mod's once the player moves the game's row off it, and the mod loses a
+    /// key the player binds a game row (or a macro trigger) onto, with no restart and no interface switch. Controls:
+    /// the keys stay as they were until the frame sync runs (the old code never re-resolved on these edits), and a
+    /// steady frame with no edit resolves nothing.
+    #[test]
+    fn game_key_and_macro_edits_re_resolve_the_mods_keys_without_a_restart() {
+        use crate::binds::{Input, row_named};
+        for pc in [false, true] {
+            interface(pc);
+            let stat = row_named("stat_window").unwrap();
+            register("alpha", "tog", "f4", "Toggle");
+            assert_eq!(get_key("alpha", "tog").as_deref(), Some(""), "pc={pc}: F4 is the Stat Window's: refused");
+            let steady = resolve_count_for_test();
+            for _ in 0..5 {
+                sync_interface_mode();
+            }
+            assert_eq!(resolve_count_for_test(), steady, "pc={pc}: a steady frame resolves nothing");
+            // the player moves the Stat Window row to F8 on the Controls page: F4 is free
+            edit_game(|b| {
+                b.bind_key_profile(stat, "f8", pc);
+            });
+            assert_eq!(get_key("alpha", "tog").as_deref(), Some(""), "pc={pc}: control: not before the frame sync");
+            sync_interface_mode();
+            assert_eq!(get_key("alpha", "tog").as_deref(), Some("f4"), "pc={pc}: the freed key is the mod's");
+            assert_eq!(resolve_count_for_test(), steady + 1);
+            sync_interface_mode();
+            assert_eq!(resolve_count_for_test(), steady + 1, "pc={pc}: and then steady");
+            // the player binds a game row back onto F4: the mod loses it
+            edit_game(|b| {
+                b.bind_key_profile(stat, "f4", pc);
+            });
+            sync_interface_mode();
+            assert_eq!(get_key("alpha", "tog").as_deref(), Some(""), "pc={pc}: the game's key again");
+            // Defaults (the whole of the game's bindings put back) after a move
+            edit_game(|b| {
+                b.bind_key_profile(stat, "f8", pc);
+            });
+            sync_interface_mode();
+            assert_eq!(get_key("alpha", "tog").as_deref(), Some("f4"));
+            edit_game(|b| *b = Binds::default());
+            sync_interface_mode();
+            assert_eq!(get_key("alpha", "tog").as_deref(), Some(""), "pc={pc}: Defaults give F4 back to the Stat Window");
+            // a macro trigger added on the Macros page takes the mod's key; removed, gives it back
+            edit_game(|b| {
+                b.bind_key_profile(stat, "f8", pc);
+            });
+            sync_interface_mode();
+            assert_eq!(get_key("alpha", "tog").as_deref(), Some("f4"));
+            edit_game(|b| {
+                b.set_trigger(0, None, vec![Input::Key("f4".into())]).unwrap();
+            });
+            sync_interface_mode();
+            assert_eq!(get_key("alpha", "tog").as_deref(), Some(""), "pc={pc}: a macro trigger on F4 takes it");
+            edit_game(|b| {
+                b.remove_trigger(0, 0);
+            });
+            sync_interface_mode();
+            assert_eq!(get_key("alpha", "tog").as_deref(), Some("f4"), "pc={pc}: and gives it back");
+            crate::settings::testing::reset(false);
+            reset_in_memory();
+        }
+    }
+
+    /// The steady frame's cost: with nothing changed, `sync_interface_mode` is one comparison of the game's bindings with
+    /// the ones last resolved against, no clone and no resolve. Measured over many calls and printed (a debug build, so
+    /// well above a release build's), with a loose bound that a clone of the bindings per frame would break.
+    #[test]
+    fn perf_sync_interface_mode_is_one_comparison_when_nothing_changed() {
+        interface(true);
+        register("alpha", "seven", "7", "Seven");
+        let steady = resolve_count_for_test();
+        let calls = 20_000u32;
+        let start = std::time::Instant::now();
+        for _ in 0..calls {
+            sync_interface_mode();
+        }
+        let each = start.elapsed() / calls;
+        println!("sync_interface_mode, nothing changed: {each:?} a call (debug build)");
+        assert_eq!(resolve_count_for_test(), steady, "no resolve");
+        assert!(each < std::time::Duration::from_micros(100), "{each:?} a call");
         crate::settings::testing::reset(false);
         reset_in_memory();
     }
