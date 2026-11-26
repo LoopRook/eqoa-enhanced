@@ -26,7 +26,7 @@ pub mod release;
 pub mod report;
 #[cfg(not(target_arch = "wasm32"))]
 mod report_background;
-#[cfg(not(target_arch = "wasm32"))]
+// every target: the hold on the in-game crash report send covers the browser build too
 pub mod report_consent;
 pub mod report_crash_dir;
 pub mod report_label;
