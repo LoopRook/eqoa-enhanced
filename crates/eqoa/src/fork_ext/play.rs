@@ -4710,8 +4710,13 @@ impl Play {
         #[cfg(not(target_arch = "wasm32"))]
         // the tag byte is read only where the game's own number colours read it (`number_rgb`): never on a server whose
         // client patch carries the colour itself (S2 `damage_rgb`)
-        let _tag = _tag.filter(|_| !crate::s2::get().damage_rgb);
-        crate::fork_ext::addons::native_core::observe_hit_tagged(_attacker, _defender, _amount, _color, _tag.map(|t| (t.pet, t.merc)));
+        crate::fork_ext::addons::native_core::observe_hit_tagged(
+            _attacker,
+            _defender,
+            _amount,
+            _color,
+            _tag.filter(|_| !crate::s2::get().damage_rgb).map(|t| (t.pet, t.merc)),
+        );
         // Unit tests never emit to a real companion. The browser has no native socket
         // or SystemTime clock; neither is touched by this hook there.
         #[cfg(all(not(target_arch = "wasm32"), not(test)))]
