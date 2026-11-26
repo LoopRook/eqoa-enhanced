@@ -1554,6 +1554,10 @@ fn install_fields(lua: &Lua) {
                 Some(5)
             } else if matches!((path, field), ("eqoa.entities.Entity", "head_mark" | "merc_tag"))
                 || matches!((path, field), ("eqoa.player.Stats", "hot" | "pot" | "figures"))
+                || matches!(
+                    (path, field),
+                    ("eqoa.combat.CombatHit", "by_player" | "from_merc" | "attribution" | "hit_kind")
+                )
                 || (path == "eqoa.hud.Layout"
                     && !matches!(field, "player" | "group_members" | "target" | "pet" | "minimap"))
             {
