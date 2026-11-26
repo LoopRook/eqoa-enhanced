@@ -1219,7 +1219,7 @@ fn round_minimap_card_text_follows_the_ui_scale_body() {
         rm.frames(4);
         let (dx, dy) = rm.dot_at(rm.me[0] + 40.0, rm.me[2] + 30.0);
         assert!(rm.hover(dx, dy).is_some(), "a card on the dot at {win:?}");
-        let (got, want): (f64, f64) = rm.state("(function() local f = eqoa.hud.frame() return round_minimap.card_font_scale, 11 * math.min(f.scale_x, f.scale_y) / 13 end)()");
+        let [got, want]: [f64; 2] = rm.state("(function() local f = eqoa.hud.frame() return {round_minimap.card_font_scale, 11 * math.min(f.scale_x, f.scale_y) / 13} end)()");
         assert!((got - want).abs() < 1e-6, "{win:?}: text scale {got} is 11 x the UI scale / 13 = {want}");
         let card: [f64; 4] = rm.state("(function() local c = round_minimap.card_rect return {c.x, c.y, c.w, c.h} end)()");
         assert!(card[0] >= 0.0 && card[0] + card[2] <= win.0 as f64 && card[1] >= 0.0 && card[1] + card[3] <= win.1 as f64, "{win:?}: card {card:?} on the screen");
