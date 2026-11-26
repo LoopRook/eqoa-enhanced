@@ -390,7 +390,7 @@ local function ensure_terrain(area)
     if state.terrain and state.terrain_size == key then return state.terrain, pw, ph end
     release_terrain()
     local v = state.view
-    local t, err = eqoa.map.terrain({ center = { x = v.x, z = v.z }, scale = v.scale or 8, width = pw, height = ph })
+    local t, err = eqoa.map.terrain({ center = { x = v.x, z = v.z }, scale = math.max(v.scale or 8, 1), width = pw, height = ph })
     state.terrain, state.terrain_size = t, t and key or nil
     state.terrain_error = (not t and err) and err.message or nil
     return t, pw, ph

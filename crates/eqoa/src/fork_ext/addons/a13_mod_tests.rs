@@ -834,3 +834,24 @@ fn owner1125b_round_minimap_goes_while_the_world_map_window_is_up_and_returns_wh
     frame(&mut map, 3);
     assert_eq!(suppressed(&host), "false", "the window closed: the minimap returns");
 }
+
+#[test]
+fn a13_world_map_asks_for_its_picture_at_scale_one_or_more_even_when_zoomed_closer() {
+    // 2026-11-26 (H2): the API refuses a picture closer than 1 unit a pixel; the mod magnifies the 1-unit picture.
+    // Negative control: asking for the saved 0.25 itself gives "The map picture is not available" (terrain nil).
+    fresh();
+    let mut rig = rig_with(json!({"version": 1, "scale": 0.25}));
+    rig.open();
+    rig.frames(2);
+    assert_eq!(rig.lua_f64("world_map.view.scale"), 0.25, "reopened at the saved zoom");
+    assert_eq!(rig.lua_str("world_map.terrain_error"), "nil", "the picture request was accepted at 0.25");
+    assert_eq!(rig.lua_str("world_map.terrain ~= nil"), "true", "a picture is held");
+    assert_eq!(rig.lua_f64("world_map.mag"), 4.0, "and drawn 4 times larger");
+    // resized while zoomed closer than 1: the picture is made again at the new size, still accepted
+    let before = rig.lua_str("world_map.terrain_size");
+    rig.host.execute("world_map.win.w = 500; world_map.win.h = 400").unwrap();
+    rig.frames(3);
+    assert_ne!(rig.lua_str("world_map.terrain_size"), before, "the picture was made again at the new size");
+    assert_eq!(rig.lua_str("world_map.terrain_error"), "nil", "the resized picture request was accepted at 0.25");
+    assert_eq!(rig.lua_str("world_map.terrain ~= nil"), "true");
+}
