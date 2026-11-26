@@ -596,7 +596,7 @@ For data too big to handle in one frame, the client reads, parses and writes JSO
 
 A loaded value is an ordinary, changeable Lua table; arrays (also empty ones) remember that they are arrays and are saved as arrays. A value to save follows the settings rules above, plus `eqoa.files.null`. A file may be up to 16 MiB, the top value and up to 32 levels of nesting below it, and two million values to load, and 14 MiB to save (§9). A large value is handed to Lua over several frames; how it is sliced is design intent, not part of the promise.
 
-An ordinary mod has 8 MiB of Lua memory. A mod that lists `"large_data"` in its `capabilities` gets 128 MiB (§9); without it a large load fails with `resource.failed` and a message that says so. The mod is not disabled.
+An ordinary mod has 8 MiB of Lua memory. A mod that lists `"large_data"` in its `capabilities` gets 256 MiB (§9); without it a large load fails with `resource.failed` and a message that says so. The mod is not disabled.
 
 #### Sharing a file with other mods
 
@@ -1571,7 +1571,7 @@ The files in the `mods` folder itself are never changed by a mod: its private da
 
 | Limit | Value | |
 |---|---|---|
-| Lua memory per mod | 8 MiB; 128 MiB with `"large_data"` | tested |
+| Lua memory per mod | 8 MiB; 256 MiB with `"large_data"` | tested |
 | Lua instructions per mod per frame, all handlers together | 4 million | tested |
 | A private file; all private data of a mod, settings included | 1 MiB; 16 MiB | tested |
 | Files open at once through `io.open` | 16 | tested |

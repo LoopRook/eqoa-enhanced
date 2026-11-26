@@ -1416,9 +1416,9 @@ mod tests {
             super::super::host::Host::for_addon(&discovered)
                 .unwrap()
                 .lua
-                .set_memory_limit(128 * 1024 * 1024)
+                .set_memory_limit(256 * 1024 * 1024)
                 .unwrap(),
-            128 * 1024 * 1024
+            256 * 1024 * 1024
         );
         let journal = Storage::new(Some(config.0.clone()))
             .data_dir(&discovered)

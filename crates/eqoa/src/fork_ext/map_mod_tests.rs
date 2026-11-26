@@ -1330,15 +1330,17 @@ fn round4b_fix_busy_world_max_journal_cost_and_incremental_queries() {
         minimum > 800000,
         "busy callbacks must retain at least 20% of the fatal instruction budget: {minimum}"
     );
-    let heap: usize = 128 * 1024 * 1024; // addons/async_json.rs JSON_HEAP, the heap of a host with files
+    // The guard stays where 90% of the old 128 MiB heap was, though a mod with files has 256 MiB since 2026-11-26 (owner:
+    // the room was raised, and the mods are to get leaner, not to grow into it).
+    let heap: usize = 128 * 1024 * 1024;
     eprintln!("R4 B2 Lua memory peak (sampled after each step): search={peak} journal={jpeak} of {heap}");
-    // The hosts with files have a 128 MiB heap (JSON_HEAP) and the garbage of a load or an index build counts until the
+    // The hosts with files had a 128 MiB heap (JSON_HEAP, now 256 MiB) and the garbage of a load or an index build counts until the
     // collector runs, so the peak is about twice what the mod really holds. Sampled after each step, this test's 80,000
     // spawns / 10,000 names peaked at 131 MB (98%) on the merged tree of 2026-11-26, which failed "not enough memory" now and
     // then; it is about 111 MB (83%) now (before the H2 change 104-110 MB). The guard is 90%: a peak past it is a thin margin
     // and fails here, loudly, not now and then in some other run.
-    assert!(peak < heap / 10 * 9, "Map Search peaked at {peak} bytes of its {heap} byte heap (limit: 90%)");
-    assert!(jpeak < heap / 10 * 9, "Creature Journal peaked at {jpeak} bytes of its {heap} byte heap (limit: 90%)");
+    assert!(peak < heap / 10 * 9, "Map Search peaked at {peak} bytes; the guard is 90% of {heap} bytes (the heap itself is 256 MiB)");
+    assert!(jpeak < heap / 10 * 9, "Creature Journal peaked at {jpeak} bytes; the guard is 90% of {heap} bytes (the heap itself is 256 MiB)");
     native_events::clear(&h);
     native_events::clear(&j);
     input::reset_input_state();

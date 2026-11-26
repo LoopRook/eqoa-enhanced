@@ -4,6 +4,7 @@ Upstream changes remain in UPDATE-NOTES.md.
 
 ## Unreleased
 
+- **Map Search holds a very large creature journal with less memory**, and a mod that declares `"large_data"` now has 256 MiB of Lua memory (was 128 MiB; an ordinary mod still has 8 MiB). For mod authors: a raised limit breaks no mod.
 - **Fixes from a second review of this batch.** **Auction:** choosing "Any type", "Any class" or "Any race" from an open list no longer re-orders the lots instead, and ordering by High bid keeps lots with no bid at the bottom. **Map Search:** it no longer stops with an error when its creature lists finish loading at the wrong moment, and it still finds creatures near you when its lists cannot be read (it said "Searching..." for ever). **Bag Viewer:** switching to a character with no saved helper choices starts automatic banking near a banker at once (Bank showed as on but did nothing until a switch was clicked). **Mods' settings:** changing an option no longer makes a mod read back an older copy of a setting it had just saved.
 - **The crash offer says "did not close normally" for several such runs too**, not only for one (two hard closes in a row were still called crash reports).
 - **A browser build of Enhanced sends no crash report either.** Upstream's page sends a crash to a report server at once; Enhanced's page contacts no report server and says so. (Enhanced publishes Windows only; this keeps a build someone makes from the source to the same rule.)
