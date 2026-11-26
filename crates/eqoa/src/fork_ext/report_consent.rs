@@ -18,6 +18,24 @@
 
 use std::path::Path;
 
+#[cfg(test)]
+thread_local! {
+    static TEST_CONFIG: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The unit tests' config folder (a thread's own; `None` unless a test set one
+/// with `set_test_config_dir`): the unit tests' settings store has no folder,
+/// so a test of what reads or deletes `<config>/crashes/` puts one here.
+#[cfg(test)]
+pub fn test_config_dir() -> Option<std::path::PathBuf> {
+    TEST_CONFIG.with(|c| c.borrow().clone())
+}
+
+#[cfg(test)]
+pub fn set_test_config_dir(d: Option<std::path::PathBuf>) {
+    TEST_CONFIG.with(|c| *c.borrow_mut() = d);
+}
+
 /// Whether a kept crash report may be sent to a game server. No: the offer
 /// has no choice to say yes with. (A later "send to this server" choice
 /// would turn this into a per-report decision.)

@@ -175,7 +175,11 @@ impl Manager {
             named: None,
             root,
             storage: Storage::new(storage_root),
-            writes: std::sync::Arc::new(super::write_queue::WriteQueue::new()),
+            writes: {
+                let writes = std::sync::Arc::new(super::write_queue::WriteQueue::new());
+                super::options::set_settings_writes(&writes);
+                writes
+            },
             disclosures: BTreeMap::new(),
             device: device.clone(),
             queue: queue.clone(),
@@ -896,6 +900,9 @@ impl Manager {
                 );
                 (value, writer)
             } else {
+                // a save of a mod still queued reaches the disk before the disk is read back (this runs only
+                // when a generation changed; it waits for as long as the queued writes take)
+                self.writes.flush();
                 let value = self
                     .storage
                     .load_profile(&key, &i.host.lua)

@@ -1637,8 +1637,15 @@ mod native {
         } else {
             "an earlier version"
         };
-        let each =
-            "It kept a crash report each time. Save them locally to share with Enhanced support.";
+        // all unclosed runs say so, as one run does; a mix, or all crashes, did
+        // keep a report each (an unclosed run's is the fork's own)
+        let each = if all.iter().all(|s| s.unclosed) {
+            "The game did not close normally those times (it may have been ended from outside, such as End task, or stopped without a message). It kept a report each time. Save them locally to share with Enhanced support."
+        } else if all.iter().any(|s| s.unclosed) {
+            "It kept a report each time. Save them locally to share with Enhanced support."
+        } else {
+            "It kept a crash report each time. Save them locally to share with Enhanced support."
+        };
         let intro = match other.len() {
             0 => each.to_string(),
             n if n == all.len() => format!(
@@ -2056,6 +2063,70 @@ mod tests {
             )
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Several runs stopped: all of them unclosed say the game did not close
+    /// normally "those times" (as one run says "then"); a mix of crashes and
+    /// unclosed runs, and all crashes, say it kept a report (a crash report)
+    /// each time. The "earlier version" sentences in front stay.
+    #[test]
+    fn several_runs_are_worded_as_one_run_is_by_how_they_ended() {
+        use native::{Stopped, crash_words};
+        use std::time::{Duration, UNIX_EPOCH};
+        let now = UNIX_EPOCH + Duration::from_secs(1_900_000_000);
+        let run = |unclosed: bool, version: &str| Stopped { at: Some(now), version: Some(version.into()), unclosed };
+        let none = "The game did not close normally those times (it may have been ended from outside, such as End task, or stopped without a message). It kept a report each time. Save them locally to share with Enhanced support.";
+        let (_, all_unclosed) = crash_words(&[run(true, "v1"), run(true, "v1")], "v1", now);
+        assert_eq!(all_unclosed, none, "all unclosed");
+        let mix = "It kept a report each time. Save them locally to share with Enhanced support.";
+        let (_, mixed) = crash_words(&[run(true, "v1"), run(false, "v1"), run(true, "v1")], "v1", now);
+        assert_eq!(mixed, mix, "a mix");
+        let (_, crashes) = crash_words(&[run(false, "v1"), run(false, "v1")], "v1", now);
+        assert_eq!(crashes, "It kept a crash report each time. Save them locally to share with Enhanced support.", "all crashes, as before");
+        // the earlier-version sentences stay in front
+        let (_, older) = crash_words(&[run(true, "v0"), run(true, "v0")], "v1", now);
+        assert_eq!(older, format!("Those were in an earlier version of the game (v0). {none}"));
+    }
+
+    /// Delete in a crash offer, through the real path with a config folder:
+    /// the fork's copies, upstream's `crashes/` copies (`crash-*.txt` and
+    /// `crash-*.posted`) are all gone, and an unrelated file in either stays.
+    #[test]
+    fn delete_in_the_offer_removes_every_copy_and_only_those() {
+        use native::{Action, act, offer_in};
+        let root = std::env::temp_dir().join(format!("eqoa-delete-all-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mine = crate::fork_ext::report_crash_dir::in_config(&root);
+        let up = root.join("crashes");
+        std::fs::create_dir_all(&mine).unwrap();
+        std::fs::create_dir_all(&up).unwrap();
+        let body = "EQOA native client crash report
+version: dev-x (dev)
+when: 20261126-072340
+
+--- crash ---
+A panic
+";
+        for n in ["crash-20261126-072340.txt", "crash-20261126-072341.txt"] {
+            std::fs::write(mine.join(n), body).unwrap();
+            std::fs::write(up.join(n), body).unwrap();
+        }
+        std::fs::write(up.join("crash-20261126-072340.posted"), "id").unwrap();
+        std::fs::write(mine.join("shot.png"), "mine").unwrap();
+        std::fs::write(up.join("notes.txt"), "mine too").unwrap();
+        crate::fork_ext::report_consent::set_test_config_dir(Some(root.clone()));
+        let mut offer = offer_in(&mine);
+        assert!(offer.is_some(), "control: the fork's reports are offered");
+        act(&mut offer, Action::Delete);
+        crate::fork_ext::report_consent::set_test_config_dir(None);
+        let left = |d: &std::path::Path| {
+            let mut v: Vec<String> = std::fs::read_dir(d).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(left(&mine), ["shot.png"], "the fork's folder: only the unrelated file");
+        assert_eq!(left(&up), ["notes.txt"], "upstream's crashes/: only the unrelated file");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Every crash report waiting is one offer (F3 crash 20261028-235209,

@@ -128,9 +128,14 @@ function pageFacts() {
 // at most one report of each kind a page: a crash, and each problem's key
 const sent = new Set();
 
+// EQOA Enhanced sends no crash or problem report by itself (FORK.md): the page
+// reaches no report server; the details stay in the browser's console
+const NO_UPLOAD = 'EQOA Enhanced does not send crash reports. The details are in the browser console.';
+
 // a crash (or a problem that stops the page) sent to the report server;
 // `done` hears its id, or why it was not sent
 async function sendCrash(kind, title, detail, done) {
+  if (NO_UPLOAD) { if (done) done('', NO_UPLOAD); return; }
   if (sent.has(kind)) return;
   sent.add(kind);
   await Promise.race([buildKnown, new Promise((r) => setTimeout(r, 2000))]);
@@ -207,8 +212,8 @@ function crash(title, detail) {
   } catch { /* a private window: nothing kept */ }
   const head = `${title}: ${String(detail).split('\n')[0]}\n\nThe client cannot go on: reload the page to play again.`;
   const say = (more) => notice('crash', 'bad', head + more, [['Reload', () => location.reload(), true]]);
-  say('\nSending a crash report...');
-  sendCrash('crash', title, detail, (id, why) => say(id ? `\nA crash report was sent (${id}): thank you.` : `\nThe crash report could not be sent (${why}).`));
+  say(NO_UPLOAD ? '\n' + NO_UPLOAD : '\nSending a crash report...');
+  sendCrash('crash', title, detail, (id, why) => say(id ? `\nA crash report was sent (${id}): thank you.` : NO_UPLOAD ? '\n' + NO_UPLOAD : `\nThe crash report could not be sent (${why}).`));
 }
 
 // ---- what the page catches

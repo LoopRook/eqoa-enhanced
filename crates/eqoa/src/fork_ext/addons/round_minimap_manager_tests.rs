@@ -1216,7 +1216,10 @@ fn round_minimap_card_text_follows_the_ui_scale() {
 fn round_minimap_card_text_follows_the_ui_scale_body() {
     let mut heights = Vec::new();
     for win in [(640u32, 480u32), (1024, 768), (1920, 1080)] {
-        let Some(mut rm) = Rm::sized(|p| p == "eqoa_round_minimap", 0, win, 1) else { return };
+        let Some(mut rm) = Rm::sized(|p| p == "eqoa_round_minimap", 0, win, 1) else {
+            eprintln!("SKIP round_minimap_card_text_follows_the_ui_scale: no GPU adapter");
+            return;
+        };
         rm.frames(4);
         let (dx, dy) = rm.dot_at(rm.me[0] + 40.0, rm.me[2] + 30.0);
         assert!(rm.hover(dx, dy).is_some(), "a card on the dot at {win:?}");
