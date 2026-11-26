@@ -1243,3 +1243,48 @@ fn a6_a_failing_handler_releases_its_windows_and_is_told_they_closed() {
 include!("perf_mods_tests.rs");
 
 include!("hide_under_map_tests.rs");
+
+/// Owner test 2026-11-26: "being able to paste into it would be nice". The player's paste key (Ctrl+V) while the chat line holds
+/// the keyboard hands the clipboard's text to the mod as typed text (single line, control characters left out, the mod's own
+/// limit), and the mod never asks for the clipboard. Control: a plain V types the letter. Negative control: without the paste
+/// handling Ctrl+V types the letter "v" and nothing is pasted.
+#[test]
+fn a6_chat_line_takes_a_paste_as_typed_text() {
+    let (host, bridge, mut context, vm) = loaded();
+    tick_n(&host, &bridge, &mut context, 3);
+    let state = |code: &str| probe_str(&host, &format!("chat_probe.state.{code}"));
+    open_line(&host, &bridge, &mut context, vm, "hi ", "say");
+    assert!(super::input::is_text_capture_active());
+    let key_v = || winit::keyboard::Key::Character("v".into());
+    // control: a plain V is the letter
+    real_key(&host, key_v());
+    assert_eq!(state("text"), "hi v");
+    host.execute("chat_probe.state.text = 'hi '").unwrap();
+    // Ctrl+V: two lines, a tab and a bell on the clipboard
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("hello\r\nwor\u{7}ld\tend".into()));
+    super::input::set_modifiers((true, false, false));
+    real_key(&host, key_v());
+    super::input::set_modifiers((false, false, false));
+    assert_eq!(state("text"), "hi hello world end", "the pasted text was typed in, one line, no control characters");
+    // a long paste stops where typing does (the line's own limit)
+    host.execute("chat_probe.state.text = ''").unwrap();
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("a".repeat(300)));
+    super::input::set_modifiers((true, false, false));
+    real_key(&host, key_v());
+    super::input::set_modifiers((false, false, false));
+    assert_eq!(state("text").len(), 110, "the line takes no more than it takes typed");
+    // nothing on the clipboard: nothing typed, and not the letter either
+    host.execute("chat_probe.state.text = 'x'").unwrap();
+    super::input::set_modifiers((true, false, false));
+    real_key(&host, key_v());
+    super::input::set_modifiers((false, false, false));
+    assert_eq!(state("text"), "x");
+    // with no text entry holding the keyboard a paste goes nowhere
+    super::input::reset_input_state();
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("late".into()));
+    super::input::set_modifiers((true, false, false));
+    real_key(&host, key_v());
+    super::input::set_modifiers((false, false, false));
+    assert_eq!(state("text"), "x", "the entry is not holding the keyboard: nothing is typed");
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = None);
+}

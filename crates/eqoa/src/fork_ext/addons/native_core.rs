@@ -1020,6 +1020,7 @@ fn generation_loss(c: &mut Core, count: u64) {
     }
 }
 pub(crate) fn flush_deferred() {
+    super::input::poll_paste();
     super::window_sessions::flush_outbox();
     // An empty flush (no queued capture, nothing lost, no guide to check) changes nothing: skip the timer, the
     // CORE borrow and `guides::update`. Runs once per VM per frame, so this is the common case.

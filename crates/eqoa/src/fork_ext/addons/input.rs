@@ -385,6 +385,16 @@ pub(crate) fn route_mod_key_based(
     } else {
         None
     };
+    // The paste key while a mod's text entry has the keyboard is not the letter V: the clipboard's text comes instead
+    // (`request_paste`, `poll_paste`), so a mod never asks for the clipboard.
+    let text = if editor && down && paste_key_held(&plain) {
+        if !repeat {
+            request_paste();
+        }
+        None
+    } else {
+        text
+    };
     // The names a press has, and a release or a repeat has its press's, as `App::key_name`
     // keeps `key_names`.
     let own: &str = match base {
@@ -412,6 +422,77 @@ pub(crate) fn route_mod_key_based(
         c.emit("input.key", serde_json::json!({"key":press.key,"combo":press.combo,"down":down,"repeat":repeat,"synthetic":false,"text":text}));
     });
 }
+
+// ---- paste into a mod's text entry ----------------------------------------------------------------------------------
+
+/// Ctrl+V (Cmd+V on a Mac), as the game's own edit boxes take it (`viewer::clipboard_key`).
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn paste_key_held(plain: &str) -> bool {
+    let held = if cfg!(target_os = "macos") { SUPER.with(|m| m.get()) } else { modifiers().0 };
+    held && plain == "v"
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn paste_key_held(_: &str) -> bool {
+    false
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+static PASTED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+static PASTE_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(test)]
+thread_local! {
+    /// What the clipboard holds in a test: read at once, with no other program and no thread.
+    pub(crate) static TEST_CLIPBOARD: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Reads the clipboard off the frame thread (another program answers when it answers); `poll_paste` takes the text on a
+/// later frame. The player's own paste key asks, nothing a mod does.
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn request_paste() {
+    use std::sync::atomic::Ordering::Release;
+    // a test never reads the real clipboard
+    #[cfg(test)]
+    {
+        if let Some(text) = TEST_CLIPBOARD.with_borrow_mut(Option::take) {
+            PASTED.lock().unwrap().push(text);
+            PASTE_READY.store(true, Release);
+        }
+        return;
+    }
+    #[cfg(not(test))]
+    let _ = std::thread::Builder::new().name("mod-paste".into()).spawn(|| {
+        if let Ok(text) = arboard::Clipboard::new().and_then(|mut board| board.get_text()) {
+            PASTED.lock().unwrap().push(text);
+            PASTE_READY.store(true, Release);
+        }
+    });
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn request_paste() {}
+
+/// Each frame: text a paste has read goes to the mod whose text entry has the keyboard, as typed text (the `text` of one
+/// `input.key` event for the key V), single-line, with control characters left out and no more than an edit box
+/// takes (`editbox::paste_chars`); the mod holds its own limit as it does for typing. Nothing if the entry has gone.
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+pub(crate) fn poll_paste() {
+    use std::sync::atomic::Ordering::{Acquire, Release};
+    if !PASTE_READY.load(Acquire) {
+        return;
+    }
+    PASTE_READY.store(false, Release);
+    for pasted in std::mem::take(&mut *PASTED.lock().unwrap()) {
+        let text = crate::editbox::paste_chars(&pasted, false);
+        if text.is_empty() || !is_text_capture_active() {
+            continue;
+        }
+        super::native_core::defer(256 + text.len(), move |c| {
+            c.emit("input.key", serde_json::json!({"key":"v","combo":"v","down":true,"repeat":false,"synthetic":false,"text":text}));
+        });
+    }
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+pub(crate) fn poll_paste() {}
 
 /// Keeps the modifiers the window last said (`ModifiersChanged`).
 pub(crate) fn observe_modifiers(event: &winit::event::WindowEvent) {
