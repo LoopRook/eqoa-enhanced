@@ -248,6 +248,26 @@ fn factions_one_event_for_a_changed_page_none_for_the_same_one() {
     assert_eq!(heard(&h).matches("factions.changed:true:").count(), 1, "told after a zone change: {}", heard(&h));
 }
 
+/// A page turn (`request_factions` forgets the page, then the answer arrives) is one event, `open = true`: nothing is
+/// told for the moment the page is forgotten. Negative control: with the `is_some` test removed from `set_factions`,
+/// an `open = false` event is heard.
+#[test]
+fn factions_a_page_turn_tells_the_new_page_only_never_open_false() {
+    fresh();
+    let h = listener();
+    native_a5::set_factions(1, || Some(page(10)));
+    step(&h);
+    clear_heard(&h);
+    native_a5::set_factions(2, || None);
+    step(&h);
+    assert_eq!(heard(&h), "", "the page forgotten while the request is out: nothing told");
+    native_a5::set_factions(3, || Some(page(11)));
+    step(&h);
+    let arrived = heard(&h);
+    assert_eq!(arrived.matches("factions.changed:true:").count(), 1, "{arrived}");
+    assert!(!arrived.contains("factions.changed:false"), "{arrived}");
+}
+
 /// A mod that does not listen: no revision is spent and nothing is kept. Negative control: with the `wanted` test
 /// removed from `set_factions`, the counter moves.
 #[test]
