@@ -754,6 +754,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 |---|---|---|---|
 | `eqoa.events.abilities.changed` | supported | 2 |  |
 | `eqoa.events.action.result` | supported | 6 |  |
+| `eqoa.events.auction.changed` | supported | 8 |  |
 | `eqoa.events.bank.changed` | supported | 5 |  |
 | `eqoa.events.batch.progress` | supported | 6 |  |
 | `eqoa.events.batch.result` | supported | 6 |  |
@@ -769,6 +770,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.cooldown.ended` | supported | 2 |  |
 | `eqoa.events.cooldown.started` | supported | 2 |  |
 | `eqoa.events.cooldown.updated` | supported | 2 |  |
+| `eqoa.events.craft.changed` | supported | 8 |  |
 | `eqoa.events.disabling` | supported | 2 |  |
 | `eqoa.events.duel.changed` | supported | 8 |  |
 | `eqoa.events.dye.changed` | supported | 8 |  |
@@ -778,6 +780,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.entity.changed` | supported | 2 |  |
 | `eqoa.events.entity.removed` | supported | 2 |  |
 | `eqoa.events.events.dropped` | supported | 2 |  |
+| `eqoa.events.factions.changed` | supported | 8 |  |
 | `eqoa.events.fishing.changed` | supported | 8 |  |
 | `eqoa.events.friends.changed` | supported | 8 |  |
 | `eqoa.events.group.changed` | supported | 2 |  |
@@ -791,6 +794,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.lfg.changed` | supported | 8 |  |
 | `eqoa.events.lfg.result` | supported | 8 |  |
 | `eqoa.events.loot.changed` | supported | 5 |  |
+| `eqoa.events.mail.changed` | supported | 8 |  |
 | `eqoa.events.map.changed` | supported | 4 |  |
 | `eqoa.events.mastery.changed` | supported | 6 |  |
 | `eqoa.events.merc.changed` | supported | 8 |  |
@@ -802,6 +806,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.pointer.wheel` | supported | 4 |  |
 | `eqoa.events.quests.changed` | supported | 6 |  |
 | `eqoa.events.quests.goals_changed` | supported | 8 |  |
+| `eqoa.events.raid.changed` | supported | 8 |  |
 | `eqoa.events.render` | supported | 2 |  |
 | `eqoa.events.resource.failed` | supported | 2 |  |
 | `eqoa.events.resource.ready` | supported | 2 |  |
@@ -1202,6 +1207,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.action.result.data.reason` | supported | 6 |  |
 | `eqoa.events.action.result.data.request_id` | supported | 6 |  |
 | `eqoa.events.action.result.data.state` | supported | 6 |  |
+| `eqoa.events.auction.changed.data.open` | supported | 8 |  |
+| `eqoa.events.auction.changed.data.revision` | supported | 8 |  |
 | `eqoa.events.bank.changed.data.after` | supported | 5 |  |
 | `eqoa.events.bank.changed.data.before` | supported | 5 |  |
 | `eqoa.events.bank.changed.data.cause` | supported | 5 |  |
@@ -1294,6 +1301,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.cooldown.updated.data.ability_id` | supported | 2 |  |
 | `eqoa.events.cooldown.updated.data.display_key` | supported | 2 |  |
 | `eqoa.events.cooldown.updated.data.lockout` | supported | 2 |  |
+| `eqoa.events.craft.changed.data.open` | supported | 8 |  |
+| `eqoa.events.craft.changed.data.revision` | supported | 8 |  |
 | `eqoa.events.duel.changed.data.after` | supported | 8 |  |
 | `eqoa.events.duel.changed.data.before` | supported | 8 |  |
 | `eqoa.events.duel.changed.data.changed` | supported | 8 |  |
@@ -1316,6 +1325,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.events.dropped.data.first_seq` | supported | 2 |  |
 | `eqoa.events.events.dropped.data.last_seq` | supported | 2 |  |
 | `eqoa.events.events.dropped.data.streams` | supported | 2 |  |
+| `eqoa.events.factions.changed.data.open` | supported | 8 |  |
+| `eqoa.events.factions.changed.data.revision` | supported | 8 |  |
 | `eqoa.events.fishing.changed.data.open` | supported | 8 |  |
 | `eqoa.events.fishing.changed.data.revision` | supported | 8 |  |
 | `eqoa.events.friends.changed.data.after` | supported | 8 |  |
@@ -1360,6 +1371,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.loot.changed.data.cause` | supported | 5 |  |
 | `eqoa.events.loot.changed.data.changed` | supported | 5 |  |
 | `eqoa.events.loot.changed.data.closed_by` | supported | 7 |  |
+| `eqoa.events.mail.changed.data.open` | supported | 8 |  |
+| `eqoa.events.mail.changed.data.revision` | supported | 8 |  |
 | `eqoa.events.map.changed.data.after` | supported | 4 |  |
 | `eqoa.events.map.changed.data.before` | supported | 4 |  |
 | `eqoa.events.map.changed.data.changed` | supported | 4 |  |
@@ -1398,6 +1411,8 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.events.quests.goals_changed.data.after` | supported | 8 |  |
 | `eqoa.events.quests.goals_changed.data.before` | supported | 8 |  |
 | `eqoa.events.quests.goals_changed.data.changed` | supported | 8 |  |
+| `eqoa.events.raid.changed.data.open` | supported | 8 |  |
+| `eqoa.events.raid.changed.data.revision` | supported | 8 |  |
 | `eqoa.events.render.data.dt` | supported | 2 |  |
 | `eqoa.events.resource.failed.data.error` | supported | 2 |  |
 | `eqoa.events.resource.failed.data.handle` | supported | 2 |  |
@@ -2192,15 +2207,20 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.windows.Session.title` | supported | 8 |  |
 | `eqoa.windows.SessionData` | supported | 8 |  |
 | `eqoa.windows.SessionData.alpha` | supported | 8 |  |
+| `eqoa.windows.SessionData.asker` | supported | 8 |  |
 | `eqoa.windows.SessionData.available` | supported | 8 |  |
 | `eqoa.windows.SessionData.casting` | supported | 8 |  |
 | `eqoa.windows.SessionData.catch` | supported | 8 |  |
 | `eqoa.windows.SessionData.channel` | supported | 8 |  |
+| `eqoa.windows.SessionData.choices` | supported | 8 |  |
 | `eqoa.windows.SessionData.current` | supported | 8 |  |
+| `eqoa.windows.SessionData.deadline_ms` | supported | 8 |  |
+| `eqoa.windows.SessionData.duration` | supported | 8 |  |
 | `eqoa.windows.SessionData.entries` | supported | 8 |  |
 | `eqoa.windows.SessionData.fair_from` | supported | 8 |  |
 | `eqoa.windows.SessionData.fair_to` | supported | 8 |  |
 | `eqoa.windows.SessionData.from` | supported | 8 |  |
+| `eqoa.windows.SessionData.id` | supported | 8 |  |
 | `eqoa.windows.SessionData.inventory` | supported | 8 |  |
 | `eqoa.windows.SessionData.links` | supported | 8 |  |
 | `eqoa.windows.SessionData.list` | supported | 8 |  |
@@ -2215,6 +2235,7 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `eqoa.windows.SessionData.perfect_to` | supported | 8 |  |
 | `eqoa.windows.SessionData.ready` | supported | 8 |  |
 | `eqoa.windows.SessionData.reply_to` | supported | 8 |  |
+| `eqoa.windows.SessionData.rolls` | supported | 8 |  |
 | `eqoa.windows.SessionData.slots` | supported | 8 |  |
 | `eqoa.windows.SessionData.spells` | supported | 8 |  |
 | `eqoa.windows.SessionData.state` | supported | 8 |  |
@@ -2390,6 +2411,33 @@ Statuses and round labels are the running client's registry claims. Forge and Im
 | `ImGui.Unindent` | supported | 2 |  |
 | `ImGui.vec2` | supported | 2 |  |
 | `ImGui.vec4` | supported | 2 |  |
+| `ImGuiCond.Always` | supported | 2 |  |
+| `ImGuiCond.Appearing` | supported | 2 |  |
+| `ImGuiCond.FirstUseEver` | supported | 2 |  |
+| `ImGuiCond.None` | supported | 2 |  |
+| `ImGuiCond.Once` | supported | 2 |  |
+| `ImGuiWindowFlags.AlwaysAutoResize` | supported | 2 |  |
+| `ImGuiWindowFlags.AlwaysHorizontalScrollbar` | supported | 2 |  |
+| `ImGuiWindowFlags.AlwaysVerticalScrollbar` | supported | 2 |  |
+| `ImGuiWindowFlags.HorizontalScrollbar` | supported | 2 |  |
+| `ImGuiWindowFlags.MenuBar` | supported | 2 |  |
+| `ImGuiWindowFlags.NoBackground` | supported | 2 |  |
+| `ImGuiWindowFlags.NoBringToFrontOnFocus` | supported | 2 |  |
+| `ImGuiWindowFlags.NoCollapse` | supported | 2 |  |
+| `ImGuiWindowFlags.NoDecoration` | supported | 2 |  |
+| `ImGuiWindowFlags.NoFocusOnAppearing` | supported | 2 |  |
+| `ImGuiWindowFlags.NoInputs` | supported | 2 |  |
+| `ImGuiWindowFlags.NoMouseInputs` | supported | 2 |  |
+| `ImGuiWindowFlags.NoMove` | supported | 2 |  |
+| `ImGuiWindowFlags.NoNav` | supported | 2 |  |
+| `ImGuiWindowFlags.NoNavFocus` | supported | 2 |  |
+| `ImGuiWindowFlags.NoNavInputs` | supported | 2 |  |
+| `ImGuiWindowFlags.NoResize` | supported | 2 |  |
+| `ImGuiWindowFlags.NoSavedSettings` | supported | 2 |  |
+| `ImGuiWindowFlags.NoScrollWithMouse` | supported | 2 |  |
+| `ImGuiWindowFlags.NoScrollbar` | supported | 2 |  |
+| `ImGuiWindowFlags.NoTitleBar` | supported | 2 |  |
+| `ImGuiWindowFlags.None` | supported | 2 |  |
 | `eqoa.imgui` | partial | 2 | bounded native bridge |
 | `eqoa.imgui.Begin` | supported | 2 |  |
 | `eqoa.imgui.BeginChild` | supported | 2 |  |
