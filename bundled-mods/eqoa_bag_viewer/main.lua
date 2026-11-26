@@ -334,6 +334,7 @@ eqoa.events.on("merchant.changed", function(e)
     if e.data and e.data.cause == "open" and eqoa.merchant.get() ~= nil then B.learn_native_open("merchant") end
 end)
 eqoa.events.on("bank.changed", function(e)
+    HP.on_bank_changed(e.data) -- an item taken out of the bank is no longer marked to bank
     local b = eqoa.bank.get()
     if e.data and e.data.cause == "open" and b and b.open then B.learn_native_open("bank") end
 end)

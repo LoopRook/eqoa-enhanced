@@ -187,6 +187,29 @@ function H.set_bank(it, flag)
     B.dirty()
 end
 
+-- An item the player takes out of the bank loses its bank mark. The server's own answer to a take (`bank.changed`, cause
+-- "bank_took") is what is heard, so every way of taking one out counts: Withdraw 1, Withdraw stack, the multi-select's
+-- Take out of bank, the game's own bank window. The mark is the item type's (the item id, as every mark here is), so
+-- it goes for every stack of that item, in the bank or the pack: a mark taken off is one a click puts back, and a mark
+-- left behind would bank the item again at the next visit. A deposit (`bank_added`) never marks anything.
+function H.on_bank_changed(d)
+    if not (d and d.cause == "bank_took" and d.before and d.after) then return end
+    if not H.loaded then H.load() end
+    local function held(container)
+        local n = {}
+        for _, it in ipairs(container.items or {}) do
+            local k = mark_key(it)
+            n[k] = (n[k] or 0) + (it.quantity or 1)
+        end
+        return n
+    end
+    local before, after, cleared = held(d.before), held(d.after), 0
+    for k, n in pairs(before) do
+        if (after[k] or 0) < n and H.bank[k] then H.bank[k] = nil; cleared = cleared + 1 end
+    end
+    if cleared > 0 then H.save(); B.dirty() end
+end
+
 local function character()
     if not B.character then B.sync_character() end
     return B.character

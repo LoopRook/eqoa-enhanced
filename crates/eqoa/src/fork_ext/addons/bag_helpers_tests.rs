@@ -757,3 +757,47 @@ fn fix2_item3_one_ware_that_cannot_be_bought_does_not_stop_the_others_and_a_cut_
     run(&bad, cut);
     assert_eq!(int(&bad, "PLAN.cost"), 700, "negative control: the unclipped cost");
 }
+
+/// An item the player takes out of the bank loses its bank mark, whichever way it was taken (the server's own answer is what
+/// is heard); a deposit marks nothing, and what is not taken keeps its mark. (Owner's report 2026-11-26: a withdrawn item was
+/// banked again at the next visit.)
+#[test]
+fn line3_an_item_taken_out_of_the_bank_loses_its_bank_mark() {
+    let setup = r#"
+        H.load()
+        H.bank["20"], H.bank["21"], H.bank["22"], H.bank["40"] = true, true, true, true
+        function bank_item(id, name, q) return {id = id, name = name, ref = "b" .. id .. "_" .. q, quantity = q, list = "bank"} end
+        function took(before, after) H.on_bank_changed({cause = "bank_took", before = {items = before}, after = {items = after}}) end
+    "#;
+    let lua = world();
+    run(&lua, setup);
+    // one stack taken whole: gone from the bank, no longer marked
+    run(&lua, r#"took({bank_item(20, "Moonstone", 4), bank_item(40, "Silk", 9)}, {bank_item(40, "Silk", 9)})"#);
+    assert!(boolean(&lua, "H.bank['20'] == nil"), "the withdrawn item's mark is gone");
+    assert!(boolean(&lua, "H.bank['40'] == true"), "an item still in the bank keeps its mark");
+    assert!(!boolean(&lua, "(FILES['helpers.cfg'] or ''):find('bank:20', 1, true) ~= nil"), "and the saved marks agree");
+    assert!(boolean(&lua, "(FILES['helpers.cfg'] or ''):find('bank:40', 1, true) ~= nil"));
+    // a part of a stack taken (Withdraw 1 of 2): the item is in the pack now, so its mark goes too
+    run(&lua, r#"took({bank_item(21, "Rat Pelt", 2), bank_item(40, "Silk", 9)}, {bank_item(21, "Rat Pelt", 1), bank_item(40, "Silk", 9)})"#);
+    assert!(boolean(&lua, "H.bank['21'] == nil"), "a part of a stack taken clears the item's mark");
+    // two items taken in one answer, and an item taken from one of its two stacks
+    run(&lua, r#"H.bank['20'], H.bank['21'] = true, true
+        took({bank_item(20, "Moonstone", 1), bank_item(21, "Rat Pelt", 1), bank_item(22, "Pearl", 5), bank_item(22, "Pearl", 5)},
+             {bank_item(22, "Pearl", 5)})"#);
+    assert!(boolean(&lua, "H.bank['20'] == nil and H.bank['21'] == nil and H.bank['22'] == nil"));
+    assert!(boolean(&lua, "H.bank['40'] == true"));
+    // a deposit marks nothing and clears nothing; an answer that moved none of a marked item's stacks clears nothing
+    run(&lua, r#"H.on_bank_changed({cause = "bank_added", before = {items = {}}, after = {items = {bank_item(30, "Ring", 1)}}})"#);
+    assert!(boolean(&lua, "H.bank['30'] == nil and H.bank['40'] == true"), "a deposit does not mark, nor unmark");
+    run(&lua, r#"took({bank_item(40, "Silk", 9)}, {bank_item(40, "Silk", 9)})"#);
+    assert!(boolean(&lua, "H.bank['40'] == true"), "a take of something else leaves the mark");
+    // the other causes of a bank change (a window opening, money) are not takes
+    run(&lua, r#"H.on_bank_changed({cause = "bank_money", before = {items = {bank_item(40, "Silk", 9)}}, after = {items = {}}})"#);
+    assert!(boolean(&lua, "H.bank['40'] == true"));
+
+    // negative control: with the clearing taken out the withdrawn item stays marked
+    let bad = mutated(&[("if (after[k] or 0) < n and H.bank[k] then H.bank[k] = nil; cleared = cleared + 1 end", "")]);
+    run(&bad, setup);
+    run(&bad, r#"took({bank_item(20, "Moonstone", 4)}, {})"#);
+    assert!(boolean(&bad, "H.bank['20'] == true"), "negative control: without the fix the mark stays");
+}
