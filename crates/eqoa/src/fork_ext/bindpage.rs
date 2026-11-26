@@ -4,7 +4,12 @@ use crate::bindpage::Column;
 use crate::binds::{self, Binds, Input, Moved, ROWS, row_named};
 use crate::pointer::{Hits, rows_rect};
 use crate::settings::{read_config, write_config};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU8, Ordering};
+#[cfg(test)]
+use std::sync::atomic::AtomicU64;
 use vi::ui::{Raster, UI_COLORS, Vui, Window, wide};
 
 const KEYS_FILE: &str = "mod-keys.opt";
@@ -33,6 +38,40 @@ pub struct ModBind {
 }
 
 static MOD_BINDS: Mutex<Vec<ModBind>> = Mutex::new(Vec::new());
+
+/// Interface profile under which `resolve` last ran: 0 unset, 1 Controller, 2 PC.
+static RESOLVED_PC: AtomicU8 = AtomicU8::new(0);
+
+#[cfg(test)]
+static RESOLVE_COUNT: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+static PC_INDEX_REBUILDS: AtomicU64 = AtomicU64::new(0);
+
+struct PcRowIndex {
+    binds: Binds,
+    /// First row `r` whose `profile_key(r, true)` is `Some(k)` for each non-empty key `k`.
+    by_key: HashMap<String, usize>,
+    /// Whether `binds.profile_key(r, true) == r_default(r)` for each row `r`.
+    on_default: Vec<bool>,
+}
+
+thread_local! {
+    static PC_ROW_INDEX: RefCell<Option<PcRowIndex>> = const { RefCell::new(None) };
+}
+
+fn pc_tag() -> u8 {
+    if crate::binds::pc_shortcuts() { 2 } else { 1 }
+}
+
+#[cfg(test)]
+pub(crate) fn resolve_count_for_test() -> u64 {
+    RESOLVE_COUNT.load(Ordering::Relaxed)
+}
+
+#[cfg(test)]
+pub(crate) fn pc_index_rebuilds_for_test() -> u64 {
+    PC_INDEX_REBUILDS.load(Ordering::Relaxed)
+}
 
 /// The Controls row that opens and closes the Mods & Addons window (the addon manager),
 /// beside the mod rows (owner, 2026-11-20). It is a mod binding like any other (the same
@@ -178,14 +217,35 @@ pub fn register(addon: &str, id: &str, default_key: &str, description: &str) -> 
 }
 
 pub fn set_addon_enabled(addon_id: &str, enabled: bool) {
-    let game = crate::settings::with_binds(Clone::clone);
-    let mut binds = MOD_BINDS.lock().unwrap();
-    for b in binds.iter_mut() {
-        if b.addon_id == addon_id {
-            b.enabled = enabled;
+    let tag = pc_tag();
+    let mut changed = false;
+    {
+        let mut binds = MOD_BINDS.lock().unwrap();
+        for b in binds.iter_mut() {
+            if b.addon_id == addon_id && b.enabled != enabled {
+                b.enabled = enabled;
+                changed = true;
+            }
         }
     }
-    // A mod coming back is checked again against what has the keys now.
+    if !changed && RESOLVED_PC.load(Ordering::Relaxed) == tag {
+        return;
+    }
+    // The game's keys first: the lock below must not be held while they load.
+    let game = crate::settings::with_binds(Clone::clone);
+    let mut binds = MOD_BINDS.lock().unwrap();
+    // A mod coming back (or an interface switch) is checked again against what has the keys now.
+    resolve(&game, &mut binds);
+}
+
+/// Re-resolves mod defaults once if the active keyboard interface (PC vs Controller) changed.
+pub(crate) fn sync_interface_mode() {
+    let tag = pc_tag();
+    if RESOLVED_PC.load(Ordering::Relaxed) == tag {
+        return;
+    }
+    let game = crate::settings::with_binds(Clone::clone);
+    let mut binds = MOD_BINDS.lock().unwrap();
     resolve(&game, &mut binds);
 }
 
@@ -194,6 +254,8 @@ pub fn reset_in_memory() {
     binds.clear();
     set_manager_key(None);
     ANY_COMBO.store(false, std::sync::atomic::Ordering::Relaxed);
+    RESOLVED_PC.store(0, Ordering::Relaxed);
+    PC_ROW_INDEX.with(|idx| *idx.borrow_mut() = None);
     *SESSION.lock().unwrap() = None;
 }
 
@@ -502,12 +564,40 @@ fn game_row(game: &Binds, key: &str) -> Option<usize> {
         return None;
     }
     // the interface in use: the PC keyboard has its own profile (1..0 on the bars, its own overrides)
-    let pc = crate::binds::pc_shortcuts();
-    let on = if pc { (0..ROWS.len()).find(|&r| game.profile_key(r, true) == Some(key)) } else { game.row_on(key) };
-    on.or_else(|| {
+    if crate::binds::pc_shortcuts() {
+        return PC_ROW_INDEX.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let stale = slot.as_ref().is_none_or(|idx| idx.binds != *game);
+            if stale {
+                let mut by_key = HashMap::with_capacity(ROWS.len());
+                let mut on_default = Vec::with_capacity(ROWS.len());
+                for r in 0..ROWS.len() {
+                    let pk = game.profile_key(r, true);
+                    if let Some(k) = pk.filter(|k| !k.is_empty()) {
+                        by_key.entry(k.to_string()).or_insert(r);
+                    }
+                    on_default.push(pk == r_default(r));
+                }
+                #[cfg(test)]
+                PC_INDEX_REBUILDS.fetch_add(1, Ordering::Relaxed);
+                *slot = Some(PcRowIndex {
+                    binds: game.clone(),
+                    by_key,
+                    on_default,
+                });
+            }
+            let idx = slot.as_ref().unwrap();
+            idx.by_key.get(key).copied().or_else(|| {
+                ROWS.iter()
+                    .position(|r| r.keys.contains(&key))
+                    .filter(|&r| !game.moved(r) && idx.on_default[r])
+            })
+        });
+    }
+    game.row_on(key).or_else(|| {
         ROWS.iter()
             .position(|r| r.keys.contains(&key))
-            .filter(|&r| !game.moved(r) && (!pc || game.profile_key(r, true) == r_default(r)))
+            .filter(|&r| !game.moved(r))
     })
 }
 
@@ -590,6 +680,9 @@ fn default_in_use(game: &Binds, binds: &[ModBind], key: &str) -> bool {
 /// or has them put back, so the result never depends on the order any of
 /// that happened in.
 fn resolve(game: &Binds, binds: &mut [ModBind]) {
+    #[cfg(test)]
+    RESOLVE_COUNT.fetch_add(1, Ordering::Relaxed);
+    RESOLVED_PC.store(pc_tag(), Ordering::Relaxed);
     for b in binds.iter_mut() {
         b.refused.clear();
         match &b.stored {
@@ -1615,6 +1708,106 @@ mod.eqoa_map_search.clear=f4
         register_manager_row();
         register("eqoa_map_search", "clear", "", "Clear map guide");
         assert_eq!(get_key("eqoa_map_search", "clear").as_deref(), Some("f4"), "a later F4 stays");
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+    }
+
+    /// Regression test (PC interface perf): `game_row` in PC mode uses a cached profile index
+    /// that matches the exact `profile_key` scan for every key and rebuilds only when `Binds` changes.
+    #[test]
+    fn perf_pc_mode_game_row_caches_profile_index_and_matches_naive_scan() {
+        let naive = |game: &Binds, key: &str| -> Option<usize> {
+            if key.is_empty() {
+                return None;
+            }
+            (0..ROWS.len())
+                .find(|&r| game.profile_key(r, true) == Some(key))
+                .or_else(|| {
+                    ROWS.iter()
+                        .position(|r| r.keys.contains(&key))
+                        .filter(|&r| !game.moved(r) && game.profile_key(r, true) == r_default(r))
+                })
+        };
+        let keys = [
+            "1", "7", "0", "w", "g", "space", "v", "`", "~", "f4", "f10", "shift+1", "b", "y",
+            "shift+f10", "ctrl+9", "",
+        ];
+        interface(true);
+        let base_rebuilds = pc_index_rebuilds_for_test();
+        let game = crate::settings::binds();
+        for &k in &keys {
+            assert_eq!(game_row(&game, k), naive(&game, k), "default PC binds for {k:?}");
+        }
+        assert_eq!(
+            pc_index_rebuilds_for_test() - base_rebuilds,
+            1,
+            "all lookups on unchanged Binds share one index build"
+        );
+        // Repeated lookups must not rebuild.
+        for _ in 0..20 {
+            assert_eq!(game_row(&game, "7"), naive(&game, "7"));
+            assert_eq!(game_row(&game, "shift+f10"), naive(&game, "shift+f10"));
+        }
+        assert_eq!(pc_index_rebuilds_for_test() - base_rebuilds, 1);
+
+        // Negative control: mutating Binds invalidates the cache and rebuilds once.
+        with_pc_key("pcbar3_slot1", "shift+1");
+        with_pc_key("art", "b");
+        let modified = crate::settings::binds();
+        for &k in &keys {
+            assert_eq!(game_row(&modified, k), naive(&modified, k), "modified PC binds for {k:?}");
+        }
+        assert_eq!(
+            pc_index_rebuilds_for_test() - base_rebuilds,
+            2,
+            "negative control: changed Binds triggers exactly one rebuild"
+        );
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+    }
+
+    /// Regression test (PC interface perf): redundant `set_addon_enabled` and steady `sync_interface_mode`
+    /// do not re-run `resolve()`, while real enable/disable transitions and PC <-> Controller switches do.
+    #[test]
+    fn perf_redundant_set_addon_enabled_skips_resolve_but_mode_switch_and_toggle_run_it() {
+        interface(true);
+        register("alpha", "seven", "7", "Seven");
+        assert_eq!(get_key("alpha", "seven").as_deref(), Some(""), "7 is Bar 2 slot 2 in PC mode");
+
+        let before = resolve_count_for_test();
+        for _ in 0..20 {
+            set_addon_enabled("alpha", true);
+            set_addon_enabled("mod_without_binds", true);
+            sync_interface_mode();
+        }
+        assert_eq!(
+            resolve_count_for_test(),
+            before,
+            "steady-state calls must not re-run resolve()"
+        );
+
+        // Negative control 1: real disable -> enable transition runs resolve().
+        set_addon_enabled("alpha", false);
+        assert_eq!(resolve_count_for_test(), before + 1);
+        set_addon_enabled("alpha", true);
+        assert_eq!(resolve_count_for_test(), before + 2);
+
+        // Negative control 2: switching PC -> Controller runs resolve() once and frees '7'.
+        crate::settings::set_ui_mode(false).unwrap();
+        sync_interface_mode();
+        assert_eq!(resolve_count_for_test(), before + 3);
+        assert_eq!(get_key("alpha", "seven").as_deref(), Some("7"), "7 is free in Controller mode");
+        for _ in 0..10 {
+            sync_interface_mode();
+        }
+        assert_eq!(resolve_count_for_test(), before + 3, "steady Controller frames do not re-resolve");
+
+        // Switching Controller -> PC runs resolve() once and refuses '7' again.
+        crate::settings::set_ui_mode(true).unwrap();
+        sync_interface_mode();
+        assert_eq!(resolve_count_for_test(), before + 4);
+        assert_eq!(get_key("alpha", "seven").as_deref(), Some(""), "7 is taken again in PC mode");
+
         crate::settings::testing::reset(false);
         reset_in_memory();
     }
