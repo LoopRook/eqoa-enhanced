@@ -1807,16 +1807,29 @@ fn gauge_and_image_take_an_optional_scale() {
         assert(eqoa.hud.gauge({x=10, y=20, art=7, fill=0.5, scale=1.5}))
         assert(eqoa.hud.gauge({x=10, y=20, art=7, fill=0.5}))
         assert(eqoa.hud.image({ui_id=25, x=10, y=20, w=174, scale=2}))
+        assert(eqoa.hud.image({ui_id='panel', x=10, y=20, scale=1.5}))
+        -- a scale that cannot apply (a texture) is refused, never ignored
+        for _, sc in ipairs({1, 2, -1}) do
+            local ok, err = eqoa.hud.image({texture={}, x=1, y=1, scale=sc})
+            assert(ok == nil and err.code == 'invalid_argument', 'texture scale ' .. tostring(sc))
+        end
         for _, bad in ipairs({0, -1, 1/0, 0/0}) do
             local ok, err = eqoa.hud.gauge({x=1, y=1, art=7, fill=1, scale=bad})
             assert(ok == nil and err.code == 'invalid_argument', 'gauge scale ' .. tostring(bad))
             ok, err = eqoa.hud.image({ui_id=25, x=1, y=1, scale=bad})
             assert(ok == nil and err.code == 'invalid_argument', 'image scale ' .. tostring(bad))
+            ok, err = eqoa.hud.image({ui_id='panel', x=1, y=1, scale=bad})
+            assert(ok == nil and err.code == 'invalid_argument', 'panel scale ' .. tostring(bad))
         end
     "#,
     )
     .unwrap();
-    let q = drawn(hud_layer::MOD_QUEUES.with(|q| q.borrow().values().flatten().cloned().collect()));
+    let raw: Vec<hud_layer::HudCommand> = hud_layer::MOD_QUEUES.with(|q| q.borrow().values().flatten().cloned().collect());
+    assert!(
+        raw.iter().any(|c| matches!(c, hud_layer::HudCommand::Panel { scale, .. } if *scale == 1.5)),
+        "the panel keeps its scale: {raw:?}"
+    );
+    let q = drawn(raw.into_iter().filter(|c| !matches!(c, hud_layer::HudCommand::Panel { .. })).collect());
     assert_eq!(q.len(), 3, "the refused calls queue nothing: {q:?}");
     assert!(matches!(q[0], Drawn::Gauge { scale, .. } if scale == 1.5));
     assert!(matches!(q[1], Drawn::Gauge { scale, .. } if scale == 1.0), "no scale: the old call");
@@ -1847,6 +1860,7 @@ fn a_scaled_gauge_and_image_grow_about_their_own_corner() {
     for (what, make) in [
         ("gauge", (|s: f32| hud_layer::HudCommand::Gauge { x: 100, y: 200, art: 7, fill: 1.0, lit: true, scale: s, anchor: render::ui::Anchor::Left, vertical: render::ui::Vertical::Top }) as fn(f32) -> hud_layer::HudCommand),
         ("image", |s: f32| hud_layer::HudCommand::Image { ui_id: 25, target_fade: false, x: 100, y: 200, w: Some(174), h: None, color: None, scale: s, anchor: render::ui::Anchor::Left, vertical: render::ui::Vertical::Top }),
+        ("panel", |s: f32| hud_layer::HudCommand::Panel { x: 100, y: 200, w: 148, h: 132, scale: s, anchor: render::ui::Anchor::Left, vertical: render::ui::Vertical::Top }),
     ] {
         let mut seen = Vec::new();
         for s in [1.0, 1.5] {

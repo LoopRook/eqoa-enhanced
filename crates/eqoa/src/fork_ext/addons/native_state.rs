@@ -1067,6 +1067,15 @@ fn install_math(lua: &Lua) -> Result<()> {
                 );
             };
             if !t.get::<Value>("texture")?.is_nil() {
+                // A texture is sized with `w` and `h`; a `scale` it cannot honour is refused, never ignored.
+                if !t.get::<Value>("scale")?.is_nil() {
+                    return error(
+                        lua,
+                        "eqoa.hud.image",
+                        "invalid_argument",
+                        "scale does not apply to a texture: size it with w and h",
+                    );
+                }
                 return super::hud_textures::image(lua, &t);
             }
             let t = Spec::new(lua, &t)?;
@@ -1110,6 +1119,7 @@ fn install_math(lua: &Lua) -> Result<()> {
                     y,
                     w: w.unwrap_or(148),
                     h: h.unwrap_or(132),
+                    scale,
                     anchor,
                     vertical,
                 },
@@ -1200,6 +1210,7 @@ fn install_math(lua: &Lua) -> Result<()> {
                 y,
                 w,
                 h,
+                scale: 1.0,
                 anchor,
                 vertical,
             };

@@ -68,6 +68,8 @@ pub enum HudCommand {
         y: i32,
         w: i32,
         h: i32,
+        /// drawn about its own top left corner, 1.0 as asked (`eqoa.hud.image`'s `scale` with `ui_id = "panel"`)
+        scale: f32,
         anchor: render::ui::Anchor,
         vertical: render::ui::Vertical,
     },
@@ -556,11 +558,17 @@ fn draw_commands(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster<'_>, target_
                         y,
                         w,
                         h,
+                        scale,
                         anchor,
                         vertical,
                     } => {
                         ui.ui.anchor = anchor;
                         ui.ui.vertical = vertical;
+                        let before = ui.ui.hud_scale;
+                        if scale != 1.0 && before == render::ui::HudScale::IDENTITY {
+                            let origin = ui.ui.placed([x as f32, y as f32]);
+                            ui.ui.hud_scale = render::ui::HudScale { origin, factor: scale };
+                        }
                         let f = [x, y, x + w, y + h];
                         let inside = [f[0] + 2, f[1] + 2, f[2] - 2, f[3] - 2];
                         let corners = |r: [i32; 4]| {
@@ -589,6 +597,7 @@ fn draw_commands(vui: &crate::ui::Vui, ui: &mut crate::ui::UiRaster<'_>, target_
                             1.0,
                             true,
                         );
+                        ui.ui.hud_scale = before;
                     }
                 });
             }
