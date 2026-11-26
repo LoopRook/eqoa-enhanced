@@ -108,6 +108,8 @@ pub(crate) fn canvas_size(requested: f32, texels: (u32, u32)) -> (u32, u32) {
 pub(crate) enum Pic {
     Overview,
     Tile(usize),
+    /// A plain square over a place the game's own map covers (`crate::map::hidden`), on top of the rest.
+    Cover,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -118,28 +120,38 @@ pub(crate) struct PlanQuad {
 }
 
 /// The quads a picture is drawn from: the whole world is the overview alone; a view is the overview and, at the
-/// game's tile zoom, the tiles of the zones that meet the view (each as the game's own map places them).
+/// game's tile zoom, the tiles of the zones that meet the view (each as the game's own map places them). Over them all,
+/// a plain square on each area of `covers` (`crate::map::hidden::covers`) that the picture shows, as the game's map
+/// covers it, whatever the zoom: the picture of the floor under it would give the Night Chain 4 puzzle away.
 pub(crate) fn plan(
     tr: Transform,
     tile_scale: f32,
     tiles: &[(usize, [f32; 4])],
+    covers: &[[f32; 4]],
 ) -> Vec<PlanQuad> {
     let at = |r: [f32; 4]| {
         let (a, b) = (tr.project(r[0], r[1]), tr.project(r[2], r[3]));
         [a.0, a.1, b.0, b.1]
     };
     let mut out = vec![PlanQuad { pic: Pic::Overview, dst: at(tr.extent) }];
-    let Some(v) = tr.view else { return out };
-    if v.scale > tile_scale {
-        return out;
-    }
     let (w, h) = (tr.size.0 as f32, tr.size.1 as f32);
-    for &(zone, rect) in tiles {
+    if let Some(v) = tr.view
+        && v.scale <= tile_scale
+    {
+        for &(zone, rect) in tiles {
+            let d = at(rect);
+            if d[2] < 0.0 || d[0] > w || d[3] < 0.0 || d[1] > h {
+                continue;
+            }
+            out.push(PlanQuad { pic: Pic::Tile(zone), dst: d });
+        }
+    }
+    for &rect in covers {
         let d = at(rect);
         if d[2] < 0.0 || d[0] > w || d[3] < 0.0 || d[1] > h {
             continue;
         }
-        out.push(PlanQuad { pic: Pic::Tile(zone), dst: d });
+        out.push(PlanQuad { pic: Pic::Cover, dst: d });
     }
     out
 }
@@ -260,7 +272,7 @@ pub(crate) fn canvas_of_first() -> Option<(wgpu::Texture, (u32, u32), u64)> {
 }
 
 const SHADER: &str = r#"
-struct Q { rect: vec4<f32> };
+struct Q { rect: vec4<f32>, color: vec4<f32> };
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
 @group(0) @binding(2) var<uniform> q: Q;
@@ -276,7 +288,9 @@ struct Out { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
     return o;
 }
 @fragment fn fs_main(in: Out) -> @location(0) vec4<f32> {
-    return textureSample(src, samp, in.uv);
+    let t = textureSample(src, samp, in.uv);
+    // a cover (alpha above 0) is its colour alone; a picture's quad has none
+    return select(t, q.color, q.color.a > 0.0);
 }
 "#;
 
@@ -394,7 +408,8 @@ pub(crate) fn draw(map: &crate::map::Map, device: &wgpu::Device, enc: &mut wgpu:
             l.transform.set(Some(tr));
             l.world.set(src.world);
             l.progress.set(src.progress);
-            let quads = plan(tr, src.tile_scale, &tile_rects);
+            let covers: Vec<[f32; 4]> = crate::map::hidden::covers(src.world, src.extent).collect();
+            let quads = plan(tr, src.tile_scale, &tile_rects, &covers);
             let key = Key {
                 view,
                 progress: src.progress,
@@ -435,7 +450,8 @@ pub(crate) fn draw(map: &crate::map::Map, device: &wgpu::Device, enc: &mut wgpu:
             let mut groups = Vec::with_capacity(quads.len());
             for q in &quads {
                 let tex = match q.pic {
-                    Pic::Overview => src.texture,
+                    // a cover reads no picture: any texture will do under its colour
+                    Pic::Overview | Pic::Cover => src.texture,
                     Pic::Tile(z) => match src.tiles.iter().find(|t| t.zone == z) {
                         Some(t) => t.texture,
                         None => continue,
@@ -443,8 +459,9 @@ pub(crate) fn draw(map: &crate::map::Map, device: &wgpu::Device, enc: &mut wgpu:
                 };
                 let (w, h) = (size.0 as f32, size.1 as f32);
                 let ndc = [q.dst[0] / w * 2.0 - 1.0, 1.0 - q.dst[1] / h * 2.0, q.dst[2] / w * 2.0 - 1.0, 1.0 - q.dst[3] / h * 2.0];
-                let mut bytes = [0u8; 16];
-                for (k, v) in ndc.iter().enumerate() {
+                let color = if q.pic == Pic::Cover { crate::map::hidden::COVER } else { [0.0; 4] };
+                let mut bytes = [0u8; 32];
+                for (k, v) in ndc.iter().chain(color.iter()).enumerate() {
                     bytes[k * 4..k * 4 + 4].copy_from_slice(&v.to_ne_bytes());
                 }
                 let buffer = device.buffer_init(&wgpu::util::BufferInitDescriptor {
