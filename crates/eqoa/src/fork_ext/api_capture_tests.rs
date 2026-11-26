@@ -136,7 +136,8 @@ fn round7c_play_records_match_declared_fields() {
             fields('hud.Frame', eqoa.hud.frame())
             local layout = eqoa.hud.layout()
             -- the other pieces: each only while the game draws it
-            fields('hud.Layout', layout, 'quests meter effects chat chat1 chat2 chat3 settings breath quick_menus spell_bars utility_bars equipment_bar target_info raid_prompts stats focus')
+            fields('hud.Layout', layout)
+            fields('hud.LayoutPieces', layout.pieces, 'quest_tracker dps_meter effects chat chat1 chat2 chat3 settings breath quick_menus spell_bars utility_bars equipment_bar target_info raid_prompts stat_window focus')
             fields('hud.PlayerLayout', layout.player)
             fields('hud.TargetLayout', layout.target)
             fields('hud.GroupMemberLayout', layout.group_members[1])

@@ -30,17 +30,21 @@ impl Default for HudState {
 }
 
 /// What the layout record is worked out from besides the five stock pieces' moves and sizes: HUD Scale (percent), the
-/// interface, Move HUD, and the other pieces' rectangles as last drawn.
-type Extras = (u8, bool, bool, Vec<(u8, [f32; 4])>);
+/// interface, Move HUD, the other pieces' rectangles as last drawn, the Utility Bar Layout (which side the utility bars
+/// are kept at) and the size of the window they were drawn in.
+type Extras = (u8, bool, bool, Vec<(u8, [f32; 4])>, crate::hudmenu::UtilityLayout, (u32, u32));
 type LayoutKey = ((u32, u32), HudState, [[f32; 2]; 5], [f32; 5], Extras);
 
-/// The pieces `eqoa.hud.layout()` gives a rectangle for beyond the five it always lists, by the name `Piece` has
-/// (snake_case). Each is there only while the game draws it.
+/// The pieces `eqoa.hud.layout()` gives a rectangle for beyond the five it always lists, under `pieces`, by the name
+/// `eqoa.hud.hide` has for the same thing (`quest_tracker`, `dps_meter`, `stat_window`, `effects`, `chat`, `breath`,
+/// `spell_bars`, `utility_bars`); a piece `hide` has no element for has `Piece`'s own name in snake_case (`chat1`,
+/// `chat2`, `chat3`, `settings`, `quick_menus`, `equipment_bar`, `target_info`, `raid_prompts`, `focus`). Each is there
+/// only while the game draws it; a future piece is a new key.
 const EXTRA_PIECES: [(crate::hudlayout::Piece, &str); 17] = {
     use crate::hudlayout::Piece::*;
     [
-        (Quests, "quests"),
-        (Meter, "meter"),
+        (Quests, "quest_tracker"),
+        (Meter, "dps_meter"),
         (Effects, "effects"),
         (Chat, "chat"),
         (Chat1, "chat1"),
@@ -54,7 +58,7 @@ const EXTRA_PIECES: [(crate::hudlayout::Piece, &str); 17] = {
         (EquipmentBar, "equipment_bar"),
         (TargetInfo, "target_info"),
         (RaidPrompts, "raid_prompts"),
-        (Stats, "stats"),
+        (Stats, "stat_window"),
         (Focus, "focus"),
     ]
 };
@@ -219,7 +223,17 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
             r.iter().all(|v| v.is_finite()).then_some((k as u8, r))
         })
         .collect();
-    let key = (window_size, state, shifts, sizes, (hud_scale_percent, pc_mode, unlocked, drawn));
+    // The other pieces were drawn in the game's window, so their rectangles are measured with that window's side and
+    // top (`drawn_in`), whatever size is asked for: asked for another size they are projected into it, not laid out
+    // again (the five above are worked out for the size asked).
+    let drawn_in = get_window_size();
+    let key = (
+        window_size,
+        state,
+        shifts,
+        sizes,
+        (hud_scale_percent, pc_mode, unlocked, drawn, crate::settings::utility_layout(), drawn_in),
+    );
     if let Some(value) = LAYOUT_CACHE.with(|c| {
         c.borrow()
             .as_ref()
@@ -303,8 +317,10 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
             "panel": to_rect(crate::hudlayout::Piece::Pet, 20.0, state.pet_y as f32, 174.0, state.pet_h as f32, "left", "top"),
         },
     });
-    // The other pieces, as the game last drew them (moved and scaled already). `frame_*` are in the piece's own
-    // drawing coordinates, as the five above give theirs; `x`..`height` are window pixels.
+    // The other pieces, as the game last drew them (moved and scaled already), under `pieces`. `frame_*` are in the
+    // piece's own drawing coordinates, as the five above give theirs; `x`..`height` are window pixels.
+    let mut pieces = serde_json::Map::new();
+    let drawn_beyond = beyond_of(drawn_in);
     for &(k, r) in &key.4.3 {
         let (piece, name) = EXTRA_PIECES[k as usize];
         let (own_h, own_v) = piece.own();
@@ -313,12 +329,13 @@ pub fn hud_layout_json(window_size: (u32, u32)) -> std::rc::Rc<Json> {
             crate::hudlayout::Edge::Middle => 0.0,
             crate::hudlayout::Edge::End => span,
         };
-        let (fx, fy) = (r[0] - off(own_h, beyond.side), r[1] - off(own_v, beyond.top));
+        let (fx, fy) = (r[0] - off(own_h, drawn_beyond.side), r[1] - off(own_v, drawn_beyond.top));
         let (w, h) = (r[2] - r[0], r[3] - r[1]);
         let (anc, vert) = anchor_words(piece);
         let out = transform_rect([fx, fy, w, h], anc, vert, m);
-        result[name] = json!({"frame_x": fx, "frame_y": fy, "frame_width": w, "frame_height": h, "x": out[0], "y": out[1], "width": out[2], "height": out[3]});
+        pieces.insert(name.to_string(), json!({"frame_x": fx, "frame_y": fy, "frame_width": w, "frame_height": h, "x": out[0], "y": out[1], "width": out[2], "height": out[3]}));
     }
+    result["pieces"] = Json::Object(pieces);
     let result = std::rc::Rc::new(result);
     LAYOUT_CACHE.with(|c| *c.borrow_mut() = Some((key, result.clone())));
     result
