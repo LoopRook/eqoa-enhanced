@@ -180,14 +180,14 @@ def sell_scene(suite):
     return ss.Scene(
         "5a", "Bag Viewer: Ctrl+click three items, group Sell at a merchant",
         mods=("eqoa_bag_viewer",), mod_keys_file=BAG_KEY, fresh_db=True,
-        env={"EQOA_MOD_KEYS": "b@10000", "EQOA_MOUSE": f"{SELECT_3};click {x} {y}@15000;click 541 145@16500"},
-        control_env={"EQOA_MOUSE": f"{SELECT_3};click {x} {y}@15000;click 541 175@16500"},   # answers "No, leave them"
+        env={"EQOA_MOD_KEYS": "b@10000;right@16500;enter@17200", "EQOA_MOUSE": f"{SELECT_3};click {x} {y}@15000"},   # the client's own question: Right to Yes, Enter
+        control_env={"EQOA_MOD_KEYS": "b@10000;enter@17200"},   # Enter on the default No: nothing may be sold
         quit_after=24,
-        shots="12500=1-three-selected.png,15800=2-confirm.png,18500=3-after.png",
+        shots="12500=1-three-selected.png,16000=2-confirm.png,19500=3-after.png",
         expect=[
             ("the merchant's reach was used (a hidden merchant session opened for the mod)", r"takeover: mod talk -> npc 0x[0-9a-f]+, .*"),
             ("the group sale ran and said so", addon_line("eqoa_bag_viewer", r"bag multi-select: Sold 3 of 3")),
-            ("the merchant session was closed again", r"takeover: merchant hidden session closed \(the mod's action or batch finished\)"),
+            ("the merchant session was closed again", r"takeover: merchant hidden session closed \((the mod's action or batch finished|released by the mod)\)"),
         ],
         extra=lambda run_dir, log: [("the character kept 1 of its 4 items (3 sold)", suite.inventory()[0] == 1)],
         notes=("worn items are untouched: not tested, the seed character's four heirloom items cannot be worn",),
