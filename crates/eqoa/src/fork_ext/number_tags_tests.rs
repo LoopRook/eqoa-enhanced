@@ -161,6 +161,26 @@ fn combat_hit_says_who_made_it_or_says_it_cannot() {
     crate::settings::testing::reset(false);
 }
 
+/// Before the player's own id is known, no tag and an attacker that cannot be compared with it is `unknown`, not `id`
+/// (nothing is known about who made it). Negative control: without the `me.is_some()` guard it said `id`, false, false.
+#[test]
+fn combat_hit_with_the_players_id_not_known_is_unknown_not_id() {
+    let (mut p, _sent) = play_with_recorder();
+    let host = host_listening_to("combat.hit");
+    p.session.number_tags_offer = true;
+    p.damage_indication(&msg(0x200, -12, 0x100, None), 1);
+    CORE.with(|c| c.borrow_mut().view.player = serde_json::Value::Null);
+    native_events::dispatch(&host).unwrap();
+    host.execute(
+        r#"
+        assert(#hits == 1)
+        assert(hits[1].attribution == 'unknown' and hits[1].by_player == nil and hits[1].from_merc == nil, tostring(hits[1].attribution))
+        "#,
+    )
+    .unwrap();
+    crate::settings::testing::reset(false);
+}
+
 /// A server whose client patch carries the colour itself (S2 `damage_rgb`) sends three colour bytes, not a tag: the hit
 /// from the player's id is unknown, not the player's (the old code said `by_player` true for a pet's hit there).
 #[test]
