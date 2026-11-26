@@ -284,7 +284,7 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
 ## One home for the fork's options (owner, 2026-11-15)
 
 - **Status:** Backlog; fold into round 8's option-rows seam.
-- **Now:** since sync 2026-11-15 upstream's Options > Extended is five groups (Graphics, UI, Other, Touch Controls, Multi-boxing). The fork's Enhanced page (HUD toggles, Mods & Addons) sits in the UI group because a top-level entry would mean rewriting upstream's fixed `GROUPS` table.
+- **Now:** since sync 2026-11-15 upstream's Options > Extended is five groups (Graphics, UI, Other, Touch Controls, Multi-boxing). The fork's Enhanced page (HUD toggles, Mods & Addons) sat in the UI group; since sync 2026-11-26 upstream's UI menu is full (15 categories) and it is in the Other group (Options > Extended > Other > Enhanced), because a top-level entry would mean rewriting upstream's fixed `GROUPS` table.
 - **Owner's preference:** everything from the fork in one place.
 - **Plan:** the round 8 seam "option rows declared in one table; ids 1000+ reserved for other builds" also lets another build add its own group. Once upstream has it, Enhanced becomes its own top-level entry with no upstream line changed.
 
