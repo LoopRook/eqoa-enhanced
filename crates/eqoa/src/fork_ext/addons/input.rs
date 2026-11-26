@@ -427,7 +427,7 @@ pub(crate) fn route_mod_key_based(
 //
 // The player's paste key, pressed while a mod's text entry holds the keyboard, brings the clipboard's text to that one mod
 // as typed text, so a mod never asks for the clipboard. The recipient is fixed at the press (the VM whose text capture was
-// renewed last), the text is handed to that VM alone (`Core::emit_to`), and it is dropped if that mod no longer holds the
+// held it), the text is handed to that VM alone (`Core::emit_to`), and it is dropped if that mod no longer holds the
 // capture when the text comes, or the world's generation changed, or a newer press took over. One read at a time.
 
 /// The most characters a paste brings.
@@ -466,9 +466,14 @@ fn live_text_captures() -> Vec<(u64, Instant)> {
     })
 }
 
-/// The one mod a paste is for: the one whose text capture was renewed last.
+/// The one mod a paste is for: the mod that holds a text capture. With two mods holding one at the press nobody can say
+/// which the player meant, and a mod that renews its hold after the others each frame must not be able to take the paste:
+/// then there is no recipient and nothing is read.
 fn text_capture_holder() -> Option<u64> {
-    live_text_captures().into_iter().max_by_key(|(_, at)| *at).map(|(vm, _)| vm)
+    let mut holders = live_text_captures().into_iter().map(|(vm, _)| vm).collect::<Vec<_>>();
+    holders.sort_unstable();
+    holders.dedup();
+    if let [only] = holders[..] { Some(only) } else { None }
 }
 
 /// A paste asked for and not yet answered.

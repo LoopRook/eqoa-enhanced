@@ -1382,6 +1382,14 @@ fn a6_a_paste_needs_a_text_entry_one_read_at_a_time_and_not_altgr() {
     assert_eq!(clipboard().as_deref(), Some("private"), "no text entry: the clipboard is never read");
     // an entry is open: two presses before the answer is one read
     open_line(&host, &bridge, &mut context, vm, "", "say");
+    // with another mod holding a text capture too, nobody can say which was meant: nothing is read, nobody is given it
+    let other_vm = native_events::bus(&listener().lua).borrow().vm;
+    super::input::set_text_capture_for_test(other_vm, true);
+    super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("contested".into()));
+    ctrl_v(&host);
+    assert_eq!(clipboard().as_deref(), Some("contested"), "two mods hold a text capture: the clipboard is not read");
+    assert_eq!(state("text"), "");
+    super::input::set_text_capture_for_test(other_vm, false);
     super::input::TEST_CLIPBOARD.with_borrow_mut(|c| *c = Some("one".into()));
     let press = || {
         super::input::set_modifiers((true, false, false));
