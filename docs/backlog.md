@@ -428,3 +428,74 @@ A font restored after going missing is retried after a face or size change or af
   send stat deltas with the buff (a later additive `Buff` field).
 - **Cast bars:** a player-style unit-frame set (your own cast bar, your target's cast bar, target health, etc.), as in modern MMOs. The API capability exists (A3/A4); this is a mod, not an API change.
 - **Target Frame demo:** its menu shows "Invite to group" for every target (fine for a demo; a real mod should offer only what applies).
+
+## After the round 8 offer: API additions left from the gap check (2026-11-26)
+
+- **Status:** Deferred by the owner (2026-11-26): the offer goes first, because one consistent API matters more than
+  coverage. All of these are additive to `eqoa/1`. Source: the gap check of 2026-11-26 (eight items; three were built
+  in batch 8) and the reviews of batch 8.
+- **Meters:** a read-only `eqoa.combat.dps_meter()`, and the server-fed group meter.
+- **Effects on others:** a target's or creature's debuffs, and the effects on each group member.
+- **Focus:** `eqoa.focus.get()` and a `focus` element for `eqoa.hud.hide`.
+- **Inspect data:** on auction lots and on a mercenary's gear and spells; stats on recipes; `actions.craft_create(recipe)`.
+- **Abilities and bars:** the autocast state of an ability; the details of a weapon-set bar slot.
+- **ImGui names:** `ImGuiCol` and four other flag families are used by mods but are not in the documented surface.
+- **One way to name a pack item:** four exist today.
+- **Recorded creature locations as a shared read**, so the World Map's search box can list what Map Search has
+  recorded (today it finds live creatures and group members only).
+- **A cross-mod "is that window open" read:** Bags cannot come back by itself when the Auction window closes.
+- **Stat figures without the player's own Stat Window setting:** `player.stats().figures` arrive while that setting is
+  on or while a mod hides the Stat Window; anything wider needs an upstream line.
+- **Move, look and button presses** wait on upstream.
+- **A "send" choice in the crash offer:** since batch 8 no crash report is sent to a game server at all; offering it
+  with an explicit yes per report is a separate, owner-approved piece of work.
+
+## Mod work approved or asked for, not built (2026-11-26)
+
+- **Bag Viewer: "Open merchants and bankers in Bag Viewer"** (spec approved by the owner 2026-11-25). One option, off
+  by default. On: talking to a merchant opens Bag Viewer on a Merchant tab (wares and prices left, bags right; a click
+  buys one, stackables ask how many with the total, what you cannot afford is greyed; right-click or Sell (N) sells
+  with the price shown and the API's sell question; Esc or walking away closes); talking to a banker opens the Bank
+  tab (a click moves an item across, stacks ask how many, a tunar row). The Bank tab stays readable anywhere; the
+  Merchant tab exists only while a merchant is open. Option off, or Bag Viewer off: the game's windows as today.
+- **Quest turn-in that speeds through every step** and stops only at a real choice (later: the player picks a path and
+  it follows). Needs a five-line "what you will see" for the owner first: today's match rule fits almost no real quest,
+  and a stale Turn-in Helper beside Dialogs fights it for the same window.
+- **A quest guide for this server; the World Map highlighting creatures a quest needs; an XP-camp flag on the World Map.**
+- **Auto-repair's chat line.**
+- **A plain-words message when two mods want the same window** (today: "response_dialog window is already taken over
+  by eqoa_dialogs" in the log).
+- **Mods that drift at a HUD Scale other than 100%:** checked for Mana Bars, Target of Target and the Target Frame
+  demo in batch 8; any other mod drawing beside a game HUD piece should follow `hud.layout()` the same way.
+- **A once-only notice that Mods & Addons moved from F10 to Shift+F10** (today a log line only).
+
+## Mod project (later; the bundled mods are proofs of the API, owner 2026-11-25)
+
+- One shared look for all mods (see "Match our UI to the EQOA Parser style").
+- Bag Viewer: move the switches at the bottom of the window into a settings pane.
+- Player, group and compass frames; a quest tracker; ability bars; controller support in the showcase mods.
+- Name Plates: line of sight.
+- An in-game meter mod that matches the owner's external parser (LoopRook/EQOA-Parser). The API already supplies most
+  single-client figures; it needs the meter reads listed above.
+- A sharper World Map picture (detail tiles are 3.9 units per texel).
+- 48 of the 132 `eqoa.actions` have no bundled mod using them (all 17 mercenary, fishing and dye actions; four raid
+  and master-loot actions): each wants at least a small example before it is called proven.
+
+## Open technical questions after batch 8 (2026-11-26)
+
+- **Hit tags from the owner's server:** the pet and mercenary tag-byte reading behind `combat.hit`'s `by_player`,
+  `from_merc` and `attribution` has not been checked against a capture from that server. The owner's test with a
+  mercenary out is the practical check.
+- **Local telemetry for the external parser** (loopback only): heal and damage signs are inverted in
+  `fork_ext/play.rs` `snapshot()` and its own test asserts the inversion. The owner says the parser is not needed.
+- **Three render GPU pixel tests** (`ao.rs` twice, `particles16.rs`) fail on the lead's graphics card and are untouched
+  by the fork: check them on plain upstream before calling any local run clean (see "Upstream AO tests fail on GPUs").
+- **Upstream's updater** gives up after 120 seconds and deletes the partial download; inside a VPN the download can be
+  too slow to finish. Resuming instead of deleting is upstream's code: a candidate for the offer or a later PR.
+- **"Mods stopped responding" once on 2026-11-25**, cured by logging in again; cause unknown; nothing in the log.
+- **A hidden HUD piece can show for a moment** before the first health update, because a mod's hides publish once the
+  HUD is ready.
+- **Frame-rate history:** the fixed-spot scene read 61.1 fps (batch 6), 50.9 (batch 7) and 68.0 (batch 8) in single
+  runs on a busy PC. Repeat on an idle PC before quoting a number.
+- **Controls not run red in batch 8:** the crash-report consent tests, most of the review-fix tests and the mod pass
+  (in-test mutations only); there is no end-to-end test of Delete through the crash offer's dialog.
