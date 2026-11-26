@@ -176,20 +176,27 @@ local function entity_name(id)
 end
 
 -- `by_player` and `from_merc` are the core's answer to who made the figure: a server that tags its numbers tells a pet's or
--- a mercenary's hit with the player as the attacker, so `outgoing` alone would make them yours. A core without the two
--- fields (nil) is read as before: `outgoing` is you.
+-- a mercenary's hit with the player as the attacker, so `outgoing` alone would make them yours. Three states: `by_player`
+-- true (yours: "You"), false (a pet's, a mercenary's or another's: named; a pet-tagged hit is "Your pet" only while you have one), nil (`attribution == "unknown"`: the server sends
+-- no tag, so a hit credited to the player may be the player's, its pet's or its mercenary's; "Your side", never "You").
 local function on_hit(d)
     if not d or not (d.outgoing or d.incoming or d.from_pet or d.to_pet or d.from_merc) then return end
     local heal = d.kind == "heal"
-    local mine = d.outgoing and d.by_player ~= false
+    local mine = d.outgoing and d.by_player == true
+    local unknown = d.outgoing and d.by_player == nil and d.from_merc == nil
     local who
     if mine then
         who = "You"
     elseif d.from_merc then
         local e = not d.outgoing and eqoa.entities.find(d.attacker_id)
         who = e and e.name or "Your mercenary"
+    elseif unknown then
+        who = "Your side"
     elseif d.outgoing then
-        who = "Your pet"
+        -- the tag's pet bit (a pet of the player's side made it): the player's own pet only while the player has one. A
+        -- mercenary has pets of its own, tagged the same way, so with none of yours out the line says "Your side's pet".
+        local p = eqoa.player.get()
+        who = (p and p.pet_id ~= nil) and "Your pet" or "Your side's pet"
     else
         who = entity_name(d.attacker_id)
     end

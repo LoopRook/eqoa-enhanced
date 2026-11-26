@@ -419,7 +419,8 @@ fn hit(attacker: u32, defender: u32, amount: u32) {
     super::native_core::emit(
         "combat.hit",
         json!({"attacker_id": attacker, "defender_id": defender, "amount": amount, "kind": "damage", "color": null,
-            "outgoing": attacker == 256, "incoming": defender == 256, "from_pet": false, "to_pet": false}),
+            "outgoing": attacker == 256, "incoming": defender == 256, "from_pet": false, "to_pet": false,
+            "by_player": attacker == 256, "from_merc": false, "attribution": "tag"}),
     );
 }
 
@@ -498,6 +499,21 @@ fn nameplates_a_hit_on_you_is_red_yours_is_white_and_a_big_hit_is_bigger() {
         height_of(&frame(&host, &bridge, &mut context))
     };
     assert!(big_h > usual_h, "the bigger hit's number stands taller ({big_h} vs {usual_h})");
+    // control (2026-11-26): a hit the client cannot attribute (a server that sends no tag: by_player nil) is not sampled,
+    // so even a big one is no bigger than a usual one; the old mod (`by_player ~= false`) counted it
+    let unknown_h = {
+        let (host, bridge, mut context) = numbers_only();
+        for _ in 0..5 {
+            hit(256, 7001, 10);
+        }
+        super::native_core::emit(
+            "combat.hit",
+            json!({"attacker_id": 256, "defender_id": 7001, "amount": 100, "kind": "damage", "color": null, "outgoing": true,
+                "incoming": false, "from_pet": false, "to_pet": false, "by_player": null, "from_merc": null, "attribution": "unknown"}),
+        );
+        height_of(&frame(&host, &bridge, &mut context))
+    };
+    assert!(unknown_h <= usual_h, "an unknown hit is not drawn bigger ({unknown_h} vs {usual_h})");
 }
 
 #[test]

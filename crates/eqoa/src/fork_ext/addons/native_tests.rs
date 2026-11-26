@@ -147,6 +147,8 @@ function fields(name, record, optional)
 end
 -- Fields an event's data may lack in every delivery of the fixtures, each with the reason it may be nil.
 EVENT_OPTIONAL = {
+    -- by_player/from_merc: nil when the server sends no tag and the attacker is the player's id (attribution 'unknown'); hit_kind: nil without a tag
+    ['combat.hit'] = 'by_player from_merc hit_kind',
     -- code/reason: only a refusal or failure; detail: only an action that reports what it did
     ['action.result'] = 'code reason detail',
     -- a running batch has no outcome yet: no ok, code, reason, completed_tick or failed_step

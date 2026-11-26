@@ -1030,12 +1030,12 @@ fn a6_chat_combat_tab_shows_the_hits_the_game_tells_the_client_of() {
     press_tab(&mut context, "tab:combat");
     assert!(lines(&host).is_empty(), "control: nothing before a hit");
     // the player hits the gnoll, the gnoll hits back, the pet hits, a stranger hits another stranger, a heal
-    native_core::observe_hit(256, 8193, -12, None);
+    native_core::observe_hit_tagged(256, 8193, -12, None, Some((false, false)));
     native_core::observe_text("You have slain a gnoll.", [1.0, 0.55, 0.15, 1.0]);
     native_core::observe_hit(8193, 256, -7, None);
     native_core::observe_hit(9000, 8193, -4, None);
     native_core::observe_hit(5555, 6666, -99, None);
-    native_core::observe_hit(256, 256, 5, None);
+    native_core::observe_hit_tagged(256, 256, 5, None, Some((false, false)));
     native_core::flush_deferred();
     tick_n(&host, &bridge, &mut context, 2);
     assert_eq!(
@@ -1079,7 +1079,7 @@ fn a6_chat_combat_tab_does_not_write_a_mercs_or_pets_hit_as_yours() {
     tick_n(&host, &bridge, &mut context, 2);
     // the player's own hit, the merc's hit and heal (the server's attacker is the player, the tag says merc), the pet's hit
     // by the same road, the merc told by its own id, another member's hit (not shown)
-    native_core::observe_hit_tagged(256, 8193, -12, None, None);
+    native_core::observe_hit_tagged(256, 8193, -12, None, Some((false, false)));
     native_core::observe_hit_tagged(256, 8193, -30, None, Some((false, true)));
     native_core::observe_hit_tagged(256, 256, 40, None, Some((false, true)));
     native_core::observe_hit_tagged(256, 8193, -9, None, Some((true, false)));
@@ -1098,6 +1098,92 @@ fn a6_chat_combat_tab_does_not_write_a_mercs_or_pets_hit_as_yours() {
             "Quinor hits Gnoll for 20.",
         ],
         "only the player's own hit is 'You'; a stranger's hit is not there"
+    );
+}
+
+/// 2026-11-26: a server that sends no tag (or none agreed yet) cannot tell the player's own hit from its pet's or
+/// mercenary's, all credited to the player's id. `by_player` is then nil and the Combat tab does not write "You":
+/// "Your side hits Gnoll for 12." Negative controls: the known own hit (tag read) is still "You", a stranger's hit is
+/// still named, and against the old mod (`by_player ~= false`) the unknown lines read "You hit ..." (the git stash of
+/// `bundled-mods/eqoa_chat/main.lua` run fails on the first line).
+#[test]
+fn a6_chat_combat_tab_does_not_say_you_when_it_cannot_tell() {
+    let (host, bridge, mut context, _vm) = loaded();
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.player = json!({"id": 256, "name": "Me", "level": 20, "pet_id": 9000});
+        c.view.entities = vec![
+            json!({"ref": {"$ref": "entity", "key": "8193", "generation": 0, "incarnation": 1}, "id": 8193, "name": "Gnoll", "level": 22, "kind": "npc", "is_creature": true,
+                   "position": {"x": 1.0, "y": 0.0, "z": 1.0}, "actor_position": {"x": 1.0, "y": 0.0, "z": 1.0}}),
+        ];
+    });
+    host.execute("chat_probe.state.w = 640").unwrap();
+    tick_n(&host, &bridge, &mut context, 3);
+    let (x, y): (f64, f64) = host.lua.load("local h = chat_probe.hit('tab:combat'); return h.x + h.w / 2, h.y + h.h / 2").eval().unwrap();
+    super::pointer_api::position([x as f32, y as f32], true, (1024, 768));
+    CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": x, "y": y, "inside_window": true, "button": "left"})));
+    tick_n(&host, &bridge, &mut context, 2);
+    native_core::observe_hit(256, 8193, -12, None); // no tag: unknown
+    native_core::observe_hit(256, 256, 5, None); // no tag: unknown heal on the player
+    native_core::observe_hit_tagged(256, 8193, -30, None, Some((false, false))); // the tag says the player's own
+    native_core::observe_hit(8193, 256, -7, None); // the gnoll's hit: named by its id
+    native_core::flush_deferred();
+    tick_n(&host, &bridge, &mut context, 2);
+    let lines: Vec<String> = host.lua.load("return chat_probe.lines()").eval().unwrap();
+    assert_eq!(
+        lines,
+        vec![
+            "Your side hits Gnoll for 12.",
+            "Your side heals you for 5.",
+            "You hit Gnoll for 30.",
+            "Gnoll hits you for 7.",
+        ],
+        "unknown is never 'You'; the tagged own hit and the others are as before"
+    );
+}
+
+/// 2026-11-26 owner report (eqoaclassic, a mercenary and no pet of his own): the Combat tab wrote "Your pet hits" for his
+/// mercenary's pets, and wrote the heals on those pets as his. A pet-tagged hit is "Your pet" only while the player has
+/// a pet; with none out it is "Your side's pet" (a mercenary's pets are tagged the same way). A tag with both the pet and
+/// the merc bits reads as the mercenary's; a heal the server sends without a tag is "Your side". Negative control: the
+/// old mod writes "Your pet hits Gnoll for 9." for the first line (git stash of `bundled-mods/eqoa_chat/main.lua`).
+#[test]
+fn a6_chat_combat_tab_says_your_pet_only_while_the_player_has_one() {
+    let (host, bridge, mut context, _vm) = loaded();
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.player = json!({"id": 256, "name": "Me", "level": 20, "pet_id": null});
+        c.view.entities = vec![
+            json!({"ref": {"$ref": "entity", "key": "8193", "generation": 0, "incarnation": 1}, "id": 8193, "name": "Gnoll", "level": 22, "kind": "npc", "is_creature": true,
+                   "position": {"x": 1.0, "y": 0.0, "z": 1.0}, "actor_position": {"x": 1.0, "y": 0.0, "z": 1.0}}),
+            json!({"ref": {"$ref": "entity", "key": "7001", "generation": 0, "incarnation": 1}, "id": 7001, "name": "Wolf", "level": 20, "kind": "npc", "is_creature": true,
+                   "position": {"x": 1.0, "y": 0.0, "z": 1.0}, "actor_position": {"x": 1.0, "y": 0.0, "z": 1.0}}),
+        ];
+    });
+    host.execute("chat_probe.state.w = 640").unwrap();
+    tick_n(&host, &bridge, &mut context, 3);
+    let (x, y): (f64, f64) = host.lua.load("local h = chat_probe.hit('tab:combat'); return h.x + h.w / 2, h.y + h.h / 2").eval().unwrap();
+    super::pointer_api::position([x as f32, y as f32], true, (1024, 768));
+    CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": x, "y": y, "inside_window": true, "button": "left"})));
+    tick_n(&host, &bridge, &mut context, 2);
+    native_core::observe_hit_tagged(256, 8193, -9, None, Some((true, false))); // pet bit, no pet of the player's out
+    native_core::observe_hit_tagged(256, 8193, -11, None, Some((true, true))); // pet and merc bits: the mercenary's
+    native_core::observe_hit(256, 7001, 20, None); // a heal on the mercenary's pet, sent with no tag
+    native_core::flush_deferred();
+    tick_n(&host, &bridge, &mut context, 2);
+    CORE.with(|c| c.borrow_mut().view.player = json!({"id": 256, "name": "Me", "level": 20, "pet_id": 9000}));
+    native_core::observe_hit_tagged(256, 8193, -13, None, Some((true, false))); // the same bit with a pet of the player's out
+    native_core::flush_deferred();
+    tick_n(&host, &bridge, &mut context, 2);
+    let lines: Vec<String> = host.lua.load("return chat_probe.lines()").eval().unwrap();
+    assert_eq!(
+        lines,
+        vec![
+            "Your side's pet hits Gnoll for 9.",
+            "Your mercenary hits Gnoll for 11.",
+            "Your side heals Wolf for 20.",
+            "Your pet hits Gnoll for 13.",
+        ],
     );
 }
 

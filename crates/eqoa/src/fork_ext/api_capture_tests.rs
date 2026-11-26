@@ -253,7 +253,7 @@ fn round7c_world_events_come_from_play_changes() {
             assert(#missing == 0, 'Play did not emit: ' .. table.concat(missing, ', '))
             event_fields(seen, world_events)
             fields('events.Event', seen['combat.hit'])
-            fields('combat.CombatHit', seen['combat.hit'].data)
+            fields('combat.CombatHit', seen['combat.hit'].data, 'by_player from_merc hit_kind')
         "#,
         )
         .unwrap();

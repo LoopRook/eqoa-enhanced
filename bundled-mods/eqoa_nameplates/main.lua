@@ -325,7 +325,10 @@ eqoa.events.on("combat.hit", function(ev)
     local out, inc = h.outgoing, h.incoming
     if not (out or inc) then return end
     local big = false
-    if out and not inc and h.by_player ~= false then
+    -- only a hit the player made counts toward the average (`by_player` true). `by_player` false is a pet's or mercenary's;
+    -- nil is a server that sends no tag, where a hit credited to the player may be a pet's or mercenary's too, so it is not
+    -- sampled (no bigger numbers there, rather than an average the pet drags down).
+    if out and not inc and h.by_player == true then
         -- the game does not mark critical hits; one well above your usual hit is drawn bigger
         if samples >= 4 and h.amount >= avg * 1.6 then big = true end
         avg = samples == 0 and h.amount or (avg * 0.9 + h.amount * 0.1)
