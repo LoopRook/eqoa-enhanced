@@ -3028,7 +3028,7 @@ fn dispatch_broker_action(
             }
             let Some(ml) = crate::fork_ext::addons::raid_strips::master_loot_detail() else {
                 return DispatchOutcome::Refused {
-                    code: "permission_denied",
+                    code: "not_ready",
                     reason: "corpse is not under master loot rules".into(),
                 };
             };
@@ -3065,7 +3065,7 @@ fn dispatch_broker_action(
             }
             // the game's own window asks "Assign <item> to <name>?" first, so the client does (`a1_play`)
             let member = ml.members.iter().find(|(id, _)| *id == *member_id).map(|(_, n)| n.clone()).unwrap_or_default();
-            a1_play::loot_assign_question(it.inv_index, &it.item.name, *member_id, &member)
+            a1_play::loot_assign_question(play, it.inv_index, &it.item.name, *member_id, &member)
         }
         ActionKind::LootAbandon { item } => {
             if !loot_session_open(play) {
@@ -3076,7 +3076,7 @@ fn dispatch_broker_action(
             }
             if crate::fork_ext::addons::raid_strips::master_loot_detail().is_none() {
                 return DispatchOutcome::Refused {
-                    code: "permission_denied",
+                    code: "not_ready",
                     reason: "corpse is not under master loot rules".into(),
                 };
             }
@@ -3108,7 +3108,7 @@ fn dispatch_broker_action(
                 }
             }
             // the game's own window asks before abandoning, so the client does (`a1_play`)
-            a1_play::loot_abandon_question()
+            a1_play::loot_abandon_question(play)
         }
         ActionKind::Buy { ware, count } => {
             if !merchant_session_open(play) {

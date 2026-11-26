@@ -157,6 +157,11 @@ fn game_words(play: &Play, ask: confirm::SellAsk, name: &str) -> String {
     crate::livewords::word(words, id, 0).replacen("%S", name, 1).replacen("%s", name, 1)
 }
 
+/// The merchant and rate a sale is asked or started under.
+fn merchant_now(play: &Play) -> confirm::Merchant {
+    confirm::Merchant { id: play.npcw.shop.id, rate: play.npcw.shop.sell_rate }
+}
+
 /// `eqoa.actions.sell` after the broker's checks (a merchant open, nothing pending, the handle fresh, not worn, the
 /// count within the stack): where the game's window would ask, the question and not the sale. `None`: sell at once.
 pub(super) fn sell_question(play: &Play, inv_index: u32, count: i64) -> Option<DispatchOutcome> {
@@ -174,7 +179,7 @@ pub(super) fn sell_question(play: &Play, inv_index: u32, count: i64) -> Option<D
     }
     let total = i64::from(crate::merchant::sell_price(it, play.npcw.shop.sell_rate)).saturating_mul(count);
     let text = confirm::sell_text(&game_words(play, why, &it.item.name), why, &it.item.name, count, total);
-    let act = Act::Sell { inv_index, name: it.item.name.clone(), count };
+    let act = Act::Sell { inv_index, name: it.item.name.clone(), count, at: merchant_now(play), price: total };
     Some(ask(act, text, "merchant"))
 }
 
@@ -184,13 +189,14 @@ fn sell_many(play: &Play, items: &[ResolvedItemSpec]) -> DispatchOutcome {
     if !super::merchant_session_open(play) {
         return refuse("window_closed", "merchant window is not open");
     }
-    if play.npcw.shop.pending || super::PENDING_NPCW_TX.with(|p| p.borrow().is_some()) {
+    if play.npcw.shop.pending || super::PENDING_NPCW_TX.with(|p| p.borrow().is_some()) || confirm::sell_run_active() {
         return refuse("busy", "merchant transaction already pending");
     }
     let rate = play.npcw.shop.sell_rate;
     let mut acts = Vec::with_capacity(items.len());
     let mut asked: Vec<confirm::SellLine> = Vec::new();
     let mut plain = 0usize;
+    let mut plain_keys: Vec<u32> = Vec::new();
     let mut total = 0i64;
     for item in items {
         let idx = match item_index(play, item) {
@@ -206,7 +212,10 @@ fn sell_many(play: &Play, items: &[ResolvedItemSpec]) -> DispatchOutcome {
         total = total.saturating_add(price);
         match sell_ask(it) {
             Some(why) => asked.push((it.item.name.clone(), count, price, why)),
-            None => plain += 1,
+            None => {
+                plain += 1;
+                plain_keys.push(it.inv_index);
+            }
         }
         acts.push((it.inv_index, it.item.name.clone(), count));
     }
@@ -216,27 +225,31 @@ fn sell_many(play: &Play, items: &[ResolvedItemSpec]) -> DispatchOutcome {
             return refuse("not_ready", "no mod is asking");
         };
         let addon = crate::fork_ext::addons::action_broker::dispatch_addon().unwrap_or_default();
-        confirm::begin_quiet_run(vm, &addon, acts);
+        // the run ends with the merchant window it started under, as an asked one does
+        let session = window_sessions::get(vm, "merchant").map(|s| s.id);
+        confirm::begin_quiet_run(vm, &addon, session, merchant_now(play), acts);
         return DispatchOutcome::Completed { detail: Some(json!({"asked": false, "count": n, "total_price": total})) };
     }
-    ask(Act::SellMany { items: acts }, confirm::sell_many_text(n, total, &asked, plain), "merchant")
+    ask(Act::SellMany { items: acts, at: merchant_now(play), plain: plain_keys }, confirm::sell_many_text(n, total, &asked, plain), "merchant")
 }
 
 /// `loot_assign` after the broker's own checks: the game's own question for the assignment, never the assignment.
-pub(super) fn loot_assign_question(key: u32, item: &str, member_id: u32, member: &str) -> DispatchOutcome {
+pub(super) fn loot_assign_question(play: &Play, key: u32, item: &str, member_id: u32, member: &str) -> DispatchOutcome {
     if crate::fork_ext::addons::action_broker::dispatching_batch_step() {
         return refuse("not_ready", "the game asks before assigning loot, and a batch step cannot ask: use eqoa.actions.loot_assign itself");
     }
-    let act = Act::LootAssign { key, item: item.to_string(), member_id, member: member.to_string() };
+    let corpse = super::api_capture::items::current_loot_source_id(play);
+    let act = Act::LootAssign { key, item: item.to_string(), member_id, member: member.to_string(), corpse };
     ask(act, confirm::loot_assign_text(item, member), "loot")
 }
 
 /// `loot_abandon` after the broker's own checks.
-pub(super) fn loot_abandon_question() -> DispatchOutcome {
+pub(super) fn loot_abandon_question(play: &Play) -> DispatchOutcome {
     if crate::fork_ext::addons::action_broker::dispatching_batch_step() {
         return refuse("not_ready", "the game asks before abandoning a corpse's loot, and a batch step cannot ask: use eqoa.actions.loot_abandon itself");
     }
-    ask(Act::LootAbandon, confirm::loot_abandon_text(), "loot")
+    let corpse = super::api_capture::items::current_loot_source_id(play);
+    ask(Act::LootAbandon { corpse }, confirm::loot_abandon_text(), "loot")
 }
 
 /// `drop_quest` after the broker's own checks: the question, never the drop.
@@ -287,7 +300,10 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
         // a group destroy is carried out stack by stack (`step_runs`), never in one step
         Act::DestroyMany { .. } => Err("a group destroy runs stack by stack".into()),
         Act::SellMany { .. } => Err("a group sale runs stack by stack".into()),
-        Act::LootAssign { key, item, member_id, .. } => {
+        Act::LootAssign { key, item, member_id, corpse, .. } => {
+            if super::api_capture::items::current_loot_source_id(play) != *corpse {
+                return Err("the corpse window is another corpse's now".into());
+            }
             // still the master looter of this corpse, the item still on it, the member still eligible
             let Some(ml) = crate::fork_ext::addons::raid_strips::master_loot_detail() else {
                 return Err("master loot is no longer yours on this corpse".into());
@@ -307,7 +323,10 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
             play.session.send_raid_command(net::raid::Command::Assign { key: *key, id: *member_id });
             Ok(())
         }
-        Act::LootAbandon => {
+        Act::LootAbandon { corpse } => {
+            if super::api_capture::items::current_loot_source_id(play) != *corpse {
+                return Err("the corpse window is another corpse's now".into());
+            }
             if crate::fork_ext::addons::raid_strips::master_loot_detail().is_none() {
                 return Err("master loot is no longer yours on this corpse".into());
             }
@@ -317,9 +336,12 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
             play.session.send_raid_command(net::raid::Command::Abandon);
             Ok(())
         }
-        Act::Sell { inv_index, name, count } => {
+        Act::Sell { inv_index, name, count, at, price } => {
             if !super::merchant_session_open(play) {
                 return Err("the merchant window is closed".into());
+            }
+            if merchant_now(play) != *at {
+                return Err("the merchant or the price it pays changed since the question was asked".into());
             }
             if play.npcw.shop.pending || super::PENDING_NPCW_TX.with(|p| p.borrow().is_some()) {
                 return Err("the merchant has not answered the last request".into());
@@ -335,6 +357,9 @@ fn carry_out(play: &mut Play, p: &Pending) -> Result<(), String> {
             }
             if it.equip_slot != -1 {
                 return Err("the item is worn now".into());
+            }
+            if i64::from(crate::merchant::sell_price(it, play.npcw.shop.sell_rate)).saturating_mul(*count) != *price {
+                return Err("the price changed since the question was asked".into());
             }
             // the sale goes out where every merchant request does (`play.rs`, with the merchant window's own output)
             super::PENDING_NPCW_TX.with(|p| {
@@ -481,6 +506,10 @@ fn step_runs(play: &mut Play) {
 /// waiting for the merchant's answer to the one before, and ends with `confirm.closed` too.
 fn advance_run(play: &mut Play, run: &mut confirm::Run) -> bool {
     let selling = matches!(run.p.act, Act::SellMany { .. });
+    let (at, plain) = match &run.p.act {
+        Act::SellMany { at, plain, .. } => (Some(*at), plain.clone()),
+        _ => (None, Vec::new()),
+    };
     if play.is_dead() || !play.in_world_now() {
         confirm::report_run_done(run, "yes", Some("not in the world"));
         return false;
@@ -505,7 +534,9 @@ fn advance_run(play: &mut Play, run: &mut confirm::Run) -> bool {
             return false;
         };
         if selling {
-            if !super::merchant_session_open(play) {
+            // gone, or another merchant (or the same at another rate): the rest is not sold
+            let gone = !super::merchant_session_open(play) || at.is_some_and(|a| a != merchant_now(play));
+            if gone {
                 // the merchant is gone: this stack and every one after it are not sold
                 run.skipped.push(name);
                 let rest: Vec<String> = run.queue.drain(..).map(|(_, n, _)| n).collect();
@@ -516,7 +547,13 @@ fn advance_run(play: &mut Play, run: &mut confirm::Run) -> bool {
             let found = play.dump.inventory.items.iter().find(|it| it.inv_index == inv_index);
             match found {
                 // worn by its turn, or no longer what was asked about: skipped, never sold
-                Some(it) if it.item.name == name && count <= it.quantity.max(1) && it.equip_slot == -1 => {
+                // (a stack that needed no question then and needs one now was quick-slotted since: skipped too)
+                Some(it)
+                    if it.item.name == name
+                        && count <= it.quantity.max(1)
+                        && it.equip_slot == -1
+                        && !(plain.contains(&inv_index) && sell_ask(it).is_some()) =>
+                {
                     super::PENDING_NPCW_TX.with(|p| {
                         *p.borrow_mut() = Some(super::PendingNpcwTx::Sell { item_key: inv_index, count: count as i32 })
                     });

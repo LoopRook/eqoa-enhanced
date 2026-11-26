@@ -329,6 +329,12 @@ pub(crate) fn loot_source_named() -> Option<u32> {
     SOURCE.with(|s| s.borrow().as_ref().map(|(id, _)| *id))
 }
 
+/// Tests: name the corpse the open loot window belongs to.
+#[cfg(test)]
+pub(crate) fn set_source_for_test(source: Option<(u32, String)>) {
+    SOURCE.with(|s| *s.borrow_mut() = source);
+}
+
 pub(crate) fn current_loot_source_id(play: &Play) -> Option<u32> {
     if let Some((id, _)) = SOURCE.with(|s| s.borrow().clone()) {
         return Some(id);

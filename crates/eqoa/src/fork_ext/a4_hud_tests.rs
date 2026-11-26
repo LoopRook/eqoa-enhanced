@@ -1241,7 +1241,7 @@ fn a4_master_loot_read_actions_and_refusals() {
         .unwrap();
     assert_eq!(code_closed, "window_closed");
 
-    // Open corpse WITHOUT master loot -> loot_abandon & loot_assign refused with permission_denied.
+    // Open corpse WITHOUT master loot -> loot_abandon & loot_assign refused with not_ready (the game's own rule, section 1's table).
     let drop_item = sample_net_item(5000, "Boss Sword", 42);
     let payload = sample_corpse_payload(&[drop_item]);
     assert!(p.npcw_opcode(0x0018, &payload));
@@ -1289,7 +1289,7 @@ fn a4_master_loot_read_actions_and_refusals() {
         .unwrap();
     assert_eq!(
         (c_a.as_str(), c_b.as_str()),
-        ("permission_denied", "permission_denied")
+        ("not_ready", "not_ready")
     );
 
     // Enable master loot via real Event::MasterLoot(Some(...)).
@@ -1425,6 +1425,38 @@ fn a4_master_loot_read_actions_and_refusals() {
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].1, RaidCmd::Abandon.bytes());
     }
+
+    // 2026-11-26 (H1): a Yes is for the corpse the question was put under. Another corpse's window by then: nothing is
+    // sent (negative control: without the corpse check the Abandon / Assign goes to the other corpse)
+    for (what, assign) in [("abandon", false), ("assign", true)] {
+        for (changed, expect_sent) in [(true, 0usize), (false, 1usize)] {
+            p.session.record.as_mut().unwrap().clear();
+            api_capture::items::set_source_for_test(Some((111, "Corpse A".into())));
+            let call = if assign {
+                r#"local loot = assert(eqoa.loot.get()); return eqoa.actions.loot_assign(loot.items[1].ref, 20)"#
+            } else {
+                r#"return eqoa.actions.loot_abandon()"#
+            };
+            h.lua.load(format!("assert(({call}))")).exec().unwrap();
+            step_actions(&mut p);
+            assert!(crate::fork_ext::addons::confirm::current_for_test().is_some(), "{what}: the question is up");
+            if changed {
+                api_capture::items::set_source_for_test(Some((222, "Corpse B".into())));
+            }
+            {
+                use winit::keyboard::{Key, NamedKey};
+                assert!(crate::fork_ext::addons::confirm::key(&Key::Named(NamedKey::ArrowRight)));
+                assert!(crate::fork_ext::addons::confirm::key(&Key::Named(NamedKey::Enter)));
+            }
+            step_actions(&mut p);
+            assert_eq!(
+                p.session.record.as_ref().unwrap().len(),
+                expect_sent,
+                "{what}: corpse changed = {changed}"
+            );
+        }
+    }
+    api_capture::items::set_source_for_test(None);
 
     // Negative control 4: after corpse closes, saved_ref is stale (stale_handle).
     assert!(p.npcw_opcode(0x0016, &[]));
