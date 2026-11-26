@@ -500,3 +500,110 @@ fn hide_under_map_frames_windows_are_not_drawn_while_the_game_map_is_up() {
     assert_eq!(frames(&host, &bridge, &mut context, 2), shown, "map closed: the same windows again");
     assert!(host.drain_logs().unwrap().is_empty());
 }
+
+// ---- owner 2026-11-26: the Effects window as a strip of icons ----
+
+/// The game's short time under an icon: seconds under a minute, then minutes, then hours.
+fn short_time(seconds: f64) -> String {
+    if seconds < 60.0 {
+        format!("{}s", seconds.max(0.0).ceil() as i64)
+    } else if seconds < 3600.0 {
+        format!("{}m", (seconds / 60.0).floor() as i64)
+    } else {
+        format!("{}h", (seconds / 3600.0).floor() as i64)
+    }
+}
+
+/// `n` effects of the player's, alternately removable, with end times from seconds to hours.
+fn effects_fixture(n: usize) {
+    fixture();
+    native_a3::sync_buffs(true, 20, move || {
+        (0..n)
+            .map(|i| BuffLine {
+                whose: 0,
+                id: 100 + i as u32,
+                icon: 11 + i as u32,
+                removable: i % 2 == 0,
+                name: format!("Effect {i}"),
+                ends_tick: Some([450, 3_000, 9_000, 60_000, 400_000, 1_600_000][i % 6] + 30_000 * (i as u64 / 6)),
+                description: None,
+            })
+            .collect()
+    });
+}
+
+fn probe_cells(host: &Host) -> Vec<(String, String, f64, f64, f64, bool, bool, String)> {
+    let n: i64 = host.lua.load("return #frames_probe.cells").eval().unwrap();
+    (1..=n)
+        .map(|i| {
+            host.lua
+                .load(format!("local c = frames_probe.cells[{i}]; return c.name, c.time, c.x, c.y, c.w, c.icon, c.hovered, c.letters or ''"))
+                .eval()
+                .unwrap()
+        })
+        .collect()
+}
+
+#[test]
+fn owner1126_effects_window_draws_one_icon_per_effect_with_the_short_time_wrapped_at_the_width() {
+    effects_fixture(9);
+    let mut context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon()).unwrap();
+    frames(&host, &bridge, &mut context, 4);
+    let cells = probe_cells(&host);
+    assert_eq!(cells.len(), 9, "nine effects draw nine icons");
+    // each shows the time left in the short form, read from the same API record
+    for (i, c) in cells.iter().enumerate() {
+        let left: f64 = host.lua.load(format!("return eqoa.effects.buffs()[{}].time_left", i + 1)).eval().unwrap();
+        assert_eq!(c.1, short_time(left), "{}: {left} s", c.0);
+        assert_eq!(c.0, format!("Effect {i}"));
+    }
+    let times: Vec<&str> = cells.iter().map(|c| c.1.as_str()).collect();
+    assert!(times.iter().any(|t| t.ends_with('s')) && times.iter().any(|t| t.ends_with('m')) && times.iter().any(|t| t.ends_with('h')), "seconds, minutes and hours all appear: {times:?}");
+    // no icon art in this world: a framed square with the first letters, never blank
+    assert!(cells.iter().all(|c| !c.5 && c.7 == "Ef"), "{cells:?}");
+    // wrapped at the window's width: more than one row, none past the right edge
+    let (cols, right): (i64, f64) = host.lua.load("return frames_probe.cols, frames_probe.right").eval().unwrap();
+    let mut rows: Vec<i64> = cells.iter().map(|c| c.3.round() as i64).collect();
+    rows.dedup();
+    assert!(cols < 9 && rows.len() > 1, "9 icons wrap to {} rows at {cols} a row", rows.len());
+    assert!(cells.iter().all(|c| c.2 + c.4 <= right + 0.5), "no icon runs past the window's right edge ({right})");
+    // control: three effects fit one row (the wrap is the width's doing)
+    native_a3::sync_buffs(true, 21, || {
+        (0..3).map(|i| BuffLine { whose: 0, id: 1 + i, icon: 11, removable: false, name: format!("E{i}"), ends_tick: Some(900), description: None }).collect()
+    });
+    frames(&host, &bridge, &mut context, 3);
+    let few = probe_cells(&host);
+    let mut rows: Vec<i64> = few.iter().map(|c| c.3.round() as i64).collect();
+    rows.dedup();
+    assert_eq!((few.len(), rows.len()), (3, 1), "control: three icons share a row");
+    assert!(host.drain_logs().unwrap().is_empty());
+}
+
+#[test]
+fn owner1126_effects_icons_name_the_effect_on_hover_and_only_a_removable_one_comes_off_on_a_click() {
+    effects_fixture(4);
+    let mut context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon()).unwrap();
+    frames(&host, &bridge, &mut context, 4);
+    let centre = |host: &Host, i: usize| {
+        let c = &probe_cells(host)[i];
+        [(c.2 + c.4 / 2.0) as f32, (c.3 + c.4 / 2.0) as f32]
+    };
+    // the pointer on the second icon: it is the one hovered, a tip is up, and the tip is that effect's
+    let at = centre(&host, 1);
+    assert!(tip_at(&host, &bridge, &mut context, at), "a hover card on the icon");
+    let hovered: Vec<String> = probe_cells(&host).iter().filter(|c| c.6).map(|c| c.0.clone()).collect();
+    assert_eq!(hovered, vec!["Effect 1".to_string()], "the card names the icon under the pointer");
+    assert!(!tip_at(&host, &bridge, &mut context, [900.0, 700.0]), "the card goes with the pointer");
+    // a click on the non-removable one queues nothing (control); on the removable one it queues the take-off
+    click_at(&host, &bridge, &mut context, centre(&host, 1));
+    assert!(!action_broker::queued_kinds_for_test().contains(&"remove_effect"), "control: Effect 1 cannot be taken off");
+    click_at(&host, &bridge, &mut context, centre(&host, 0));
+    assert!(action_broker::queued_kinds_for_test().contains(&"remove_effect"), "Effect 0 is removable: the click takes it off");
+    assert!(host.drain_logs().unwrap().is_empty());
+}
