@@ -155,7 +155,7 @@ local function draw()
             text(px+13*k,yy,r.name,r.at and c.text or c.muted,pw-26*k);text(px+13*k,yy+13*k,r.detail,c.muted,pw-26*k)
             if r.at then hit(px+6*k,yy-2*k,pw-12*k,27*k,function() s.choose(r) end) end
         end
-        if #s.rows==0 then text(px+13*k,py+108*k,s.build and "Searching..." or s.tab==2 and "No group members" or (#s.catalog==0 and s.tab==1 and "NPC list unavailable: reinstall from the ZIP" or "No matching locations"),c.muted,pw-26*k) end
+        if #s.rows==0 then text(px+13*k,py+108*k,(s.build or s.dirty) and "Searching..." or s.tab==2 and "No group members" or (#s.catalog==0 and s.tab==1 and "NPC list unavailable: reinstall from the ZIP" or "No matching locations"),c.muted,pw-26*k) end
         local foot=py+ph-48*k
         fill(px+8*k,foot-7*k,pw-16*k,1,c.border)
         text(px+10*k,foot-2*k,(s.message and (not s.message_until or s.message_until>s.now) and s.message) or (#s.rows.." matches / Enter guides"),c.muted,pw-20*k)

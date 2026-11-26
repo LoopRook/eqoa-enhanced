@@ -860,6 +860,66 @@ fn round4b_journal_caps_total_and_import_and_export_truncated_view() {
     }
 }
 
+/// Owner 2026-11-26: creature results took about a second to appear because the whole catalogue was scanned again, a slice
+/// a frame, each time the panel opened or a creature came or went. The name index is now built once after a load (not per
+/// keystroke, not per opening) and a query is made only for the names it matches, so the first rows are there within a few
+/// frames of the last key. The control: loading data does rebuild the index (the counter moves), so the "built once" check can fail.
+#[test]
+fn owner1126_map_search_creature_results_come_within_a_few_frames_and_the_index_is_built_once() {
+    use crate::fork_ext::addons::input;
+    use winit::keyboard::{Key, NamedKey};
+    input::reset_input_state();
+    crate::settings::testing::reset(false);
+    let mut p = Play::bundled_ui_fixture();
+    let mut bat = creature(6000, "Quick test bat", 15, [200., 2., 300.]);
+    bat.p19 = 255;
+    p.entities.slots = vec![Some(bat)];
+    p.forge_snapshot(None);
+    let scratch = Scratch::new();
+    let (h, a) = search_host(&scratch);
+    h.run_addon(&a).unwrap();
+    // the game's own catalogue is read by a worker: wait for it, so nothing else moves the index count later
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline && !h.lua.load("local s=require('search');return #s.catalog>1000 and #s.jobs==0").eval::<bool>().unwrap() {
+        step(&h, 0.5);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    settle(&h);
+    let load = "local s=require('search'); local v={};for i=1,8000 do v['Fixture '..i]={world={0},pos={{i,0,i}}} end;s.load(v,'catalog')";
+    h.execute(load).unwrap();
+    settle(&h);
+    let count = |h: &Host| -> i64 { h.lua.load("return require('search').index_count").eval().unwrap() };
+    let ready = |h: &Host| -> bool { h.lua.load("local s=require('search');return not s.dirty and not s.build and #s.rows>0").eval().unwrap() };
+    let built = count(&h);
+    assert!(built >= 1, "the name index was built after the load");
+    assert!(h.lua.load("return #require('search').npc_cache >= 8000").eval::<bool>().unwrap(), "one entry per name");
+    key(&h, Key::Named(NamedKey::F2));
+    type_text(&h, "Fixture 77");
+    let mut frames = 0;
+    while !ready(&h) && frames < 30 {
+        step(&h, 0.5);
+        frames += 1;
+    }
+    assert!(ready(&h), "the results came");
+    assert!(frames <= 4, "the first rows are there {frames} frames after the last key (a scan of 8,000 names took 8 or more)");
+    assert_eq!(h.lua.load("return require('search').rows[1].name").eval::<String>().unwrap().starts_with("Fixture 77"), true);
+    // more letters, a backspace, a close and an opening: the index is not built again
+    type_text(&h, "1");
+    key(&h, Key::Named(NamedKey::Backspace));
+    settle(&h);
+    key(&h, Key::Named(NamedKey::F2));
+    key(&h, Key::Named(NamedKey::F2));
+    settle(&h);
+    assert_eq!(count(&h), built, "typing and opening the panel do not rebuild the index");
+    assert!(ready(&h), "and the list is there after the reopening");
+    // control: loading data does rebuild it (so the count above could have moved)
+    h.execute(load).unwrap();
+    settle(&h);
+    assert_eq!(count(&h), built + 1, "control: new data is indexed again, once");
+    native_events::clear(&h);
+    input::reset_input_state();
+}
+
 #[test]
 fn round4b_fix_moving_world_finishes_search_and_enter() {
     use crate::fork_ext::addons::{guides, input};
