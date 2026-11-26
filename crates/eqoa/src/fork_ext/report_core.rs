@@ -2305,7 +2305,7 @@ last event
         assert!(unclosed.unclosed, "the unclosed run is known as one");
         let panic_file = root.join("crash-p.txt");
         std::fs::write(&panic_file, "EQOA native client crash report
-version: dev-x (dev)
+version: local (local)
 
 --- crash ---
 thread 'main' panicked at crates/a.rs:1:2:
@@ -2314,8 +2314,8 @@ boom
         let panicked = stopped(&panic_file);
         assert!(!panicked.unclosed, "control: a panic's report is a crash");
         let now = std::time::SystemTime::now();
-        let (_, a) = crash_words(&[unclosed], "dev-x", now);
-        let (_, b) = crash_words(&[Stopped { unclosed: false, ..panicked }], "dev-x", now);
+        let (_, a) = crash_words(&[unclosed], "local", now);
+        let (_, b) = crash_words(&[Stopped { unclosed: false, ..panicked }], "local", now);
         assert!(a.starts_with("The game did not close normally then") && !a.contains("kept a crash report"), "{a}");
         assert!(b.starts_with("It kept a crash report then"), "{b}");
         let _ = std::fs::remove_dir_all(&root);
