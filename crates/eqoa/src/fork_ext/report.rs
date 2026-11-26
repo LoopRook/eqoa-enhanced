@@ -519,7 +519,7 @@ pub fn dialog_fine(kind: &Kind) -> Option<&'static str> {
             "The saved report zip includes any note and screenshot you choose (which may show character names), available logs, client state, and a manifest with the Enhanced version and enabled mods. Nothing is uploaded anywhere.",
         ),
         Kind::Crash(_) => Some(
-            "The saved report zip includes any note you enter, available crash logs, client state, and a manifest with the Enhanced version and enabled mods. Nothing is uploaded anywhere.",
+            "The saved report zip includes any note you enter, available crash logs, client state, and a manifest with the Enhanced version and enabled mods. Nothing is uploaded anywhere, and no crash report is sent to the game server you play on: a report leaves this PC only if you share the saved zip yourself. Delete removes every kept copy.",
         ),
     }
 }

@@ -25,6 +25,7 @@ pub mod report;
 #[cfg(not(target_arch = "wasm32"))]
 mod report_background;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod report_consent;
 pub mod report_crash_dir;
 pub mod report_label;
 #[cfg(target_arch = "wasm32")]

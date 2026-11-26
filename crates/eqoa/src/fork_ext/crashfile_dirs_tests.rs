@@ -186,3 +186,66 @@ fn a_failed_move_still_keeps_old_reports_from_the_server_and_retries() {
     assert_eq!(migrate_legacy(&root), 0, "and then it is done");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+
+/// The server offers to take crash reports (`send_pending`): with the
+/// player never asked, nothing is sent and the kept file stays, whatever is
+/// kept. The control: the same session does send a crash report when told to
+/// (`send_crash_report`, what `send_pending` used to do for each kept file),
+/// so the empty wire is the hold's doing, not the recorder's.
+/// (A unit test has no config directory, so what `send_pending` would read
+/// is checked through `pending_in` on a folder of its own.)
+#[test]
+fn a_server_offer_gets_no_crash_report_without_the_players_yes() {
+    struct Rec(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+    impl net::session::Datagrams for Rec {
+        fn send_to(&mut self, d: &[u8], _: [u8; 4], _: u16) {
+            self.0.borrow_mut().extend_from_slice(d);
+        }
+        fn recv_from(&mut self) -> Option<(Vec<u8>, [u8; 4], u16)> {
+            None
+        }
+    }
+    let wire = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut s = net::session::Session::connect_with(Box::new(Rec(wire.clone())), ([127, 0, 0, 1], 5000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+    s.flush();
+    wire.borrow_mut().clear();
+    let d = scratch("offer");
+    write_in(&d, "20261126-072340-1795677820", "EQOA client crash report\npanic: boom\n").unwrap();
+    assert_eq!(pending_in(&d).len(), 1, "control: a kept report waits");
+    assert_eq!(send_pending(&mut s, net::session::CRASH_REPORT_MOST), 0, "none sent");
+    s.flush();
+    assert!(wire.borrow().is_empty(), "nothing on the wire: {} bytes", wire.borrow().len());
+    assert_eq!(files_in(&d).len(), 1, "the file stays");
+    assert!(!crate::fork_ext::report_consent::server_send_allowed());
+    assert!(crate::fork_ext::report_consent::hold(1).is_some());
+    // upstream's copy is no longer written for a server
+    assert!(write("20261126-072340", "x").is_none() && !crate::fork_ext::report_consent::keep_for_server());
+    // control: the recorder does see a send
+    s.send_crash_report(1, "EQOA client crash report\npanic: boom\n", net::session::CRASH_REPORT_MOST);
+    s.flush();
+    assert!(has(&wire.borrow(), "panic: boom"), "control: the wire records a crash report");
+    // the hook is the first thing send_pending does
+    let source = include_str!("../crashfile.rs");
+    let body = source.split("pub fn send_pending").nth(1).unwrap();
+    assert!(body.lines().nth(1).unwrap().contains("report_consent::hold(most)"));
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// "Delete" in the offer removes upstream's copies in `crashes/` too (and
+/// their `.posted` marks); what is no crash report stays. The control: before
+/// it, upstream's sender would take them (`pending_in`).
+#[test]
+fn delete_removes_the_copies_upstream_would_send() {
+    let up = scratch("delete");
+    write_in(&up, "20261126-072340-1795677820", "EQOA client crash report\npanic: a\n").unwrap();
+    write_in(&up, "20261126-072341-1795677821", "EQOA client crash report\npanic: b\n").unwrap();
+    std::fs::write(up.join("crash-20261126-072340-1795677820.posted"), "id").unwrap();
+    std::fs::write(up.join("notes.txt"), "mine").unwrap();
+    assert_eq!(pending_in(&up).len(), 2, "control: both would be sent");
+    assert_eq!(crate::fork_ext::report_consent::forget_server_copies_in(&up), 3);
+    assert!(pending_in(&up).is_empty(), "nothing left to send");
+    assert!(files_in(&up).is_empty());
+    assert!(up.join("notes.txt").exists(), "what is no crash report stays");
+    let _ = std::fs::remove_dir_all(&up);
+}
