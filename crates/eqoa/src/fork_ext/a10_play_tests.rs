@@ -2093,6 +2093,81 @@ mod mods {
         assert_eq!(state_of(&r, "return require('eqoa_auction_state').sort.key .. require('eqoa_auction_state').sort.dir"), "high1");
     }
 
+    /// A results page whose lots each have their own three columns (leader, high bid or -1 for none, bids).
+    fn page_reply_per_lot(page: i64, lots: &[(i64, i64, i64, [i64; 3])]) -> Vec<u8> {
+        let mut w = Writer::default();
+        w.u8(129).signed(page).signed(30).signed(lots.len() as i64);
+        for (id, qty, buyout, _) in lots {
+            lot_bytes(&mut w, *id, *qty, *buyout, 500);
+        }
+        for c in 0..3 {
+            w.signed(lots.len() as i64);
+            for (_, _, _, cols) in lots {
+                w.signed(cols[c]);
+            }
+        }
+        w.data
+    }
+
+    /// Batch 8 review M1: ordering by High bid puts a lot with no bid last, ascending and descending (the README's rule).
+    #[test]
+    fn batch8_m1_auction_high_bid_order_keeps_lots_without_a_bid_last_both_ways() {
+        let mut r = auction_rig_mod();
+        let (x, y) = au_hit(&r, "Search");
+        r.press_px(x, y, "left", false);
+        let page = r.p.bank.auction.page as i64;
+        // 501 bid 50, 502 no bid, 503 bid 20, 504 no bid
+        r.p.bank_opcode(0x1206, &page_reply_per_lot(page, &[(501, 1, 400, [7, 50, 3]), (502, 1, 100, [7, -1, 3]), (503, 1, 900, [7, 20, 3]), (504, 1, 0, [7, -1, 3])]));
+        r.settle();
+        let shown = |r: &Rig| state_of(r, "local t = {} for _, id in ipairs(require('eqoa_auction_state').shown) do t[#t + 1] = id end return table.concat(t, ',')");
+        assert_eq!(shown(&r), "501,502,503,504", "the server's order until a title is clicked");
+        let (x, y) = au_hit(&r, "order high");
+        r.press_px(x, y, "left", false);
+        assert_eq!(shown(&r), "503,501,502,504", "High bid ascending, the lots with no bid last");
+        let (x, y) = au_hit(&r, "order high");
+        r.press_px(x, y, "left", false);
+        assert_eq!(shown(&r), "501,503,502,504", "High bid descending, the lots with no bid still last");
+    }
+
+    /// Batch 8 review H3: with a Type picker open, a click on the upper part of its first row ("Any type") chooses that
+    /// option and orders nothing, though a column title lies under that spot; with no picker open the title still orders.
+    #[test]
+    fn batch8_h3_auction_picker_row_over_a_column_title_takes_the_click() {
+        let mut r = auction_rig_mod();
+        let (x, y) = au_hit(&r, "Search");
+        r.press_px(x, y, "left", false);
+        let page = r.p.bank.auction.page as i64;
+        r.p.bank_opcode(0x1206, &page_reply(page, &[(501, 1, 400), (502, 1, 100)]));
+        r.settle();
+        // choose a real type first, so that choosing "Any type" is a visible change
+        let (x, y) = au_hit(&r, "Type: Any type");
+        r.press_px(x, y, "left", false);
+        let first = state_of(&r, "return require('eqoa_auction_state').opts[2].label");
+        let (x, y) = au_hit(&r, &format!("pick {first}"));
+        r.press_px(x, y, "left", false);
+        assert_eq!(state_of(&r, "return tostring(require('eqoa_auction_state').wear ~= nil)"), "true");
+        // open the picker again; find a point of the first row ("Any type") that a column title also covers
+        let (x, y) = au_hit(&r, &format!("Type: {first}"));
+        r.press_px(x, y, "left", false);
+        assert_eq!(state_of(&r, "return tostring(require('eqoa_auction_state').picking)"), "wear");
+        let (px, py) = bv_point(
+            &r,
+            "local S = require('eqoa_auction_state'); local pick; for _, h in ipairs(S.hits) do if h.label and h.label == 'pick Any type' then pick = h end end \
+             for _, h in ipairs(S.hits) do if h.label and h.label:find('^order ') then \
+               local x0, x1, y0, y1 = math.max(h.x, pick.x), math.min(h.x + h.w, pick.x + pick.w), math.max(h.y, pick.y), math.min(h.y + h.h, pick.y + pick.h) \
+               if x0 < x1 and y0 < y1 then return (x0 + x1) / 2, y0 + 0.5 end end end \
+             error('the picker row and a column title do not overlap')",
+        );
+        r.press_px(px, py, "left", false);
+        assert_eq!(state_of(&r, "return tostring(require('eqoa_auction_state').wear)"), "nil", "the click chose Any type; {}", r.why());
+        assert_eq!(state_of(&r, "return tostring(require('eqoa_auction_state').picking)"), "false", "the picker closed");
+        assert_eq!(state_of(&r, "return tostring(require('eqoa_auction_state').sort)"), "nil", "no order was set");
+        // control: with no picker open a click on a column title still orders
+        let (x, y) = au_hit(&r, "order high");
+        r.press_px(x, y, "left", false);
+        assert_eq!(state_of(&r, "local s = require('eqoa_auction_state').sort; return s and s.key .. s.dir or 'nil'"), "high1");
+    }
+
     fn bm_hit(r: &Rig, label: &str) -> (f64, f64) {
         bv_point(r, &format!("for _, h in ipairs(require('bags').action_hits) do if h.label == '{label}' then return h.x + h.w / 2, h.y + h.h / 2 end end error('no action {label}')"))
     }

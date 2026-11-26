@@ -706,6 +706,8 @@ function M.sync_character()
     M.char_dirty = false
     if name == M.character then return false end
     M.character = name
+    -- the helpers' render poll depends on whose choices apply (a fresh character has Bank on by default)
+    if M.on_character then M.on_character(name) end
     local mode = M.auto_by_char[name] or "off"
     M.alog(nil, "mode:" .. name .. ":" .. mode, M.auto_mode_line(mode, name))
     if mode ~= M.auto_mode then
