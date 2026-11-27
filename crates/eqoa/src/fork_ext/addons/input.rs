@@ -42,6 +42,9 @@ pub struct InputState {
     pub hook_claims: HashSet<String>,
     pub key_claims: HashMap<u8, String>,
     pub suppress_shadow: HashMap<u8, bool>,
+    /// The `eqoa.input.claim("Escape")` claims of mod windows, oldest first, each with its `suppress`: the last one holds
+    /// Escape (it is `key_claims`' Escape owner), the others wait in line and take it in turn (`mirror_escape`).
+    pub escape_line: Vec<(String, bool)>,
     pub text_capture_owners: HashMap<String, Instant>,
     pub text_capture: bool,
     pub key_events: Vec<RawKeyEvent>,
@@ -67,6 +70,7 @@ impl Default for InputState {
             hook_claims: HashSet::new(),
             key_claims: HashMap::new(),
             suppress_shadow: HashMap::new(),
+            escape_line: Vec::new(),
             text_capture_owners: HashMap::new(),
             text_capture: false,
             key_events: Vec::with_capacity(KEY_RING_SIZE),
@@ -241,12 +245,15 @@ pub(crate) fn route_mod_key(
 struct Press {
     key: String,
     combo: String,
+    /// The mods that heard the press (`None`: every mod): its release goes to them, so a mod that saw a key go down
+    /// always sees it come up, and no other mod hears a release of a press it never had.
+    audience: Option<Rc<[u64]>>,
 }
 
 impl Press {
-    /// A key with nothing known of its press: just the key.
+    /// A key with nothing known of its press: just the key, for every mod.
     fn plain(plain: &str) -> Press {
-        Press { key: plain.to_string(), combo: plain.to_string() }
+        Press { key: plain.to_string(), combo: plain.to_string(), audience: None }
     }
 }
 
@@ -262,7 +269,7 @@ fn press_names(plain: &str, own: &str, editor: bool) -> Press {
     } else {
         plain.to_string()
     };
-    Press { key: plain.to_string(), combo }
+    Press { key: plain.to_string(), combo, audience: None }
 }
 
 /// Whether this key going down is the manager row's key and the client should open or close the
@@ -401,14 +408,34 @@ pub(crate) fn route_mod_key_based(
         Some(base) => base,
         None => &plain,
     };
+    // Who hears it (`key_audience`): a release whoever heard its press, a press or a repeat as the keyboard is held now.
     let press = if !down {
         remembered.unwrap_or_else(|| Press::plain(&plain))
     } else if repeat {
-        PRESSES
+        let mut press = PRESSES
             .with(|m| m.borrow().get(own).cloned())
-            .unwrap_or_else(|| press_names(&plain, own, editor))
+            .unwrap_or_else(|| press_names(&plain, own, editor));
+        // a repeat goes as a press would now; the release then goes to every mod that heard the press or a repeat
+        let now = key_audience(key, editor);
+        let heard = match (&press.audience, &now) {
+            (Some(had), Some(now)) => {
+                let mut all: Vec<u64> = had.iter().chain(now.iter()).copied().collect();
+                all.sort_unstable();
+                all.dedup();
+                Some(Rc::from(all))
+            }
+            _ => None,
+        };
+        PRESSES.with(|m| {
+            if let Some(kept) = m.borrow_mut().get_mut(own) {
+                kept.audience = heard;
+            }
+        });
+        press.audience = now;
+        press
     } else {
-        let press = press_names(&plain, own, editor);
+        let mut press = press_names(&plain, own, editor);
+        press.audience = key_audience(key, editor);
         PRESSES.with(|m| {
             let mut m = m.borrow_mut();
             if m.len() >= 64 {
@@ -418,8 +445,139 @@ pub(crate) fn route_mod_key_based(
         });
         press
     };
+    let audience: Option<std::sync::Arc<[u64]>> = press.audience.as_deref().map(std::sync::Arc::from);
     super::native_core::defer(256 + text.as_ref().map_or(0, String::len), move |c| {
-        c.emit("input.key", serde_json::json!({"key":press.key,"combo":press.combo,"down":down,"repeat":repeat,"synthetic":false,"text":text}));
+        c.emit_for(audience, "input.key", serde_json::json!({"key":press.key,"combo":press.combo,"down":down,"repeat":repeat,"synthetic":false,"text":text}));
+    });
+}
+
+// ---- one press does one thing: who hears a key ----------------------------------------------------------------------
+//
+// The owner's rule (2026-11-27): in a mod's window one press of a key does one thing. A key typed into a mod's text box is
+// that text box's and no other mod's: while a mod's text editor holds the keyboard (`eqoa.input.capture_text`), `input.key`
+// goes to the mods holding it and to no other. Escape goes to one window: the mod window that holds it (the newest
+// `eqoa.input.claim("Escape")`, or the window the player last clicked), and when that window lets go the next in line
+// holds it without asking again (`escape_line`). Only with no mod window holding Escape is it every mod's, and the game's.
+
+/// Who hears a key going down now (`None`: every mod). While a mod's text editor holds the keyboard: the mods holding it
+/// (a hold the client cannot put a VM to leaves the key with every mod, as before). Else Escape: the mod that holds it.
+fn key_audience(key: &Key, editor: bool) -> Option<Rc<[u64]>> {
+    if editor {
+        let owners: Vec<String> = INPUT_STATE.with(|s| s.borrow().text_capture_owners.keys().cloned().collect());
+        let mut vms = Vec::with_capacity(owners.len());
+        for owner in &owners {
+            vms.push(owner_vm(owner)?);
+        }
+        vms.sort_unstable();
+        vms.dedup();
+        return (!vms.is_empty()).then(|| Rc::from(vms));
+    }
+    if matches!(key, Key::Named(NamedKey::Escape)) {
+        return escape_holder_vm().map(|vm| Rc::from([vm]));
+    }
+    None
+}
+
+const ESCAPE: u8 = 0x1B;
+
+/// Whether a claim's owner is an `eqoa.input.claim` of a mod (`"\u{1f}<vm>:native:<id>"`), not a Forge package's.
+fn native_claim(owner: &str) -> bool {
+    owner_vm(owner).is_some() && owner.contains(":native:")
+}
+
+/// Whether a claim's mod can act on Escape now: it listens to `input.key` (a mod whose key handler failed, or that never
+/// listened, cannot).
+fn escape_live(owner: &str) -> bool {
+    owner_vm(owner).is_some_and(|vm| super::native_events::vm_listens(vm, "input.key"))
+}
+
+/// The mod whose window holds Escape now: the newest claim whose mod can act on it. `None` with no such claim (Escape is
+/// then every mod's, and the game's), or while a Forge package holds Escape.
+pub(crate) fn escape_holder_vm() -> Option<u64> {
+    let line: Vec<String> = INPUT_STATE.with(|s| s.borrow().escape_line.iter().map(|(o, _)| o.clone()).collect());
+    line.iter().rev().find(|o| escape_live(o)).and_then(|o| owner_vm(o))
+}
+
+impl InputState {
+    /// `key_claims`' Escape follows the line: the newest claim is the owner on record (what `GetKeyOwner` and a Forge
+    /// package's `AcquireKey` see). Who hears an Escape press and whether the game gets it are worked out at the press
+    /// from the claims whose mods can act on it (`escape_holder_vm`, `escape_suppressed`). A Forge package's hold on Escape
+    /// is never touched (a mod's claim is refused while one is held: `escape_claimable`).
+    fn mirror_escape(&mut self) {
+        match self.escape_line.last() {
+            Some((owner, _)) => {
+                let suppress = self.escape_line.iter().any(|(_, s)| *s);
+                self.key_claims.insert(ESCAPE, owner.clone());
+                self.suppress_shadow.insert(ESCAPE, suppress);
+            }
+            None => {
+                if self.key_claims.get(&ESCAPE).is_some_and(|o| native_claim(o)) {
+                    self.key_claims.remove(&ESCAPE);
+                    self.suppress_shadow.remove(&ESCAPE);
+                }
+            }
+        }
+    }
+
+    /// Whether an Escape press is kept from the game while mod windows claim it: while any claim whose mod can act on
+    /// Escape asked for that (one window's `suppress = false` does not let Escape through past another's), never while
+    /// none of them can act on it (the player is not left with an Escape nothing acts on). `None` with no mod claim.
+    fn escape_suppressed(&self) -> Option<bool> {
+        (!self.escape_line.is_empty()).then(|| self.escape_line.iter().any(|(o, s)| *s && escape_live(o)))
+    }
+
+    /// Whether a mod may claim Escape: it is free, or a mod window holds it (the new claim goes in front of it).
+    pub(crate) fn escape_claimable(&self) -> bool {
+        self.key_claims.get(&ESCAPE).is_none_or(|o| native_claim(o))
+    }
+
+    /// The owner of mod `vm`'s claim of Escape, if it has one (one per mod: `eqoa.input.claim("Escape")` again while it
+    /// holds one gives back the same claim).
+    pub(crate) fn escape_claim_of(&self, vm: u64) -> Option<String> {
+        self.escape_line.iter().find(|(o, _)| owner_vm(o) == Some(vm)).map(|(o, _)| o.clone())
+    }
+
+    /// A mod window claims Escape: it holds it now, in front of the windows that held it before.
+    pub(crate) fn escape_push(&mut self, owner: String, suppress: bool) {
+        self.escape_line.push((owner, suppress));
+        self.mirror_escape();
+    }
+
+    /// A claim of Escape ends (released): the next window in line holds it. `true` if it was in line.
+    pub(crate) fn escape_remove(&mut self, owner: &str) -> bool {
+        let before = self.escape_line.len();
+        self.escape_line.retain(|(o, _)| o != owner);
+        let removed = self.escape_line.len() != before;
+        self.mirror_escape();
+        removed
+    }
+
+    /// Every claim of Escape whose owner starts with `prefix` ends (its mod stopped).
+    pub(crate) fn escape_drop_prefix(&mut self, prefix: &str) {
+        self.escape_line.retain(|(o, _)| !o.starts_with(prefix));
+        self.mirror_escape();
+    }
+}
+
+/// Mod `vm`'s claim of Escape ends because its window can no longer act on Escape (its key handler or its drawing failed,
+/// `native_events::deliver_data`): the window before it holds Escape, or the game has it.
+pub(crate) fn escape_drop_vm(vm: u64) {
+    let prefix = format!("\u{1f}{vm}:");
+    INPUT_STATE.with(|s| s.borrow_mut().escape_drop_prefix(&prefix));
+}
+
+/// The player clicked mod `vm`'s window: it is in front, so its claim of Escape (if it has one) holds Escape.
+pub(crate) fn escape_raise(vm: u64) {
+    INPUT_STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        let Some(at) = s.escape_line.iter().rposition(|(o, _)| owner_vm(o) == Some(vm)) else {
+            return;
+        };
+        if at + 1 != s.escape_line.len() {
+            let claim = s.escape_line.remove(at);
+            s.escape_line.push(claim);
+            s.mirror_escape();
+        }
     });
 }
 
@@ -699,6 +857,11 @@ pub fn is_key_suppressed(key: u8) -> bool {
         if state.text_capture && key < 0x80 {
             return true;
         }
+        if key == ESCAPE
+            && let Some(kept) = state.escape_suppressed()
+        {
+            return kept;
+        }
         state.suppress_shadow.get(&key).copied().unwrap_or(false)
     })
 }
@@ -895,6 +1058,7 @@ pub(crate) fn create_module(
                 state.hook_claims.clear();
                 state.key_claims.clear();
                 state.suppress_shadow.clear();
+                state.escape_line.clear();
                 state.text_capture_owners.clear();
                 state.text_capture = false;
                 state.key_cursors.clear();

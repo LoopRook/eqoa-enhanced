@@ -21,6 +21,7 @@
     "eqoa.actions.command",
     "eqoa.actions.set_channel",
     "eqoa.actions.open_link",
+    "eqoa.actions.open_chat_line",
     "eqoa.entities.find",
     "eqoa.hud.hide",
     "eqoa.hud.frame",

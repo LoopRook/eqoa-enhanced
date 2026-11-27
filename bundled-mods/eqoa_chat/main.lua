@@ -149,9 +149,9 @@ end)
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
-local function add_line(m)
+local function add_line(m, sender)
     state.seq = state.seq + 1
-    state.lines[#state.lines + 1] = { text = m.text, kind = m.kind or "system", links = m.links or {}, color = m.color, seq = state.seq }
+    state.lines[#state.lines + 1] = { text = m.text, kind = m.kind or "system", links = m.links or {}, color = m.color, seq = state.seq, sender = sender }
     while #state.lines > MAX_LINES do table.remove(state.lines, 1) end
     state.rev = state.rev + 1
 end
@@ -278,7 +278,16 @@ local function index_of(t)
     for i, e in ipairs(edited_tabs()) do if e == t then return i end end
 end
 
-local function close_menu() state.menu = nil; state.menu_hits = {} end
+-- The menu is a window of its own while it is up: it holds Escape (one press closes the menu and nothing else, not a
+-- window behind it and not the game's Start menu) and lets go of it when it closes.
+local function close_menu()
+    state.menu = nil; state.menu_hits = {}
+    if state.menu_escape then eqoa.input.release(state.menu_escape); state.menu_escape = nil end
+end
+local function open_menu(m)
+    state.menu = m
+    if not state.menu_escape then state.menu_escape = eqoa.input.claim("Escape", true) end
+end
 
 local function move_tab(t, delta)
     local list = edited_tabs()
@@ -498,6 +507,19 @@ local function open_link(link)
     if err then notice("Could not open " .. link.name .. ": " .. tostring(err.message)) end
 end
 
+-- A click on a player's name (`ChatMessage.sender`: the game's own reading of who spoke) opens the line with the tell to
+-- them, as the game's own chat does; nothing is sent. With the line already open it only fills an empty one: what is being
+-- typed is never replaced.
+local function open_tell(name)
+    local command = "/tell " .. name .. " "
+    if state.session then
+        if state.text == "" then state.text = command else state.note = "Finish or clear the line first" end
+        return
+    end
+    local _, err = eqoa.actions.open_chat_line(command)
+    if err then notice("Could not open a tell to " .. name .. ": " .. tostring(err.message)) end
+end
+
 local function pointer_pressed(d)
     -- an open menu has the press: a row runs, anything else closes it
     if state.menu then
@@ -549,12 +571,19 @@ end
 -- the history first, then every line as it comes
 do
     local old = eqoa.chat.history(200)
-    for _, m in ipairs(old or {}) do add_line(m) end
+    for _, m in ipairs(old or {}) do add_line(m, m.sender) end
 end
-listen("chat.message", function(e) add_line(e.data) end)
+listen("chat.message", function(e) add_line(e.data, e.data.sender) end)
 listen("combat.hit", function(e) on_hit(e.data) end)
 listen("pointer.pressed", function(e) pointer_pressed(e.data) end)
 listen("pointer.wheel", function(e) on_wheel(e.data) end)
+-- the game's chat-history key (C held, or R2) with Up and Down: with the game's chat hidden, this window scrolls instead
+listen("chat.history_scroll", function(e)
+    local d = e.data
+    if d.active and (d.steps or 0) ~= 0 and not map_up() then
+        state.scroll = math.max(0, state.scroll + (d.steps > 0 and 1 or -1))
+    end
+end)
 listen("input.key", function(e) on_key(e.data) end)
 listen("windows.session", function(e)
     local d = e.data
@@ -639,9 +668,15 @@ eqoa.events.on("render", function()
         return
     end
     local f = eqoa.hud.frame()
-    local k = math.min(f.scale_x, f.scale_y)
+    -- HUD Scale multiplies the box the player sized: `kf` is window pixels per saved frame pixel (the window's), `k` that
+    -- times the scale; drawing, text, hit areas and the claim all use `k`. What is saved stays in frame units at scale 1.
+    local hs = eqoa.hud.layout().hud_scale
+    if type(hs) ~= 'number' or hs ~= hs or hs <= 0 then hs = 1 end
+    local kf = math.min(f.scale_x, f.scale_y)
+    local k = kf * hs
     local dw, dh = ui.GetDisplaySize()
-    if k <= 0 or dw <= 0 then return end
+    if kf <= 0 or dw <= 0 then return end
+    state.k = k -- read by the mod's tests: window pixels per saved frame pixel
     -- the client lets a text capture lapse after a second unless it is asked for again: every frame it is wanted
     local want = state.session ~= nil or state.rename ~= nil
     if want then
@@ -662,8 +697,15 @@ eqoa.events.on("render", function()
         -- a line wrapped to more rows grows the window upward: its bottom edge stays where it was
         local extra = state.session and (entry_h - 40) or 0
         local ly = state.ly and (state.ly - extra) or (448 - Ht - 24)
-        x0 = clamp(f.offset_x + state.lx * f.scale_x, 0, math.max(0, dw - W * k))
-        y0 = clamp(f.offset_y + ly * f.scale_y, 0, math.max(0, dh - Ht * k))
+        -- the box grows and shrinks about the corner of the screen it sits nearest (the game's own pieces grow about a
+        -- fixed corner and are kept on screen, hudlayout.rs scale/clamp; its place is the nearest side, Place::of): a
+        -- box at the left and bottom keeps its distance from them, one dragged to the top right keeps to that corner.
+        -- The corner is chosen from the box as saved (scale 1) and held while it is dragged, so it never flips.
+        local bx, by = f.offset_x + state.lx * f.scale_x, f.offset_y + ly * f.scale_y
+        local pv = state.drag and state.pivot
+        if not pv then pv = { r = bx + W * kf / 2 > dw / 2, b = by + Ht * kf / 2 > dh / 2 }; state.pivot = pv end
+        x0 = clamp(pv.r and (bx + W * kf - W * k) or bx, 0, math.max(0, dw - W * k))
+        y0 = clamp(pv.b and (by + Ht * kf - Ht * k) or by, 0, math.max(0, dh - Ht * k))
         state.eff_ly = ly + (state.ly and extra or 0)
         state.rect = { x = x0, y = y0, w = W * k, h = Ht * k }
     end
@@ -712,6 +754,10 @@ eqoa.events.on("render", function()
             else
                 state.w = clamp(d.w + dx / k, MIN_W, MAX_W)
                 state.h = clamp(d.h + dy / k, MIN_H, MAX_H)
+                -- a box held at its right or bottom keeps its far edge on the corner it grows about, so its saved place moves by what the scale adds (nothing at 100%)
+                local pv = state.pivot
+                if pv and pv.r then state.lx = d.lx + (state.w - d.w) * (k - kf) / f.scale_x end
+                if pv and pv.b and state.ly then state.ly = d.ly + (state.h - d.h) * (k - kf) / f.scale_y end
             end
             layout()
         elseif d.seen or d.age > 5 then
@@ -779,7 +825,7 @@ eqoa.events.on("render", function()
             -- a click chooses the tab; a right click (the styles' tabs) opens its menu
             local entry = t.entry
             state.hits[#state.hits + 1] = tag(hit(tx, HEAD + 2, tw, 12, function() state.tab, state.scroll = t.id, 0 end),
-                "tab:" .. t.id, entry and function(d) state.menu = { x = d.x, y = d.y, entry = entry } end or nil)
+                "tab:" .. t.id, entry and function(d) open_menu({ x = d.x, y = d.y, entry = entry }) end or nil)
             tx = tx + tw + 2
         end
         do
@@ -792,7 +838,7 @@ eqoa.events.on("render", function()
         if tx < limit then
             -- the empty strip beside the tabs: a right click there offers New tab and Reset tabs
             state.hits[#state.hits + 1] = tag(hit(tx, HEAD + 2, limit - tx, 12, function() end), "strip",
-                function(d) state.menu = { x = d.x, y = d.y } end)
+                function(d) open_menu({ x = d.x, y = d.y }) end)
         end
     end
 
@@ -828,6 +874,8 @@ eqoa.events.on("render", function()
     -- the oldest row is at the top at the most: that many rows back, and no more
     if found < need then state.scroll = math.max(0, found - ROWS) end
     state.drawn = {}
+    -- the pointer, for the hover on a name that opens a tell (not over the open menu or while a drag has the window)
+    local ptr = not (state.menu or state.drag) and eqoa.input.pointer() or nil
     for row = 1, ROWS do
         local pk = picked[state.scroll + (ROWS - row) + 1]
         if pk then
@@ -856,6 +904,27 @@ eqoa.events.on("render", function()
                     if lx + lw < W - PAD + 0.5 then
                         text(lx, y, name, c.link)
                         state.hits[#state.hits + 1] = tag(hit(lx, y, lw, LINE, function() open_link(link) end), "link")
+                    end
+                end
+            end
+            -- the speaker's name on the line's first row: click it for a tell to them
+            local who = l.sender
+            if who and pk.b0 == l.wrows[1][1] then
+                -- past the tags before the name ("[Test] Test: hi" is clicked on the second Test)
+                local after = 1
+                while true do
+                    local _, e = body:find("^%[[^%]]*%]%s*", after)
+                    if not e then break end
+                    after = e + 1
+                end
+                local from, upto = body:find(who, after, true)
+                if from and from >= pk.b0 and upto <= pk.b1 then
+                    local lx = PAD + width(body:sub(pk.b0, from - 1)) / k
+                    local lw = width(who) / k
+                    if lx + lw < W - PAD + 0.5 then
+                        local h = tag(hit(lx, y, lw, LINE, function() open_tell(who) end), "name")
+                        state.hits[#state.hits + 1] = h
+                        if ptr and ptr.inside_window and inside(ptr.x, ptr.y, h) then text(lx, y, who, c.link) end
                     end
                 end
             end

@@ -131,3 +131,71 @@ fn bring_to_front(id: u32) {
         }
     });
 }
+
+// ---- which mod a window is: a click on any mod window gives that mod Escape (2026-11-27) -------------------------------
+//
+// A mod draws its windows inside its own `render` (`native_events::render`), so a top-level window that first becomes active
+// this frame while a mod draws is that mod's. A click on a real ImGui window (a mod's `ImGui.Begin` window with no
+// `claim_pointer`, such as Social's, or a third-party mod's plain window) then finds its mod here, as a click on a claimed
+// window finds it through its claim.
+
+thread_local! {
+    /// Each mod window's id with its mod's VM, as last drawn.
+    static OWNERS: std::cell::RefCell<std::collections::HashMap<u32, u64>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    /// The top-level windows already active this frame when a mod began to draw (they are not that mod's).
+    static BEFORE: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The top-level windows begun so far this frame.
+fn active_roots() -> Vec<u32> {
+    with_context(|g| unsafe {
+        let list = &(*g).Windows;
+        let frame = (*g).FrameCount;
+        (0..list.Size.max(0) as usize)
+            .filter_map(|i| {
+                let w = *list.Data.add(i);
+                (!w.is_null()
+                    && (*w).LastFrameActive == frame
+                    && !(*w).IsFallbackWindow
+                    && (*w).Flags & sys::ImGuiWindowFlags_ChildWindow == 0)
+                    .then(|| (*w).ID)
+            })
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+/// A mod is about to draw.
+pub(super) fn begin_vm_draw() {
+    let roots = active_roots();
+    BEFORE.with(|b| *b.borrow_mut() = roots);
+}
+
+/// Mod `vm` drew: the top-level windows that became active while it drew are its own.
+pub(super) fn end_vm_draw(vm: u64) {
+    let before = BEFORE.with(|b| std::mem::take(&mut *b.borrow_mut()));
+    let mine: Vec<u32> = active_roots().into_iter().filter(|id| !before.contains(id)).collect();
+    if mine.is_empty() {
+        return;
+    }
+    OWNERS.with(|o| {
+        let mut o = o.borrow_mut();
+        if o.len() > 4096 {
+            o.clear();
+        }
+        for id in mine {
+            o.insert(id, vm);
+        }
+    });
+}
+
+/// The mod whose real (input-taking) window is in front at the point, as ImGui drew it last frame.
+pub(super) fn real_window_vm_at(x: f32, y: f32) -> Option<u64> {
+    let z = front_real_window_z(x, y)?;
+    let id = with_context(|g| unsafe {
+        let w = *(*g).Windows.Data.add(z);
+        let root = if (*w).RootWindow.is_null() { w } else { (*w).RootWindow };
+        (*root).ID
+    })?;
+    OWNERS.with(|o| o.borrow().get(&id).copied())
+}

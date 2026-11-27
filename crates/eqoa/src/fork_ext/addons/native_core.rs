@@ -141,6 +141,9 @@ pub(crate) struct Event {
     pub bytes: usize,
     /// Told to this one VM only (the player's paste goes to the mod whose text entry had the keyboard, `input::poll_paste`).
     pub only_vm: Option<u64>,
+    /// Told to these VMs only, and still the player's gesture (`input.key`: a key typed while a mod's text editor holds the
+    /// keyboard goes to that mod, Escape to the mod window that holds it; `input::route_mod_key_based`). `None`: every VM.
+    pub audience: Option<std::sync::Arc<[u64]>>,
 }
 
 impl Event {
@@ -353,15 +356,21 @@ impl Core {
     }
 
     pub fn emit(&mut self, name: &str, data: Json) {
-        self.emit_scoped(name, data, None);
+        self.emit_scoped(name, data, None, None);
     }
 
     /// `emit`, told to the one VM `only_vm` and to no other (and not a gesture: it carries no player action of its own).
     pub(crate) fn emit_to(&mut self, vm: u64, name: &str, data: Json) {
-        self.emit_scoped(name, data, Some(vm));
+        self.emit_scoped(name, data, Some(vm), None);
     }
 
-    fn emit_scoped(&mut self, name: &str, data: Json, only_vm: Option<u64>) {
+    /// `emit`, told only to the VMs in `audience` (`None`: every VM, as `emit`). Unlike `emit_to` the event keeps its
+    /// player gesture: it is the player's own key press, only fewer mods hear it.
+    pub(crate) fn emit_for(&mut self, audience: Option<std::sync::Arc<[u64]>>, name: &str, data: Json) {
+        self.emit_scoped(name, data, None, audience);
+    }
+
+    fn emit_scoped(&mut self, name: &str, data: Json, only_vm: Option<u64>, audience: Option<std::sync::Arc<[u64]>>) {
         let _timed = super::addon_perf::section("events.emit");
         match self.stream_counts.get_mut(name) {
             Some(n) => *n += 1,
@@ -405,6 +414,7 @@ impl Core {
             data: std::sync::Arc::new(data),
             bytes,
             only_vm,
+            audience,
         };
         if event.name.starts_with("cooldown.") {
             self.forge_cooldowns.push(&event);
@@ -855,9 +865,25 @@ pub(crate) fn json_len(value: &Json) -> usize {
 }
 
 pub(crate) fn observe_text(text: &str, color: [f32; 4]) {
+    observe_text_from(text, color, None);
+}
+
+/// `ChatMessage.sender` for a line: the player's name as the game's own chat reads it (`Play::speaker_of`: where the
+/// name lies in the line, in UTF-16 units; `chat::speaker`), without the tags before it, so a tell to it is
+/// `/tell <sender> `. None for a line no player speaks (a creature's, a system line) and for the player's own.
+fn sender_of(text: &str, speaker: Option<(u16, u16)>) -> Option<String> {
+    let (at, len) = speaker?;
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    let name = String::from_utf16_lossy(wide.get(at as usize..at as usize + len as usize)?);
+    Some(crate::chat::plain_name(&name).to_owned()).filter(|n| !n.is_empty())
+}
+
+/// `observe_text` with the line's speaker (`Play::speaker_of`): the `sender` of the message.
+pub(crate) fn observe_text_from(text: &str, color: [f32; 4], speaker: Option<(u16, u16)>) {
     if !capture_requested() {
         return;
     }
+    let sender = sender_of(text, speaker);
     let mut end = text.len().min(8192);
     while !text.is_char_boundary(end) {
         end -= 1;
@@ -868,7 +894,7 @@ pub(crate) fn observe_text(text: &str, color: [f32; 4]) {
     let kind = crate::chat::kind_of(&text, color).key();
     let links = super::native_a6::take_line_links(&text);
     defer(text.len() + 256, move |c| {
-        let message = json!({"seq":c.seq+1,"time":c.source_time.unwrap_or_else(||time_unborrowed(c)),"text":text,"color":{"r":color[0],"g":color[1],"b":color[2],"a":color[3]},"channel":channel,"kind":kind,"links":links});
+        let message = json!({"seq":c.seq+1,"time":c.source_time.unwrap_or_else(||time_unborrowed(c)),"text":text,"color":{"r":color[0],"g":color[1],"b":color[2],"a":color[3]},"channel":channel,"sender":sender,"kind":kind,"links":links});
         if c.chat.len() == 1000 {
             c.chat.pop_front();
         }

@@ -3,14 +3,14 @@
  "schema_version": 1,
  "rule": "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
  "counts": {
-  "total": 2601,
-  "proven": 882,
-  "provisional": 1352,
+  "total": 2604,
+  "proven": 893,
+  "provisional": 1344,
   "compat": 367,
   "by_kind": {
    "action": {
-    "proven": 85,
-    "provisional": 47,
+    "proven": 87,
+    "provisional": 46,
     "compat": 0
    },
    "compat": {
@@ -19,13 +19,13 @@
     "compat": 367
    },
    "event": {
-    "proven": 46,
-    "provisional": 29,
+    "proven": 47,
+    "provisional": 28,
     "compat": 0
    },
    "field": {
-    "proven": 370,
-    "provisional": 941,
+    "proven": 377,
+    "provisional": 936,
     "compat": 0
    },
    "function": {
@@ -39,8 +39,8 @@
     "compat": 0
    },
    "type": {
-    "proven": 76,
-    "provisional": 85,
+    "proven": 77,
+    "provisional": 84,
     "compat": 0
    }
   }
@@ -146,7 +146,6 @@
   "eqoa.actions.blacksmith_close",
   "eqoa.actions.camera",
   "eqoa.actions.chat",
-  "eqoa.actions.close_window",
   "eqoa.actions.cycle_target",
   "eqoa.actions.dye_cancel",
   "eqoa.actions.dye_no_dye",
@@ -262,7 +261,6 @@
   "eqoa.chat.ChatLink.len",
   "eqoa.chat.ChatLink.name",
   "eqoa.chat.ChatLink.start",
-  "eqoa.chat.ChatMessage",
   "eqoa.chat.ChatMessage.channel",
   "eqoa.chat.ChatMessage.color",
   "eqoa.chat.ChatMessage.kind",
@@ -399,8 +397,6 @@
   "eqoa.entities.Entity.diseased",
   "eqoa.entities.Entity.disposition",
   "eqoa.entities.Entity.entity_type",
-  "eqoa.entities.Entity.head_mark",
-  "eqoa.entities.Entity.merc_tag",
   "eqoa.entities.Entity.poisoned",
   "eqoa.entities.Entity.ref",
   "eqoa.entities.Entity.status_flags",
@@ -473,9 +469,6 @@
   "eqoa.events.cast.started.data.own",
   "eqoa.events.cast.started.data.target_id",
   "eqoa.events.cast.started.data.targets",
-  "eqoa.events.chat.history_scroll",
-  "eqoa.events.chat.history_scroll.data.active",
-  "eqoa.events.chat.history_scroll.data.steps",
   "eqoa.events.chat.message.data.channel",
   "eqoa.events.chat.message.data.color",
   "eqoa.events.chat.message.data.kind",
@@ -745,7 +738,6 @@
   "eqoa.hud.GroupMemberLayout.panel",
   "eqoa.hud.GroupMemberLayout.power",
   "eqoa.hud.Layout.group_members",
-  "eqoa.hud.Layout.hud_scale",
   "eqoa.hud.Layout.hud_unlocked",
   "eqoa.hud.Layout.pc_mode",
   "eqoa.hud.Layout.pet",

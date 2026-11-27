@@ -173,12 +173,36 @@ impl WriteQueue {
 }
 
 impl Drop for WriteQueue {
+    /// Finishes what waits, then lets the worker go. At the end of the process the system may already have ended the worker
+    /// (Windows ends every other thread before it runs the main thread's thread-local teardown, which is where the manager's
+    /// queue is dropped): `join` on a thread the system ended panics in std ("threads should not terminate unexpectedly"), and
+    /// that panic at every normal quit wrote a crash file. So: the queue is drained first (bounded, in case the worker is gone), and
+    /// the worker is joined only when it reports itself finished; otherwise the handle is dropped and the thread let go.
     fn drop(&mut self) {
-        self.shared.state.lock().unwrap().closed = true;
-        self.shared.changed.notify_all();
+        let wait_for_queue = std::time::Duration::from_secs(2);
+        let wait_for_exit = std::time::Duration::from_millis(100);
+        {
+            let mut state = self.shared.state.lock().unwrap();
+            state.closed = true;
+            self.shared.changed.notify_all();
+            let deadline = std::time::Instant::now() + wait_for_queue;
+            while !state.pending.is_empty() || state.busy {
+                let left = deadline.saturating_duration_since(std::time::Instant::now());
+                if left.is_zero() {
+                    break;
+                }
+                state = self.shared.changed.wait_timeout(state, left).unwrap().0;
+            }
+        }
         if let Some(handle) = self.worker.lock().unwrap().take() {
-            // The worker empties the queue before it looks at `closed`.
-            let _ = handle.join();
+            // A live worker returns at once when the queue is empty and closed.
+            let until = std::time::Instant::now() + wait_for_exit;
+            while !handle.is_finished() && std::time::Instant::now() < until {
+                thread::sleep(std::time::Duration::from_millis(1));
+            }
+            if handle.is_finished() {
+                let _ = handle.join();
+            }
         }
     }
 }
@@ -335,5 +359,37 @@ mod tests {
             queue.submit(PathBuf::from("b"), None, job(2));
         }
         assert_eq!(*log.lock().unwrap(), vec![1, 2]);
+    }
+
+    /// Owner's logs 2026-11-27: every normal quit of the dev builds ended in a panic "threads should not terminate unexpectedly" and
+    /// a crash file. At the end of the process Windows ends the idle worker first, and only then drops the main thread's
+    /// thread-locals, where this queue is dropped: `join` on a thread the system ended panics in std. A worker ended the same way
+    /// (`TerminateThread`, while it sleeps, so that no wait of the condvar is left dangling: that is the test's doing, the
+    /// process's own exit leaves none) is given to the queue as its worker, and the drop must not panic and must not wait long.
+    /// Control: on the code before this fix the drop calls `join` and panics with exactly that message.
+    #[cfg(windows)]
+    #[test]
+    fn write_queue_a_worker_ended_by_the_system_does_not_make_the_drop_panic() {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::Threading::{TerminateThread, WaitForSingleObject};
+        let queue = WriteQueue::new();
+        let ended = thread::Builder::new()
+            .name("addon-settings-write".into())
+            .spawn(|| loop {
+                thread::sleep(Duration::from_secs(3600));
+            })
+            .unwrap();
+        thread::sleep(Duration::from_millis(200)); // asleep, as an idle worker is
+        let raw = ended.as_raw_handle();
+        // SAFETY: the handle is that of the thread just made, owned by `ended` for the whole call.
+        unsafe {
+            assert_ne!(TerminateThread(raw, 0), 0, "the thread was ended");
+            WaitForSingleObject(raw, 5000);
+        }
+        *queue.worker.lock().unwrap() = Some(ended);
+        let started = Instant::now();
+        let dropped = catch_unwind(AssertUnwindSafe(|| drop(queue)));
+        assert!(dropped.is_ok(), "dropping the queue panicked after the system ended its worker");
+        assert!(started.elapsed() < Duration::from_secs(1), "and it did not wait long: {:?}", started.elapsed());
     }
 }

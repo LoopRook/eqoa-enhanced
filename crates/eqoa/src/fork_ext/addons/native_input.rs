@@ -32,6 +32,8 @@ pub(crate) fn release_vm(lua: &mlua::Lua) {
             s.key_claims.remove(&key);
             s.suppress_shadow.remove(&key);
         }
+        // the mod's windows let go of Escape: the next window in line holds it
+        s.escape_drop_prefix(&prefix);
         s.hook_claims.retain(|v| !v.starts_with(&prefix));
         s.text_capture_owners.retain(|v, _| !v.starts_with(&prefix));
         s.key_cursors.retain(|v, _| !v.starts_with(&prefix));
@@ -92,15 +94,45 @@ pub(crate) fn install(host: &Host) -> mlua::Result<()> {
                     );
                 }
             };
-            if INPUT_STATE.with(|s| s.borrow().key_claims.contains_key(&code)) {
+            // Escape is shared by the mods' windows: a claim of it goes in front of the windows that hold it (the newest
+            // window holds it; when it lets go the one before holds it again). Every other key has one owner.
+            let escape = code == 0x1b;
+            if INPUT_STATE.with(|s| {
+                let s = s.borrow();
+                if escape { !s.escape_claimable() } else { s.key_claims.contains_key(&code) }
+            }) {
                 return error(lua, "eqoa.input.claim", "busy", "key already has an owner");
+            }
+            // One claim of Escape per mod: asked again while it holds one, the mod gets the same claim back (the same
+            // token, its place in the line unchanged, its `suppress` as asked now), so the line never grows past one
+            // claim per mod and a claim made each frame does not jump to the front each frame.
+            if escape {
+                let vm = bus(lua).borrow().vm;
+                let held = INPUT_STATE.with(|s| s.borrow().escape_claim_of(vm));
+                if let Some(owner) = held
+                    && let Some(id) = owner.rsplit(':').next().and_then(|id| id.parse::<u64>().ok())
+                {
+                    INPUT_STATE.with(|s| {
+                        let mut s = s.borrow_mut();
+                        if let Some(claim) = s.escape_line.iter_mut().find(|(o, _)| *o == owner) {
+                            claim.1 = suppress;
+                        }
+                        s.mirror_escape();
+                    });
+                    let t = super::super::native_events::Token { vm, id, kind: "input" };
+                    return lua.pack_multi((lua.create_userdata(t)?, Value::Nil));
+                }
             }
             let t = token(lua, "input");
             INPUT_STATE.with(|s| {
                 let mut s = s.borrow_mut();
-                s.key_claims
-                    .insert(code, format!("\u{1f}{}:native:{}", t.vm, t.id));
-                s.suppress_shadow.insert(code, suppress);
+                let owner = format!("\u{1f}{}:native:{}", t.vm, t.id);
+                if escape {
+                    s.escape_push(owner, suppress);
+                } else {
+                    s.key_claims.insert(code, owner);
+                    s.suppress_shadow.insert(code, suppress);
+                }
             });
             claimed.borrow_mut().insert(t.id, code);
             lua.pack_multi((lua.create_userdata(t)?, Value::Nil))
@@ -125,7 +157,9 @@ pub(crate) fn install(host: &Host) -> mlua::Result<()> {
             let owner = format!("\u{1f}{}:native:{}", t.vm, t.id);
             let removed = INPUT_STATE.with(|s| {
                 let mut s = s.borrow_mut();
-                if s.key_claims.get(&code) == Some(&owner) {
+                if code == 0x1b {
+                    s.escape_remove(&owner)
+                } else if s.key_claims.get(&code) == Some(&owner) {
                     s.key_claims.remove(&code);
                     s.suppress_shadow.remove(&code);
                     true

@@ -7525,7 +7525,7 @@ impl Play {
     /// until the box, which measures with the font, takes it), and for the
     /// plain log shown when there is no HUD.
     fn add_chat(&mut self, text: String, color: [f32; 4]) {
-        fork_hooks::observe_text(&text, color);
+        fork_hooks::observe_text(&text, color, self.speaker_of(&text, color));
         if std::env::var_os("EQOA_CHAT_LOG").is_some() {
             eprintln!("chat: {text}");
         }
