@@ -542,3 +542,19 @@ A font restored after going missing is retried after a face or size change or af
   The test `round4b_fix_busy_world_max_journal_cost_and_incremental_queries` keeps its guard at 90% of the OLD 128 MiB
   on purpose, so the mods do not grow into the new room; lower that guard as the mods get leaner.
 - **Not measured:** the owner's real journal in play.
+
+## Check upstream's new features against the API for gaps (owner, 2026-11-27)
+
+Check each of upstream's new features (Bestiary, bank bags, Faction Tracker, creature loot chart, Target of
+Target, Bags + Compare Gear) against `eqoa/1`: can a mod read and do what the feature shows? List the gaps;
+additions come after the offer to upstream.
+
+## API tiers: let the scan follow kept and copied values (lead, 2026-11-27)
+
+`tools/api_tiers.py` proves a record field only on a value it can follow from the API call. Fields our mods
+really read stay provisional when the value is kept in a table first (`state.guild = eqoa.guild.get()`), copied
+into a sorted list, passed to a function that also takes other tables, returned from a function with two
+returns, or defaulted after `or` (the builder's 30 examples: `~/Paseo/reports/eqoa-api-tiers-2026-11-27.md`
+section 7; `Ability.name`, `Friend.name`, `ChatMessage.text`, `Guild.motd` among them). Extending the scan only
+promotes names (no `--allow-demote`); each new pattern needs a negative control, and the reviewer's 128 names
+must stay provisional.
