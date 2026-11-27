@@ -141,6 +141,9 @@ pub(crate) struct Event {
     pub bytes: usize,
     /// Told to this one VM only (the player's paste goes to the mod whose text entry had the keyboard, `input::poll_paste`).
     pub only_vm: Option<u64>,
+    /// Told to these VMs only, and still the player's gesture (`input.key`: a key typed while a mod's text editor holds the
+    /// keyboard goes to that mod, Escape to the mod window that holds it; `input::route_mod_key_based`). `None`: every VM.
+    pub audience: Option<std::sync::Arc<[u64]>>,
 }
 
 impl Event {
@@ -353,15 +356,21 @@ impl Core {
     }
 
     pub fn emit(&mut self, name: &str, data: Json) {
-        self.emit_scoped(name, data, None);
+        self.emit_scoped(name, data, None, None);
     }
 
     /// `emit`, told to the one VM `only_vm` and to no other (and not a gesture: it carries no player action of its own).
     pub(crate) fn emit_to(&mut self, vm: u64, name: &str, data: Json) {
-        self.emit_scoped(name, data, Some(vm));
+        self.emit_scoped(name, data, Some(vm), None);
     }
 
-    fn emit_scoped(&mut self, name: &str, data: Json, only_vm: Option<u64>) {
+    /// `emit`, told only to the VMs in `audience` (`None`: every VM, as `emit`). Unlike `emit_to` the event keeps its
+    /// player gesture: it is the player's own key press, only fewer mods hear it.
+    pub(crate) fn emit_for(&mut self, audience: Option<std::sync::Arc<[u64]>>, name: &str, data: Json) {
+        self.emit_scoped(name, data, None, audience);
+    }
+
+    fn emit_scoped(&mut self, name: &str, data: Json, only_vm: Option<u64>, audience: Option<std::sync::Arc<[u64]>>) {
         let _timed = super::addon_perf::section("events.emit");
         match self.stream_counts.get_mut(name) {
             Some(n) => *n += 1,
@@ -405,6 +414,7 @@ impl Core {
             data: std::sync::Arc::new(data),
             bytes,
             only_vm,
+            audience,
         };
         if event.name.starts_with("cooldown.") {
             self.forge_cooldowns.push(&event);

@@ -1323,8 +1323,10 @@ fn a6_a_paste_reaches_only_the_mod_that_held_the_text_capture() {
     ctrl_v(&host);
     assert_eq!(state("text"), text, "the mod's entry got all of it, as typed text");
     assert_eq!(heard(&other), "", "another mod listening to input.key is not given the clipboard's text");
+    // 2026-11-27 (one press does one thing): a key typed into a mod's text box is that mod's alone; the listener used to hear
+    // the key without its text, and now hears nothing of it
     let keys: i64 = other.lua.load("return keys").eval().unwrap();
-    assert!(keys > 0, "it still hears the key pressed (as it hears every typed key), without text");
+    assert_eq!(keys, 0, "it hears nothing of a key typed into another mod's text box");
 }
 
 /// Point 1: the capture changed hands before the clipboard answered: nobody gets the text. And the world changing does

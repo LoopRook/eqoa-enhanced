@@ -58,11 +58,16 @@ local function say(text, ok)
     state.status = { text = tostring(text), ok = ok }
 end
 
+-- Asked every frame a box is being typed in: the client lets the hold lapse about a second after the last ask, and then
+-- the keys typed would reach the game and every other mod again.
 local function set_text_capture(on)
     on = on == true
-    if state.capturing_text ~= on then
-        state.capturing_text = on
-        eqoa.input.capture_text(on)
+    if on then
+        state.capturing_text = true
+        eqoa.input.capture_text(true)
+    elseif state.capturing_text then
+        state.capturing_text = false
+        eqoa.input.capture_text(false)
     end
 end
 
@@ -801,9 +806,18 @@ eqoa.events.on("windows.session", function(e)
 end)
 eqoa.events.on("input.key", function(e)
     if state.open and not map_up() and e.data.down and not e.data["repeat"] and e.data.key:lower() == "escape" then
+        -- Escape while typing (a tell, a name, the guild message) leaves the text box first (ImGui lets go of the field
+        -- on the same press); the window and what it was showing stay. The next Escape closes the window.
+        if state.capturing_text then
+            set_text_capture(false)
+            return
+        end
         close_window(false)
     end
 end)
+
+-- what a test reads (the window's state)
+social_keys_probe = { state = state }
 eqoa.events.on("world.leaving", function()
     close_window(true)
     state.takeover_attempted = false

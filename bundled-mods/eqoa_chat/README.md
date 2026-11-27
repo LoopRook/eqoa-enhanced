@@ -11,12 +11,13 @@ A chat window of this mod's own, bottom left. The game's chat box is hidden whil
   **Show in this tab** (a tick per chat style: Say, Group, Guild, Shout, Tell, Combat, Loot, Rolls, XP, System; the menu
   stays open while you tick). Right-click the empty strip beside the tabs, or click the small **+**, for **New tab** (it
   starts with nothing ticked). **All** can be renamed and moved but never deleted and always shows every line. **Reset tabs**
-  (in any of these menus) brings back All plus one tab per style. Your tabs are kept in the mod's settings (the game's own Options
+  (in any of these menus) brings back All plus one tab per style. Esc closes a menu and does nothing else. Your tabs are kept in the mod's settings (the game's own Options
   chat tabs are not used by this window). Rename types in the strip (12 characters at most): Enter keeps it, Esc drops it,
   and no other key does anything while you type.
 - **Tabs.** **All** shows every line of chat. Then one tab per chat style: **Say, Group, Guild, Shout, Tell, Combat, Loot,
   Rolls, XP, System**, each with only that style's lines. The mod's own messages (a line it could not send, and why) come
-  as red System lines. The wheel over the window scrolls back.
+  as red System lines. The wheel over the window scrolls back, and so do Up and Down while the game's chat-history key
+  is held (C, or R2 on a controller). That key's Tab (the game's chat panes) does nothing here.
 - **Combat.** The game shows hits as numbers over heads, not as lines of chat, so this window writes them: "You hit
   Gnoll for 12.", "Gnoll hits you for 7.", your pet's hits and what hits it, heals. They show in the tabs that show
   Combat (and not in All), in time order with the chat lines that are combat too (kills, misses, resists).
@@ -34,16 +35,12 @@ A chat window of this mod's own, bottom left. The game's chat box is hidden whil
 - **Item links.** A link in a chat line is blue; click it and the game's own item card opens (where the server offers
   item links and Item Links is on). The Bag Viewer's **Link** button puts the item into this window's line, as the
   game's own Link Item puts it into the game's line; up to four links go with a line.
-- **Tell a name.** Move the pointer over a player's name at the start of a line (say, shout, tell, group, guild) and it turns
-  blue; click it and the line opens holding `/tell Name `, ready to type. Nothing is sent. Creatures, system lines and
-  your own lines are not clickable, as in the game's own chat. With the line already open, a click only fills it when it
-  is empty. (On a controller, where the game keeps the line, the game's own box opens.)
 - **Not taken.** Passwords, report text, the buddy, guild and ignore name boxes and the alarm box are always the game's own
   boxes. Reports are never sent by a mod.
 - Turn the mod off and the game's chat box and Enter key come back at once.
 
 It uses `eqoa.windows.takeover("chat_entry")`, `eqoa.actions.chat_line`, `eqoa.actions.command`,
-`eqoa.actions.set_channel`, `eqoa.actions.open_link` and `eqoa.actions.open_chat_line`; Mods & Addons labels it as able to act on its own for those.
+`eqoa.actions.set_channel` and `eqoa.actions.open_link`; Mods & Addons labels it as able to act on its own for those.
 Other mods' warnings are not collected here: the mod API has no way to read them yet. While the line is open your character keeps
 running (autorun and follow too), as in the game's own chat box.
 
