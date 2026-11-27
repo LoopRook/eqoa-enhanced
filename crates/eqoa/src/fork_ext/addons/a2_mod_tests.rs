@@ -561,11 +561,13 @@ fn speed_hand_ins_a_stopped_talk_is_forgotten_after_a_while() {
     press(&r.host, "1");
     assert_eq!(answers_sent(), 1, "his own answer");
     r.answered();
+    r.frames(2); // the close is told to the mod now, at this tick
     set_tick(1010);
     r.say_text(Some(NPC), "A fine choice.");
     r.frames(3);
     assert_eq!(answers_sent(), 1, "soon after, the stopped talk still holds: the rest is his");
     r.answered();
+    r.frames(2);
     set_tick(1010 + 100);
     r.say_text(Some(NPC), "Greetings again.");
     r.frames(3);
