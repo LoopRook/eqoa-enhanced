@@ -71,14 +71,19 @@ fn keys_str(m: &Mod, code: &str) -> String {
 /// A scratch mod (a third-party one) that writes down every `input.key` it hears, as "<key>+" (down) and "<key>-" (up),
 /// and may claim keys.
 fn keys_listener(name: &str) -> Mod {
+    keys_scratch(
+        name,
+        "heard = {}\neqoa.events.on('input.key', function(e) heard[#heard + 1] = e.data.key .. (e.data.down and '+' or '-') end)\n",
+        &[],
+    )
+}
+
+/// A scratch mod with source `source`, allowed the input calls and `more` besides.
+fn keys_scratch(name: &str, source: &str, more: &[&str]) -> Mod {
     let dir = std::env::temp_dir().join(format!("eqoa-one-press-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(
-        dir.join("main.lua"),
-        "heard = {}\neqoa.events.on('input.key', function(e) heard[#heard + 1] = e.data.key .. (e.data.down and '+' or '-') end)\n",
-    )
-    .unwrap();
+    std::fs::write(dir.join("main.lua"), source).unwrap();
     let dir = dir.canonicalize().unwrap();
     let addon = DiscoveredAddon {
         id: name.into(),
@@ -91,7 +96,11 @@ fn keys_listener(name: &str) -> Mod {
         api: Some("eqoa/1".into()),
         entry_mode: super::discovery::EntryMode::Once,
         capabilities_declared: true,
-        requested_capabilities: ["eqoa.events.on", "eqoa.input.claim", "eqoa.input.capture_text"].iter().map(|c| c.to_string()).collect(),
+        requested_capabilities: ["eqoa.events.on", "eqoa.input.claim", "eqoa.input.capture_text"]
+            .iter()
+            .chain(more)
+            .map(|c| c.to_string())
+            .collect(),
         extensions: Default::default(),
         initially_enabled: false,
         mods_root: None,
@@ -342,4 +351,114 @@ fn one_press_l1_the_chat_history_key_scrolls_the_chat_mods_window() {
     assert_eq!(scroll(-1, true), "1", "Down scrolls forward");
     assert_eq!(scroll(-1, true), "0");
     assert_eq!(scroll(-1, true), "0", "never past the newest line");
+}
+
+/// The Stats Box mod with the HUD claims its `eqoa.hud.hide("stat_window")` goes to (the runtime publishes them each frame).
+fn keys_stats_box(claims: &std::rc::Rc<std::cell::RefCell<super::visibility::HudClaimsRegistry>>) -> (Mod, super::visibility::VisibilityLease) {
+    use std::{cell::RefCell, rc::Rc};
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods").canonicalize().unwrap();
+    let addon = super::discovery::discover(&dir).addons.into_iter().find(|a| a.id == "eqoa_stats_box").expect("the Stats Box is bundled");
+    let host = Host::for_addon(&addon).unwrap();
+    let snapshot = crate::play::Play::bundled_ui_fixture().forge_snapshot(None);
+    host.snapshot.set(snapshot);
+    let lease = super::visibility::VisibilityLease::with_hud_claims(
+        Rc::new(RefCell::new(super::health::HealthBarClaimsRegistry::new())),
+        claims.clone(),
+    )
+    .unwrap();
+    lease.update(snapshot.health, true);
+    super::visibility::install_managed_health_adapter(&host, &lease).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon).unwrap();
+    let vm = native_events::bus(&host.lua).borrow().vm;
+    (Mod { host, bridge, vm, dir: None }, lease)
+}
+
+/// The lead's request (owner's logs 2026-11-27: "stats box shown" then "stats box hidden" in pairs). On the real key route
+/// (`Runtime::scripted_key` -> `route_key` -> `input.key` -> the mod's binding; the game's side as the viewer does it:
+/// `KeyEdge`, then `Play::toggle_stat_window` for a key sent on as F4), PC interface, the game's Stat Window setting On, the
+/// mod's own key given F1 on Controls (Controls is left with none): one press of F1 flips the box exactly once, one press of
+/// F4 flips it exactly once, a held key's repeats do not flip it again, the game's Stat Window setting is never touched, and
+/// a second mod (a binding with F1 as its default, a `hud.piece_requested` listener) is never fired or told.
+/// "Exactly once" is read from the box's switch: every `toggle_stats_box` flips it and writes one "stats box shown/hidden"
+/// line, so two calls on one press would leave it as it was (the assertion), three would not be told apart from one.
+/// Control: the same F1 with the mod's key unbound does nothing to the box.
+#[test]
+fn one_press_stats_box_f1_and_f4_each_flip_the_box_once_on_the_real_key_route() {
+    super::big_stack(one_press_stats_box_body)
+}
+fn one_press_stats_box_body() {
+    use crate::binds::Sent;
+    let mut context = keys_setup();
+    crate::settings::testing::reset(false);
+    super::options::reset_in_memory();
+    crate::fork_ext::bindpage::reset_in_memory();
+    crate::settings::set_ui_mode(true).unwrap();
+    crate::settings::set_stat_window(true).unwrap();
+    let claims = std::rc::Rc::new(std::cell::RefCell::new(super::visibility::HudClaimsRegistry::new()));
+    let (stats, _lease) = keys_stats_box(&claims);
+    frames(&[&stats], &mut context, 3);
+    super::visibility::publish_claims(&claims.borrow());
+    assert!(!crate::hud::fork_hud::stat_window_visible(), "control: the mod holds the game's Stat Window");
+    let box_on = || super::options::get_toggle("eqoa_stats_box", "stats_box").unwrap_or(false);
+    let mut play = crate::play::Play::bundled_ui_fixture();
+    let mut rt = keys_runtime();
+    let mut edge = crate::binds::KeyEdge::default();
+    // one physical press of `name`, with `repeats` system repeats while it is held, as the viewer takes it: the mod runtime
+    // first (`route_key`; a repeat goes through the same `route_mod_key_based` with `repeat` set), then the game's keys
+    let mut press = |name: &str, repeats: usize, mods: &[&Mod], context: &mut Context| -> (bool, bool) {
+        let (box_before, window_before) = (box_on(), crate::settings::stat_window());
+        let key = crate::binds::key_of(name);
+        let mut controls = false;
+        for repeat in std::iter::once(false).chain(std::iter::repeat_n(true, repeats)) {
+            if repeat {
+                keys_input::route_mod_key(&key, true, true, false, true, false);
+            } else {
+                rt.scripted_key(7990, &key, None, winit::event::ElementState::Pressed, true);
+            }
+            edge.pc_mode = true;
+            match crate::settings::with_binds(|b| edge.key(name, true, repeat, false, b)) {
+                // the viewer's F4 (`statplay`), and F1 the Controls page, each on a press that is not a repeat
+                Some(Sent::Key(to)) if to == "f4" && !repeat => play.toggle_stat_window(),
+                Some(Sent::Key(to)) if to == "f1" && !repeat => controls = true,
+                _ => {}
+            }
+            keys_core::flush_deferred();
+            frames(mods, context, 1);
+        }
+        rt.scripted_key(7990, &key, None, winit::event::ElementState::Released, true);
+        crate::settings::with_binds(|b| edge.key(name, false, false, false, b));
+        keys_core::flush_deferred();
+        frames(mods, context, 2);
+        super::visibility::publish_claims(&claims.borrow());
+        assert_eq!(crate::settings::stat_window(), window_before, "{name}: the game's own Stat Window setting is not touched");
+        (box_on() != box_before, controls)
+    };
+    // control: the mod's key unbound, F1 is the Controls page's and does nothing to the box
+    assert_eq!(press("f1", 0, &[&stats], &mut context), (false, true), "control: F1 is Controls' while the mod's key is unbound");
+    // the player gives the mod's row F1 on Controls (the mod's row is the first after the game's)
+    let (mut capture, mut note, mut cues) = (Some(crate::bindpage::Column::Keyboard), None, Vec::new());
+    assert!(crate::fork_ext::bindpage::capture_key(&mut capture, &mut note, crate::binds::ROWS.len(), "f1", &mut cues), "{note:?}");
+    assert_eq!(crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle").as_deref(), Some("f1"));
+    // a second mod: a binding that would like F1, and a listener for the game's Stat Window key
+    let other = keys_scratch(
+        "keys-stats-other",
+        "fired, told = 0, 0\n\
+         eqoa.input.bind({id = 'other', label = 'Other', default_key = 'f1'}, function() fired = fired + 1 end)\n\
+         eqoa.events.on('hud.piece_requested', function() told = told + 1 end)\n",
+        &["eqoa.input.bind"],
+    );
+    let mods = [&stats, &other];
+    frames(&mods, &mut context, 2);
+    for round in 0..2 {
+        assert_eq!(press("f1", 0, &mods, &mut context), (true, false), "round {round}: one press of F1 flips the box once");
+        assert_eq!(press("f4", 0, &mods, &mut context), (true, false), "round {round}: one press of F4 flips the box once");
+        assert_eq!(press("f1", 3, &mods, &mut context), (true, false), "round {round}: F1 held (3 repeats) flips it once");
+        assert_eq!(press("f4", 3, &mods, &mut context), (true, false), "round {round}: F4 held (3 repeats) flips it once");
+    }
+    let (fired, told): (i64, i64) = other.host.lua.load("return fired, told").eval().unwrap();
+    assert_eq!((fired, told), (0, 0), "the second mod's binding never fired and it was never told of the Stat Window key");
+    let logs: Vec<String> = stats.host.drain_logs().unwrap().into_iter().filter(|l| !l.contains("[info]")).collect();
+    assert!(logs.is_empty(), "{logs:?}");
+    crate::settings::testing::reset(false);
 }
