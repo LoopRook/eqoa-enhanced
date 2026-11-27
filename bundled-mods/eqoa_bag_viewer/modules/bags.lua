@@ -627,6 +627,33 @@ function M.wrap_description(text)
     return lines
 end
 
+-- The stats' names when the item came without them (the client read it before its words were loaded): the game's own word as
+-- it is now, else a plain name from the stat table, else "Stat N".
+local STAT_LABELS = {str = "Strength", sta = "Stamina", agi = "Agility", dex = "Dexterity", wis = "Wisdom", int = "Intelligence",
+    cha = "Charisma", hp = "Hit points", pow = "Power", ac = "Armor class", poison_resist = "Poison resist",
+    disease_resist = "Disease resist", fire_resist = "Fire resist", cold_resist = "Cold resist",
+    lightning_resist = "Lightning resist", arcane_resist = "Arcane resist", fish = "Fishing"}
+local stat_keys
+
+function M.stat_label(s)
+    if s.name then return s.name end
+    local items = eqoa.items
+    local word = items and items.stat_name and items.stat_name(s.id)
+    if word then return word end
+    if not stat_keys then
+        stat_keys = {}
+        for key, id in pairs(items and items.stats or {}) do stat_keys[id] = key end
+    end
+    local key = stat_keys[s.id]
+    return key and STAT_LABELS[key] or ("Stat " .. s.id)
+end
+
+local function slot_label(it)
+    if it.slot_name then return it.slot_name end
+    local info = eqoa.items and eqoa.items.slot_info and it.wear_slot and eqoa.items.slot_info(it.wear_slot)
+    return info and info.name or nil
+end
+
 function M.card(it)
     local h = M.hover
     if h and h.key == it.ref then return h.lines end
@@ -643,9 +670,10 @@ function M.card(it)
         local races = names_of(it.allowed_races, M.RACE_NAMES, RACE_COUNT)
         if races ~= "" then lines[#lines + 1] = {"Race: " .. races, why.race and "red" or "text"} end
     end
-    if it.slot_name then lines[#lines + 1] = {"Slot: " .. it.slot_name, "text"} end
+    local slot = slot_label(it)
+    if slot then lines[#lines + 1] = {"Slot: " .. slot, "text"} end
     for _, s in ipairs(it.stats) do
-        lines[#lines + 1] = {string.format("%s %+d", s.name or ("Stat " .. s.id), s.value), "text"}
+        lines[#lines + 1] = {string.format("%s %+d", M.stat_label(s), s.value), "text"}
     end
     if (it.maximum_hp or 0) > 0 then lines[#lines + 1] = {"HP " .. it.current_hp .. "/" .. it.maximum_hp, "text"} end
     if (it.durability or 0) > 0 then lines[#lines + 1] = {"Durability " .. it.durability, "text"} end
@@ -655,6 +683,36 @@ function M.card(it)
     for _, d in ipairs(M.wrap_description(it.description)) do lines[#lines + 1] = {d, "muted"} end
     M.hover = {key = it.ref, lines = lines}
     return lines
+end
+
+-- The card's lines kept to `maxw` (the tooltip's width, by `width(text)`): a longer line goes on over several, at the word
+-- (a word wider than the tooltip is cut), every line after the first in the same colour kind.
+function M.wrap_card(lines, maxw, width)
+    local out = {}
+    for _, l in ipairs(lines) do
+        local text, kind = l[1], l[2]
+        if width(text) <= maxw then
+            out[#out + 1] = l
+        else
+            local cur = ""
+            local function flush()
+                if cur ~= "" then out[#out + 1] = {cur, kind}; cur = "" end
+            end
+            for word in text:gmatch("%S+") do
+                while width(word) > maxw do
+                    local cut = #word
+                    while cut > 1 and width(word:sub(1, cut)) > maxw do cut = cut - 1 end
+                    flush()
+                    out[#out + 1] = {word:sub(1, cut), kind}
+                    word = word:sub(cut + 1)
+                end
+                local try = cur == "" and word or (cur .. " " .. word)
+                if cur ~= "" and width(try) > maxw then flush(); cur = word else cur = try end
+            end
+            flush()
+        end
+    end
+    return out
 end
 
 local function cannot_reason(it, can)

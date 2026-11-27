@@ -6304,3 +6304,25 @@ fn trade_pass_wait_fallback_control_body() {
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The owner's play on build 4936f2c0 (2026-11-27): the helpers change his target; the "Auction window is a mod" line stays;
+// the tooltip's long line runs off the edge. (The Lua-only checks are `bag_owner1127h_tests.rs`.)
+
+#[test]
+fn owner_h_the_tooltip_of_a_long_class_line_is_drawn_wrapped() {
+    big_stack(owner_h_tooltip_body)
+}
+fn owner_h_tooltip_body() {
+    let Some(mut bv) = trade_setup("owner h tooltip") else { return };
+    // a piece of gear every class can wear: "All classes"... and one for many: a class mask of the first twelve
+    bv.play.bags_added(&serde_json::json!({"name":"Fists of Might","id":900500,"key":61,"wear":12,"class_mask":4095,"level":59,"max_hp":11000,"cur_hp":11000,"value":4792,"icon":4001,
+        "stats":[[0,40],[8,75]],"desc":"These knuckles are strong and are able to cause massive amounts of damage."}));
+    bv.open();
+    let n: usize = bv.eval("(function() for i, e in ipairs(require('bags').grid.items) do if e.item.name == 'Fists of Might' then return i end end end)()");
+    bv.point(bv.slot(n));
+    bv.frames(3);
+    let (card, drawn): (usize, usize) = bv.eval("(function() local B = require('bags') local it for _, e in ipairs(B.grid.items) do if e.item.name == 'Fists of Might' then it = e.item end end return #B.card(it), #(B.last_card or {}) end)()");
+    assert!(drawn > card, "the long class line is drawn as several lines ({card} lines in the card, {drawn} drawn)");
+    bv.clean();
+}

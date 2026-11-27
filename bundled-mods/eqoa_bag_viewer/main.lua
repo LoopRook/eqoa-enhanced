@@ -860,7 +860,8 @@ function draw()
     end
 
     if over then
-        local lines = T.card(B.card(over.item), over.item, mode)
+        local lines = B.wrap_card(T.card(B.card(over.item), over.item, mode), 208 * k, ui.CalcTextSize)
+        B.last_card = lines
         local cw = 0
         for _, l in ipairs(lines) do cw = math.max(cw, ui.CalcTextSize(l[1])) end
         local cwk, chk = math.min(cw + 12 * k, 220 * k), (#lines * LINE + 8) * k
