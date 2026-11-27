@@ -414,6 +414,7 @@ function draw()
     end
     AL.tick()
     T.tick()
+    if B.result and B.result.expires and os.clock() >= B.result.expires then B.result = nil end
     local mode = T.mode()
     local GX = mode and (T.PANEL_W + PAD) or 0
     grid_x = PAD + GX
@@ -643,7 +644,7 @@ function draw()
         label = "Auction", x = x0 + auction_btn.x * k, y = y0 + auction_btn.y * k, w = auction_btn.w * k, h = auction_btn.h * k,
         run = function()
             if not eqoa.mods.send("eqoa_auction", "open") then
-                B.result = {text = "The Auction window is a mod: turn on EQOA Auction in Mods & Addons", ok = false}
+                B.notice("The Auction window is a mod: turn on EQOA Auction in Mods & Addons")
             else
                 -- eqoa/1 lets one mod read nothing of another's window, so Bags cannot come back by itself when
                 -- Auction closes: it steps aside (closes) and the Bags key (Shift+B) opens it again

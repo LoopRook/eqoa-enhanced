@@ -6326,3 +6326,25 @@ fn owner_h_tooltip_body() {
     assert!(drawn > card, "the long class line is drawn as several lines ({card} lines in the card, {drawn} drawn)");
     bv.clean();
 }
+
+#[test]
+fn owner_h_the_auction_line_goes_away_by_itself() {
+    big_stack(owner_h_auction_line_body)
+}
+fn owner_h_auction_line_body() {
+    let Some(mut bv) = trade_setup("owner h auction line") else { return };
+    bv.open();
+    bv.lua().load("require('bags').NOTICE_SECS = 0.05").exec().unwrap();
+    let (x, y, _) = bv.action_hit("Auction").expect("the Auction button");
+    bv.click((x, y));
+    bv.frames(2);
+    let (text, _) = bv.result_text().expect("the line is there");
+    assert!(text.contains("Auction window is a mod"), "{text}");
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    bv.frames(3);
+    assert_eq!(bv.result_text(), None, "the line is gone after a few seconds");
+    // an action of any kind replaces it as before, and the viewer is open still
+    assert!(bv.is_open());
+    bv.clean();
+}
+

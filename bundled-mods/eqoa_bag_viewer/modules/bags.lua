@@ -529,7 +529,14 @@ function M.dirty()
     M.grid = nil
 end
 
+-- A line of the result row that goes by itself: after NOTICE_SECS, or with the next action (which sets another line).
+M.NOTICE_SECS = 6.0
+function M.notice(text)
+    M.result = {text = text, ok = false, expires = os.clock() + M.NOTICE_SECS}
+end
+
 function M.select(tab)
+    if M.result and M.result.expires then M.result = nil end
     if M.multi and tab ~= M.tab then M.multi.clear() end -- multi-select: a selection belongs to the tab it was made on
     if M.trade and tab ~= M.tab then M.trade.leaving(M.tab) end -- the Merchant tab left: the visit ends
     if tab == 7 and (eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse() ~= nil) and M.tab ~= 7 then
