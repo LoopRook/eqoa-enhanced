@@ -555,6 +555,13 @@ listen("chat.message", function(e) add_line(e.data) end)
 listen("combat.hit", function(e) on_hit(e.data) end)
 listen("pointer.pressed", function(e) pointer_pressed(e.data) end)
 listen("pointer.wheel", function(e) on_wheel(e.data) end)
+-- the game's chat-history key (C held, or R2) with Up and Down: with the game's chat hidden, this window scrolls instead
+listen("chat.history_scroll", function(e)
+    local d = e.data
+    if d.active and (d.steps or 0) ~= 0 and not map_up() then
+        state.scroll = math.max(0, state.scroll + (d.steps > 0 and 1 or -1))
+    end
+end)
 listen("input.key", function(e) on_key(e.data) end)
 listen("windows.session", function(e)
     local d = e.data

@@ -801,9 +801,18 @@ eqoa.events.on("windows.session", function(e)
 end)
 eqoa.events.on("input.key", function(e)
     if state.open and not map_up() and e.data.down and not e.data["repeat"] and e.data.key:lower() == "escape" then
+        -- Escape while typing (a tell, a name, the guild message) leaves the text box first (ImGui lets go of the field
+        -- on the same press); the window and what it was showing stay. The next Escape closes the window.
+        if state.capturing_text then
+            set_text_capture(false)
+            return
+        end
         close_window(false)
     end
 end)
+
+-- what a test reads (the window's state)
+social_keys_probe = { state = state }
 eqoa.events.on("world.leaving", function()
     close_window(true)
     state.takeover_attempted = false

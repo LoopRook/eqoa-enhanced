@@ -16,7 +16,8 @@ A chat window of this mod's own, bottom left. The game's chat box is hidden whil
   and no other key does anything while you type.
 - **Tabs.** **All** shows every line of chat. Then one tab per chat style: **Say, Group, Guild, Shout, Tell, Combat, Loot,
   Rolls, XP, System**, each with only that style's lines. The mod's own messages (a line it could not send, and why) come
-  as red System lines. The wheel over the window scrolls back.
+  as red System lines. The wheel over the window scrolls back, and so do Up and Down while the game's chat-history key
+  is held (C, or R2 on a controller). That key's Tab (the game's chat panes) does nothing here.
 - **Combat.** The game shows hits as numbers over heads, not as lines of chat, so this window writes them: "You hit
   Gnoll for 12.", "Gnoll hits you for 7.", your pet's hits and what hits it, heals. They show in the tabs that show
   Combat (and not in All), in time order with the chat lines that are combat too (kills, misses, resists).
