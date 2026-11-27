@@ -75,11 +75,18 @@ local function end_visit(kind)
     T.after_release(kind)
 end
 
-local function pass(kind)
+-- The game's own window for the session this mod holds (the option went off, or Bag Viewer could not open).
+local function try_pass(kind)
     local s = eqoa.windows.session(kind)
-    local ok, err = false, nil
-    if s then ok, err = eqoa.windows.pass(s.ref) end
-    note("the window did not open: the game's own " .. kind .. " window is shown" .. (ok and "" or (" (" .. tostring(err and err.code) .. ")")))
+    if not s then return false end
+    local ok, err = eqoa.windows.pass(s.ref)
+    note(ok and ("the game's own " .. kind .. " window is shown") or ("the game's " .. kind .. " window could not be shown (" .. tostring(err and err.code) .. ")"))
+    if not T.on then T.poll(true) end
+    return true
+end
+
+function T.hand_over(kind)
+    try_pass(kind)
 end
 
 -- ---------------------------------------------------------------- what is on show
@@ -101,20 +108,20 @@ function T.mode()
 end
 
 local function begin_visit(kind)
-    T.refresh()
-    if not T.on then return end
     local was_open = B.open
     if not was_open then T.open_viewer() end
-    if not B.open then pass(kind); return end -- the window would not open: the game's own is shown
+    if not B.open then T.hand_over(kind); return end -- the window would not open: the game's own is shown
     B.select(kind == "merchant" and T.TAB or 6)
     T.auto_opened = not was_open -- (after the select: leaving a tab clears it)
 end
 
 -- An NPC the player talked to. Only a window this mod holds is ours to open over: another mod's claim, or none, is left
--- alone (its window, or the game's, is what the player sees).
+-- alone (its window, or the game's, is what the player sees). The option may have gone off since the last poll: the game's
+-- own window is shown then, and the claims go back with it.
 local function opened(kind)
     T.refresh()
     if not T.held[kind] then return end
+    if not T.on then T.hand_over(kind); return end
     begin_visit(kind)
 end
 
@@ -156,6 +163,8 @@ end
 -- Each frame the window is up: has the visit ended (walked away, the server closed it, the option went off)?
 function T.tick()
     T.refresh()
+    -- the option went off while a visit (or just the claim) was up: the windows go back to the game now
+    if not T.on and (T.held.merchant or T.held.bank) then T.poll(true) end
     local mode = T.mode()
     local ended_merchant = B.tab == T.TAB and mode == nil
     local ended_bank = B.tab == 6 and T.was_bank and mode == nil

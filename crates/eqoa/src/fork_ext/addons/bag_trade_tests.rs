@@ -497,3 +497,24 @@ fn review4_a_window_another_mod_holds_is_left_alone() {
     assert_eq!(int(&lua, "OPENED"), 0);
     assert!(boolean(&lua, "T.mode() == nil"));
 }
+
+#[test]
+fn review1_the_option_turned_off_at_an_npc_hands_the_window_to_the_game_and_lets_the_claims_go() {
+    // the option goes off and the NPC is talked to before the once-a-second poll has noticed: the claim is still held
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, "OPTIONS.open_npc = false; SESSIONS.merchant = {ref = 'ws-1'}; talk_merchant({ware_(1, 'Bread')})");
+    assert_eq!(int(&lua, "OPENED"), 0, "off: Bag Viewer stays shut");
+    assert_eq!(string(&lua, "#PASSED .. ':' .. tostring(PASSED[1])"), "1:ws-1", "the game's own merchant window is shown");
+    assert!(boolean(&lua, "released('merchant') and released('bank')"), "and the claims are let go at once, not a second later");
+    // the same for a banker
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, "OPTIONS.open_npc = false; SESSIONS.bank = {ref = 'ws-2'}; banker_talk({bank_it(7, 'Moonstone', 3)})");
+    assert_eq!(string(&lua, "#PASSED .. ':' .. tostring(PASSED[1]) .. ':' .. OPENED"), "1:ws-2:0");
+    // turned off while the Bank tab shows a visit: the bank session ends with the claim
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, "banker_talk({bank_it(7, 'Moonstone', 3)}); OPTIONS.open_npc = false; T.tick()");
+    assert!(boolean(&lua, "released('bank')"), "the player is not left talking to a banker with no window");
+}
