@@ -40,6 +40,7 @@ fn context() -> Context {
 }
 
 fn fixture() {
+    MARK.with(|m| *m.borrow_mut() = None);
     CORE.with(|c| *c.borrow_mut() = Core::default());
     action_broker::reset_all_for_test();
     ws::reset_for_test();
@@ -278,6 +279,11 @@ impl Rig {
     }
 }
 
+/// The client's 30 Hz step count, as `eqoa.client.get().tick` gives it.
+fn set_tick(n: u64) {
+    CORE.with(|c| c.borrow_mut().tick = n);
+}
+
 fn answers_sent() -> usize {
     action_broker::queued_kinds_for_test().iter().filter(|k| **k == "dialog_answer").count()
 }
@@ -476,20 +482,94 @@ fn speed_hand_ins_never_picks_a_goodbye_or_close() {
     assert_eq!(answers_sent(), 1, "a real single answer is picked");
 }
 
-/// Review HIGH-3: leaving a stopped talk with Escape ends it, so hailing the person again starts afresh (before the fix the
-/// close came back as "answered", the stopped talk stayed for five seconds and the new talk was not sped through).
+/// Review HIGH-3: leaving a stopped talk with Escape ends it, so hailing the person again a moment later starts afresh (before
+/// the fix the close came back as "answered", the stopped talk stayed for five seconds and the new talk was not sped through).
 #[test]
 fn speed_hand_ins_a_left_talk_does_not_leak_into_the_next_one() {
     mark_step(NPC);
     let mut r = speed_rig(true);
+    set_tick(1000);
     r.say_box(3, Some(NPC), "Which road?", &["North", "South"]);
     r.frames(3);
     press(&r.host, "escape");
     assert_eq!(action_broker::queued_kinds_for_test(), vec!["close_window"]);
     r.answered();
+    set_tick(1000 + 100);
     r.say_text(Some(NPC), "Greetings again.");
     r.frames(3);
-    assert_eq!(answers_sent(), 1, "the new talk is sped through: {:?}", r.host.drain_logs());
+    assert_eq!(answers_sent(), 1, "a fresh hail a few seconds later is sped through: {:?}", r.host.drain_logs());
+}
+
+/// Review round 2: Escape on a text dialog only presses its Done, so the same speaker's next queued text must not start the
+/// speed-through again straight after the player pressed Escape to stop it. Control: without the Escape it is answered.
+#[test]
+fn speed_hand_ins_stays_stopped_after_escape_for_the_speakers_next_texts() {
+    mark_step(NPC);
+    let mut r = speed_rig(true);
+    set_tick(1000);
+    r.say_text(Some(NPC), "Part one.");
+    r.frames(2);
+    assert_eq!(answers_sent(), 1, "the first text is answered");
+    press(&r.host, "escape");
+    r.answered();
+    r.say_text(Some(NPC), "Part two, already queued.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 1, "after Escape the next text of the same speaker is not answered");
+    // still stopped while the speaker's dialogs keep coming (each refreshes the wait) ...
+    set_tick(1030);
+    r.answered();
+    r.say_text(Some(NPC), "Part three.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 1, "and the next after it");
+    // ... and forgotten after a while with none of theirs: a fresh hail is sped through
+    r.answered();
+    set_tick(1030 + 100);
+    r.say_text(Some(NPC), "A fresh hail.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 2, "a fresh hail after the wait is answered: {:?}", r.host.drain_logs());
+    drop(r);
+    // the control: no Escape, the second text is answered
+    let mut r = speed_rig(true);
+    r.say_text(Some(NPC), "Part one.");
+    r.frames(2);
+    r.answered();
+    r.say_text(Some(NPC), "Part two.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 2, "without Escape the second is answered");
+    drop(r);
+    // another speaker is not held back by the stop
+    mark_step(NPC);
+    let mut r = speed_rig(true);
+    r.say_text(Some(NPC), "Part one.");
+    r.frames(2);
+    press(&r.host, "escape");
+    r.answered();
+    r.say_text(Some("Somebody Else"), "Hello.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 1, "a speaker without a mark is untouched (and the stop does not carry to a marked one by name only)");
+}
+
+/// A stopped talk is forgotten after a while (STOPPED_WAIT_TICKS = 60 steps): the next hail starts afresh; sooner it is still
+/// the stopped talk's, so its words are the player's.
+#[test]
+fn speed_hand_ins_a_stopped_talk_is_forgotten_after_a_while() {
+    mark_step(NPC);
+    let mut r = speed_rig(true);
+    set_tick(1000);
+    r.say_box(1, Some(NPC), "Which road?", &["North", "South"]);
+    r.frames(3);
+    press(&r.host, "1");
+    assert_eq!(answers_sent(), 1, "his own answer");
+    r.answered();
+    set_tick(1010);
+    r.say_text(Some(NPC), "A fine choice.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 1, "soon after, the stopped talk still holds: the rest is his");
+    r.answered();
+    set_tick(1010 + 100);
+    r.say_text(Some(NPC), "Greetings again.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 2, "after the wait a new hail is sped through: {:?}", r.host.drain_logs());
 }
 
 /// Review MEDIUM-2: an answer the client refuses after accepting it (not ready, rate limited) stops the run.
@@ -527,16 +607,36 @@ fn speed_hand_ins_answers_a_step_once_and_not_a_repeat_of_it() {
     assert!(logs.iter().any(|l| l.contains("stopped: repeat")), "{logs:?}");
 }
 
-/// The player's own key answer also stops it: after it the rest of the talk is his.
+/// The player's own answer while it is running stops it: the text dialog was answered by the mod, the player presses Done
+/// himself before the server's next step, and that next step is then not answered by the mod. Negative control: without
+/// `by_player`'s halt the next text is answered too (the count would be 3).
 #[test]
 fn speed_hand_ins_steps_aside_when_the_player_answers_himself() {
     mark_step(NPC);
     let mut r = speed_rig(true);
+    r.say_text(Some(NPC), "Greetings, friend.");
+    r.frames(2);
+    assert_eq!(answers_sent(), 1, "the mod pressed Done");
+    press(&r.host, "enter");
+    assert_eq!(answers_sent(), 2, "the player pressed Done himself");
+    r.answered();
+    r.say_text(Some(NPC), "A second part.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 2, "after his own answer the rest is his: it does not carry on");
+}
+
+/// After the mod stopped at a real choice and the player picked, the rest of the talk is the player's too.
+#[test]
+fn speed_hand_ins_after_a_stopped_choice_the_rest_of_the_talk_is_the_players() {
+    mark_step(NPC);
+    let mut r = speed_rig(true);
+    set_tick(1000);
     r.say_box(4, Some(NPC), "Which road?", &["North", "South"]);
     r.frames(3);
     press(&r.host, "2");
     assert_eq!(answers_sent(), 1, "his own answer goes");
     r.answered();
+    set_tick(1005);
     r.say_text(Some(NPC), "A fine choice.");
     r.frames(3);
     assert_eq!(answers_sent(), 1, "after his own answer the rest is his: it does not start again");
