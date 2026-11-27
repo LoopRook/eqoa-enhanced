@@ -597,7 +597,7 @@ class Committed(unittest.TestCase):
     def test_actions_split_matches_the_brief(self):
         doc = json.loads(T.TIERS.read_text(encoding="utf-8"))
         acts = doc["counts"]["by_kind"]["action"]
-        self.assertEqual(acts["proven"] + acts["provisional"], 132)
+        self.assertEqual(acts["proven"] + acts["provisional"], 133)
         provisional_actions = [n for n in doc["provisional"] if n.startswith("eqoa.actions.") and n.count(".") == 2
                                and n.split(".")[2][0].islower()]
         self.assertEqual(len(provisional_actions), acts["provisional"])

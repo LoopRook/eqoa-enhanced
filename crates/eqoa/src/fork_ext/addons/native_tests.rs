@@ -162,6 +162,8 @@ EVENT_OPTIONAL = {
     ['batch.progress'] = 'ok code reason completed_tick failed_step',
     -- code/reason: only a batch that stopped or failed; failed_step: only when a step failed
     ['batch.result'] = 'code reason failed_step',
+    -- sender: only a line a player speaks (nil for a creature's, a system line, your own)
+    ['chat.message'] = 'sender',
     -- text: only a key that types a character
     ['input.key'] = 'text',
     -- closed_by: only a change that reports a corpse window going

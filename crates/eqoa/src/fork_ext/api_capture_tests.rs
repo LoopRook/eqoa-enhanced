@@ -119,7 +119,8 @@ fn round7c_play_records_match_declared_fields() {
             fields('hotbar.HotbarSlot', bar.slots[1], 'item weapon_set ui_icon')
             fields('effects.Effect', eqoa.effects.list()[1])
             local chat = eqoa.chat.history()
-            fields('chat.ChatMessage', chat[#chat])
+            -- sender: only a line a player speaks
+            fields('chat.ChatMessage', chat[#chat], 'sender')
             fields('Color', chat[#chat].color)
             local inp = eqoa.input.get()
             fields('input.InputState', inp)
