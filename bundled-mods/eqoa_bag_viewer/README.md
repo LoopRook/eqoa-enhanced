@@ -194,6 +194,14 @@ If the window was shut it opens by itself; if the window cannot open the game's 
   top-right button, leaving the tab, walking away from the NPC (25 units), zoning, or turning the option off. The game's session with
   the merchant or banker ends with it, so you are never left "talking" to an NPC with nothing on the screen. A visit that opened
   the window closes it; one that found it open leaves it open on the first tab.
+- **Items you set aside.** An item marked to bank (**B**) or kept for Restock (**R**) is not sold by **Sell (N)** (the line after the
+  sale says how many were kept), and a right-click on one asks "Sell X? It is marked to bank" first. The "how many" question
+  acts only on the stack, merchant and price it showed: if any changed while it was up, nothing is done and the line says so.
+- **If something goes wrong.** Turn the option off at a merchant and the game's own window opens; if the window cannot open for
+  an NPC, or the game will not show its window, the session is handed back or closed rather than left hidden. A Lua error in
+  the merchant and bank view ends the visit, lets both windows go back to the game and does not claim them again until the mod is
+  reloaded. A merchant or bank window another mod holds is left alone. The two-panel Bank tab is only for a bank you talked to,
+  not for the tab's own refresh near a banker.
 - Everything else keeps working in these tabs: junk and bank marks, **Sell junk**, **Restock**, **Bank marked**, **Do it when I get
   near**, multi-select, the repair panel and the Auction button. A merchant or banker the mod's own helpers talk to (Sell junk
   from the All tab) is not a visit: nothing opens for it.
