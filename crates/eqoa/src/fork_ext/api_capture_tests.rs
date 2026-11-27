@@ -119,7 +119,8 @@ fn round7c_play_records_match_declared_fields() {
             fields('hotbar.HotbarSlot', bar.slots[1], 'item weapon_set ui_icon')
             fields('effects.Effect', eqoa.effects.list()[1])
             local chat = eqoa.chat.history()
-            fields('chat.ChatMessage', chat[#chat])
+            -- sender: only a line a player speaks
+            fields('chat.ChatMessage', chat[#chat], 'sender')
             fields('Color', chat[#chat].color)
             local inp = eqoa.input.get()
             fields('input.InputState', inp)
@@ -1057,7 +1058,7 @@ fn performance_busy_world_zero_addons_frame_and_packet_allocation_bound() {
     });
     let (_, chat_time, chat_allocs, chat_bytes) = measure(|| {
         for _ in 0..600 {
-            observe_text("busy server line", [1.; 4]);
+            observe_text("busy server line", [1.; 4], None);
         }
     });
     eprintln!(
@@ -1253,7 +1254,7 @@ fn performance_busy_world_disabled_vms_leave_packet_and_frame_capture_quiescent(
                 let capture = begin_game_event(&p, &event);
                 end_game_event(&p, capture);
             }
-            observe_text("ignored while disabled", [1.; 4]);
+            observe_text("ignored while disabled", [1.; 4], None);
         }
     });
     assert_eq!(

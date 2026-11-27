@@ -13,7 +13,7 @@ and **resize** (drag the corner). Its place and size are kept.
 - **Hover** a dot or a mark (creatures and players near you, camps, coaches, towns, quests, pins, your waypoint) for a card
   with its name, its level (camps and quests give their level range) and how far away it is. It shows you as a dart facing
   your way, your group in their colours, your target's ring, quests to take (!) and steps to do (?), camps (bigger for an XP
-  camp), coaches and town names. The Map Markers setting hides camps and coaches here as it does on the game's map.
+  camp), coaches and town names. The creature dots are coloured as the game's minimap colours them: friendly NPCs by what they do (coachmen light blue, bankers cyan, smiths orange, merchants yellow, trainers pink, spell merchants purple, quest givers white), other NPCs tan, players and pets blue, a mercenary a reddish blue. Limits: Minimap Colors choices and the server's spell-merchant list are not readable by a mod, so the role colours are the defaults and a spell merchant is one with "Spell" in its name; a player flagged for PvP is green on the minimap and blue here. The Map Markers setting hides camps and coaches here as it does on the game's map.
 - **Right-click** the map: **Set waypoint here** (the game's own waypoint, shown on this map with its distance and on the minimap), **Drop a pin here...** (type a short note, Enter saves, Esc cancels), or **Clear waypoint**. Right-click a pin or
   the waypoint to remove it (a waypoint you placed in the game's own map is taken over first, then cleared). A waypoint you
   set here stays when you turn the mod off. Pins are kept for each world (up to 60 in a world, the whole of Tunaria for
@@ -38,7 +38,7 @@ under any mod window: Space jumps, the number keys and Tab target, and the arrow
 
 **Sizes.** The map's text, buttons, hover card and marks are drawn at the same size as the other mod windows (they follow the
 game's UI scale, so they grow with the game window), and the font is made at the size drawn, so large text stays sharp. To
-change them, open **Mods & Addons (F10)** and choose **World Map sizes...**: **Text size** (Small, Normal, Large,
+change them, open **Mods & Addons (F10)** and choose **World Map: text and marker size...**: **Text size** (Small, Normal, Large,
 Very large) sizes the title bar, the search box, the buttons, the hover card, the place names and the help line, and **Marker
 size** (the same four) sizes the dots, the camps, coaches, pins, your dart and their hit areas. Both apply at once and are kept.
 The window's smallest size grows with the text, and the buttons and the help line shorten themselves rather than overlap.

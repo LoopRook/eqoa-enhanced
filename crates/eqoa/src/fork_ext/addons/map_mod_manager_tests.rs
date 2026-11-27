@@ -1,12 +1,17 @@
 // Real Manager + GPU evidence for the two map mods (included in manager tests).
 fn r4_begin(gpu: &mut Gpu) {
-    gpu.context.io_mut().set_display_size([1024., 768.]);
+    r4_begin_at(gpu, (1024, 768))
+}
+fn r4_begin_at(gpu: &mut Gpu, size: (u32, u32)) {
+    gpu.context.io_mut().set_display_size([size.0 as f32, size.1 as f32]);
     gpu.context.io_mut().set_display_framebuffer_scale([1., 1.]);
     gpu.context.io_mut().set_delta_time(1. / 60.);
     gpu.context.frame();
 }
 fn r4_render(gpu: &mut Gpu, map: &crate::map::Map) -> wgpu::Texture {
-    let size = (1024, 768);
+    r4_render_at(gpu, map, (1024, 768))
+}
+fn r4_render_at(gpu: &mut Gpu, map: &crate::map::Map, size: (u32, u32)) -> wgpu::Texture {
     let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("round4 native map + addons"),
         size: wgpu::Extent3d {
@@ -547,4 +552,98 @@ fn round4b_manager_map_mods_large_journal_gpu_captures_and_frame_cost_body() {
         23000,
         "disable preserves the large loaded journal"
     );
+}
+
+/// Map Search's controls on the full map are sized by the full map's own layout (window pixels per frame pixel), not by
+/// HUD Scale or the minimap piece: the button, the Stop/Track buttons' height and the panel keep one size at any scale and
+/// stay inside the band the header leaves. Control: under the minimap the button DOES follow the scale.
+#[test]
+fn map_search_on_the_full_map_keeps_its_size_at_any_hud_scale() {
+    big_stack(map_search_full_map_hud_scale_body)
+}
+fn map_search_full_map_hud_scale_body() {
+    use super::super::{hud_layout, input, native_core};
+    let Some(mut gpu) = Gpu::new() else {
+        eprintln!("SKIP map_search_full_map_hud_scale: no GPU");
+        return;
+    };
+    let root = Scratch::new();
+    let config = Scratch::new();
+    for file in crate::fork_ext::bundled::EMBEDDED_FILES.iter().filter(|f| f.package == "eqoa_map_search") {
+        let path = root.0.join(file.path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        if std::env::var_os("EQOA_R4_TEST_SOURCE").is_some() && file.path.ends_with(".lua") {
+            fs::copy(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods").join(file.path), &path).unwrap();
+        } else {
+            fs::write(path, file.data).unwrap();
+        }
+    }
+    let mut manager = gpu.manager(&root.0, Some(config.0.clone()));
+    // (button w, button h, panel w, panel y, panel h, anchor y, anchor h) with the search open
+    let measure = |gpu: &mut Gpu, manager: &mut Manager, pc: bool, pct: u8, mini_piece: u32, win: (u32, u32), minimap: bool| {
+        crate::settings::testing::reset(false);
+        crate::settings::set_ui_mode(pc).unwrap();
+        crate::settings::set_hud_scale_percent(pct);
+        crate::settings::save_hud_layout(&if mini_piece == 100 { String::new() } else { format!("size minimap {mini_piece}
+") });
+        crate::hudlayout::testing_reset();
+        crate::hideui::show();
+        input::reset_input_state();
+        hud_layout::set_hud_state(true, true, false, 93, 0);
+        hud_layout::set_window_size(win.0, win.1);
+        let mut play = crate::play::Play::bundled_ui_fixture();
+        play.test_map_search_surface(!minimap);
+        play.map.mini.up = minimap;
+        let mut snapshot = play.forge_snapshot(None);
+        snapshot.capture_pending = false;
+        let map = crate::map::Map::round4_fixture(&gpu.device, &gpu.queue, win, minimap);
+        // the mod's VM exists after the manager's first frame; then the panel is opened and a few frames are drawn
+        for i in 0..5 {
+            manager.flush_pending_fonts(&mut gpu.context);
+            r4_begin_at(gpu, win);
+            native_core::presentation();
+            manager.frame(snapshot);
+            r4_render_at(gpu, &map, win);
+            manager.after_render();
+            if i == 0 {
+                lua(manager, "eqoa_map_search").load("require('search').open=true").exec().unwrap();
+            }
+        }
+        let lua = lua(manager, "eqoa_map_search");
+        lua.load("local s=require('search');local a=eqoa.map.get().search_anchor or {y=0,height=0};local b,p=s.button_rect,s.panel_rect;return b.w,b.h,p.w,p.y,p.h,a.y,a.height")
+            .eval::<(f32, f32, f32, f32, f32, f32, f32)>()
+            .unwrap_or_else(|e| panic!("no search rectangles pc={pc} {pct}% piece {mini_piece} {win:?}: {e}"))
+    };
+    let mut failures = Vec::new();
+    for win in [(1024, 768), (1280, 720)] {
+        for pc in [false, true] {
+            let base = measure(&mut gpu, &mut manager, pc, 100, 100, win, false);
+            let mut cases = vec![(75u8, 100u32), (150, 100)];
+            if pc {
+                cases.push((100, 200));
+                cases.push((150, 200));
+            }
+            for (pct, piece) in cases {
+                let got = measure(&mut gpu, &mut manager, pc, pct, piece, win, false);
+                let note = format!("pc={pc} win={win:?} scale {pct}% piece {piece}%");
+                for (name, a, b) in [("button w", got.0, base.0), ("button h", got.1, base.1), ("panel w", got.2, base.2)] {
+                    if (a - b).abs() >= 0.51 {
+                        failures.push(format!("{note}: {name} {a} vs 100% {b}"));
+                    }
+                }
+                if got.3 < got.5 - 0.51 || got.3 + got.4 > got.5 + got.6 + 0.51 || got.4 <= 0. {
+                    failures.push(format!("{note}: panel y {} h {} outside the header band y {} h {}", got.3, got.4, got.5, got.6));
+                }
+            }
+        }
+    }
+    // Control: with the minimap showing the button follows the scale (so "never scale" would fail here).
+    for win in [(1024, 768), (1280, 720)] {
+        let small = measure(&mut gpu, &mut manager, false, 75, 100, win, true);
+        let big = measure(&mut gpu, &mut manager, false, 150, 100, win, true);
+        assert!(big.0 > small.0 * 1.5, "minimap search button must follow HUD Scale: {} vs {}", small.0, big.0);
+    }
+    assert!(failures.is_empty(), "full-map search drifts with HUD Scale:
+{}", failures.join("
+"));
 }

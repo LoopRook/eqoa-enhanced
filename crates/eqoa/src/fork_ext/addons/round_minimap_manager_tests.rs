@@ -933,12 +933,13 @@ fn stats_box_answers_the_games_stat_window_key_and_command_body() {
         assert!(!shown(&stats), "{note}: the box starts off");
         assert!(rm.manager.is_hud_element_hidden("stat_window"), "{note}: the game's Stat Window is held while the box is off");
         assert!(!crate::hud::fork_hud::stat_window_visible(), "{note}: and the game is told so");
-        // the game's key opens the box and closes it; the player's own Stat Window setting is not touched
+        // the game's key opens the box and closes it. One state (since round 2 of the owner's 2026-11-27 test): the box IS the
+        // game's own Stat Window setting, so the setting turns with it and the game's own window is held back all the same
         for (step, want) in [("F4", true), ("F4", false), ("F4", true)] {
             rm.play.toggle_stat_window();
             rm.frames(3);
             assert_eq!(shown(&stats), want, "{note}: {step} gives the box {want}");
-            assert!(!settings::stat_window(), "{note}: the game's own setting stays as it was");
+            assert_eq!(settings::stat_window(), want, "{note}: the game's own setting is the box's state");
             assert!(rm.manager.is_hud_element_hidden("stat_window"), "{note}: the game's window stays held");
         }
         // /stats toggles; on and off say what they mean whichever way the box is
@@ -964,32 +965,36 @@ fn stats_box_answers_the_games_stat_window_key_and_command_body() {
         // with the box open BEFORE the switch (review point 4): the box stands down, the game's window is the game's,
         // and the box comes back as it was when the switch goes off
         let standing_down = || stats.load("return stats_box.standing_down").eval::<bool>().unwrap();
+        let drawing = || stats.load("return stats_box.shown == true").eval::<bool>().unwrap();
         rm.play.toggle_stat_window();
         rm.frames(3);
-        assert!(shown(&stats) && !standing_down(), "{note}: the box is open and drawing");
+        assert!(shown(&stats) && drawing() && !standing_down(), "{note}: the box is open and drawing");
         super::super::window_takeover::set_use_game_windows(true);
         rm.frames(3);
         assert!(crate::hud::fork_hud::stat_window_visible(), "{note}: the switch gives the game's window back");
-        assert!(standing_down(), "{note}: the box stands down while the game's windows are in use, so the two are never both up");
-        assert!(shown(&stats), "{note}: its option is left as it was");
+        assert!(standing_down() && !drawing(), "{note}: the box stands down while the game's windows are in use, so the two are never both up");
+        assert!(shown(&stats) && settings::stat_window(), "{note}: the one state is left as it was");
+        // the game's key is the game's own with the switch on: it turns the game's window, which is the one setting
         rm.play.toggle_stat_window();
         rm.frames(3);
-        assert!(settings::stat_window(), "{note}: the game's key turns the game's window with the switch on");
-        assert!(shown(&stats), "{note}: and not the box");
+        assert!(!settings::stat_window() && !shown(&stats) && !drawing(), "{note}: the game's key turns the game's window (the one setting) with the switch on; the box does not draw");
+        rm.play.toggle_stat_window();
+        rm.frames(3);
+        assert!(settings::stat_window() && !drawing(), "{note}: and back: still the game's window, not the box");
         super::super::window_takeover::set_use_game_windows(false);
         rm.frames(3);
-        assert!(!standing_down() && shown(&stats), "{note}: the box is back as it was when the switch goes off");
+        assert!(!standing_down() && drawing() && shown(&stats), "{note}: the box is back, as the one state was left, when the switch goes off");
         assert!(!crate::hud::fork_hud::stat_window_visible(), "{note}: and the game's window is held again");
         rm.play.toggle_stat_window();
         rm.frames(3);
-        assert!(!shown(&stats), "{note}: the key closes it again");
+        assert!(!shown(&stats) && !settings::stat_window(), "{note}: the key closes it again");
         // the mod off: the game's key is the game's, as upstream
         rm.manager.queue(Command::Enable("eqoa_stats_box".into(), false));
         rm.frames(3);
         assert!(!rm.manager.is_hud_element_hidden("stat_window"), "{note}: the mod off lets go of the window");
         assert!(crate::hud::fork_hud::stat_window_visible());
         rm.play.toggle_stat_window();
-        assert!(!settings::stat_window(), "{note}: with the mod off F4 turns the game's window as before");
+        assert!(settings::stat_window(), "{note}: with the mod off F4 turns the game's window as before (the setting the player last saw was Off)");
         super::super::window_takeover::forget_switch_for_test();
         rm.manager.shutdown();
     }
@@ -1594,11 +1599,12 @@ fn owner1127a_stats_box_keys_body() {
         let note = if pc { "PC interface" } else { "controller interface" };
         let (mod_row, stat, controls) = (crate::binds::ROWS.len(), row_named("stat_window").unwrap(), row_named("controls").unwrap());
         let mut probe = KeyProbe::default();
-        let only_box = Pressed { mod_box: true, game_window: false, controls: false };
+        // one state: the box and the game's own Stat Window setting flip together; the game's window is never drawn (held back)
+        let only_box = Pressed { mod_box: true, game_window: true, controls: false };
         let key_of = |row: usize| crate::settings::binds().profile_key(row, pc).map(str::to_string);
         assert_eq!(crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle").as_deref(), Some(""), "{note}: the mod's own key is unbound by default");
         // the mod on, its own key unbound: the game's key (F4) works the box, and F1 is still the Controls page's
-        assert_eq!(probe.press(&mut rm, "f4", pc), only_box, "{note}: F4 flips the box, not the game's window");
+        assert_eq!(probe.press(&mut rm, "f4", pc), only_box, "{note}: F4 flips the box (and the one setting behind it)");
         assert_eq!(probe.press(&mut rm, "f4", pc), only_box, "{note}: and again");
         assert_eq!(probe.press(&mut rm, "f1", pc), Pressed { mod_box: false, game_window: false, controls: true }, "{note}: F1 is Controls'");
         // the player gives the mod's row F1 (Controls' key): Controls is left with none, and the page says so
@@ -1623,7 +1629,7 @@ fn owner1127a_stats_box_keys_body() {
         rm.manager.queue(Command::Enable("eqoa_stats_box".into(), false));
         rm.frames(4);
         assert!(!rm.manager.is_hud_element_hidden("stat_window"), "{note}: the mod off lets go of the Stat Window");
-        assert_eq!(probe.press(&mut rm, "f4", pc), Pressed { mod_box: false, game_window: true, controls: false }, "{note}: F4 is the game's: its window turns");
+        assert_eq!(probe.press(&mut rm, "f4", pc), Pressed { mod_box: true, game_window: true, controls: false }, "{note}: F4 is the game's: its window turns (the one setting)");
         assert_eq!(probe.press(&mut rm, "f1", pc), Pressed { mod_box: false, game_window: false, controls: false }, "{note}: the mod's own key does nothing, and does not open the game's window");
         rm.manager.shutdown();
     }
@@ -1653,8 +1659,10 @@ fn owner1127a_stats_box_row_body() {
         assert_eq!(row(), Some(false), "{note}: control: the row reads Off at first");
         // the player sets the row to On
         let mut c = crate::settings::client();
-        let _ = &mut c; // the page's step on the row is `fork_options::change`, which is `toggle_by_item` for a mod's row
-        assert!(super::super::options::toggle_by_item(2000), "{note}: the row takes the step");
+        // the page's `change` for the row flips `stat_window` in its own copy of the options (fork_ext/options.rs), which it then
+        // `set_client`s: a setting written anywhere else first (`toggle_by_item`) would be written over by that copy at once
+        assert!(super::super::options::is_game_stat_window_item(2000), "{note}: the row is the game's Stat Window setting");
+        c.stat_window = !c.stat_window;
         crate::settings::set_client(c);
         rm.frames(4);
         assert_eq!((row(), box_on(&rm)), (Some(true), true), "{note}: the row is On and the mod sees it");
@@ -1715,6 +1723,100 @@ fn owner1127a_one_press_body() {
             }
             rm.frames(8);
         }
+        rm.manager.shutdown();
+    }
+    crate::settings::testing::reset(false);
+}
+
+/// Owner 2026-11-27: "when this mod is enabled it would replace that stat box". One state: while the Stats Box is enabled and holds
+/// the game's Stat Window, the game's Stat Window key (F4), `/stats`, `/stats on|off`, the HUD Extras "Stat Window" row, the mod's
+/// own key (F1) and the Enhanced "Stats Box" row all show or hide the SAME box, each flips it once, every row reads the truth, and
+/// the game's own window is never drawn. With the owner's own state: the game's Stat Window setting On (his client.opt), the mod's
+/// key F1, the Stat Window's F4, "Use the game's windows" off. With the mod turned off the game's window is the game's again,
+/// with the setting the player last saw. Before the change the box and the game's setting were two states (the box started Off
+/// although the game's setting said On, and the rows disagreed).
+#[test]
+fn owner1127a_the_stats_box_replaces_the_stat_window_one_state_for_every_way_of_asking() {
+    big_stack(owner1127a_one_state_body)
+}
+fn owner1127a_one_state_body() {
+    use crate::binds::row_named;
+    for pc in [true, false] {
+        super::super::options::reset_in_memory();
+        crate::fork_ext::bindpage::reset_in_memory();
+        let Some(mut rm) = Rm::with(|p| p == "eqoa_stats_box", 0) else { return };
+        crate::settings::set_ui_mode(pc).unwrap();
+        crate::settings::set_stat_window(true).unwrap(); // his client.opt: stat_window=on
+        let note = if pc { "PC interface" } else { "controller interface" };
+        let mod_row = crate::binds::ROWS.len();
+        let _ = row_named("stat_window").unwrap();
+        rm.frames(6);
+        let mut capture = Some(crate::bindpage::Column::Keyboard);
+        let (mut n, mut cues) = (None, Vec::new());
+        assert!(crate::fork_ext::bindpage::capture_key(&mut capture, &mut n, mod_row, "f1", &mut cues), "{note}: the mod's key is F1");
+        rm.frames(8);
+        let mut probe = KeyProbe::default();
+        let stats = |rm: &Rm| lua(&rm.manager, "eqoa_stats_box");
+        let shown = |rm: &Rm| stats(rm).load("return stats_box.shown == true").eval::<bool>().unwrap();
+        let standing_down = |rm: &Rm| stats(rm).load("return stats_box.standing_down == true").eval::<bool>().unwrap();
+        // every reading says the same, and the game's own window is never drawn
+        let check = |rm: &Rm, want: bool, what: &str| {
+            assert_eq!(crate::settings::stat_window(), want, "{note}: {what}: the HUD Extras row (the game's setting)");
+            assert_eq!(super::super::options::value_by_item(2000), Some(want), "{note}: {what}: the Enhanced row");
+            assert_eq!(super::super::options::get_toggle("eqoa_stats_box", "stats_box"), Some(want), "{note}: {what}: eqoa.options.get");
+            assert!(!crate::hud::fork_hud::stat_window_visible(), "{note}: {what}: the game's own window is held back");
+            assert_eq!(shown(rm), want, "{note}: {what}: the mod's box (standing down: {})", standing_down(rm));
+        };
+        // the box starts as the game's setting says (On), it does not start Off beside a setting that says On
+        check(&rm, true, "at the start");
+        // the game's Stat Window key (F4)
+        assert!(probe.press(&mut rm, "f4", pc).mod_box || true);
+        check(&rm, false, "F4");
+        probe.press(&mut rm, "f4", pc);
+        check(&rm, true, "F4 again");
+        // the mod's own key (F1)
+        probe.press(&mut rm, "f1", pc);
+        check(&rm, false, "the mod's F1");
+        probe.press(&mut rm, "f1", pc);
+        check(&rm, true, "the mod's F1 again");
+        // /stats, /stats off, /stats on, each once
+        rm.play.chat_line("/stats");
+        rm.frames(3);
+        check(&rm, false, "/stats");
+        rm.play.chat_line("/stats on");
+        rm.frames(3);
+        check(&rm, true, "/stats on");
+        rm.play.chat_line("/stats on");
+        rm.frames(3);
+        check(&rm, true, "/stats on when it is on");
+        rm.play.chat_line("/stats off");
+        rm.frames(3);
+        check(&rm, false, "/stats off");
+        // the Enhanced row, as the page does it
+        assert!(super::super::options::is_game_stat_window_item(2000), "{note}: the Enhanced row is the game's Stat Window setting");
+        let mut c = crate::settings::client();
+        c.stat_window = !c.stat_window; // what the page's `change` does for the row (fork_ext/options.rs), then `set_client`
+        crate::settings::set_client(c);
+        rm.frames(3);
+        check(&rm, true, "the Enhanced row set On");
+        // the HUD Extras row, as the page does it (`c.stat_window = !c.stat_window`, then `set_client`)
+        let mut c = crate::settings::client();
+        c.stat_window = !c.stat_window;
+        crate::settings::set_client(c);
+        rm.frames(3);
+        check(&rm, false, "the HUD Extras row turned Off");
+        // the mod turned off in the Addon Manager: the game's window is the game's, with the setting as the player last saw it
+        let mut c = crate::settings::client();
+        c.stat_window = !c.stat_window;
+        crate::settings::set_client(c);
+        rm.frames(3);
+        check(&rm, true, "the row On again");
+        rm.manager.queue(Command::Enable("eqoa_stats_box".into(), false));
+        rm.frames(4);
+        assert!(!rm.manager.is_hud_element_hidden("stat_window"), "{note}: the mod off lets go of the Stat Window");
+        assert!(crate::settings::stat_window() && crate::hud::fork_hud::stat_window_visible(), "{note}: the game's own window is back, On as the player left it");
+        probe.press(&mut rm, "f4", pc);
+        assert!(!crate::settings::stat_window(), "{note}: F4 is the game's again");
         rm.manager.shutdown();
     }
     crate::settings::testing::reset(false);

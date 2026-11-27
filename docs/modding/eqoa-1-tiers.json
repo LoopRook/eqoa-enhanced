@@ -3,13 +3,13 @@
  "schema_version": 1,
  "rule": "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
  "counts": {
-  "total": 2601,
-  "proven": 880,
+  "total": 2604,
+  "proven": 883,
   "provisional": 1354,
   "compat": 367,
   "by_kind": {
    "action": {
-    "proven": 85,
+    "proven": 86,
     "provisional": 47,
     "compat": 0
    },
@@ -24,7 +24,7 @@
     "compat": 0
    },
    "field": {
-    "proven": 368,
+    "proven": 370,
     "provisional": 943,
     "compat": 0
    },
@@ -262,7 +262,6 @@
   "eqoa.chat.ChatLink.len",
   "eqoa.chat.ChatLink.name",
   "eqoa.chat.ChatLink.start",
-  "eqoa.chat.ChatMessage",
   "eqoa.chat.ChatMessage.channel",
   "eqoa.chat.ChatMessage.color",
   "eqoa.chat.ChatMessage.kind",
@@ -399,8 +398,6 @@
   "eqoa.entities.Entity.diseased",
   "eqoa.entities.Entity.disposition",
   "eqoa.entities.Entity.entity_type",
-  "eqoa.entities.Entity.head_mark",
-  "eqoa.entities.Entity.merc_tag",
   "eqoa.entities.Entity.poisoned",
   "eqoa.entities.Entity.ref",
   "eqoa.entities.Entity.status_flags",
@@ -744,7 +741,6 @@
   "eqoa.hud.GroupMemberLayout.panel",
   "eqoa.hud.GroupMemberLayout.power",
   "eqoa.hud.Layout.group_members",
-  "eqoa.hud.Layout.hud_scale",
   "eqoa.hud.Layout.hud_unlocked",
   "eqoa.hud.Layout.pc_mode",
   "eqoa.hud.Layout.pet",
@@ -1383,9 +1379,11 @@
   "eqoa.windows.StartEntry.native",
   "eqoa.windows.StartEntry.text",
   "eqoa.windows.TalkedTo.id",
+  "eqoa.windows.Window",
   "eqoa.windows.Window.dialog",
   "eqoa.windows.Window.focused",
   "eqoa.windows.Window.hints",
+  "eqoa.windows.Window.kind",
   "eqoa.windows.Window.ref",
   "eqoa.windows.Window.rows",
   "eqoa.windows.Window.scroll_top",
@@ -1395,6 +1393,8 @@
   "eqoa.windows.Window.title",
   "eqoa.windows.Window.visible",
   "eqoa.windows.Windows.active",
+  "eqoa.windows.Windows.mode",
+  "eqoa.windows.Windows.windows",
   "eqoa.windows.find",
   "eqoa.windows.format_hint",
   "eqoa.windows.get_window",

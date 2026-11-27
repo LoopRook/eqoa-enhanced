@@ -1244,6 +1244,8 @@ include!("perf_mods_tests.rs");
 
 include!("hide_under_map_tests.rs");
 
+include!("chat_hud_scale_tests.rs");
+
 /// Owner test 2026-11-26: "being able to paste into it would be nice". The player's paste key (Ctrl+V) while the chat line holds
 /// the keyboard hands the clipboard's text to the mod as typed text (single line, control characters left out, the mod's own
 /// limit), and the mod never asks for the clipboard. Control: a plain V types the letter. Negative control: without the paste
@@ -1422,4 +1424,136 @@ fn a6_a_paste_keeps_what_typing_keeps() {
     assert_eq!(super::input::paste_text_for_test("caf\u{e9} & $ ^ < > [ ] { } \\ | ` \u{65e5}"), "caf\u{e9} & $ ^ < > [ ] { } \\ | ` \u{65e5}");
     assert_eq!(super::input::paste_text_for_test(&"x".repeat(5000)).chars().count(), 4096);
     assert_eq!(super::input::paste_text_for_test(&"\u{e9}".repeat(5000)).chars().count(), 4096);
+}
+
+
+// ---- click a name for a tell: `ChatMessage.sender` and `eqoa.actions.open_chat_line` (2026-11-27) ----
+
+/// `sender` is the game's own reading of who spoke (`chat::speaker`, which `Play::speaker_of` narrows to players): the bare
+/// name, tags left out, nil where no player speaks. Negative control: a line observed with no speaker carries none, and so
+/// does a creature's (the game dropped it), so the field follows the game's reading and not the text alone.
+#[test]
+fn a6_a_chat_message_names_the_player_who_spoke_as_the_games_chat_reads_it() {
+    fresh();
+    let h = host_with("reader", &["eqoa.events.on"], &[]);
+    let white = [1.0f32; 4];
+    let tell = [1.0, 127.0 / 255.0, 1.0, 1.0];
+    let cases: [(&str, [f32; 4]); 9] = [
+        ("Ann: hello", white),
+        ("Ann tells you, 'psst'", tell),
+        ("[GM] Ann: hello", white),
+        ("[OG] [HC] Ann shouts: hello", white),
+        ("v.Ann tells the group: pull", [0.5, 0.5, 1.0, 1.0]),
+        ("You told Ann, 'hi'", tell),
+        ("Usage: /tell name message", white),
+        ("You have slain a rat.", white),
+        ("An\u{e9}: hello", white),
+    ];
+    for (text, color) in cases {
+        // what `Play::add_chat` hands the observer: the game's reading of the line
+        native_core::observe_text_from(text, color, crate::chat::speaker(text, color));
+    }
+    // a creature of the line's name in view: the game's `speaker_of` returns none, whatever the text reads like
+    native_core::observe_text_from("Valrean: welcome, traveler", white, None);
+    // control: the same line as a player's, with the speaker read
+    native_core::observe_text_from("Ann: hello", white, crate::chat::speaker("Ann: hello", white));
+    native_core::flush_deferred();
+    h.execute(
+        r#"
+        local m = eqoa.chat.history(20)
+        local want = { 'Ann', 'Ann', 'Ann', 'Ann', 'v.Ann', false, false, false, false, false, 'Ann' }
+        assert(#m == 11, #m)
+        for i, w in ipairs(want) do
+            if w then assert(m[i].sender == w, i .. ': ' .. tostring(m[i].sender) .. ' for ' .. m[i].text)
+            else assert(m[i].sender == nil, i .. ': ' .. tostring(m[i].sender) .. ' for ' .. m[i].text) end
+        end
+    "#,
+    )
+    .unwrap();
+}
+
+/// `open_chat_line` needs its own capability and checks its text; a valid call is queued and sends nothing.
+/// Negative control: a call with the capability and a good text is queued (the refusals are not a broken action).
+#[test]
+fn a6_open_chat_line_checks_its_text_and_needs_its_capability() {
+    fresh();
+    let none = host_with("none", &["eqoa.actions.chat", "eqoa.actions.command"], &[]);
+    none.execute("local r, e = eqoa.actions.open_chat_line('/tell Ann '); assert(r == nil and e.code == 'permission_denied', e and e.code)").unwrap();
+    // the line is judged by what would be sent (spec section 8, rule 4), though the player sends it: a slash line needs
+    // `command`, any other `chat`, an empty one neither
+    let only = host_with("only", &["eqoa.actions.open_chat_line"], &[]);
+    only.execute(
+        r#"
+        local r, e = eqoa.actions.open_chat_line('/tell Ann '); assert(r == nil and e.code == 'permission_denied', e and e.code)
+        local r2, e2 = eqoa.actions.open_chat_line('/quit'); assert(r2 == nil and e2.code == 'permission_denied', e2 and e2.code)
+        local r3, e3 = eqoa.actions.open_chat_line('hello'); assert(r3 == nil and e3.code == 'permission_denied', e3 and e3.code)
+        assert(eqoa.actions.open_chat_line(''))
+    "#,
+    )
+    .unwrap();
+    let chat_only = host_with("chat_only", &["eqoa.actions.open_chat_line", "eqoa.actions.chat"], &[]);
+    chat_only
+        .execute("local r, e = eqoa.actions.open_chat_line('/quit'); assert(r == nil and e.code == 'permission_denied', 'chat does not cover a slash line'); assert(eqoa.actions.open_chat_line('hello'))")
+        .unwrap();
+    action_broker::reset_all_for_test();
+    let h = host_with("opener", &["eqoa.actions.open_chat_line", "eqoa.actions.chat", "eqoa.actions.command"], &[]);
+    h.execute(
+        r#"
+        local function refused(text, code)
+            local r, e = eqoa.actions.open_chat_line(text)
+            assert(r == nil and e and e.code == code, tostring(code) .. ' for ' .. tostring(text) .. ': ' .. tostring(e and e.code))
+        end
+        refused(nil, 'invalid_argument')
+        refused(42, 'invalid_argument')
+        refused(string.rep('a', 128), 'invalid_argument')
+        refused('/tell Ann\nhi', 'invalid_argument')
+        refused('/tell Ann\0', 'invalid_argument')
+    "#,
+    )
+    .unwrap();
+    assert_eq!(action_broker::queued_count_for_test(), 0, "nothing queued by the refusals");
+    h.execute("assert(eqoa.actions.open_chat_line('/tell Ann ')); assert(eqoa.actions.open_chat_line(string.rep('a', 127))); assert(eqoa.actions.open_chat_line(''))").unwrap();
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["open_chat_line"; 3]);
+    assert!(super::chat::take_outgoing_chat().is_empty(), "opening a line sends nothing");
+}
+
+/// The Chat mod: a player's name in a line is a place to click, and the click asks the game to open the line holding
+/// `/tell Name `. Negative controls: a creature's line (no sender) and a system line are no place to click; a click beside
+/// the name and a right click on it ask for nothing; with the line already open and holding text, a click replaces nothing.
+#[test]
+fn a6_chat_mod_opens_a_tell_on_a_click_on_a_players_name_and_on_nothing_else() {
+    use super::pointer_api;
+    let (host, bridge, mut context, vm) = loaded();
+    let white = [1.0f32; 4];
+    native_core::observe_text_from("Ann: hello there", white, crate::chat::speaker("Ann: hello there", white));
+    native_core::observe_text_from("Valrean: welcome, traveler", white, None);
+    native_core::observe_text_from("You have slain a rat.", white, None);
+    native_core::flush_deferred();
+    tick_n(&host, &bridge, &mut context, 3);
+    // exactly one name is a place to click: Ann's
+    let names: i64 = host.lua.load("local n = 0; for _, h in ipairs(chat_probe.state.hits) do if h.id == 'name' then n = n + 1 end end; return n").eval().unwrap();
+    assert_eq!(names, 1, "one player's name in view; the creature's and the system line's are not");
+    let press = |host: &Host, bridge: &Bridge, context: &mut Context, at: (f64, f64), button: &str| {
+        pointer_api::position([at.0 as f32, at.1 as f32], true, (1024, 768));
+        CORE.with(|c| c.borrow_mut().emit("pointer.pressed", json!({"x": at.0, "y": at.1, "inside_window": true, "button": button})));
+        tick_n(host, bridge, context, 2);
+    };
+    let name_at = |host: &Host| -> (f64, f64) { host.lua.load("local h = chat_probe.hit('name'); return h.x + h.w / 2, h.y + h.h / 2").eval().unwrap() };
+    let at = name_at(&host);
+    press(&host, &bridge, &mut context, (at.0 + 300.0, at.1), "left");
+    assert_eq!(action_broker::queued_count_for_test(), 0, "a click beside the name asks for nothing");
+    press(&host, &bridge, &mut context, at, "right");
+    assert_eq!(action_broker::queued_count_for_test(), 0, "only the left button opens a tell");
+    press(&host, &bridge, &mut context, at, "left");
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["open_chat_line"], "{:?}", host.drain_logs());
+    assert!(super::chat::take_outgoing_chat().is_empty(), "nothing is sent");
+    // the line is open and typed in: a click on the name replaces nothing
+    action_broker::reset_all_for_test();
+    open_line(&host, &bridge, &mut context, vm, "", "say");
+    key(&host, "h", "h");
+    tick_n(&host, &bridge, &mut context, 1);
+    let at = name_at(&host);
+    press(&host, &bridge, &mut context, at, "left");
+    assert_eq!(probe_str(&host, "chat_probe.state.text"), "h", "what is typed stays");
+    assert_eq!(action_broker::queued_count_for_test(), 0);
 }

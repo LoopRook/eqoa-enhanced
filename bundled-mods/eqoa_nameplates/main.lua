@@ -13,22 +13,18 @@ local ui = eqoa.imgui
 -- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
 local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
 -- Plates belong to the world: they are not drawn over a game window that fills the screen (Options, the Start menu and its
--- pages, the Abilities, Character Summary, quest log and the like). `eqoa.windows.get()` names what has the game's controls
--- (`mode`) and what is up (`windows`); the small windows over the world (loot, a merchant, a dialog) leave the plates alone.
-local FULL_SCREEN = {
-    options = true, start_menu = true, inventory = true, map = true, spellbook = true, recipe_book = true, trainer = true,
-    quest_log = true, mastery = true, factions = true, who = true, guild = true, buddy_list = true, ignore_list = true,
-    mail_compose = true, mail_inbox = true, mail_tell = true, mail_reply = true, support_request = true, support_inbox = true,
-    chat_history = true, auction_search = true, experiment = true, group_search = true, combat_record = true,
+-- pages, the Abilities, Character Summary, quest log and the like). `eqoa.windows.get().native_mode` is the game's own number
+-- for what has its controls (the table in the API spec's "Reading the game's windows"); the small windows over the world (loot,
+-- a merchant, a dialog) leave the plates alone.
+local FULL_SCREEN_MODES = {
+    [5] = true, [6] = true, [12] = true, [13] = true, [18] = true, [21] = true, [22] = true, [23] = true, [24] = true,
+    [26] = true, [28] = true, [29] = true, [31] = true, [32] = true, [33] = true, [34] = true, [35] = true, [37] = true,
+    [39] = true, [40] = true, [41] = true, [42] = true, [60] = true,
 }
 local function game_page_up()
     local w = eqoa.windows.get()
     if not w then return false end
-    if w.start_menu_open == true or FULL_SCREEN[w.mode] then return true end
-    for _, win in ipairs(w.windows or {}) do
-        if FULL_SCREEN[win.kind] then return true end
-    end
-    return false
+    return w.start_menu_open == true or FULL_SCREEN_MODES[w.native_mode] == true
 end
 
 local DEFAULTS = {

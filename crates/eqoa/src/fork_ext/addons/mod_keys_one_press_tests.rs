@@ -466,10 +466,10 @@ fn keys_hud_mod(
 /// (`Runtime::scripted_key` -> `route_key` -> `input.key` -> the mod's binding; the game's side as the viewer does it:
 /// `KeyEdge`, then `Play::toggle_stat_window` for a key sent on as F4), PC interface, the game's Stat Window setting On, the
 /// mod's own key given F1 on Controls (Controls is left with none): one press of F1 flips the box exactly once, one press of
-/// F4 flips it exactly once, a held key's repeats do not flip it again, the game's Stat Window setting is never touched, and
-/// a second mod (a binding with F1 as its default, a `hud.piece_requested` listener) is never fired or told.
-/// "Exactly once" is read from the box's switch: every `toggle_stats_box` flips it and writes one "stats box shown/hidden"
-/// line, so two calls on one press would leave it as it was (the assertion), three would not be told apart from one.
+/// F4 flips it exactly once, a held key's repeats do not flip it again, the game's Stat Window setting is the box's state
+/// after every press (one state since develop a73c4170), and a second mod (a binding with F1 as its default, a
+/// `hud.piece_requested` listener) is never fired or told. "Exactly once" is read twice: from the box's switch, and from the
+/// mod's own log, which writes one "Stats Box: <who> asked" line per flip (so two flips on one press are seen as two lines).
 /// Control: the same F1 with the mod's key unbound does nothing to the box.
 #[test]
 fn one_press_stats_box_f1_and_f4_each_flip_the_box_once_on_the_real_key_route() {
@@ -495,7 +495,8 @@ fn one_press_stats_box_body() {
     // one physical press of `name`, with `repeats` system repeats while it is held, as the viewer takes it: the mod runtime
     // first (`route_key`; a repeat goes through the same `route_mod_key_based` with `repeat` set), then the game's keys
     let mut press = |name: &str, repeats: usize, mods: &[&Mod], context: &mut Context| -> (bool, bool) {
-        let (box_before, window_before) = (box_on(), crate::settings::stat_window());
+        let box_before = box_on();
+        let _ = stats.host.drain_logs();
         let key = crate::binds::key_of(name);
         let mut controls = false;
         for repeat in std::iter::once(false).chain(std::iter::repeat_n(true, repeats)) {
@@ -519,7 +520,11 @@ fn one_press_stats_box_body() {
         keys_core::flush_deferred();
         frames(mods, context, 2);
         super::visibility::publish_claims(&claims.borrow());
-        assert_eq!(crate::settings::stat_window(), window_before, "{name}: the game's own Stat Window setting is not touched");
+        // the box and the game's Stat Window are one state (develop a73c4170): the setting follows the box
+        assert_eq!(crate::settings::stat_window(), box_on(), "{name}: the game's Stat Window setting is the box's state");
+        // one line in the mod's log for each flip ("Stats Box: <who> asked; the box is now ...")
+        let flips = stats.host.drain_logs().unwrap().iter().filter(|l| l.contains("Stats Box: ") && l.contains(" asked")).count();
+        assert_eq!(flips, usize::from(box_on() != box_before), "{name}: one log line per flip, and as many flips as the box shows");
         (box_on() != box_before, controls)
     };
     // control: the mod's key unbound, F1 is the Controls page's and does nothing to the box

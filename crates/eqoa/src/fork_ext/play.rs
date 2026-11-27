@@ -1603,9 +1603,9 @@ pub(crate) fn apply_camera(_play: &mut Play, _walker: &mut crate::walker::Walker
         crate::fork_ext::addons::action_broker::resolve_server_camera(true, None);
     }
 }
-pub(crate) fn observe_text(_text: &str, _color: [f32; 4]) {
+pub(crate) fn observe_text(_text: &str, _color: [f32; 4], _speaker: Option<(u16, u16)>) {
     #[cfg(not(target_arch = "wasm32"))]
-    crate::fork_ext::addons::native_core::observe_text(_text, _color);
+    crate::fork_ext::addons::native_core::observe_text_from(_text, _color, _speaker);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
