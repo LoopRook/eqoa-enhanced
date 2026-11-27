@@ -40,7 +40,6 @@ fn context() -> Context {
 }
 
 fn fixture() {
-    MARK.with(|m| *m.borrow_mut() = None);
     CORE.with(|c| *c.borrow_mut() = Core::default());
     action_broker::reset_all_for_test();
     ws::reset_for_test();
@@ -220,6 +219,7 @@ fn a2_dialogs_match_on_the_options_words_never_on_their_position() {
 const NPC: &str = "Commander Nothard";
 
 thread_local! {
+    /// (Per test thread, so it never carries from one test to another; NOT cleared in `fixture()`, which runs after `mark_step`.)
     /// What the next `speed_rig` puts into the client's view: (name, step, world of the mark). Applied AFTER the rig, because
     /// the rig starts from a blank `Core` (an earlier version set the marks first and the rig wiped them).
     static MARK: std::cell::RefCell<Option<(String, bool, i64, f64)>> = const { std::cell::RefCell::new(None) };
