@@ -21,7 +21,7 @@ appear in the mod's window instead of the game's dialog window.
   dialog is closed with no answer, as pressing Escape in the game would.
 - The title is the NPC you last had targeted when the words arrived. That is a best guess, not a promise that the
   NPC spoke.
-- **Invitations box** (option **Show invitations and offers**, on by default, in the mod's
+- **Invitations box** (option **Invitations and offers**, on by default, in the mod's
   options): a group invitation, a summons or a resurrection offer comes in its own small box with **Accept**,
   **Decline** and **Game window**. Accepting a group invitation is sent at once. Accepting a summons or a
   resurrection never is: the game's own **Are you sure?** appears and only your own Yes there sends it. Declining

@@ -11,7 +11,7 @@ local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == 
 local match = require("match")
 
 -- The minimap is never covered: a box that would lie over it (window pixels, from `eqoa.hud.layout`, so wherever the player
--- moved it) goes to its left, or below it where there is no room on the left. Nothing moves with the minimap off.
+-- moved it) goes to its left, or below it, or to its right, or above it, the first of those that fits. Nothing moves with the minimap off.
 local function clear_of_minimap(x, y, w, h, dw, dh, gap)
     local m = eqoa.map.get()
     if not (m and m.minimap == true) then return x, y end
@@ -23,6 +23,10 @@ local function clear_of_minimap(x, y, w, h, dw, dh, gap)
     if left >= 0 then return left, y end
     local below = r.y + r.height + gap
     if below + h <= dh then return x, below end
+    local right = r.x + r.width + gap
+    if right + w <= dw then return right, y end
+    local above = r.y - gap - h
+    if above >= 0 then return x, above end
     return x, y
 end
 
