@@ -113,7 +113,16 @@ pub(crate) fn image(lua: &Lua, t: &Table) -> Result<mlua::MultiValue> {
                 "HUD draw context unavailable",
             );
         }
-        let draw = sys::igGetForegroundDrawList_ViewportPtr(sys::igGetMainViewport());
+        // 2026-11-27h: a texture image is drawn where the mod draws it, in the one order every mod window shares: inside a
+        // window (between its `ImGui.Begin` and `End`) in that window's own place; anywhere else with the HUD, under every
+        // mod window (ImGui's background list, as the game's own HUD art is). It used to go to ImGui's FOREGROUND list, over
+        // every window: the round minimap's picture then sat over a window the player had brought to the front while its
+        // ring, drawn in the mod's layer window, sat under it.
+        let draw = if super::pointer_order::current_window_id().is_some() {
+            sys::igGetWindowDrawList()
+        } else {
+            sys::igGetBackgroundDrawList(std::ptr::null_mut())
+        };
         let a = sys::ImVec2 { x: a[0], y: a[1] };
         let b = sys::ImVec2 { x: b[0], y: b[1] };
         let u = sys::ImVec2 {

@@ -486,3 +486,6 @@ fn the_bag_viewers_item_menu_over_another_window_takes_left_and_right_clicks_alo
 
 // 2026-11-27: one press does one thing (keys and Escape in mod windows), on the same two real windows
 include!("mod_keys_one_press_tests.rs");
+
+// 2026-11-27h: a click on a mod window in front of the client's own window is the mod window's alone
+include!("window_order_1127h_tests.rs");

@@ -279,17 +279,19 @@ local function draw()
     local size = SIZE * math.min(fs, fy)
     local uv = info.uv
     local du, dv = (uv[3] - uv[1]) * INSET / FRAME, (uv[4] - uv[2]) * INSET / FRAME
-    local ok, err = eqoa.hud.image({
-        texture = { texture = info.texture, width = info.width, height = info.height,
-            uv = { uv[1] + du, uv[2] + dv, uv[3] - du, uv[4] - dv } },
-        x = lay.frame_x + INSET * fs, y = lay.frame_y + INSET * fy, w = size, h = size,
-        anchor = "right", vertical = "top", shape = "circle",
-    })
-    round_minimap.image_error = not ok and err and err.message or nil
-    if round_minimap_debug then eqoa.hud.image({texture=info,x=0,y=0,w=320,h=224}) end
+    local function picture()
+        local ok, err = eqoa.hud.image({
+            texture = { texture = info.texture, width = info.width, height = info.height,
+                uv = { uv[1] + du, uv[2] + dv, uv[3] - du, uv[4] - dv } },
+            x = lay.frame_x + INSET * fs, y = lay.frame_y + INSET * fy, w = size, h = size,
+            anchor = "right", vertical = "top", shape = "circle",
+        })
+        round_minimap.image_error = not ok and err and err.message or nil
+        if round_minimap_debug then eqoa.hud.image({texture=info,x=0,y=0,w=320,h=224}) end
+    end
     claim(g)
     round_minimap.circle = g
-    if not eqoa.imgui then return end
+    if not eqoa.imgui then picture(); return end
     local ui = eqoa.imgui
     local map = eqoa.map.get()
     local world = map and map.world_id
@@ -300,12 +302,18 @@ local function draw()
     end
     local w, h = ui.GetDisplaySize()
     ui.SetNextWindowPos(0, 0); ui.SetNextWindowSize(w, h)
+    -- The minimap is one piece, HUD as the game's own is: its picture, the ring just outside it, the waypoint arrows on its
+    -- edge and the hover card are all drawn in this one layer window, and the layer stays at the BACK of the window order
+    -- (`NoBringToFrontOnFocus` puts it behind every other window when it is made and keeps it there), so every mod window
+    -- is wholly over the minimap, never between its picture and its ring; name plates (drawn under the windows) stay under
+    -- it, as the game draws the names under its minimap.
     local flags = ImGuiWindowFlags.NoTitleBar + ImGuiWindowFlags.NoBackground + ImGuiWindowFlags.NoMove + ImGuiWindowFlags.NoResize
         + ImGuiWindowFlags.NoScrollbar + ImGuiWindowFlags.NoSavedSettings + ImGuiWindowFlags.NoInputs
+        + ImGuiWindowFlags.NoBringToFrontOnFocus + ImGuiWindowFlags.NoFocusOnAppearing
     ui.Begin("eqoa_round_minimap_layer", nil, flags)
+    picture()
     local dl = ui.GetWindowDrawList()
     local v = ImVec2.new
-    -- the ring just outside the picture (the picture is drawn over the window layer)
     dl:AddCircle(v(g.cx, g.cy), g.r + 1.5 * g.k, ui.GetColorU32(0.2, 0.2, 0.2, 1), 96, 3 * g.k)
     if world then waypoint_arrows(g, ui, dl, v, world) end
     round_minimap.card = card
