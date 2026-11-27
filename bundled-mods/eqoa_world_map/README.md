@@ -38,7 +38,7 @@ under any mod window: Space jumps, the number keys and Tab target, and the arrow
 
 **Sizes.** The map's text, buttons, hover card and marks are drawn at the same size as the other mod windows (they follow the
 game's UI scale, so they grow with the game window), and the font is made at the size drawn, so large text stays sharp. To
-change them, open **Mods & Addons (F10)** and choose **World Map: text and marker size...**: **Text size** (Small, Normal, Large,
+change them, open **Mods & Addons (F10)** and choose **World Map sizes...**: **Text size** (Small, Normal, Large,
 Very large) sizes the title bar, the search box, the buttons, the hover card, the place names and the help line, and **Marker
 size** (the same four) sizes the dots, the camps, coaches, pins, your dart and their hit areas. Both apply at once and are kept.
 The window's smallest size grows with the text, and the buttons and the help line shorten themselves rather than overlap.
