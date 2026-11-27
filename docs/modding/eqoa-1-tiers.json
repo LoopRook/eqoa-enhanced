@@ -9,8 +9,8 @@
   "compat": 367,
   "by_kind": {
    "action": {
-    "proven": 87,
-    "provisional": 46,
+    "proven": 88,
+    "provisional": 45,
     "compat": 0
    },
    "compat": {
@@ -178,7 +178,6 @@
   "eqoa.actions.status",
   "eqoa.actions.stop",
   "eqoa.actions.swap_items",
-  "eqoa.actions.target",
   "eqoa.actions.target_target",
   "eqoa.actions.use_hotbar",
   "eqoa.actions.weapon_set",

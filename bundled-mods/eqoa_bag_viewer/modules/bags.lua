@@ -529,7 +529,14 @@ function M.dirty()
     M.grid = nil
 end
 
+-- A line of the result row that goes by itself: after NOTICE_SECS, or with the next action (which sets another line).
+M.NOTICE_SECS = 6.0
+function M.notice(text)
+    M.result = {text = text, ok = false, expires = os.clock() + M.NOTICE_SECS}
+end
+
 function M.select(tab)
+    if M.result and M.result.expires then M.result = nil end
     if M.multi and tab ~= M.tab then M.multi.clear() end -- multi-select: a selection belongs to the tab it was made on
     if M.trade and tab ~= M.tab then M.trade.leaving(M.tab) end -- the Merchant tab left: the visit ends
     if tab == 7 and (eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse() ~= nil) and M.tab ~= 7 then
@@ -627,6 +634,33 @@ function M.wrap_description(text)
     return lines
 end
 
+-- The stats' names when the item came without them (the client read it before its words were loaded): the game's own word as
+-- it is now, else a plain name from the stat table, else "Stat N".
+local STAT_LABELS = {str = "Strength", sta = "Stamina", agi = "Agility", dex = "Dexterity", wis = "Wisdom", int = "Intelligence",
+    cha = "Charisma", hp = "Hit points", pow = "Power", ac = "Armor class", poison_resist = "Poison resist",
+    disease_resist = "Disease resist", fire_resist = "Fire resist", cold_resist = "Cold resist",
+    lightning_resist = "Lightning resist", arcane_resist = "Arcane resist", fish = "Fishing"}
+local stat_keys
+
+function M.stat_label(s)
+    if s.name then return s.name end
+    local items = eqoa.items
+    local word = items and items.stat_name and items.stat_name(s.id)
+    if word then return word end
+    if not stat_keys then
+        stat_keys = {}
+        for key, id in pairs(items and items.stats or {}) do stat_keys[id] = key end
+    end
+    local key = stat_keys[s.id]
+    return key and STAT_LABELS[key] or ("Stat " .. s.id)
+end
+
+local function slot_label(it)
+    if it.slot_name then return it.slot_name end
+    local info = eqoa.items and eqoa.items.slot_info and it.wear_slot and eqoa.items.slot_info(it.wear_slot)
+    return info and info.name or nil
+end
+
 function M.card(it)
     local h = M.hover
     if h and h.key == it.ref then return h.lines end
@@ -643,9 +677,10 @@ function M.card(it)
         local races = names_of(it.allowed_races, M.RACE_NAMES, RACE_COUNT)
         if races ~= "" then lines[#lines + 1] = {"Race: " .. races, why.race and "red" or "text"} end
     end
-    if it.slot_name then lines[#lines + 1] = {"Slot: " .. it.slot_name, "text"} end
+    local slot = slot_label(it)
+    if slot then lines[#lines + 1] = {"Slot: " .. slot, "text"} end
     for _, s in ipairs(it.stats) do
-        lines[#lines + 1] = {string.format("%s %+d", s.name or ("Stat " .. s.id), s.value), "text"}
+        lines[#lines + 1] = {string.format("%s %+d", M.stat_label(s), s.value), "text"}
     end
     if (it.maximum_hp or 0) > 0 then lines[#lines + 1] = {"HP " .. it.current_hp .. "/" .. it.maximum_hp, "text"} end
     if (it.durability or 0) > 0 then lines[#lines + 1] = {"Durability " .. it.durability, "text"} end
@@ -655,6 +690,36 @@ function M.card(it)
     for _, d in ipairs(M.wrap_description(it.description)) do lines[#lines + 1] = {d, "muted"} end
     M.hover = {key = it.ref, lines = lines}
     return lines
+end
+
+-- The card's lines kept to `maxw` (the tooltip's width, by `width(text)`): a longer line goes on over several, at the word
+-- (a word wider than the tooltip is cut), every line after the first in the same colour kind.
+function M.wrap_card(lines, maxw, width)
+    local out = {}
+    for _, l in ipairs(lines) do
+        local text, kind = l[1], l[2]
+        if width(text) <= maxw then
+            out[#out + 1] = l
+        else
+            local cur = ""
+            local function flush()
+                if cur ~= "" then out[#out + 1] = {cur, kind}; cur = "" end
+            end
+            for word in text:gmatch("%S+") do
+                while width(word) > maxw do
+                    local cut = #word
+                    while cut > 1 and width(word:sub(1, cut)) > maxw do cut = cut - 1 end
+                    flush()
+                    out[#out + 1] = {word:sub(1, cut), kind}
+                    word = word:sub(cut + 1)
+                end
+                local try = cur == "" and word or (cur .. " " .. word)
+                if cur ~= "" and width(try) > maxw then flush(); cur = word else cur = try end
+            end
+            flush()
+        end
+    end
+    return out
 end
 
 local function cannot_reason(it, can)
@@ -886,6 +951,34 @@ function M.open_loot_corpse(after_kind, corpse_id, keep_target)
     return req, nil
 end
 
+-- The talk a helper starts targets the NPC (the game talks to its target). The client puts the player's earlier target back, but
+-- with none it leaves the NPC targeted: this mod clears it again when the conversation is over (see `restore_target`).
+M.talk_target = {}
+
+local function player_target()
+    local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
+    local id = pl and pl.target_id
+    if id == nil or id == 0 or id == 4294967295 then return nil end
+    return id
+end
+
+-- The conversation is over (the merchant closed, the bank's session ended): a target the player did not have before the
+-- helper's talk, and still the NPC it talked to, is cleared. Another target (the player chose one) is left alone.
+function M.restore_target(kind)
+    local r = M.talk_target[kind]
+    if not r then return end
+    M.talk_target[kind] = nil
+    if r.prev == nil and r.npc ~= nil and player_target() == r.npc then eqoa.actions.target(nil) end
+end
+
+-- A talk that never opened anything is let go after a while the same way.
+function M.tick_talk_targets()
+    local now = os.clock()
+    for kind, r in pairs(M.talk_target) do
+        if now - r.at > 20 then M.restore_target(kind) end
+    end
+end
+
 function M.open_talk_npc(talk_kind, verb, after_fn)
     -- one open at a time, as for corpses: a second talk while the first is unanswered would take over the
     -- first's answer (its item unsold, the second sold in its place)
@@ -897,6 +990,8 @@ function M.open_talk_npc(talk_kind, verb, after_fn)
     if M.far_gate(talk_kind, verb) then return nil, {message = TOO_FAR[talk_kind]} end
     if not M.ensure_takeover(talk_kind) then return nil, {message = "window busy"} end
     M.helper_hold[talk_kind] = true
+    local npc = M.nearby_npc(talk_kind)
+    M.talk_target[talk_kind] = {prev = player_target(), npc = npc and npc.id or nil, at = os.clock()}
     local req, err = eqoa.actions.talk(nil, {kind = talk_kind})
     if not req then
         release_takeover(talk_kind)

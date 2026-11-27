@@ -65,7 +65,6 @@ A provisional name works and is covered by the client's automated tests, but no 
 - `eqoa.actions.status`
 - `eqoa.actions.stop`
 - `eqoa.actions.swap_items`
-- `eqoa.actions.target`
 - `eqoa.actions.target_target`
 - `eqoa.actions.use_hotbar`
 - `eqoa.actions.weapon_set`

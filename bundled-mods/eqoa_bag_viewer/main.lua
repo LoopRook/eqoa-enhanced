@@ -352,6 +352,7 @@ end
 eqoa.events.on("merchant.changed", function(e)
     failed(pcall(function()
         B.tick_leaving()
+        if e.data and e.data.after == nil then B.restore_target("merchant") end
         T.on_merchant(e.data) -- before the window's own listener: a helper's talk is still pending then
         if e.data and e.data.cause == "open" and eqoa.merchant.get() ~= nil then B.learn_native_open("merchant") end
     end))
@@ -359,6 +360,7 @@ end)
 eqoa.events.on("bank.changed", function(e)
     failed(pcall(function()
         B.tick_leaving()
+        if e.data and e.data.after and not e.data.after.open then B.restore_target("bank") end
         T.on_bank(e.data)
         HP.on_bank_changed(e.data) -- an item taken out of the bank is no longer marked to bank
         local b = eqoa.bank.get()
@@ -390,6 +392,7 @@ eqoa.events.on("player.changed", function(e)
         -- asked on a new world or login, when the update names another character, and once a second besides
         T.poll() -- the claim on the merchant and bank windows follows the option (once a second)
         B.tick_leaving()
+        B.tick_talk_targets()
         local after = e.data and e.data.after
         local now = os.clock()
         if B.char_dirty or now - B.char_checked >= 1.0 or (after and after.name and after.name ~= B.character) then
@@ -414,6 +417,7 @@ function draw()
     end
     AL.tick()
     T.tick()
+    if B.result and B.result.expires and os.clock() >= B.result.expires then B.result = nil end
     local mode = T.mode()
     local GX = mode and (T.PANEL_W + PAD) or 0
     grid_x = PAD + GX
@@ -643,7 +647,7 @@ function draw()
         label = "Auction", x = x0 + auction_btn.x * k, y = y0 + auction_btn.y * k, w = auction_btn.w * k, h = auction_btn.h * k,
         run = function()
             if not eqoa.mods.send("eqoa_auction", "open") then
-                B.result = {text = "The Auction window is a mod: turn on EQOA Auction in Mods & Addons", ok = false}
+                B.notice("The Auction window is a mod: turn on EQOA Auction in Mods & Addons")
             else
                 -- eqoa/1 lets one mod read nothing of another's window, so Bags cannot come back by itself when
                 -- Auction closes: it steps aside (closes) and the Bags key (Shift+B) opens it again
@@ -860,7 +864,8 @@ function draw()
     end
 
     if over then
-        local lines = T.card(B.card(over.item), over.item, mode)
+        local lines = B.wrap_card(T.card(B.card(over.item), over.item, mode), 208 * k, ui.CalcTextSize)
+        B.last_card = lines
         local cw = 0
         for _, l in ipairs(lines) do cw = math.max(cw, ui.CalcTextSize(l[1])) end
         local cwk, chk = math.min(cw + 12 * k, 220 * k), (#lines * LINE + 8) * k

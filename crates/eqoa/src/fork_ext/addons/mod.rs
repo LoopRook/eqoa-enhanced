@@ -62,6 +62,8 @@ mod bag_multi_tests;
 #[cfg(test)]
 mod bag_trade_tests;
 #[cfg(test)]
+mod bag_owner1127h_tests;
+#[cfg(test)]
 mod chat_history_tests;
 #[cfg(test)]
 mod docs_tests;
