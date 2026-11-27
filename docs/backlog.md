@@ -479,9 +479,36 @@ A font restored after going missing is retried after a face or size change or af
 - **Auto-repair's chat line.**
 - **A plain-words message when two mods want the same window** (today: "response_dialog window is already taken over
   by eqoa_dialogs" in the log).
-- **Mods that drift at a HUD Scale other than 100%:** checked for Mana Bars, Target of Target and the Target Frame
-  demo in batch 8; any other mod drawing beside a game HUD piece should follow `hud.layout()` the same way.
+- **Mods that drift at a HUD Scale other than 100%** (audit of 2026-11-27, read from the code, nothing run). Follow
+  the scale: Mana Bars, Target of Target, the Target Frame demo, Round Minimap, Dialogs, HUD Numbers. To fix:
+  **Map Search** sizes its Search button, its panel and the Track waypoint button on the game's full map from the
+  minimap piece (`eqoa_map_search/main.lua` near line 93), so they are 1.5 times too big at 150% and three quarters
+  size at 75%; its test belongs beside the map mod tests. **Chat** never reads `hud.layout()` or HUD Scale: the
+  owner decides whether its box scales or keeps its size and keeps clear of the game's bars (asked 2026-11-27).
+  Small: Round Minimap's hover text ignores the scale; HUD Numbers has no test at a scale other than 100%. Fixed
+  size by design: Example Hearts and the Forge packages.
 - **A once-only notice that Mods & Addons moved from F10 to Shift+F10** (today a log line only).
+
+## From the night audits of 2026-11-27 (read from the code and the owner's logs; not run)
+
+Being fixed on branches at the time of writing, so not listed: keys typed in one mod's text box reaching every other
+mod, one Escape closing two windows, the game's merchant window opening when the Bag Viewer lets go, the panic at
+every normal quit.
+
+- **Crash backtraces cannot be read.** No `eqoa.pdb` goes out with a build, so each frame in a crash file gets the
+  name of the nearest exported symbol. Keep each build's `eqoa.pdb` from CI under its commit, and write each
+  frame's address relative to `eqoa.exe` into the crash file so a saved report can be resolved later.
+- **Reports list the wrong mods.** The log header, the crash report and the bug report read `state.json`, not the
+  active mod profile: the owner's listed 11 mods with 21 on, and the bundled ones twice (`report.rs` lines 30-69).
+- **Dialogs and Trade cannot be worked with a controller**: only the Bag Viewer and the Start Menu mod take the pad.
+- **With Name Plates on, the game's own Name Plates, Nameplate Size and Damage Numbers options** still show and save
+  and do nothing. Hide them, grey them or have the mod follow them.
+- **With "Use the game's windows" on, the window mods' keys (Shift+B, Shift+K and the like) do nothing** and only the
+  log says why.
+- **Auto-sell junk ends at once with "walked away (more than 25 units)"** in the owner's log.
+- **A window in the back runs at 15 to 27 frames a second in the world** (100 in the pregame).
+- **About half a second's stall at every world entry** in the mods' first frame.
+- **The bank is talked to three times in a row**, and two bank sessions ended on the 15-second idle timeout.
 
 ## Mod project (later; the bundled mods are proofs of the API, owner 2026-11-25)
 
