@@ -316,6 +316,7 @@ fn markdown(doc: &Json) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| s.to_string()).collect()
@@ -624,6 +625,349 @@ mod tests {
         rows(&mut child).push(json!({"path":format!("{leaf}.new_child"),"status":"supported","children":[]}));
         assert!(frozen_violations(&frozen, &child).is_empty());
         assert!(!frozen["supported"].as_array().unwrap().iter().any(|p| p == "eqoa.new_name"));
+    }
+
+    // ---- The final-freeze rule: proven and provisional names (docs/modding/VERSIONING.md).
+    //
+    // Not live yet. During the candidate phase `frozen_violations` above is the guard, unchanged. These
+    // functions are the rule that replaces it at the final freeze: a provisional name may then be
+    // corrected, but only when `docs/modding/eqoa-1-corrections.json` lists it and FORK-UPDATE-NOTES.md
+    // names it. With an empty corrections list the rule gives exactly `frozen_violations`' answer
+    // (`eqoa1_final_rule_equals_the_live_guard_without_corrections`).
+
+    /// The tier file `docs/modding/eqoa-1-tiers.json`: the provisional names and the FrontiersForge
+    /// compatibility names (`compat`, which keep today's rule). Every other frozen name is proven.
+    struct TierRecord {
+        provisional: BTreeSet<String>,
+        compat: BTreeSet<String>,
+    }
+
+    /// The names the FrontiersForge compatibility layer owns (`frontiers_forge`, `UiForge`, `bit`).
+    fn is_compat_root(name: &str) -> bool {
+        ["frontiers_forge", "UiForge", "bit"]
+            .iter()
+            .any(|root| name == *root || name.strip_prefix(root).is_some_and(|rest| rest.starts_with('.')))
+    }
+
+    fn read_tier_names(
+        tiers: &Json,
+        key: &str,
+        known: &BTreeSet<&str>,
+        problems: &mut Vec<String>,
+    ) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        let Some(list) = tiers[key].as_array() else {
+            problems.push(format!("tiers file: `{key}` is not a list"));
+            return out;
+        };
+        for item in list {
+            let Some(name) = item.as_str() else {
+                problems.push(format!("tiers file: `{key}` holds something that is not a string"));
+                continue;
+            };
+            if !known.contains(name) {
+                problems.push(format!("tiers file: `{key}` lists {name}, which is not in the frozen record"));
+            }
+            if !out.insert(name.to_string()) {
+                problems.push(format!("tiers file: `{key}` lists {name} twice"));
+            }
+        }
+        out
+    }
+
+    /// Reads a tiers file against the frozen record. `Err` has one line per way it is malformed.
+    fn parse_tiers(frozen: &Json, tiers: &Json) -> Result<TierRecord, Vec<String>> {
+        let known: BTreeSet<&str> = frozen["supported"]
+            .as_array()
+            .expect("supported")
+            .iter()
+            .map(|p| p.as_str().expect("path"))
+            .collect();
+        let mut problems = Vec::new();
+        if tiers["api"] != "eqoa/1" {
+            problems.push("tiers file: `api` is not \"eqoa/1\"".to_string());
+        }
+        if tiers["schema_version"] != 1 {
+            problems.push("tiers file: `schema_version` is not 1".to_string());
+        }
+        let provisional = read_tier_names(tiers, "provisional", &known, &mut problems);
+        let compat = read_tier_names(tiers, "compat", &known, &mut problems);
+        for name in provisional.intersection(&compat) {
+            problems.push(format!("tiers file: {name} is both provisional and compat"));
+        }
+        for name in &known {
+            if is_compat_root(name) != compat.contains(*name) {
+                problems.push(format!(
+                    "tiers file: {name} {} in `compat`, but {}",
+                    if compat.contains(*name) { "is" } else { "is not" },
+                    if is_compat_root(name) {
+                        "it belongs to the FrontiersForge layer"
+                    } else {
+                        "it is not part of the FrontiersForge layer"
+                    }
+                ));
+            }
+        }
+        if problems.is_empty() {
+            Ok(TierRecord { provisional, compat })
+        } else {
+            Err(problems)
+        }
+    }
+
+    fn non_empty<'a>(entry: &'a Json, key: &str) -> Option<&'a str> {
+        entry[key].as_str().filter(|s| !s.trim().is_empty())
+    }
+
+    /// Reads `docs/modding/eqoa-1-corrections.json` (`[{ "name", "what", "notes_version" }]`): the set of
+    /// names whose correction is declared. Only a provisional name can be corrected.
+    fn parse_corrections(corrections: &Json, tiers: &TierRecord) -> Result<BTreeSet<String>, Vec<String>> {
+        let mut problems = Vec::new();
+        let mut out = BTreeSet::new();
+        let Some(list) = corrections.as_array() else {
+            return Err(vec!["corrections file: not a list".to_string()]);
+        };
+        for entry in list {
+            let (Some(name), Some(_), Some(_)) = (
+                non_empty(entry, "name"),
+                non_empty(entry, "what"),
+                non_empty(entry, "notes_version"),
+            ) else {
+                problems.push(format!(
+                    "corrections file: an entry needs a non-empty `name`, `what` and `notes_version`: {entry}"
+                ));
+                continue;
+            };
+            if !tiers.provisional.contains(name) {
+                problems.push(format!(
+                    "corrections file: {name} is not a provisional name; a proven or compat name cannot be corrected"
+                ));
+            }
+            if !out.insert(name.to_string()) {
+                problems.push(format!("corrections file: {name} is listed twice"));
+            }
+        }
+        if problems.is_empty() { Ok(out) } else { Err(problems) }
+    }
+
+    /// The final-freeze guard. A proven or compat name that changed status or disappeared is a violation
+    /// (as in `frozen_violations`); so is a provisional one, unless `corrected` lists it and `notes` names
+    /// it in backticks. The lines for violations that remain are exactly `frozen_violations`' lines.
+    fn final_freeze_violations(
+        frozen: &Json,
+        current: &Json,
+        tiers: &TierRecord,
+        corrected: &BTreeSet<String>,
+        notes: &str,
+    ) -> Vec<String> {
+        frozen_violations(frozen, current)
+            .into_iter()
+            .filter_map(|line| {
+                let name = line.split(": ").next().unwrap_or("");
+                if !tiers.provisional.contains(name) || !corrected.contains(name) {
+                    return Some(line);
+                }
+                if notes.contains(&format!("`{name}`")) {
+                    None
+                } else {
+                    Some(format!(
+                        "{line} (listed in eqoa-1-corrections.json, but FORK-UPDATE-NOTES.md does not name `{name}`)"
+                    ))
+                }
+            })
+            .collect()
+    }
+
+    fn doc_json(file: &str) -> Json {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/modding").join(file);
+        serde_json::from_slice(&std::fs::read(&path).unwrap_or_else(|e| panic!("{file}: {e}")))
+            .unwrap_or_else(|e| panic!("{file} is not JSON: {e}"))
+    }
+
+    fn update_notes() -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../FORK-UPDATE-NOTES.md");
+        std::fs::read_to_string(path).expect("FORK-UPDATE-NOTES.md")
+    }
+
+    fn committed_tiers() -> TierRecord {
+        match parse_tiers(&frozen_record(), &doc_json("eqoa-1-tiers.json")) {
+            Ok(tiers) => tiers,
+            Err(problems) => panic!("docs/modding/eqoa-1-tiers.json is malformed:\n  {}", problems.join("\n  ")),
+        }
+    }
+
+    /// A tiny frozen record, tiers and surface for the controls: `a.proven`, `a.prov`, `a.prov2`, `bit.band`.
+    fn tiny() -> (Json, Json, Json) {
+        let frozen = json!({"supported":["a.proven","a.prov","a.prov2","bit.band"]});
+        let tiers = json!({"api":"eqoa/1","schema_version":1,"provisional":["a.prov","a.prov2"],"compat":["bit.band"]});
+        (frozen.clone(), tiers, surface_of_frozen(&frozen))
+    }
+
+    fn without(surface: &Json, path: &str) -> Json {
+        let rows: Vec<Json> = surface["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["path"] != path)
+            .cloned()
+            .collect();
+        json!({"capabilities":rows})
+    }
+
+    fn downgraded(surface: &Json, path: &str) -> Json {
+        let mut out = surface.clone();
+        for row in out["capabilities"].as_array_mut().unwrap() {
+            if row["path"] == path {
+                row["status"] = json!("unsupported");
+            }
+        }
+        out
+    }
+
+    fn set(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The committed tiers file is well formed against the frozen record, the corrections file reads, and
+    /// the final rule passes on today's surface. (Needs no GPU.)
+    #[test]
+    fn eqoa1_tiers_files_are_well_formed_today() {
+        let frozen = frozen_record();
+        let tiers = committed_tiers();
+        assert!(!tiers.provisional.is_empty() && !tiers.compat.is_empty());
+        let corrected = parse_corrections(&doc_json("eqoa-1-corrections.json"), &tiers)
+            .unwrap_or_else(|p| panic!("corrections file is malformed:\n  {}", p.join("\n  ")));
+        let bad = final_freeze_violations(&frozen, &surface_of_frozen(&frozen), &tiers, &corrected, &update_notes());
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
+    }
+
+    /// Positive and negative controls of the final-freeze rule, on synthetic input.
+    #[test]
+    fn eqoa1_final_rule_controls() {
+        let (frozen, tiers_json, base) = tiny();
+        let tiers = parse_tiers(&frozen, &tiers_json).unwrap();
+        let ok = |current: &Json, corrected: &[&str], notes: &str| {
+            final_freeze_violations(&frozen, current, &tiers, &set(corrected), notes)
+        };
+        assert!(ok(&base, &[], "").is_empty());
+        // A provisional name that disappears is a violation unless it is corrected AND named in the notes.
+        let gone = without(&base, "a.prov");
+        assert_eq!(ok(&gone, &[], "`a.prov`"), vec!["a.prov: supported -> removed".to_string()]);
+        assert!(ok(&gone, &["a.prov"], "`a.prov` was renamed").is_empty());
+        // Negative controls: the notes do not name it (or name another, or name it without backticks).
+        assert_eq!(ok(&gone, &["a.prov"], "").len(), 1);
+        assert_eq!(ok(&gone, &["a.prov"], "`a.prov2` was renamed").len(), 1);
+        assert_eq!(ok(&gone, &["a.prov"], "a.prov was renamed").len(), 1);
+        assert!(ok(&gone, &["a.prov"], "").remove(0).contains("does not name"));
+        // Negative control: named in the notes but not in the corrections file.
+        assert_eq!(ok(&gone, &[], "`a.prov` was renamed").len(), 1);
+        // A correction covers only its own name.
+        let both = without(&gone, "a.prov2");
+        assert_eq!(ok(&both, &["a.prov"], "`a.prov` `a.prov2`").len(), 1);
+        assert!(ok(&both, &["a.prov", "a.prov2"], "`a.prov` `a.prov2`").is_empty());
+        // A provisional name that loses its status is treated the same way.
+        let down = downgraded(&base, "a.prov");
+        assert_eq!(ok(&down, &[], "`a.prov`"), vec!["a.prov: supported -> unsupported".to_string()]);
+        assert!(ok(&down, &["a.prov"], "`a.prov`").is_empty());
+        // A proven name is never excused, even with a correction and a note.
+        for current in [without(&base, "a.proven"), downgraded(&base, "a.proven")] {
+            assert_eq!(ok(&current, &["a.proven"], "`a.proven`").len(), 1);
+            assert_eq!(ok(&current, &[], "").len(), 1);
+        }
+        // A compat name follows today's rule: no correction loosens it.
+        for current in [without(&base, "bit.band"), downgraded(&base, "bit.band")] {
+            assert_eq!(ok(&current, &["bit.band"], "`bit.band`").len(), 1);
+        }
+        // Additions never fail the guard.
+        let mut grown = base.clone();
+        grown["capabilities"].as_array_mut().unwrap().push(json!({"path":"a.new","status":"supported","children":[]}));
+        assert!(ok(&grown, &[], "").is_empty());
+    }
+
+    /// While the corrections file is empty the final rule must give the live guard's answer (candidate
+    /// phase: the guard must not become looser). Checked for proven, provisional and compat names, for a
+    /// removal and for a status change, on the real frozen record and tiers file.
+    #[test]
+    fn eqoa1_final_rule_equals_the_live_guard_without_corrections() {
+        let frozen = frozen_record();
+        let tiers = committed_tiers();
+        let base = surface_of_frozen(&frozen);
+        let names: Vec<&str> = frozen["supported"].as_array().unwrap().iter().map(|p| p.as_str().unwrap()).collect();
+        let pick = |wanted: &dyn Fn(&str) -> bool| names.iter().copied().filter(|n| wanted(*n)).take(4).collect::<Vec<_>>();
+        let proven = pick(&|n| !tiers.provisional.contains(n) && !tiers.compat.contains(n));
+        let provisional = pick(&|n| tiers.provisional.contains(n));
+        let compat = pick(&|n| tiers.compat.contains(n));
+        assert!(proven.len() == 4 && provisional.len() == 4 && compat.len() == 4);
+        let empty = BTreeSet::new();
+        for name in proven.iter().chain(&provisional).chain(&compat) {
+            for current in [without(&base, name), downgraded(&base, name)] {
+                let live = frozen_violations(&frozen, &current);
+                assert_eq!(live.len(), 1, "{name}");
+                assert_eq!(final_freeze_violations(&frozen, &current, &tiers, &empty, &update_notes()), live, "{name}");
+            }
+        }
+        assert!(final_freeze_violations(&frozen, &base, &tiers, &empty, "").is_empty());
+        // Negative control of this comparison: with a correction the two rules differ for a provisional name.
+        let name = provisional[0];
+        let gone = without(&base, name);
+        let corrected = set(&[name]);
+        let notes = format!("`{name}` was corrected");
+        assert!(final_freeze_violations(&frozen, &gone, &tiers, &corrected, &notes).is_empty());
+        assert_eq!(frozen_violations(&frozen, &gone).len(), 1);
+    }
+
+    /// Malformed tiers and corrections files are refused, each way.
+    #[test]
+    fn eqoa1_tier_file_malformations_are_caught() {
+        let (frozen, good, _) = tiny();
+        assert!(parse_tiers(&frozen, &good).is_ok());
+        let with = |key: &str, value: Json| {
+            let mut t = good.clone();
+            t[key] = value;
+            parse_tiers(&frozen, &t).err().map(|p| p.join("\n")).unwrap_or_default()
+        };
+        // A provisional name the frozen record does not have.
+        assert!(with("provisional", json!(["a.prov", "a.ghost"])).contains("a.ghost, which is not in the frozen record"));
+        // Listed twice.
+        assert!(with("provisional", json!(["a.prov", "a.prov"])).contains("a.prov twice"));
+        // Both provisional and compat.
+        assert!(with("compat", json!(["bit.band", "a.prov"])).contains("a.prov is both provisional and compat"));
+        // A FrontiersForge name left out of compat, or an ordinary name put in.
+        assert!(with("compat", json!([])).contains("bit.band is not in `compat`"));
+        assert!(with("compat", json!(["bit.band", "a.proven"])).contains("a.proven is in `compat`"));
+        // Wrong shape and wrong api.
+        assert!(with("provisional", json!("a.prov")).contains("not a list"));
+        assert!(with("provisional", json!([7])).contains("not a string"));
+        assert!(with("api", json!("eqoa/2")).contains("`api`"));
+        assert!(with("schema_version", json!(2)).contains("schema_version"));
+
+        let tiers = parse_tiers(&frozen, &good).unwrap();
+        let entry = |name: &str| json!({"name":name,"what":"renamed","notes_version":"0.9.0"});
+        assert_eq!(parse_corrections(&json!([]), &tiers).unwrap(), BTreeSet::new());
+        assert_eq!(parse_corrections(&json!([entry("a.prov")]), &tiers).unwrap(), set(&["a.prov"]));
+        let err = |value: Json| parse_corrections(&value, &tiers).err().map(|p| p.join("\n")).unwrap_or_default();
+        assert!(err(json!({})).contains("not a list"));
+        assert!(err(json!([entry("a.proven")])).contains("not a provisional name"));
+        assert!(err(json!([entry("bit.band")])).contains("not a provisional name"));
+        assert!(err(json!([entry("a.prov"), entry("a.prov")])).contains("a.prov is listed twice"));
+        assert!(err(json!([{"name":"a.prov","what":"renamed"}])).contains("needs a non-empty"));
+        assert!(err(json!([{"name":"a.prov","what":" ","notes_version":"0.9.0"}])).contains("needs a non-empty"));
+    }
+
+    /// The same final rule against the live surface (needs a GPU, like `eqoa1_frozen_surface_only_grows`):
+    /// with no corrections it reports exactly what the live guard reports, which is nothing today.
+    #[test]
+    #[cfg(windows)]
+    fn eqoa1_final_rule_agrees_with_the_live_surface() {
+        let Some(current) = with_graphics(reference()) else {
+            return;
+        };
+        let frozen = frozen_record();
+        let live = frozen_violations(&frozen, &current);
+        let tiers = committed_tiers();
+        let rule = final_freeze_violations(&frozen, &current, &tiers, &BTreeSet::new(), &update_notes());
+        assert_eq!(rule, live);
+        assert!(rule.is_empty(), "eqoa/1 frozen surface changed:\n  {}\n{FROZEN_POLICY}", rule.join("\n  "));
     }
 
     #[test]
