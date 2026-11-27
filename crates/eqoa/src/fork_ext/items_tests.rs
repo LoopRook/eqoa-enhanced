@@ -1865,6 +1865,21 @@ impl Play {
     pub(crate) fn bags_merchant_packet(&mut self, id: u32) {
         apply(self, opcode(0x00B7, shop_bytes(id, 90, 110, &[sword()], "Shop")));
     }
+    /// 0x00B7 with these wares (items as `Spec::from_json`): the merchant's list, as the server sends it.
+    pub(crate) fn bags_merchant_wares_packet(&mut self, id: u32, wares: &serde_json::Value) {
+        apply(self, opcode(0x00B7, shop_bytes(id, 90, 110, &specs(wares), "Shop")));
+    }
+    /// The server's answer to a purchase: the bought item arrives (0x003B) and the request is answered.
+    pub(crate) fn bags_buy_confirm(&mut self, item: &serde_json::Value) {
+        let ev = Event::InvAdd(Box::new(Spec::from_json(item).net()));
+        let cap = super::super::begin_game_event(self, &ev);
+        if let Event::InvAdd(it) = &ev {
+            let limit = it.item.max_stack;
+            crate::inventory::add_item(&mut self.dump.inventory, it, limit, crate::inventory::pack_cap());
+        }
+        self.npcw_item_added();
+        super::super::end_game_event(self, cap);
+    }
     pub(crate) fn bags_bank_packet(&mut self) {
         apply(self, opcode(0x124D, vec![]));
     }

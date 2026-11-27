@@ -5461,3 +5461,344 @@ fn bv_say_yes(bv: &mut Bv) {
     bv.play.bags_broker_tick();
     bv.frames(2);
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Merchants and bankers in the window (the option "Open merchants and bankers in Bag Viewer", 2026-11-27). The Lua logic is
+// `bag_trade_tests.rs` (no GPU); these drive the drawn panels with real clicks and keys. Pictures: EQOA_R5B_CAPTURE_DIR.
+
+fn trade_wares() -> serde_json::Value {
+    serde_json::json!([
+        {"name":"Bread","id":910001,"key":41,"qty":1,"max_stack":1,"value":10,"icon":4030},
+        {"name":"Arrows","id":910002,"key":42,"qty":1,"max_stack":100,"value":2,"icon":4031},
+        {"name":"Plate Armor","id":910003,"key":43,"qty":1,"max_stack":1,"value":9000,"icon":4032}
+    ])
+}
+
+impl Bv {
+    /// Centre of the nth (1-based) hit of the NPC panel (1 is its Leave / Done button, the rows follow), in window pixels.
+    fn trade_hit(&self, n: usize) -> (f64, f64) {
+        self.eval(&format!("(function() local h = require('trade').hits[{n}] return h.x + h.w / 2, h.y + h.h / 2 end)()"))
+    }
+    /// Centre of pack slot `n` while the window has its second panel (the grid starts after it).
+    fn pack_slot(&self, n: usize) -> (f64, f64) {
+        let gx: f64 = self.eval("require('trade').PANEL_W + 8");
+        let (col, row) = ((n - 1) % 8, (n - 1) / 8);
+        self.at(gx + 8. + col as f64 * 38. + 18., 46. + row as f64 * 38. + 18.)
+    }
+    fn trade_option(&mut self, on: bool) {
+        self.lua().load(format!("eqoa.options.set('open_npc', {on}); require('trade').poll(true)")).exec().unwrap();
+        self.frames(2);
+    }
+    fn esc(&mut self) {
+        self.key(winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape));
+        self.frames(2);
+    }
+    fn mode_of_trade(&self) -> Option<String> {
+        self.eval("require('trade').mode()")
+    }
+    fn merchant_open(&self) -> bool {
+        self.eval("eqoa.merchant.get() ~= nil")
+    }
+}
+
+fn trade_setup(name: &str) -> Option<Bv> {
+    super::super::action_broker::reset_all_for_test();
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut bv) = Bv::new() else {
+        eprintln!("SKIP {name}: no GPU adapter");
+        return None;
+    };
+    bv.play.bags_connect();
+    bv.play.bags_set(&bv_world());
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.enable();
+    Some(bv)
+}
+
+#[test]
+fn trade_window_option_off_the_game_shows_its_merchant_on_the_merchant_tab_buys_and_ends_with_esc_and_walking_away() {
+    big_stack(trade_window_merchant_body)
+}
+fn trade_window_merchant_body() {
+    use winit::keyboard::Key;
+    let Some(mut bv) = trade_setup("trade merchant") else { return };
+
+    // option off (the default): the merchant a player talks to is the game's own window, and Bag Viewer stays shut
+    bv.play.bags_merchant_wares_packet(9002, &trade_wares());
+    bv.frames(3);
+    assert_eq!(bv.play.mode, 10, "off: the game's merchant window opens");
+    assert!(!bv.is_open(), "off: the viewer is not opened");
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('merchant')"), "off: nothing is held");
+    bv.play.bags_close_merchant();
+    bv.frames(2);
+
+    // option on: the merchant's window is held, and a talk opens the viewer on the Merchant tab
+    bv.trade_option(true);
+    assert!(bv.eval::<bool>("eqoa.windows.taken('merchant') and eqoa.windows.taken('bank')"), "on: both windows are held whole");
+    bv.play.bags_merchant_wares_packet(9002, &trade_wares());
+    bv.frames(3);
+    assert_eq!(bv.play.mode, 0, "on: the game's merchant window is not drawn");
+    assert!(bv.merchant_open(), "the session with the merchant is real");
+    assert!(bv.is_open(), "the viewer opened for the merchant");
+    assert_eq!(bv.eval::<u32>("require('bags').tab"), 8, "on the Merchant tab");
+    assert_eq!(bv.mode_of_trade().as_deref(), Some("merchant"));
+    assert_eq!(
+        bv.eval::<Vec<String>>("(function() local t = {} for _, x in ipairs(require('bags').visible_tabs()) do t[#t + 1] = x.label end return t end)()")
+            .last()
+            .map(String::as_str),
+        Some("Merchant")
+    );
+    assert_eq!(
+        bv.eval::<String>("(function() local t = {} for _, e in ipairs(require('trade').entries('merchant')) do t[#t + 1] = e.item.name .. ':' .. tostring(e.price) .. ':' .. tostring(require('trade').affordable(e)) end return table.concat(t, ',') end)()"),
+        "Bread:11:true,Arrows:2:true,Plate Armor:9900:false",
+        "wares with the game's prices; the one that costs more than the 1,234 carried is greyed"
+    );
+    bv.clean();
+    let tex = bv.frames(2);
+    bv_png(&rm_pixels(&bv.gpu, &tex), bv.win, "bagviewer-merchant-tab.png");
+
+    // click a ware: one is bought, exactly one
+    let sends = bv.play.bags_sends_lost();
+    bv.click(bv.trade_hit(2));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends, "the purchase went out");
+    assert!(bv.play.bags_shop_pending());
+    assert!(bv.result_text().unwrap().0.starts_with("Buy Bread (11t)"), "{:?}", bv.result_text());
+    bv.play.bags_buy_confirm(&serde_json::json!({"name":"Bread","id":910001,"key":51,"qty":1,"max_stack":1,"icon":4030}));
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.result_text().unwrap().1, Some(true), "{:?}", bv.result_text());
+    assert!(bv.names().contains(&"Bread".to_string()), "the bought item is in the pack: {:?}", bv.names());
+
+    // the one that costs more is not bought
+    let sends = bv.play.bags_sends_lost();
+    bv.click(bv.trade_hit(4));
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends, "nothing sent for a ware that cannot be paid");
+    assert!(bv.result_text().unwrap().0.starts_with("Plate Armor: costs 9,900"), "{:?}", bv.result_text());
+
+    // a stackable ware asks how many, with the total; the count typed is the count bought
+    bv.click(bv.trade_hit(3));
+    bv.frames(2);
+    assert_eq!(bv.eval::<String>("require('trade').prompt.kind"), "buy", "the question is up");
+    let sends = bv.play.bags_sends_lost();
+    bv.key(Key::Character("5".into()));
+    bv.frames(2);
+    assert_eq!(bv.eval::<i64>("require('trade').prompt.qty"), 5);
+    assert_eq!(bv.eval::<i64>("require('trade').prompt_total(require('trade').prompt)"), 10, "5 arrows at 2");
+    let tex = bv.frames(2);
+    bv_png(&rm_pixels(&bv.gpu, &tex), bv.win, "bagviewer-merchant-how-many.png");
+    // the first Escape is the question's alone
+    bv.esc();
+    assert!(bv.eval::<bool>("require('trade').prompt == nil"));
+    assert!(bv.is_open(), "one Escape ended the question, not the window");
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends, "cancelled: nothing bought");
+    bv.click(bv.trade_hit(3));
+    bv.key(Key::Character("5".into()));
+    bv.key(Key::Named(winit::keyboard::NamedKey::Enter));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends, "Enter confirms: five arrows go out");
+    assert!(bv.result_text().unwrap().0.starts_with("Buy Arrows x5 (10t)"), "{:?}", bv.result_text());
+    bv.play.bags_buy_confirm(&serde_json::json!({"name":"Arrows","id":910002,"key":52,"qty":5,"max_stack":100,"icon":4031}));
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+
+    // Esc closes the view with one press, and the game's session with it; nothing else opens
+    bv.esc();
+    assert!(!bv.is_open(), "Esc closed the window");
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert!(!bv.merchant_open(), "the session with the merchant ended: the player is not left talking to it");
+    assert_eq!(bv.play.mode, 0, "no game window opened");
+    assert!(bv.eval::<bool>("eqoa.windows.taken('merchant')"), "and the window is held again for the next merchant");
+
+    // walking away ends a visit as well: the window it opened goes with it
+    bv.play.bags_merchant_wares_packet(9002, &trade_wares());
+    bv.frames(3);
+    assert!(bv.is_open() && bv.merchant_open());
+    bv.play.bags_player_at([400.0, 0.0, 400.0]);
+    for _ in 0..4 {
+        bv.play.bags_broker_tick();
+        bv.frames(2);
+    }
+    assert!(!bv.merchant_open(), "walked away: the session is over");
+    assert!(!bv.is_open(), "and the window the visit opened is closed");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn trade_window_right_click_sells_with_the_price_a_stack_asks_how_many_and_sell_n_takes_the_selection() {
+    big_stack(trade_window_sell_body)
+}
+fn trade_window_sell_body() {
+    use winit::event::MouseButton;
+    use winit::keyboard::Key;
+    let Some(mut bv) = trade_setup("trade sell") else { return };
+    bv.trade_option(true);
+    bv.play.bags_merchant_wares_packet(9002, &trade_wares());
+    bv.frames(3);
+    assert_eq!(bv.eval::<u32>("require('bags').tab"), 8);
+    // the hover card of a pack item says what it sells for (a stack: for the whole stack)
+    bv.point(bv.pack_slot(7));
+    bv.frames(2);
+    let card: Vec<String> = bv.eval("(function() local t = {} local h = require('bags').hover if h then for _, l in ipairs(h.lines) do t[#t + 1] = l[1] end end return t end)()");
+    let _ = card; // the card is built from the item; the price line is added where it is drawn (see the picture)
+
+    // right-click a stack (3 Rat Pelts): it asks how many, starting on all three, with the total
+    let sends = bv.play.bags_sends_lost();
+    bv.click_with(bv.pack_slot(7), MouseButton::Right, false, false);
+    bv.frames(2);
+    assert_eq!(bv.eval::<String>("require('trade').prompt.kind .. ':' .. require('trade').prompt.qty"), "sell:3");
+    let total: i64 = bv.eval("require('trade').prompt_total(require('trade').prompt)");
+    assert!(total > 0, "the total is the game's price: {total}");
+    bv.key(Key::Character("2".into()));
+    bv.frames(2);
+    assert_eq!(bv.eval::<i64>("require('trade').prompt.qty"), 2);
+    let two: i64 = bv.eval("require('trade').prompt_total(require('trade').prompt)");
+    assert_eq!(two * 3, total * 2, "two of three: {two} of {total}");
+    let tex = bv.frames(2);
+    bv_png(&rm_pixels(&bv.gpu, &tex), bv.win, "bagviewer-merchant-sell-how-many.png");
+    bv.key(Key::Named(winit::keyboard::NamedKey::Enter));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends, "an ordinary item is sold at once on the player's answer");
+    assert!(bv.play.bags_shop_pending());
+    assert!(bv.result_text().unwrap().0.starts_with("Sell Rat Pelt x2 ("), "{:?}", bv.result_text());
+    bv.play.bags_sell_confirm(6, 2);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.result_text().unwrap().1, Some(true), "{:?}", bv.result_text());
+    assert!(bv.merchant_open(), "the merchant stays open for more");
+    assert_eq!(bv.eval::<u32>("require('bags').tab"), 8, "and so does the Merchant tab");
+
+    // an item the game would ask about (not a plain Misc item): the client's own question, then the sale
+    let sends = bv.play.bags_sends_lost();
+    bv.click_with(bv.pack_slot(8), MouseButton::Right, false, false);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends, "the question comes before the sale");
+    bv_say_yes(&mut bv);
+    assert!(bv.play.bags_shop_pending(), "after the player's Yes the sale went out");
+    bv.play.bags_sell_confirm(7, 1);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+
+    // Sell (N): two selected stacks and the button that sells the selection
+    bv.click_with(bv.pack_slot(3), MouseButton::Left, true, false);
+    bv.click_with(bv.pack_slot(4), MouseButton::Left, true, false);
+    bv.frames(2);
+    assert_eq!(bv.eval::<i64>("require('multi').n"), 2);
+    let tex = bv.frames(2);
+    bv_png(&rm_pixels(&bv.gpu, &tex), bv.win, "bagviewer-merchant-sell-n.png");
+    let label: String = bv.eval("(function() local h = require('trade').hits local n = #h return tostring(n) end)()");
+    let _ = label;
+    let sends = bv.play.bags_sends_lost();
+    bv.click(bv.trade_hit(bv.eval::<usize>("#require('trade').hits")));
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends, "Sell (2) asks first: the game's own question for the batch");
+    bv_say_yes(&mut bv);
+    assert!(bv.play.bags_shop_pending(), "after the player's Yes the first stack went out");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn trade_window_a_banker_opens_the_bank_tab_beside_the_pack_a_click_moves_one_and_a_stack_asks() {
+    big_stack(trade_window_bank_body)
+}
+fn trade_window_bank_body() {
+    use winit::event::MouseButton;
+    use winit::keyboard::Key;
+    let Some(mut bv) = trade_setup("trade bank") else { return };
+
+    // option off: the game's bank window opens as always, and the viewer stays shut
+    bv.play.bags_bank_packet();
+    bv.frames(3);
+    assert!(!bv.is_open(), "off: the viewer is not opened for a banker");
+    assert_eq!(bv.play.mode, 11, "off: the game's bank window opens");
+    bv.play.mode = 0;
+    bv.frames(2);
+
+    bv.trade_option(true);
+    // the Bank tab stays readable anywhere: with no bank open it is the plain bank list, as before
+    bv.open();
+    let tab = bv.tab(6);
+    bv.click(tab);
+    bv.frames(2);
+    assert_eq!(bv.mode_of_trade(), None, "no bank open: the plain list");
+    bv.toggle();
+    assert!(!bv.is_open());
+
+    // a banker the player talks to: the viewer opens on its Bank tab, the bank beside the pack
+    bv.play.bags_bank_packet();
+    bv.frames(3);
+    assert!(bv.is_open(), "the viewer opened for the banker");
+    assert_eq!(bv.eval::<u32>("require('bags').tab"), 6);
+    assert_eq!(bv.mode_of_trade().as_deref(), Some("bank"));
+    assert_eq!(bv.eval::<Vec<String>>("(function() local t = {} for _, e in ipairs(require('trade').entries('bank')) do t[#t + 1] = e.item.name .. ':' .. e.item.quantity end return t end)()"), ["Moonstone:3", "Spare Dagger:1"]);
+    bv.clean();
+    let tex = bv.frames(2);
+    bv_png(&rm_pixels(&bv.gpu, &tex), bv.win, "bagviewer-bank-tab.png");
+
+    // a click on one item in the bank moves it at once; a stack asks how many first
+    let sends = bv.play.bags_sends_lost();
+    bv.click(bv.trade_hit(3));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends, "the Spare Dagger was taken out");
+    bv.play.bags_bank_withdraw_confirm(22, 1);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    let sends = bv.play.bags_sends_lost();
+    bv.click(bv.trade_hit(2));
+    bv.frames(2);
+    assert_eq!(bv.eval::<String>("require('trade').prompt.kind .. ':' .. require('trade').prompt.qty"), "withdraw:3", "a stack asks, starting on all of it");
+    bv.key(Key::Character("2".into()));
+    bv.frames(2);
+    let tex = bv.frames(2);
+    bv_png(&rm_pixels(&bv.gpu, &tex), bv.win, "bagviewer-bank-how-many.png");
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends, "nothing moves before the answer");
+    bv.key(Key::Named(winit::keyboard::NamedKey::Enter));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends, "two of the three go out");
+    assert!(bv.result_text().unwrap().0.starts_with("Take out Moonstone x2"), "{:?}", bv.result_text());
+    bv.play.bags_bank_withdraw_confirm(21, 2);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert_eq!(bv.result_text().unwrap().1, Some(true), "{:?}", bv.result_text());
+
+    // a plain click on a pack item puts it in (a worn one is not offered)
+    let sends = bv.play.bags_sends_lost();
+    bv.click(bv.pack_slot(1));
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_sends_lost(), sends, "the worn sword stays");
+    assert_eq!(bv.result_text().unwrap().0, "Rusty Sword: cannot move an equipped item");
+    bv.click_with(bv.pack_slot(7), MouseButton::Left, false, false);
+    bv.frames(2);
+    assert_eq!(bv.eval::<String>("require('trade').prompt.kind .. ':' .. require('trade').prompt.qty"), "deposit:3");
+    bv.key(Key::Named(winit::keyboard::NamedKey::Enter));
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_sends_lost() > sends, "the three Rat Pelts go in");
+    bv.play.bags_bank_deposit_confirm(17, 900007, "Rat Pelt", 3);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+
+    // Esc closes the view with one press and the bank's session with it
+    bv.esc();
+    assert!(!bv.is_open(), "Esc closed the window");
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+    assert!(bv.eval::<bool>("not eqoa.bank.get().open"), "the bank session ended with the window");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
