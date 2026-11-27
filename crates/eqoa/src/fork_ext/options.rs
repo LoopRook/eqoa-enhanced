@@ -158,6 +158,8 @@ pub(super) fn change(c: &mut ClientOptions, item: i32) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         item if crate::fork_ext::addons::options::is_game_stat_window_item(item) => {
             c.stat_window = !c.stat_window;
+            // kept at once, as F4 keeps it: the row is not one of the page's previews that backing out puts back
+            crate::fork_ext::addons::options::keep_stat_window_from_the_row(c.stat_window);
         }
         #[cfg(not(target_arch = "wasm32"))]
         item if item >= crate::fork_ext::addons::options::MOD_OPTION_BASE => {
@@ -725,5 +727,40 @@ quest_tracker=off
         settings::set_stat_window(false).unwrap();
         w.key(&vui, &mut NullRaster, &mut o, key::CROSS, 0, &mut cues, &mut ups);
         assert_eq!(state(&mut w, &o, &mut ups), (Some(false), false), "✕ does nothing on the row");
+
+        // Round 2b: the row keeps at once. Set On, back out of the page WITHOUT Save Changes (Triangle up to the menu, Triangle on
+        // the menu): the setting, client.opt as kept and the row on opening the page again all say On. Control: another option
+        // changed in the same visit (not saved) IS put back, in memory and out of the file.
+        let kept_text = || String::from_utf8_lossy(&testing::kept("client.opt").unwrap_or_default()).into_owned();
+        let visit = |w: &mut WndOptions, o: &mut GameOptions, cues: &mut Vec<i32>, ups: &mut Vec<crate::options::OptionsUp>| {
+            w.open(&vui, &NullRaster, o);
+            w.sel = 3;
+            w.key(&vui, &mut NullRaster, o, key::CROSS, 0, cues, ups);
+            w.grp_sel = other as i32;
+            w.key(&vui, &mut NullRaster, o, key::CROSS, 0, cues, ups);
+            w.cat_sel = (in_other.len() - 1) as i32;
+            w.key(&vui, &mut NullRaster, o, key::CROSS, 0, cues, ups);
+            w.draw(&vui, &mut NullRaster, o, ups);
+        };
+        settings::set_stat_window(false).unwrap();
+        let marks_before = settings::client().quest_markers;
+        visit(&mut w, &mut o, &mut cues, &mut ups);
+        assert_eq!(w.item, 2000);
+        // another option changed in the same visit, as the page does it (a copy of the options, `set_client`)
+        let mut other_row = settings::client();
+        other_row.quest_markers = !marks_before;
+        settings::set_client(other_row);
+        w.key(&vui, &mut NullRaster, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
+        assert_eq!(state(&mut w, &o, &mut ups), (Some(true), true), "the row set On");
+        assert!(kept_text().contains("stat_window=on"), "kept at once, in client.opt: {}", kept_text());
+        for _ in 0..4 {
+            w.key(&vui, &mut NullRaster, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups); // up to the menu (three), then the cancel
+        }
+        assert!(settings::stat_window(), "backing out without saving leaves the Stats Box as it was set");
+        assert!(kept_text().contains("stat_window=on"), "and client.opt as kept says On: {}", kept_text());
+        assert_eq!(settings::client().quest_markers, marks_before, "control: the other option, changed in the same visit, is put back");
+        assert_eq!(kept_text().contains("quest_markers=off"), !marks_before, "control: and it never reached client.opt");
+        visit(&mut w, &mut o, &mut cues, &mut ups);
+        assert_eq!(state(&mut w, &o, &mut ups), (Some(true), true), "the row reads On when the page is opened again");
     }
 }
