@@ -543,7 +543,11 @@ every normal quit.
 - **With "Use the game's windows" on, the window mods' keys (Shift+B, Shift+K and the like) do nothing** and only the
   log says why.
 - **Auto-sell junk ends at once with "walked away (more than 25 units)"** in the owner's log.
-- **A window in the back runs at 15 to 27 frames a second in the world** (100 in the pregame).
+- **A window in the back runs at 15 to 27 frames a second in the world** (100 in the pregame). The owner expects two
+  clients side by side to both run at full speed. Not a deliberate cap: the only one is upstream's "Slow When Not
+  Focused" (Options, Extended, Multi-boxing settings; about 30 a second for a covered window, off by default, per
+  window). Wants a measurement with that row off: which step of the frame waits (the present of a covered window,
+  two clients on one graphics card, or work held back when not in front).
 - **About half a second's stall at every world entry** in the mods' first frame.
 - **The bank is talked to three times in a row**, and two bank sessions ended on the 15-second idle timeout.
 
