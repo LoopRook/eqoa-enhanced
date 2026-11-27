@@ -398,6 +398,7 @@ pub(crate) fn dispatch(play: &mut Play, action: &A6Action) -> DispatchOutcome {
             DispatchOutcome::Completed { detail: Some(json!({"sent": true, "channel": native_a6::channel_name(*channel)})) }
         }
         A6Action::ChatLine { route, to, text, links } => chat_line(play, *route, to.as_deref(), text, links),
+        A6Action::OpenChatLine { text } => open_chat_line(play, text),
         A6Action::OpenLink { id, name } => {
             // the server offers no links (`unsupported`), or the player has turned Item Links off (`unavailable`)
             if !play.session.item_links_offer {
@@ -411,6 +412,20 @@ pub(crate) fn dispatch(play: &mut Play, action: &A6Action) -> DispatchOutcome {
             DispatchOutcome::Completed { detail: Some(json!({"sent": true})) }
         }
     }
+}
+
+/// `eqoa.actions.open_chat_line`: the game's own chat key with `text` in the line (`Play::keyboard_chat_key`, what a click
+/// on a speaker's name does in the game's chat). A mod that holds the chat line gets it as its session at the next step
+/// (`chat_entry`); where the game keeps the line (a pad opened it) the game's own box is the one open. Never sends.
+fn open_chat_line(play: &mut Play, text: &str) -> DispatchOutcome {
+    if play.is_dead() {
+        return refuse("not_ready", "cannot open the chat line while dead");
+    }
+    if play.mode != 0 || !play.hud_ready() {
+        return refuse("not_ready", "the chat line opens only in the world with no window open");
+    }
+    play.keyboard_chat_key(text);
+    DispatchOutcome::Completed { detail: Some(json!({"opened": true, "sent": false})) }
 }
 
 fn start_menu_command(play: &mut Play, vm: u64, session: &str, command: &str) -> DispatchOutcome {

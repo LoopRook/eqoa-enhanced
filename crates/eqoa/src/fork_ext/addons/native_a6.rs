@@ -72,6 +72,9 @@ pub(crate) struct LinkSpec {
     pub key: u32,
 }
 
+/// The most characters `open_chat_line` puts in the line: what the game's chat box holds (`Play::chat_key`: 128).
+const MOST_OPENED_LINE: usize = 127;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum A6Action {
     /// `eqoa.actions.menu_command(session.ref, command)`: the Start menu entry `command` of the mod's menu, run the
@@ -82,6 +85,9 @@ pub(crate) enum A6Action {
     ChatLine { route: Route, to: Option<String>, text: String, links: Vec<LinkSpec> },
     /// `eqoa.actions.open_link(id, name)`: the game's own item card for a link a chat line carried.
     OpenLink { id: u32, name: String },
+    /// `eqoa.actions.open_chat_line(text)`: the chat line opened as the player's own Enter key opens it, holding `text`.
+    /// Nothing is sent.
+    OpenChatLine { text: String },
 }
 
 impl A6Action {
@@ -91,6 +97,7 @@ impl A6Action {
             Self::SetChannel { .. } => "set_channel",
             Self::ChatLine { .. } => "chat_line",
             Self::OpenLink { .. } => "open_link",
+            Self::OpenChatLine { .. } => "open_chat_line",
         }
     }
 }
@@ -410,6 +417,27 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                     return Err(("not_found", "no recent chat line carried a link with this id".into()));
                 }
                 Ok(ActionKind::A6(A6Action::OpenLink { id, name }))
+            })
+        })?,
+    )?;
+    bind(
+        lua,
+        "actions",
+        "open_chat_line",
+        lua.create_function(|lua, text: Value| {
+            enqueue_lua_with_grant(lua, "eqoa.actions.open_chat_line", "eqoa.actions.open_chat_line", || {
+                let text = str_arg(&text).ok_or(("invalid_argument", "text must be a string".to_string()))?;
+                // the game's chat box holds 128 UTF-16 units, as `Play::chat_key` opens it
+                if text.encode_utf16().count() > MOST_OPENED_LINE {
+                    return Err(("invalid_argument", format!("text must be at most {MOST_OPENED_LINE} characters")));
+                }
+                if text.chars().any(|c| !crate::editbox::typable(c)) {
+                    return Err(("invalid_argument", "text holds a character the game's keyboard cannot type".into()));
+                }
+                if super::chat::report_route(&text) {
+                    return Err(("permission_denied", "report routes are forbidden".into()));
+                }
+                Ok(ActionKind::A6(A6Action::OpenChatLine { text }))
             })
         })?,
     )?;

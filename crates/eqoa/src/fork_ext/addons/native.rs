@@ -1594,8 +1594,8 @@ pub(super) fn unprojected_field(path: &str, field: &str) -> Option<&'static str>
             "eqoa.actions.BatchResult" | "eqoa.events.batch.progress.data" | "eqoa.events.batch.result.data",
             "detail",
         ) => Some("a batch reports what each step did in that step's action.result"),
-        ("eqoa.chat.ChatMessage" | "eqoa.events.chat.message.data", "channel_code" | "sender" | "outgoing") => {
-            Some("the chat observer retains only text, color and the channel name")
+        ("eqoa.chat.ChatMessage" | "eqoa.events.chat.message.data", "channel_code" | "outgoing") => {
+            Some("the chat observer retains only text, color, the channel name and the speaker")
         }
         ("eqoa.hotbar.HotbarSlot", "command") => Some("native hotbar rows do not expose command text"),
         ("eqoa.hotbar.HotbarSlot", "icon") => Some("use ui_icon or the referenced ability or item icon"),
