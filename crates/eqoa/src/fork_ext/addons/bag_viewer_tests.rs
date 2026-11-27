@@ -6201,7 +6201,9 @@ fn trade_phase_poll_while_passing(bv: &mut Bv) {
     bv.lua().load("eqoa.options.set('open_npc', false)").exec().unwrap();
     bv.play.bags_merchant_wares_packet(9002, &trade_wares());
     for _ in 0..8 {
+        // (the client's game step, which makes the held session and carries passes out, runs on a broker tick)
         bv.frames(1);
+        bv.play.bags_broker_tick();
         if bv.eval::<bool>("require('trade').passing.merchant ~= nil") {
             break;
         }
