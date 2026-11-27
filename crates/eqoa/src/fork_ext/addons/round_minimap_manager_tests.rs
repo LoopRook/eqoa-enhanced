@@ -1821,3 +1821,67 @@ fn owner1127a_one_state_body() {
     }
     crate::settings::testing::reset(false);
 }
+
+// ---- the owner's picture 2026-11-27h: a mod window between the minimap's picture and its ring -----------------------------
+
+/// Owner's picture 2026-11-27h (`1-casting-window-between-minimap-and-ring.png`): the Frames mod's Casting window was hidden
+/// behind the round minimap's picture but drawn over the ring around it. The minimap is one piece now, under every mod window:
+/// a mod window opened over the circle (here a real ImGui window filled with pure blue, opened after the minimap, as the
+/// Casting window was) covers the picture and the ring alike, and stays over both after the minimap goes away and comes back
+/// (the map, a zoning). Read from the frame's own pixels. Control: where the window is not, the picture and the ring are drawn.
+/// Negative control: before, the picture was drawn on ImGui's foreground list over every window: the window's pixel inside
+/// the circle was the picture's ("the window is over the minimap's picture" failed) while its pixel on the ring was blue.
+/// Set `EQOA_R4_CAPTURE_DIR` to keep the picture (`owner1127h-window-over-minimap.png`).
+#[test]
+fn owner1127h_a_mod_window_over_the_round_minimap_covers_its_picture_and_its_ring_alike() {
+    big_stack(owner1127h_window_over_minimap_body)
+}
+fn owner1127h_window_over_minimap_body() {
+    let Some(mut rm) = Rm::new(false) else { return };
+    rm.frames(4);
+    let (cx, cy, r) = rm.circle();
+    let k = r / 50.0;
+    rm.lua()
+        .load(
+            r#"
+            eqoa.events.on('render', function()
+                local ui, c = eqoa.imgui, round_minimap.circle
+                if not c or not round_minimap.shown then return end
+                local x0, y0, w, h = c.cx - c.r - 60, c.cy - 30, c.r + 60, 60
+                ui.SetNextWindowPos(x0, y0, ImGuiCond.Always)
+                ui.SetNextWindowSize(w, h, ImGuiCond.Always)
+                ui.Begin('owner1127h_window', nil, ImGuiWindowFlags.NoTitleBar + ImGuiWindowFlags.NoBackground + ImGuiWindowFlags.NoSavedSettings)
+                ui.GetWindowDrawList():AddRectFilled(ImVec2.new(x0, y0), ImVec2.new(x0 + w, y0 + h), ui.GetColorU32(0, 0, 1, 1))
+                ui.End()
+            end)"#,
+        )
+        .exec()
+        .unwrap();
+    let blue = |p: [u8; 4]| p[2] > 230 && p[0] < 30 && p[1] < 30;
+    let green = |p: [u8; 4]| {
+        let c = RM_GREEN.map(|c| (c * 255.0) as i32);
+        (0..3).all(|i| (p[i] as i32 - c[i]).abs() < 12)
+    };
+    let ring = |p: [u8; 4]| (0..3).all(|i| (p[i] as i32 - 51).abs() < 25);
+    for round in ["opened over the minimap", "after the minimap went away and came back"] {
+        if round != "opened over the minimap" {
+            rm.play.map.mini.up = false;
+            rm.frames(3);
+            rm.play.map.mini.up = true;
+            rm.frames(3);
+        }
+        let t = rm.frames(3);
+        let pixels = rm_pixels(&rm.gpu, &t);
+        if round == "opened over the minimap" {
+            rm_png(&pixels, "owner1127h-window-over-minimap.png");
+        }
+        let px = |x: f64, y: f64| rm_px(&pixels, x, y);
+        assert!(rm.state::<bool>("round_minimap.shown"), "{round}: control: the minimap is drawn");
+        assert!(blue(px(cx - 0.5 * r, cy)), "{round}: the window is over the minimap's picture: {:?}", px(cx - 0.5 * r, cy));
+        assert!(blue(px(cx - r - 1.5 * k, cy)), "{round}: and over its ring: {:?}", px(cx - r - 1.5 * k, cy));
+        // control: where the window is not, the minimap is drawn as before
+        assert!(green(px(cx + 0.5 * r, cy + 0.5 * r)), "{round}: control: the picture beside the window: {:?}", px(cx + 0.5 * r, cy + 0.5 * r));
+        assert!(ring(px(cx + r + 1.5 * k, cy)), "{round}: control: the ring beside the window: {:?}", px(cx + r + 1.5 * k, cy));
+    }
+    rm.manager.shutdown();
+}

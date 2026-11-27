@@ -1198,34 +1198,44 @@ fn render_managed(
         manager.profile_boundary(context, snapshot.character, &plan.server);
         manager.flush_pending_fonts(context);
         let ui = context.try_frame().map_err(|e| e.to_string())?;
-        if !snapshot.start_menu {
-            manager.profile_setup_controls(ui);
-        }
         let (snapshot_start_menu, snapshot_in_game) = (snapshot.start_menu, snapshot.in_game);
-        super::window_conflict::begin_frame();
         let mut open = plan.controls.unwrap_or(false);
-        super::window_sessions::set_manager_open(open && !snapshot.start_menu);
-        if open && !snapshot.start_menu {
-            let actions = controls(ui, manager, &mut open, plan.root.as_ref());
-            let extra = FramePlan::collect(actions, plan.settings.take());
-            plan.commands.extend(extra.commands);
-            plan.settings = extra.settings;
-        }
-        let probe = super::stall_probe::scope("mods frame (all mods)");
         let mut show_manager = false;
-        let settings = with_question_on_top(ui, || {
-            let settings = dispatch_frame(ui, manager, snapshot, plan);
-            // two mods wanted one window (`window_conflict`): its box, over the mods' windows
-            // only in the world with nothing of the game's up: the button must open Mods & Addons, which cannot open
-            // over Options, the Start menu, the map or a game window, and nothing is said over login or the pregame
-            if super::window_conflict::is_open() && snapshot_in_game && !snapshot_start_menu {
-                let names: Vec<(String, String)> = manager.entries().iter().map(|e| (e.metadata.id.clone(), e.metadata.name.clone())).collect();
-                show_manager = super::window_conflict::draw(ui, &|id| name_of(&names, id));
-            }
-            settings
-        });
+        // 2026-11-27h: the pointer is settled for the frame before ANY window is built, the client's own (Mods & Addons,
+        // the profile set-up) included: a click on a mod window in front of Mods & Addons is not also a click on it
+        // (`pointer_order::windows_in_order`)
+        let mut state = (&mut *manager, Some(plan), &mut open, &mut show_manager);
+        let settings = super::pointer_order::windows_in_order(
+            ui,
+            &mut state,
+            |ui, (manager, plan, open, _)| {
+                let plan = plan.as_mut().expect("the frame's plan");
+                if !snapshot_start_menu {
+                    manager.profile_setup_controls(ui);
+                }
+                super::window_conflict::begin_frame();
+                super::window_sessions::set_manager_open(**open && !snapshot_start_menu);
+                if **open && !snapshot_start_menu {
+                    let actions = controls(ui, manager, open, plan.root.as_ref());
+                    let extra = FramePlan::collect(actions, plan.settings.take());
+                    plan.commands.extend(extra.commands);
+                    plan.settings = extra.settings;
+                }
+            },
+            |ui, (manager, plan, _, show_manager)| {
+                let _probe = super::stall_probe::scope("mods frame (all mods)");
+                let settings = dispatch_frame(ui, manager, snapshot, plan.take().expect("the frame's plan"));
+                // two mods wanted one window (`window_conflict`): its box, over the mods' windows
+                // only in the world with nothing of the game's up: the button must open Mods & Addons, which cannot open
+                // over Options, the Start menu, the map or a game window, and nothing is said over login or the pregame
+                if super::window_conflict::is_open() && snapshot_in_game && !snapshot_start_menu {
+                    let names: Vec<(String, String)> = manager.entries().iter().map(|e| (e.metadata.id.clone(), e.metadata.name.clone())).collect();
+                    **show_manager = super::window_conflict::draw(ui, &|id| name_of(&names, id));
+                }
+                settings
+            },
+        );
         open |= show_manager;
-        drop(probe);
         #[cfg(test)]
         if fault == Some(RenderFault::PrepareRender) {
             return Err("injected prepare_render failure".into());

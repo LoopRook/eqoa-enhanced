@@ -199,3 +199,19 @@ pub(super) fn real_window_vm_at(x: f32, y: f32) -> Option<u64> {
     })?;
     OWNERS.with(|o| o.borrow().get(&id).copied())
 }
+
+/// One frame's windows in the order the pointer rule needs (2026-11-27h): the pointer is settled for the frame FIRST
+/// (`begin_frame`: the window the last press landed on raised, and a real window under a claimed mod window in front of it
+/// left without the pointer), THEN the client's own windows are built (Mods & Addons, a mod's settings, the profile
+/// set-up), then the mods' windows with the client's question on top (`runtime::with_question_on_top`). Built before the
+/// pointer was settled, Mods & Addons took a click meant for a mod window drawn in front of it.
+pub(super) fn windows_in_order<S, R>(
+    ui: &dear_imgui_rs::Ui,
+    state: &mut S,
+    client: impl FnOnce(&dear_imgui_rs::Ui, &mut S),
+    mods: impl FnOnce(&dear_imgui_rs::Ui, &mut S) -> R,
+) -> R {
+    begin_frame();
+    client(ui, state);
+    super::runtime::with_question_on_top(ui, || mods(ui, state))
+}
