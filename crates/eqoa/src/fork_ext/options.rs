@@ -352,7 +352,8 @@ mod tests {
         let (fork, upstream_pages) = pages().split_last().unwrap();
         assert!(super::super::pages_fit(upstream_pages) && super::super::pages_fit(pages()));
         assert_eq!(fork.name, "Enhanced");
-        assert_eq!(fork.items.len(), if cfg!(target_arch = "wasm32") { 8 } else { 9 }, "six HUD rows and the Mods & Addons rows");
+        // five HUD rows (six until the Stats Box's row left with the mod, 2026-11-27) and the Mods & Addons rows
+        assert_eq!(fork.items.len(), if cfg!(target_arch = "wasm32") { 7 } else { 8 }, "five HUD rows and the Mods & Addons rows");
         assert_eq!(pages().iter().filter(|c| c.name == "Enhanced HUD" || c.name == "Mods & Addons").count(), 0, "no second fork page");
         assert!(fork.items.len() > super::super::STANDARD_PAGE_ITEMS, "control: the fork's page is more than a standard page's rows");
         assert!(
