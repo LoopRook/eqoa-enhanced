@@ -41,4 +41,22 @@ function M.matches(options, quests)
     return out
 end
 
+-- The client's quest marks carry the guide's tag on a name ("Commander Nothard (guide)"): the plain name is what is compared.
+local GUIDE = " (guide)"
+
+-- true when a quest "step" mark (a "?": a step to do or a hand-in, not a quest on offer) is on this name.
+-- Names are compared whole, any case, punctuation ignored; the mark's position is never used.
+function M.has_step_mark(markers, name)
+    local want = M.norm(name)
+    if want == "" then return false end
+    for _, m in ipairs(markers or {}) do
+        if m.kind == "quest" and m.step == true and type(m.name) == "string" then
+            local plain = m.name
+            if plain:sub(-#GUIDE) == GUIDE then plain = plain:sub(1, #plain - #GUIDE) end
+            if M.norm(plain) == want then return true end
+        end
+    end
+    return false
+end
+
 return M

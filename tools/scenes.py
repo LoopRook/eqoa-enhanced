@@ -301,7 +301,7 @@ def handin_scene(suite, number, name, *, answers=("Hand over the Bracer Test",),
         out.append((f"the server {'finished' if expect_finished else 'did not finish'} the quest (server log)", (FINISHED in server) == expect_finished))
         out.append((f"the bracer is {'gone from' if expect_finished else 'still in'} the character's bag (database)",
                     suite.item_count(BRACER) == (0 if expect_finished else (1 if give else 0))))
-        auto_said = "handing in Bracer Test automatically" in log
+        auto_said = "speeding through the talk with Commander Nothard" in log
         out.append((f"the mod {'answered by itself' if expect_auto else 'left the answer to the player'}", auto_said == expect_auto))
         return out
 
@@ -310,7 +310,7 @@ def handin_scene(suite, number, name, *, answers=("Hand over the Bracer Test",),
                    r"takeover: response_dialog session started for the mod" if give else r"takeover: text_dialog session started for the mod"))
     return ss.Scene(
         number, name, mods=("eqoa_dialogs",), fresh_db=True, seed=handin_seed(*answers),
-        options={"eqoa_dialogs": {"auto_answer": True}} if auto else {},
+        options={"eqoa_dialogs": {"speed_hand_ins": True}} if auto else {},
         env={"EQOA_SAY": say, "EQOA_TARGET": "Commander Nothard@9000", "EQOA_PLAY_KEYS": "q@10500", **mouse},
         control_env=control_env or {},
         quit_after=22, shots="12500=1-dialog.png,16500=2-after.png", expect=expect, extra=checks,
@@ -466,11 +466,11 @@ def choice_scene(suite, number, name, *, questid, giver, level, tclass, index, s
                         row is not None and (row[0] != step or row[1] == 1)))
         if spell:
             out.append((f"the option's spell {spell} was given to the character (database)", suite.has_spell(spell)))
-        out.append(("the mod never answered by itself", "automatically" not in log))
+        out.append(("the mod never answered by itself", "speeding through" not in log))
         return out
 
     return ss.Scene(
-        number, name, mods=("eqoa_dialogs",), options={"eqoa_dialogs": {"auto_answer": True}}, fresh_db=True, seed=seed,
+        number, name, mods=("eqoa_dialogs",), options={}, fresh_db=True, seed=seed,  # the retired auto-answer rule was on here; Speed through hand-ins would step the scripted talk
         patch=DUMP_PATCH,
         env={"EQOA_SAY": f"#testmode@5000;#goto {giver}@8000", "EQOA_TARGET": f"{giver}@16500", "EQOA_PLAY_KEYS": "q@18000",
              "EQOA_MOD_KEYS": (f"enter@20000;{index + 1}@22500;enter@25000" if riddle_first else f"{index + 1}@21000;enter@24000")},

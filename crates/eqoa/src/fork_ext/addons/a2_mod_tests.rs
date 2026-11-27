@@ -1,8 +1,8 @@
 // Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
 //! Round A2: the bundled Dialog Window mod. It ships off, declares what it calls, holds its kinds with scope all, and
 //! reacts to a dialog session the client starts (the registry the packets feed: `dialog_sessions`). The quest
-//! hand-in helper is part of it: an answer is marked by the quest's own words, and the automatic option answers only
-//! a dialog whose single real answer is a hand-in.
+//! hand-in helper is part of it: an answer is marked by the quest's own words, and Speed through hand-ins steps
+//! through a talk with someone the journal sends the player to.
 use super::{
     action_broker,
     bridge::Bridge,
@@ -185,7 +185,7 @@ fn a2_dialogs_mark_an_answer_that_names_a_quest_by_its_words_and_pass_nothing() 
     let mut r = rig("eqoa_dialogs");
     r.frames(3);
     assert_eq!(options::get_toggle("eqoa_dialogs", "highlight"), Some(true), "highlight is on by default");
-    assert_eq!(options::get_toggle("eqoa_dialogs", "auto_answer"), Some(false), "automatic answers are off by default");
+    assert_eq!(options::get_toggle("eqoa_dialogs", "speed_hand_ins"), Some(false), "speeding through hand-ins is off by default");
     r.dialog(1, "Well?", &["Tell me about the weather", "I have brought the bat eyes you wanted", "Goodbye"]);
     assert!(r.frames(3) > 0, "the dialog is drawn: {:?}", r.host.drain_logs());
     assert!(dialog_sessions::take_passes().is_empty(), "a hand-in dialog is not passed back");
@@ -211,57 +211,246 @@ fn a2_dialogs_match_on_the_options_words_never_on_their_position() {
     }
 }
 
-#[test]
-fn a2_dialogs_answer_a_hand_in_by_themselves_only_when_told_to_and_only_with_one_real_answer() {
+// ---- Speed through hand-ins (2026-11-27) -------------------------------------------------------------------------
+// With the switch on, a talk to someone the journal sends the player to (a quest "?" step mark on their name) is stepped
+// through by the mod: Done is pressed, the single real answer is picked, and it stops at a real choice. These replace the
+// tests of the retired "Auto-answer hand-ins" rule (`a2_dialogs_answer_a_hand_in_by_themselves_only_when_told_to_and_only_with_one_real_answer`).
+
+const NPC: &str = "Commander Nothard";
+
+/// The client's quest marks: a "?" step on `name` (the guide's tag on the name, as the client writes it) in world 0.
+fn mark_step(name: &str) {
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.map = json!({"enabled": true, "open": false, "minimap": false, "markers_on": true, "world_id": 0, "revision": 1});
+        c.view.map_markers = vec![json!({"world_id": 0, "kind": "quest", "step": true, "name": format!("{name} (guide)"), "x": 100.0, "z": 200.0, "level_min": 1, "level_max": 9, "label": null})];
+    });
+}
+
+fn speed_rig(on: bool) -> Rig {
     let mut r = rig("eqoa_dialogs");
+    options::set_toggle("eqoa_dialogs", "speed_hand_ins", on);
     r.frames(2);
-    assert_eq!(options::get_toggle("eqoa_dialogs", "auto_answer"), Some(false), "off by default");
-    r.dialog(5, "Well?", &["Here is the bat eyes quest done"]);
-    r.frames(3);
-    assert!(action_broker::queued_kinds_for_test().is_empty(), "off: no answer");
-    drop(r);
-    // on: the single real answer is sent (the game's own More / Back / Close entries do not count as answers)
-    let mut r = rig("eqoa_dialogs");
-    options::set_toggle("eqoa_dialogs", "auto_answer", true);
-    r.frames(2);
-    r.dialog(6, "Well?", &["Here is the bat eyes quest done", "More", "Close"]);
-    r.frames(3);
-    assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "on: the one real answer is sent");
-    drop(r);
-    // a farewell is not a choice: a hand-in beside Goodbye / Farewell is still the one real answer (owner, 2026-11-23)
-    for farewell in ["Goodbye", "Farewell."] {
-        let mut r = rig("eqoa_dialogs");
-        options::set_toggle("eqoa_dialogs", "auto_answer", true);
-        r.frames(2);
-        r.dialog(7, "Well?", &[farewell, "Here is the bat eyes quest done"]);
-        r.frames(3);
-        assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "{farewell} beside a hand-in: answered");
-        drop(r);
+    r
+}
+
+impl Rig {
+    /// A plain message from `who` (None: the speaker is not known) arrives and starts as a session.
+    fn say_text(&mut self, who: Option<&str>, text: &str) {
+        let talked_to = who.map(|w| (7u32, w.to_string()));
+        dialog_sessions::hold(Item::Text { text: wide(text), talked_to }, None);
+        assert!(dialog_sessions::start_next(true, None).is_some(), "the text session started");
     }
-    // a dialog that offers a real choice (a path quest's two ways, say) is only marked (negative control: the ones
-    // above were answered)
+    /// A dialog with answers from `who` arrives and starts as a session.
+    fn say_box(&mut self, id: u32, who: Option<&str>, text: &str, options: &[&str]) {
+        let talked_to = who.map(|w| (7u32, w.to_string()));
+        dialog_sessions::hold(Item::Box { id, text: wide(text), options: options.iter().map(|o| wide(o)).collect(), talked_to }, None);
+        assert!(dialog_sessions::start_next(true, None).is_some(), "the box session started");
+    }
+    /// The server took the answer: the dialog's session ends "answered", as it does when the client sent it.
+    fn answered(&mut self) {
+        let s = ws::of_kind("text_dialog").or_else(|| ws::of_kind("response_dialog")).expect("a dialog is up");
+        dialog_sessions::finish(&s.id, "answered");
+    }
+}
+
+fn answers_sent() -> usize {
+    action_broker::queued_kinds_for_test().iter().filter(|k| **k == "dialog_answer").count()
+}
+
+#[test]
+fn speed_hand_ins_is_off_by_default_under_a_new_id_so_the_old_saved_rule_cannot_turn_it_on() {
     let mut r = rig("eqoa_dialogs");
-    options::set_toggle("eqoa_dialogs", "auto_answer", true);
-    r.frames(2);
-    r.dialog(7, "Well?", &["Here is the bat eyes quest done", "I will walk the other path", "Goodbye"]);
     r.frames(3);
-    assert!(action_broker::queued_kinds_for_test().is_empty(), "a choice is left to the player");
+    assert_eq!(options::get_toggle("eqoa_dialogs", "speed_hand_ins"), Some(false), "off until turned on");
+    assert_eq!(options::get_toggle("eqoa_dialogs", "auto_answer"), None, "the old rule's switch is gone, nothing reads a saved value of it");
+}
+
+/// (a) text, text, one answer, then two answers, to someone with a "?" for the player: three answers, and it stops at the
+/// fourth, which has the choice marked; the earlier words stay (the record). Negative control: the old rule answered none
+/// of this (no quest named in the answers), and (b) and (c) below show the same talk untouched without the mark or switch.
+#[test]
+fn speed_hand_ins_steps_through_a_talk_and_stops_at_the_first_real_choice() {
+    mark_step(NPC);
+    let mut r = speed_rig(true);
+    r.say_text(Some(NPC), "Greetings, friend.");
+    r.frames(2);
+    assert_eq!(answers_sent(), 1, "Done is pressed");
+    r.answered();
+    r.say_text(Some(NPC), "I have a task for you.");
+    r.frames(2);
+    assert_eq!(answers_sent(), 2, "Done again");
+    r.answered();
+    r.say_box(1, Some(NPC), "Will you take the bracer to the Militia?", &["Yes, I will take it", "Goodbye"]);
+    r.frames(2);
+    assert_eq!(answers_sent(), 3, "the single real answer is picked (a Goodbye beside it is not a choice)");
+    r.answered();
+    r.say_box(2, Some(NPC), "Which road will you walk?", &["The north road", "The south road"]);
+    let marked = r.frames(3);
+    assert_eq!(answers_sent(), 3, "two answers is a real choice: it waits for the player");
+    assert!(action_broker::queued_kinds_for_test().iter().all(|k| *k == "dialog_answer"), "only answers were sent");
+    let logs = r.host.drain_logs().unwrap();
+    assert!(logs.iter().any(|l| l.contains("stopped: choice") && l.contains("3 steps in the record")), "stopped at the choice with the talk recorded: {logs:?}");
+    // the stop is shown (a banner and a frame round the answers) and the earlier words are drawn: more than the same dialog bare
     drop(r);
-    // two quests named: still a choice
-    let mut r = rig("eqoa_dialogs");
-    options::set_toggle("eqoa_dialogs", "auto_answer", true);
+    let mut bare = speed_rig(false);
+    bare.say_box(2, Some(NPC), "Which road will you walk?", &["The north road", "The south road"]);
+    assert!(marked > bare.frames(3), "the stopped choice is marked and the record is drawn");
+}
+
+/// (b) control: the same talk to someone with no "?" for the player is not touched.
+#[test]
+fn speed_hand_ins_leaves_a_talk_with_someone_without_a_question_mark_alone() {
+    mark_step("Somebody Else");
+    let mut r = speed_rig(true);
+    r.say_text(Some(NPC), "Greetings, friend.");
     r.frames(2);
-    r.dialog(8, "Well?", &["Bat Eyes is done", "The Militia is done"]);
+    r.answered();
+    r.say_box(1, Some(NPC), "Take it?", &["Yes, I will take it"]);
     r.frames(3);
-    assert!(action_broker::queued_kinds_for_test().is_empty(), "two quests match: nothing is answered for the player");
+    assert_eq!(answers_sent(), 0, "no mark on this name: nothing answered");
     drop(r);
-    // one real answer that names no quest: not answered
-    let mut r = rig("eqoa_dialogs");
-    options::set_toggle("eqoa_dialogs", "auto_answer", true);
-    r.frames(2);
-    r.dialog(9, "Well?", &["Tell me about the weather"]);
+    // a mark that is a quest on offer (a "!", step = false) is not a "?" either
+    mark_step(NPC);
+    CORE.with(|c| c.borrow_mut().view.map_markers[0]["step"] = json!(false));
+    let mut r = speed_rig(true);
+    r.say_text(Some(NPC), "Greetings, friend.");
     r.frames(3);
-    assert!(action_broker::queued_kinds_for_test().is_empty(), "no quest named: nothing is answered");
+    assert_eq!(answers_sent(), 0, "a quest on offer is not a hand-in");
+    drop(r);
+    // a mark in another world does not count
+    mark_step(NPC);
+    CORE.with(|c| c.borrow_mut().view.map_markers[0]["world_id"] = json!(5));
+    let mut r = speed_rig(true);
+    r.say_text(Some(NPC), "Greetings, friend.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 0, "a mark elsewhere is not this person");
+}
+
+/// (c) control: with the switch off, nothing is answered, even to a marked person.
+#[test]
+fn speed_hand_ins_does_nothing_with_the_switch_off() {
+    mark_step(NPC);
+    let mut r = speed_rig(false);
+    r.say_text(Some(NPC), "Greetings, friend.");
+    r.frames(3);
+    r.answered();
+    r.say_box(1, Some(NPC), "Take it?", &["Yes, I will take it"]);
+    r.frames(3);
+    assert_eq!(answers_sent(), 0, "off: nothing runs");
+}
+
+/// (d) the run is capped at 12 steps.
+#[test]
+fn speed_hand_ins_stops_after_twelve_steps() {
+    mark_step(NPC);
+    let mut r = speed_rig(true);
+    for i in 1..=13 {
+        r.say_text(Some(NPC), &format!("Part {i} of a very long tale."));
+        r.frames(2);
+        if i <= 12 {
+            r.answered();
+        }
+    }
+    assert_eq!(answers_sent(), 12, "twelve steps, then it stops and waits for the player");
+    let logs = r.host.drain_logs().unwrap();
+    assert!(logs.iter().any(|l| l.contains("stopped: cap")), "{logs:?}");
+}
+
+/// (e) Escape stops it at once: on the live dialog (one press: the conversation is left, nothing else) and between steps
+/// (the press is held for the mod, and the server's late next step is then not answered).
+#[test]
+fn speed_hand_ins_stops_on_escape_between_steps_and_on_a_dialog() {
+    mark_step(NPC);
+    let mut r = speed_rig(true);
+    r.say_text(Some(NPC), "Greetings, friend.");
+    r.frames(2);
+    assert_eq!(answers_sent(), 1);
+    r.answered();
+    r.frames(2);
+    assert!(super::input::is_key_suppressed(0x1B), "while it waits for the next step Escape is held for the mod");
+    press(&r.host, "escape");
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "Escape between steps only stops the run: nothing else is sent");
+    r.say_text(Some(NPC), "I have a task for you.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 1, "the late step is shown, not answered");
+    // Escape on the live dialog leaves, once
+    action_broker::reset_all_for_test();
+    press(&r.host, "escape");
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["close_window"], "one press, one thing");
+    drop(r);
+    // at a stopped choice, Escape also just leaves
+    let mut r = speed_rig(true);
+    r.say_box(3, Some(NPC), "Which road?", &["North", "South"]);
+    r.frames(3);
+    press(&r.host, "escape");
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["close_window"]);
+    assert!(dialog_sessions::take_passes().is_empty(), "the game's window does not open");
+}
+
+/// (f) a speaker that is not known stops it (and a first dialog with no known speaker never starts it).
+#[test]
+fn speed_hand_ins_stops_when_it_is_not_known_who_is_speaking() {
+    mark_step(NPC);
+    let mut r = speed_rig(true);
+    r.say_text(None, "Who said this?");
+    r.frames(3);
+    assert_eq!(answers_sent(), 0, "no speaker: not started");
+    drop(r);
+    let mut r = speed_rig(true);
+    r.say_text(Some(NPC), "Greetings, friend.");
+    r.frames(2);
+    assert_eq!(answers_sent(), 1);
+    r.answered();
+    r.say_text(None, "And then?");
+    r.frames(3);
+    assert_eq!(answers_sent(), 1, "the speaker became unknown: it stops");
+    let logs = r.host.drain_logs().unwrap();
+    assert!(logs.iter().any(|l| l.contains("stopped: unknown")), "{logs:?}");
+}
+
+/// (g) only a real answer is picked: a lone Goodbye / Close / Back is never chosen for the player.
+#[test]
+fn speed_hand_ins_never_picks_a_goodbye_or_close() {
+    mark_step(NPC);
+    for lone in ["Goodbye", "Close", "Back", "Farewell."] {
+        let mut r = speed_rig(true);
+        r.say_box(1, Some(NPC), "Anything else?", &[lone]);
+        r.frames(3);
+        assert_eq!(answers_sent(), 0, "{lone} is not picked");
+    }
+}
+
+/// (h) one answer per step: the same session seen for many frames is answered once, and the same words coming again
+/// straight after are not answered a second time.
+#[test]
+fn speed_hand_ins_answers_a_step_once_and_not_a_repeat_of_it() {
+    mark_step(NPC);
+    let mut r = speed_rig(true);
+    r.say_box(1, Some(NPC), "Take the bracer?", &["Yes, I will take it"]);
+    r.frames(10);
+    assert_eq!(answers_sent(), 1, "many frames, one answer");
+    r.answered();
+    r.say_box(1, Some(NPC), "Take the bracer?", &["Yes, I will take it"]);
+    r.frames(5);
+    assert_eq!(answers_sent(), 1, "a slow server repeating the step is not answered again");
+    let logs = r.host.drain_logs().unwrap();
+    assert!(logs.iter().any(|l| l.contains("stopped: repeat")), "{logs:?}");
+}
+
+/// The player's own key answer also stops it: after it the rest of the talk is his.
+#[test]
+fn speed_hand_ins_steps_aside_when_the_player_answers_himself() {
+    mark_step(NPC);
+    let mut r = speed_rig(true);
+    r.say_box(4, Some(NPC), "Which road?", &["North", "South"]);
+    r.frames(3);
+    press(&r.host, "2");
+    assert_eq!(answers_sent(), 1, "his own answer goes");
+    r.answered();
+    r.say_text(Some(NPC), "A fine choice.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 1, "after his own answer the rest is his: it does not start again");
 }
 
 #[test]
