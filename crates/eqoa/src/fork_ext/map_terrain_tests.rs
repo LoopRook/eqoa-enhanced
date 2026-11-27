@@ -160,7 +160,7 @@ fn a13_a_view_at_the_games_opening_zoom_uses_the_games_detail_tiles() {
         .flat_map(|r| (1..14).map(move |c| (r * 13 + (c - 1), [c as f32 * 2000.0, r as f32 * 2000.0, (c + 1) as f32 * 2000.0, (r + 1) as f32 * 2000.0])))
         .collect();
     let tr = Transform { extent, size: window, view: Some(ViewReq { center: around, scale: opening }) };
-    let quads = plan(tr, TILE_SCALE, &tiles);
+    let quads = plan(tr, TILE_SCALE, &tiles, &[]);
     let used: Vec<_> = quads.iter().filter(|q| matches!(q.pic, Pic::Tile(_))).collect();
     assert!(!used.is_empty() && used.len() <= 9, "tiles for the zones the view meets: {}", used.len());
     // a tile covers 2000 units in 512 texels, drawn `2000 / scale` pixels wide: the game's own geometry
@@ -169,13 +169,13 @@ fn a13_a_view_at_the_games_opening_zoom_uses_the_games_detail_tiles() {
     assert!((units_per_texel - 2000.0 / 512.0).abs() < 0.01, "3.9 units a texel, as the game's map: {units_per_texel}");
     // the control: the whole-world picture at the largest size has no tiles and 17 units a texel at best
     let whole = Transform { extent, size: (1566, 2048), view: None };
-    let overview_only = plan(whole, TILE_SCALE, &tiles);
+    let overview_only = plan(whole, TILE_SCALE, &tiles, &[]);
     assert!(overview_only.iter().all(|q| q.pic == Pic::Overview));
     let overview_units_per_texel = 26000.0 / 1664.0 * (1664.0 / 1566.0);
     assert!(overview_units_per_texel > 2.0 * units_per_texel + 1.0, "the overview path is far blurrier: {overview_units_per_texel}");
     // zoomed out past the game's tile zoom the game uses the overview alone, so does the picture
     let far = Transform { extent, size: window, view: Some(ViewReq { center: around, scale: TILE_SCALE * 2.0 }) };
-    assert!(plan(far, TILE_SCALE, &tiles).iter().all(|q| q.pic == Pic::Overview));
+    assert!(plan(far, TILE_SCALE, &tiles, &[]).iter().all(|q| q.pic == Pic::Overview));
     // a view's transform: its middle is the centre
     let (px, py) = tr.project(around[0], around[1]);
     assert!((px - 960.0).abs() < 1e-3 && (py - 540.0).abs() < 1e-3);
@@ -258,4 +258,39 @@ fn a13_a_view_draws_the_tiles_keeps_its_handle_while_redrawn_and_a_view_change_i
     eprintln!("a13 terrain view cost (draw + submit + wait, 640x448): first {first:?}, tile arrives {with_tile:?}, view change {moved:?}");
     host.execute("assert(t.close() == true)").unwrap();
     map_terrain::release_vm(0);
+}
+
+const WORLD: [f32; 4] = [0.0, 0.0, 10000.0, 10000.0];
+
+fn covers_of(world: i32, extent: [f32; 4]) -> Vec<[f32; 4]> {
+    crate::map::hidden::covers(world, extent).collect()
+}
+
+/// Review of sync 2026-11-26 (M1): the mod's terrain picture covers Night Chain 4 as the game's map does
+/// (`crate::map::hidden`, read from it, not copied): in the overview, and in a view at the tile zoom with the
+/// isle's tiles under it; a view away from it, and another world, get none. Negative control: the same plan
+/// with no covers handed to it (as before the fix) has the isle's floor and nothing over it.
+#[test]
+fn the_terrain_picture_covers_night_four_over_the_overview_and_its_tiles() {
+    let isle = crate::map::hidden::AREAS[0].rect;
+    // the whole world, 1000 x 1000 pixels
+    let whole = Transform { extent: WORLD, size: (1000, 1000), view: None };
+    let plan_whole = plan(whole, 8.0, &[], &covers_of(4, WORLD));
+    let (a, b) = (whole.project(isle[0], isle[1]), whole.project(isle[2], isle[3]));
+    assert_eq!(plan_whole.last().map(|q| (q.pic, q.dst)), Some((Pic::Cover, [a.0, a.1, b.0, b.1])), "the overview: the isle covered");
+    assert_eq!(plan_whole.iter().filter(|q| q.pic == Pic::Cover).count(), 1);
+    assert_eq!(plan_whole[0].pic, Pic::Overview, "under the cover");
+    assert!(plan(whole, 8.0, &[], &[]).iter().all(|q| q.pic != Pic::Cover), "control: without the cover the isle's floor shows");
+    // a view over the isle at the tile zoom, the zone's tile under the cover
+    let centre = [(isle[0] + isle[2]) / 2.0, (isle[1] + isle[3]) / 2.0];
+    let view = Transform { extent: WORLD, size: (640, 448), view: Some(ViewReq { center: centre, scale: 1.0 }) };
+    let tile = (3usize, [isle[0] - 100.0, isle[1] - 100.0, isle[2] + 100.0, isle[3] + 100.0]);
+    let plan_view = plan(view, 4.0, &[tile], &covers_of(4, WORLD));
+    let pics: Vec<Pic> = plan_view.iter().map(|q| q.pic).collect();
+    assert_eq!(pics, [Pic::Overview, Pic::Tile(3), Pic::Cover], "the detail tile, then the cover over it");
+    // a view well away from the isle (Night 5's) takes none; nor does another world
+    let away = Transform { extent: WORLD, size: (640, 448), view: Some(ViewReq { center: [4499.0, 7234.0], scale: 1.0 }) };
+    assert!(plan(away, 4.0, &[], &covers_of(4, WORLD)).iter().all(|q| q.pic != Pic::Cover), "away from the isle: no cover");
+    assert!(covers_of(0, WORLD).is_empty(), "control: Tunaria has none");
+    assert!(plan(whole, 8.0, &[], &covers_of(0, WORLD)).iter().all(|q| q.pic != Pic::Cover));
 }

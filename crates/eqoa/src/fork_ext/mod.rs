@@ -127,6 +127,8 @@ pub(crate) fn piece_hidden(_ui: &mut render::ui::Ui, _piece: crate::hudlayout::P
             }
             Piece::Pet => v.pet,
             Piece::Target => v.target,
+            // upstream's opt-in Target of Target bar is drawn with the target bar: hidden with the target frame
+            Piece::TargetOfTarget => v.target,
             Piece::Minimap => v.minimap,
             Piece::Quests => v.quest_tracker,
             Piece::Meter => v.dps_meter,
@@ -138,8 +140,8 @@ pub(crate) fn piece_hidden(_ui: &mut render::ui::Ui, _piece: crate::hudlayout::P
             Piece::SpellBars => v.ability_bar || v.spell_bars,
             // the PC weapon-set bar was part of the Utility Bars before upstream gave it its own piece
             Piece::UtilityBars | Piece::EquipmentBar => v.ability_bar || v.utility_bars,
-            // upstream's pieces with no mod visibility flag: always drawn
-            Piece::Settings | Piece::TargetInfo | Piece::RaidPrompts | Piece::Stats | Piece::Focus => false,
+            // upstream's pieces with no mod visibility flag: always drawn (the Faction Tracker too)
+            Piece::Settings | Piece::Faction | Piece::TargetInfo | Piece::RaidPrompts | Piece::Stats | Piece::Focus => false,
         };
         if hidden {
             let start = _from.min(_ui.quads.len());

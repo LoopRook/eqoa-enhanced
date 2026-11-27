@@ -42,7 +42,7 @@
 //! (`render::Renderer::draw_text_around`), so the HUD's pieces over it (the
 //! breath gauge, under water) and every window stay on top.
 
-use super::{Context, Map, NOT_DRAWN, OUTLINE, OUTSIDE, WAYPOINT, view};
+use super::{Context, Map, NOT_DRAWN, OUTLINE, OUTSIDE, WAYPOINT, hidden, view};
 use render::map::MapQuad;
 use render::ui::{Anchor, Quad, Ui, Vertical, frame_from_window, window_from_frame};
 use render::wgpu;
@@ -274,6 +274,11 @@ pub struct MiniView {
     /// marks of every kind (`Mark`): the XP camps and coach stops, the
     /// quests' (`Play::mini_view` gathers them)
     pub marks: Vec<Mark>,
+    /// the friendly NPCs' dots' names and roles (an empty line for none),
+    /// (x, z) first: the tooltip under the mouse's pointer where no mark is
+    /// (Heirloom petition 3093: "mouse-over a friendly NPC square ... shows
+    /// its name")
+    pub names: Vec<([f32; 2], String, String)>,
 }
 
 /// A quest's mark's gold.
@@ -423,6 +428,18 @@ fn place_marks<'a>(marks: &[&'a Mark], world: i32, to_px: &dyn Fn([f32; 2]) -> [
     placed
 }
 
+/// The friendly NPC whose square is nearest window pixel `c`, within `reach`
+/// of it: its place on the minimap (window pixels by `to_px`), name and role.
+fn npc_under<'a>(names: &'a [([f32; 2], String, String)], to_px: &impl Fn([f32; 2]) -> [f32; 2], c: [f32; 2], reach: f32) -> Option<([f32; 2], &'a String, &'a String)> {
+    names
+        .iter()
+        .map(|(at, n, r)| (to_px(*at), n, r))
+        .map(|(q, n, r)| ((q[0] - c[0]).hypot(q[1] - c[1]), q, n, r))
+        .filter(|(d, ..)| *d <= reach)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, q, n, r)| (q, n, r))
+}
+
 /// The mark whose tooltip shows with the mouse's pointer at window pixel
 /// `c`: the topmost (the last placed) within `reach` of it.
 fn mark_under<'a>(placed: &[([f32; 2], &'a Mark)], c: [f32; 2], reach: f32) -> Option<([f32; 2], &'a Mark)> {
@@ -515,6 +532,9 @@ impl Map {
         // world units a window pixel; the player at the middle, north up;
         // inside at its own zoom (`indoor`)
         let indoors = self.indoor.inside();
+        // in an area the map does not show (`hidden`: Night 4's false
+        // floors), no picture, no marks, the frame and its words alone
+        let hide = hidden::at(cx.world, p[0], p[2]);
         let s = if indoors { self.indoor.scale() } else { self.mini.scale } / k;
         let mid = [(inside[0] + inside[2]) / 2.0, (inside[1] + inside[3]) / 2.0];
         let c = [p[0], p[2]];
@@ -530,7 +550,7 @@ impl Map {
         quads.push(MapQuad::rect(l.white, inside, full, OUTSIDE));
         // inside, the floors under the ceiling (`indoor`) once drawn, in
         // place of the map's pictures
-        let picture = self.indoor.picture().filter(|_| indoors);
+        let picture = self.indoor.picture().filter(|_| indoors && !hide);
         if let Some((tex, rect)) = picture
             && let Some((r, uv)) = clip(rect, shown, to_px)
         {
@@ -542,7 +562,7 @@ impl Map {
         let showing: Vec<(usize, [f32; 4])> = (0..cells.len())
             .filter_map(|cell| {
                 let r = cells.rect(cell);
-                let on = picture.is_none() && r[0] < shown[2] && r[2] > shown[0] && r[1] < shown[3] && r[3] > shown[1];
+                let on = !hide && picture.is_none() && r[0] < shown[2] && r[2] > shown[0] && r[1] < shown[3] && r[3] > shown[1];
                 Some((cells.zone_at[cell].filter(|_| on)?, r))
             })
             .collect();
@@ -551,7 +571,7 @@ impl Map {
                 quads.push(MapQuad::rect(l.white, r, full, NOT_DRAWN));
             }
         }
-        if let Some((r, uv)) = w.overview.filter(|_| picture.is_none()).and_then(|_| clip(extent, shown, to_px)) {
+        if let Some((r, uv)) = w.overview.filter(|_| picture.is_none() && !hide).and_then(|_| clip(extent, shown, to_px)) {
             quads.push(MapQuad::rect(w.overview.unwrap_or_default(), r, uv, [1.0; 4]));
         }
         let mut wanted = Vec::new();
@@ -566,6 +586,14 @@ impl Map {
                 }
                 None => {
                     w.builder.want_tile(zi);
+                }
+            }
+        }
+        // over them, a plain square on such an area in view from off it
+        if picture.is_none() && !hide {
+            for rect in hidden::covers(cx.world, shown) {
+                if let Some((r, _)) = clip(rect, shown, to_px) {
+                    quads.push(MapQuad::rect(l.white, r, full, hidden::COVER));
                 }
             }
         }
@@ -586,7 +614,7 @@ impl Map {
         let half = font.map_or(8.0, |fo| ui.fonts[fo].height as f32 / 2.0) * px_line;
         let edge = [inside[0] + half * 0.6, inside[1] + half, inside[2] - half * 0.6, inside[3] - half];
         let own = own_marks(&self.mini.map_marks, cx.world, crate::settings::map_markers());
-        let all: Vec<&Mark> = own.iter().chain(&mv.marks).collect();
+        let all: Vec<&Mark> = if hide { Vec::new() } else { own.iter().chain(&mv.marks).collect() };
         let placed = place_marks(&all, cx.world, &to_px, inside, MARK_REACH * px_line, mid, edge);
         let on = |q: [f32; 2], m: f32| q[0] >= inside[0] - m && q[0] <= inside[2] + m && q[1] >= inside[1] - m && q[1] <= inside[3] + m;
         // the coaches (the stable's horseshoe, the map's: off the disc), then
@@ -606,14 +634,14 @@ impl Map {
         for q in &mut ui.quads[from..] {
             q.clip = cut;
         }
-        for &(at, color) in &mv.dots {
+        for &(at, color) in mv.dots.iter().filter(|_| !hide) {
             let q = to_px(at);
             if on(q, dot + dot_o) {
                 square_dot(ui, white, cut, f(q), dot / px_line, dot_o / px_line, color);
             }
         }
         // the target: a white ring round its dot
-        if let Some(t) = mv.target {
+        if let Some(t) = mv.target.filter(|_| !hide) {
             let q = to_px(t);
             let (r, o) = (dot * 2.4, dot_o.max(0.75));
             if on(q, r + o) {
@@ -626,7 +654,7 @@ impl Map {
             }
         }
         // the group's members, their compass colours, as the map has them
-        for (pos, index) in &cx.group {
+        for (pos, index) in cx.group.iter().filter(|_| !hide) {
             let q = to_px([pos[0], pos[2]]);
             let (r, o) = view::member_radius(size);
             if on(q, r + o) {
@@ -636,7 +664,7 @@ impl Map {
         // the waypoints, on the rim while farther than the minimap shows: the
         // group's (`group_waypoint`) under the player's own
         for (at, color) in [(group_waypoint, super::group_waypoint::COLOR), (waypoint, WAYPOINT)] {
-            let Some(at) = at else { continue };
+            let Some(at) = at.filter(|_| !hide) else { continue };
             let (r, o) = view::waypoint_radius(size);
             let (r, o) = (r * 0.8, o);
             let edge = [inside[0] + r + o, inside[1] + r + o, inside[2] - r - o, inside[3] - r - o];
@@ -663,6 +691,15 @@ impl Map {
             let i = inner();
             let h = vui.font_height(&r);
             vui.draw_centered_string_ex(&mut r, &vi::ui::wide("N"), (i[0] + i[2]) / 2, i[1] + h / 2, [1.0, 1.0, 1.0, 0.85], 3, true);
+            // in an area the map does not show, its words in the middle
+            if hide {
+                let lines = wrap(hidden::WORDS, i[2] - i[0] - 8, |s| vui.string_width(&r, s));
+                let line = h - 1;
+                let top = (i[1] + i[3]) / 2 - line * lines.len() as i32 / 2 + line / 2;
+                for (k, words) in lines.iter().enumerate() {
+                    vui.draw_centered_string_ex(&mut r, words, (i[0] + i[2]) / 2, top + k as i32 * line, [0.85, 0.85, 0.9, 0.9], 3, true);
+                }
+            }
             r.ui.shift = [0.0; 2];
             // the quests' "!" and "?" over the other marks, where they were
             // placed in the window (cut to the pictures as the marks are)
@@ -682,7 +719,7 @@ impl Map {
         // the player's dart in the middle, over every mark, a little smaller
         // than the map's
         let (dr, o) = view::marker_radius(size);
-        for (rr, color) in [(dr * 0.85 + o, OUTLINE), (dr * 0.85, super::MARKER)] {
+        for (rr, color) in [(dr * 0.85 + o, OUTLINE), (dr * 0.85, super::MARKER)].into_iter().filter(|_| !hide) {
             plain(r.ui, white, view::dart(mid, heading, rr).map(f), color, cut);
         }
         // the card of the mark under the mouse's pointer, left of the frame,
@@ -699,7 +736,14 @@ impl Map {
         let b = pixels.point([outer[2], outer[3]]);
         let outer = [a[0], a[1], b[0], b[1]];
         let reach = (MARK_REACH * px_line).max(half) + px_line;
-        if let (Some(vui), Some((q, m))) = (cx.vui, self.mini.cursor.and_then(|c| mark_under(&placed, pixels.inverse(c), reach))) {
+        // a mark's card, else the name of the friendly NPC whose square is
+        // under the pointer
+        let named: Option<([f32; 2], Mark)> = self.mini.cursor.filter(|_| !hide).and_then(|c| npc_under(&mv.names, &to_px, pixels.inverse(c), dot * 2.0 + dot_o + px_line)).map(|(q, n, r)| {
+            let text = if r.is_empty() { n.clone() } else { format!("{n}\n{r}") };
+            (q, Mark::text(MarkKind::Camp, cx.world, [0.0; 2], &text))
+        });
+        let hovered = self.mini.cursor.and_then(|c| mark_under(&placed, pixels.inverse(c), reach)).or_else(|| named.as_ref().map(|(q, m)| (*q, m)));
+        if let (Some(vui), Some((q, m))) = (cx.vui, hovered) {
             r.ui.anchor = Anchor::Middle;
             r.ui.vertical = Vertical::Middle;
             let lines: Vec<(Vec<u16>, [f32; 4])> = m
@@ -718,8 +762,8 @@ impl Map {
                 // the window
                 let (corner, at) = (f([0.0, 0.0]), f([outer[0], pixels.point(q)[1]]));
                 let plate = crate::hudlayout::frame_point(crate::hudlayout::Piece::QuickMenus, [0.0, PLATE[3] as f32], crate::hudlayout::Beyond::of(size))[1] + 1.0;
-                let bottom = f([0.0, size.1 as f32])[1];
-                let x = (at[0] - 6.0 - w).max(corner[0] + 1.0);
+                let (bottom, right) = (f([0.0, size.1 as f32])[1], f([size.0 as f32, 0.0])[0]);
+                let x = tip_x([at[0], f([outer[2], 0.0])[0]], w, [corner[0] + 1.0, right - 1.0]);
                 let y = (at[1] - hgt / 2.0).min(bottom - hgt - 1.0).max(plate);
                 let from = r.ui.quads.len();
                 plain(r.ui, white, corners([x - 1.0, y - 1.0, x + w + 1.0, y + hgt + 1.0]), OUTLINE, None);
@@ -756,6 +800,25 @@ impl Map {
         l.map.draw(device, &mut pass, window);
         l.ui.draw(device, &mut pass, size);
     }
+}
+
+/// Where a tooltip `w` wide starts across: beside the minimap's frame (`frame`,
+/// its left and right), never over it (Heirloom petition 3148: "the box
+/// covers a large part of the minimap"). Left of it where it fits in the
+/// window (`window`, its first and last column), else right of it where it
+/// fits there, else on the side with more room, kept in the window.
+fn tip_x(frame: [f32; 2], w: f32, window: [f32; 2]) -> f32 {
+    let (left, right) = (frame[0] - 6.0 - w, frame[1] + 6.0);
+    let x = if left >= window[0] {
+        left
+    } else if right + w <= window[1] {
+        right
+    } else if frame[0] - window[0] >= window[1] - frame[1] {
+        left
+    } else {
+        right
+    };
+    x.min(window[1] - w).max(window[0])
 }
 
 /// A creature's or a player's dot on the minimap, its half-width and its
@@ -941,6 +1004,36 @@ mod tests {
         assert!(own_marks(&made, 0, false).is_empty(), "Map Markers off");
         assert!(own_marks(&made, 2, true).is_empty(), "made for another world");
         assert!(own_marks(&None, 0, true).is_empty());
+    }
+
+    /// A friendly NPC's square under the pointer gives its name and role (Heirloom
+    /// petition 3093): the nearest within the reach; none past it (the control).
+    #[test]
+    fn an_npcs_square_under_the_pointer_names_it() {
+        let names = vec![([10.0, 0.0], "Banker Lars".to_string(), "Banker".to_string()), ([14.0, 0.0], "Merchant Perry".to_string(), "Merchant".to_string())];
+        let to_px = |q: [f32; 2]| [q[0] * 2.0, q[1] * 2.0];
+        let got = npc_under(&names, &to_px, [21.0, 1.0], 4.0).map(|(q, n, r)| (q, n.clone(), r.clone()));
+        assert_eq!(got, Some(([20.0, 0.0], "Banker Lars".to_string(), "Banker".to_string())));
+        assert_eq!(npc_under(&names, &to_px, [27.0, 0.0], 4.0).map(|(_, n, _)| n.as_str()), Some("Merchant Perry"), "the nearest");
+        assert!(npc_under(&names, &to_px, [60.0, 0.0], 4.0).is_none(), "none past the reach");
+    }
+
+    /// A tooltip goes beside the minimap, never over it (Heirloom petition
+    /// 3148): left of it where it fits, else right of it (a minimap moved to
+    /// the window's left), else the roomier side, in the window.
+    #[test]
+    fn the_tooltip_goes_beside_the_minimap_never_over_it() {
+        let window = [0.0, 640.0];
+        assert_eq!(tip_x([474.0, 586.0], 100.0, window), 368.0, "the game's place: left of it");
+        assert_eq!(tip_x([10.0, 122.0], 100.0, window), 128.0, "at the window's left: right of it");
+        assert_eq!(tip_x([10.0, 122.0], 100.0, [-80.0, 560.0]), 128.0, "a wide window's frame");
+        // a minimap across most of the window: the roomier side, inside it
+        assert_eq!(tip_x([60.0, 600.0], 100.0, window), 0.0);
+        assert_eq!(tip_x([20.0, 560.0], 100.0, window), 540.0);
+        for (l, r) in [(474.0, 586.0), (10.0, 122.0), (300.0, 412.0)] {
+            let x = tip_x([l, r], 100.0, window);
+            assert!(x + 100.0 <= l || x >= r, "{l}..{r}: {x} overlaps it");
+        }
     }
 
     /// The tooltip is the topmost mark's under the pointer: a quest's over a

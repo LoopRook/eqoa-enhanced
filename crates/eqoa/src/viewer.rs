@@ -355,7 +355,7 @@ fn change_world(lib: &mut Library, file: &str, at: Spawn) -> Result<(Walker, Str
 
 /// The font name plates use (`VICSprite::FontResourceID`, "Arial"), if a
 /// loaded file has it.
-fn arial(lib: &Library) -> Option<esf::font::Font> {
+pub(crate) fn arial(lib: &Library) -> Option<esf::font::Font> {
     let id = vi::hsprite::hash_ref_id("Arial");
     if let Some(r) = lib.lookup(id)
         && lib.file(r.file).node(r.node).ty == 0x7000
@@ -1443,7 +1443,16 @@ pub fn shot_with(
         // whenever it is made, so the walk's frames need not have grown it
         if crate::settings::client().flora > 0 {
             let fl = flora.insert(crate::flora::Flora::new());
-            let drawn = fl.frame(&mut walker.scene, &vi::vect::Vect3::of(shot_eye.x, shot_eye.y, shot_eye.z), view.view_proj);
+            // Foliage Reacts' bodies, as a frame of the walk has them
+            let movers = match play.as_ref() {
+                _ if !crate::settings::client().foliage_reacts => Vec::new(),
+                Some(p) => p.flora_movers(&walker),
+                None => {
+                    let at = walker.cam.walk.phys.position;
+                    vec![crate::flora::Mover { at: [at.x.0, at.y.0, at.z.0], reach: 1.2 }]
+                }
+            };
+            let drawn = fl.frame(&mut walker.scene, &vi::vect::Vect3::of(shot_eye.x, shot_eye.y, shot_eye.z), view.view_proj, &movers);
             fl.upload(&mut renderer, &device, &queue, lib, &walker.scene, &drawn);
             eprintln!("{}", fl.describe());
         }
@@ -1617,7 +1626,7 @@ fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, t: &wgpu::Texture) -> V
     out
 }
 
-fn write_png(path: &str, w: u32, h: u32, rgba: &[u8]) -> Result<(), Error> {
+pub(crate) fn write_png(path: &str, w: u32, h: u32, rgba: &[u8]) -> Result<(), Error> {
     let mut enc = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(path)?), w, h);
     enc.set_color(png::ColorType::Rgba);
     enc.set_depth(png::BitDepth::Eight);
@@ -2557,9 +2566,8 @@ struct App {
     fingers: Vec<(u64, Finger)>,
     /// `EQOA_TOUCHES` in a window: finger events at ms on `clock`.
     touch_script: Vec<(i64, u64, crate::touch::Phase, [f32; 2])>,
-    /// An edit box of the game's had the keys at the last frame (told to a
-    /// page as it changes, `note_typing`).
-    typing: bool,
+    /// Whether an editor has the keys and whether browser controller chat is active.
+    typing: (bool, bool),
     /// The game's frames among those drawn (`frames.rs`): what the game
     /// counts in frames steps on these.
     frames: crate::frames::Frames,
@@ -2764,7 +2772,7 @@ fn run_app(lib: Library, source: Source, play: Option<crate::play::Play>, pendin
             s.sort_by_key(|e| e.0);
             s
         },
-        typing: false,
+        typing: (false, false),
         frames: crate::frames::Frames::default(),
         drawn_at: None,
         frame_s: 1.0 / 60.0,
@@ -3367,6 +3375,9 @@ impl App {
     fn poll_pad(&mut self, el: &ActiveEventLoop) {
         let (mut report, mut connected, motors) = self.pads.poll();
         self.arrival_pad(report.buttons);
+        // Read the physical buttons before adding the touchscreen's pad.
+        #[cfg(target_arch = "wasm32")]
+        let may_open_controller_chat = report.buttons != 0 && self.play.as_ref().is_some_and(|p| p.mode != 2);
         // a controller in use: the touch screen's pad goes
         if report.buttons != 0 || report.sticks.iter().any(|v| v.abs() > 0.5) {
             self.touch.hide();
@@ -3439,6 +3450,10 @@ impl App {
             }
         }
         self.pad_rows(el, &f.rows);
+        #[cfg(target_arch = "wasm32")]
+        if may_open_controller_chat && self.play.as_mut().is_some_and(|p| p.note_controller_chat()) {
+            self.note_typing();
+        }
     }
 
     /// A controller's buttons on rows of the client's keys (`binds`, the map
@@ -3640,6 +3655,12 @@ impl App {
     /// there does.
     fn finger(&mut self, id: u64, phase: crate::touch::Phase, at: [f32; 2], size: (u32, u32)) {
         use crate::touch::Phase;
+        // The browser can show its keyboard during this gesture, before a
+        // queued touchpad click is handled in the next frame.
+        #[cfg(target_arch = "wasm32")]
+        if phase == Phase::Ended && self.play.as_ref().is_some_and(|p| p.controller_chat_text_at(render::ui::frame_from_window(size, at))) {
+            crate::web::focus_touch_text();
+        }
         if self.touch_shut() {
             return;
         }
@@ -3794,9 +3815,14 @@ impl App {
             Some(h) => h.pre.typing(),
             None => self.play.as_mut().is_some_and(|p| p.keyboard_typing()),
         };
-        if on != std::mem::replace(&mut self.typing, on) {
+        #[cfg(target_arch = "wasm32")]
+        let controller_chat = self.play.as_ref().is_some_and(|p| p.controller_chat());
+        #[cfg(not(target_arch = "wasm32"))]
+        let controller_chat = false;
+        let typing = (on, controller_chat);
+        if typing != std::mem::replace(&mut self.typing, typing) {
             #[cfg(target_arch = "wasm32")]
-            crate::web::want_text(on);
+            crate::web::want_text(on, controller_chat);
             #[cfg(target_os = "android")]
             crate::android::want_text(on);
         }
@@ -3826,7 +3852,13 @@ impl App {
             return;
         }
         let interact = !matches!(c, crate::mouse::Click::Target(..));
-        p.click(p.creature_at_for(c.at(), size, vp, interact), interact);
+        let at = p.creature_at_for(c.at(), size, vp, interact);
+        // a right click on a monster, where the server offered its details:
+        // its details window (`mobwnd`, Heirloom petition 3163)
+        if !finger && matches!(c, crate::mouse::Click::Right(..)) && p.mob_details_click(at) {
+            return;
+        }
+        p.click(at, interact);
     }
 
     /// A mouse button on the chat box's lines (`Play::chat_press`), true when it
@@ -3847,7 +3879,7 @@ impl App {
         match p.chat_release() {
             crate::chat::Let::NotHeld => false,
             // a link's click was opened by the play (`itemlink`)
-            crate::chat::Let::Done | crate::chat::Let::Link(..) => true,
+            crate::chat::Let::Done | crate::chat::Let::Link(..) | crate::chat::Let::Name(..) => true,
             crate::chat::Let::Click(x, y) => {
                 self.click(crate::mouse::Click::Target(x, y), false);
                 true
@@ -4296,9 +4328,13 @@ impl App {
             None => "logged out: back to the server list".to_string(),
             Some(r) => format!("disconnected (reason {r}): back to the game's screens"),
         });
-        // the creatures' sounds go with them, their loops stopped
+        // the creatures' sounds go with them, their loops stopped, and the
+        // character's own body's
         if let (Some(p), Some(s)) = (self.play.as_mut(), self.sound.as_mut()) {
             p.let_go_sounds(s);
+        }
+        if let (Some(cs), Some(s)) = (self.walker.as_mut().and_then(|w| w.sprite.as_mut()), self.sound.as_mut()) {
+            cs.stop_sounds(&mut s.sink());
         }
         self.play = None;
         self.walker = None;
@@ -4488,7 +4524,6 @@ impl App {
                 k => held_name(k),
             };
             if let Some(n) = name {
-                p.keyboard = true;
                 p.map.keyboard_key(&n, event.state == ElementState::Pressed, event.repeat);
             }
             return;
@@ -4693,7 +4728,8 @@ impl App {
             return;
         }
         // The bank (mode 11): the arrows, Enter or E (X), Escape
-        // (triangle); the auction form's editor takes the keyboard.
+        // (triangle), Page Up and Page Down (L1, R1: the bank's page,
+        // petition 3297); the auction form's editor takes the keyboard.
         if let Some(p) = self.play.as_mut()
             && p.typing.is_none()
             && p.bank_owns()
@@ -4726,6 +4762,8 @@ impl App {
                 Key::Named(NamedKey::Enter) => Some(K::CROSS),
                 Key::Character(c) if c.eq_ignore_ascii_case("e") => Some(K::CROSS),
                 Key::Named(NamedKey::Escape) | Key::Named(NamedKey::Backspace) => Some(K::ESCAPE),
+                Key::Named(NamedKey::PageUp) => Some(crate::pointer::key::L1),
+                Key::Named(NamedKey::PageDown) => Some(crate::pointer::key::R1),
                 _ => None,
             };
             if let Some(k) = k
@@ -6546,6 +6584,8 @@ impl App {
                 // a minimised window has not; one merely covered by another
                 // while it has it is still the player's)
                 crate::audio::set_heard(crate::settings::background_sound() || self.pads.in_front());
+                // Master Volume (Extended > Other > Sound)
+                crate::audio::set_master(crate::settings::master_gain());
                 // macOS: Settings… (⌘,): the Options where the player is, in
                 // the world the Options window, at the title its Options
                 #[cfg(target_os = "macos")]
@@ -6842,6 +6882,11 @@ impl App {
                         // Built in its model's art (`era`): the 2002 disc's
                         // whole while it is drawn and has that model.
                         if let Some(model) = p.frame(w, lib, gpu, now, game_frame, sound.as_mut()) {
+                            // the body before stops what it had playing (a
+                            // form's wing beat loops: `CSprite::stop_sounds`)
+                            if let (Some(s), Some(cs)) = (sound.as_mut(), w.sprite.as_mut()) {
+                                cs.stop_sounds(&mut s.sink());
+                            }
                             lib.with_view(lib.view_for(model as i32), || {
                                 if let Some(r) = lib.lookup(model as i32)
                                     && let Some(m) = lib.build_model(r)
@@ -6965,8 +7010,8 @@ impl App {
                             if dynamic { "on" } else { "off" },
                             made(sun_shadows, g.renderer.sun_shadow_drawn().is_some()),
                             made(light_shadows, g.renderer.light_shadow_drawn().is_some()),
-                            g.device.adapter_info().backend,
-                            g.device.adapter_info().name,
+                            render::device_info(&g.device).backend,
+                            render::device_info(&g.device).name,
                         ));
                     }
                     // the particles' blend as the options have it (Particles:
@@ -7144,7 +7189,19 @@ impl App {
                     // with the options' Flora off
                     if let Some(fl) = flora.as_mut().filter(|_| !unseen) {
                         if crate::settings::client().flora > 0 {
-                            let drawn = fl.frame(&mut w.scene, &w.eye.position, proj * v);
+                            // Foliage Reacts' bodies: the player and what is drawn
+                            let movers = if crate::settings::client().foliage_reacts {
+                                match play.as_ref() {
+                                    Some(p) => p.flora_movers(w),
+                                    None => {
+                                        let at = w.cam.walk.phys.position;
+                                        vec![crate::flora::Mover { at: [at.x.0, at.y.0, at.z.0], reach: 1.2 }]
+                                    }
+                                }
+                            } else {
+                                Vec::new()
+                            };
+                            let drawn = fl.frame(&mut w.scene, &w.eye.position, proj * v, &movers);
                             fl.upload(&mut g.renderer, &g.device, &g.queue, lib, &w.scene, &drawn);
                         } else {
                             fl.clear();

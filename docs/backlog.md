@@ -284,7 +284,7 @@ zooms in a bit further than round 4's, which keeps upstream's zoom limits; see t
 ## One home for the fork's options (owner, 2026-11-15)
 
 - **Status:** Backlog; fold into round 8's option-rows seam.
-- **Now:** since sync 2026-11-15 upstream's Options > Extended is five groups (Graphics, UI, Other, Touch Controls, Multi-boxing). The fork's Enhanced page (HUD toggles, Mods & Addons) sits in the UI group because a top-level entry would mean rewriting upstream's fixed `GROUPS` table.
+- **Now:** since sync 2026-11-15 upstream's Options > Extended is five groups (Graphics, UI, Other, Touch Controls, Multi-boxing). The fork's Enhanced page (HUD toggles, Mods & Addons) sat in the UI group; since sync 2026-11-26 upstream's UI menu is full (15 categories) and it is in the Other group (Options > Extended > Other > Enhanced), because a top-level entry would mean rewriting upstream's fixed `GROUPS` table.
 - **Owner's preference:** everything from the fork in one place.
 - **Plan:** the round 8 seam "option rows declared in one table; ids 1000+ reserved for other builds" also lets another build add its own group. Once upstream has it, Enhanced becomes its own top-level entry with no upstream line changed.
 
@@ -449,6 +449,14 @@ A font restored after going missing is retried after a face or size change or af
 - **Move, look and button presses** wait on upstream.
 - **A "send" choice in the crash offer:** since batch 8 no crash report is sent to a game server at all; offering it
   with an explicit yes per report is a separate, owner-approved piece of work.
+- **Upstream's Target of Target bar and Faction Tracker (sync 2026-11-26, review M3, L1):** a `eqoa.hud.hide`
+  element for each and their rectangles in `eqoa.hud.layout().pieces`. Until then upstream's Target of Target bar
+  hides with the target frame, its Faction Tracker always shows, and a player who turns on both upstream's bar
+  (HUD Extras) and the Target of Target mod sees two bars. The fork's own Enhanced row "Target of Target" has the
+  same label as upstream's HUD Extras row.
+- **Round Minimap on Night Chain 4 (sync 2026-11-26, review L2):** the mod's hover names still show there while
+  upstream's minimap is blank; and a scene or GPU pixel test for the World Map mod's Night 4 cover and for the
+  map's dot of an inactive group member (both are tested below the draw call only).
 
 ## Mod work approved or asked for, not built (2026-11-26)
 

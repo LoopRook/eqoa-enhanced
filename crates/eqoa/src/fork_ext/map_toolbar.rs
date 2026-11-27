@@ -81,6 +81,8 @@ mod tests {
             group: false,
             travel,
             places: None,
+            // not opened on a town (upstream's own chrome fixture, map/chrome.rs)
+            town: false,
         }
     }
 

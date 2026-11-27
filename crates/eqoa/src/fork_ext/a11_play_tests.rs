@@ -256,6 +256,31 @@ fn a11_merc_requests_are_the_windows_own_bytes_one_at_a_time() {
     assert_eq!(sent_op(&mut p, 0x73, 0x7E), vec![crate::mercwnd::ask_bytes(crate::mercwnd::Ask::Stock(11, 1), 1)]);
 }
 
+/// Review of sync 2026-11-26 (M2): upstream's layout 2 sends a merc's carried food and drink as the record kind USE.
+/// To a mod it is still "carried" (the `eqoa/1` schema has no new kind), and Take Back takes it as it takes any carried
+/// record. Negative control: before the fix its kind read "other" and Take Back refused it as a stale handle.
+#[test]
+fn a11_review_a_mercs_carried_food_reads_carried_and_is_taken_back() {
+    let mut p = ready();
+    p.session.merc_windows = true;
+    p.session.mercs = net::session::Mercs::read(&[1, 1, 1, 0, 3, b'K', b'e', b'l']);
+    let mut items = merc_items();
+    items.push(item(15, net::mercwin::USE, "Fresh Bread", 3, -1));
+    assert!(p.merc_win_opcode(net::mercwin::OP_MERC_WINDOW_STATE, &window_body(OPEN, 1, "Kel", &items)));
+    let state = merc_state(&p).expect("the merc's window is up");
+    let kinds: Vec<(i64, String)> = state["inventory"]["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (r["id"].as_i64().unwrap(), r["kind"].as_str().unwrap().to_string()))
+        .collect();
+    assert!(kinds.contains(&(15, "carried".into())), "the meal is a carried record: {kinds:?}");
+    assert!(kinds.contains(&(9, "carried".into())) && kinds.contains(&(7, "worn".into())), "control: the others keep their kinds");
+    sent(&mut p);
+    assert!(matches!(dispatch(&mut p, &A11Action::MercTake { id: 15 }), DispatchOutcome::Completed { .. }), "Take Back takes the meal");
+    assert_eq!(sent_op(&mut p, 0x73, 0x7E), vec![crate::mercwnd::ask_bytes(crate::mercwnd::Ask::Take(15), 1)]);
+}
+
 /// Memorizing onto one of the ten slots sends the spell window's own bytes (the literal its own test pins); a spell
 /// that is not in the book, and a state the server has not sent, are refused.
 #[test]

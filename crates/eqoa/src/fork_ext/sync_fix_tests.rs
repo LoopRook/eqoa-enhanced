@@ -224,3 +224,136 @@ fn sync_m1_the_pet_panel_is_at_its_pc_place_in_the_pc_interface() {
     }
     interface(false);
 }
+
+// ---- Fixes after the review of the upstream sync of 2026-11-26 ----
+
+/// The window points on a coarse grid where the chat's scroll bar takes a press (`Play::bar_press`), each let go.
+fn bar_hits(p: &mut Play, size: (u32, u32)) -> Vec<[f32; 2]> {
+    let mut hits = Vec::new();
+    for y in (0..size.1).step_by(2) {
+        // the test's chat piece sits left of the window's edge (its local frame is not the window's): scan past it
+        for x in -600..size.0 as i32 {
+            let at = [x as f32, y as f32];
+            if p.bar_press(at, size) {
+                hits.push(at);
+            }
+            if let Some(c) = p.wnd_chat.as_mut() {
+                c.bar_release();
+                for t in 1..=crate::chat::TABS {
+                    if let Some(pane) = c.pane_mut(t) {
+                        pane.bar_release();
+                    }
+                }
+            }
+        }
+    }
+    hits
+}
+
+/// H3: a mod that hides the stock chat leaves no invisible scroll bar that takes a click or a drag (upstream's
+/// `Play::bar_press`). Control: with the chat shown the same points are its bar's; both interfaces; the box and the
+/// PC's detached pane. (Without the gate in `bar_press` the hidden chat's bar still takes the presses.)
+#[test]
+fn sync_review_h3_a_hidden_chat_has_no_scroll_bar_to_press() {
+    let size = (640, 448);
+    for (pc, detached) in [(true, false), (true, true), (false, false)] {
+        interface(pc);
+        hide(&[]);
+        let mode = if pc { 0 } else { 33 };
+        let mut p = chat_play(mode, detached);
+        let vui = crate::pointer::testing::vui();
+        let mut nr = crate::pointer::testing::NullRaster;
+        {
+            let wnd = p.wnd_chat.as_mut().unwrap();
+            for i in 0..300 {
+                let line = crate::ui::wide(&format!("history {i}"));
+                match (detached, wnd.pane_mut(1)) {
+                    (true, Some(pane)) => pane.text.add_text(&line, [1.0; 4], 0, |_| 0),
+                    _ => wnd.text.add_text(&line, [1.0; 4], 0, |_| 0),
+                }
+            }
+            // read the history: the wheel's notch takes the view off the newest line (the bar is drawn then)
+            wnd.wheel([0.0, 0.0], 4.0, true);
+            if let Some(pane) = wnd.pane_mut(1) {
+                pane.wheel([0.0, 0.0], 4.0, true);
+            }
+            for _ in 0..2 {
+                wnd.draw(&vui, &mut nr, 1000, 0.5);
+                if let Some(pane) = wnd.pane_mut(1) {
+                    pane.draw(&vui, &mut nr, 1000, 0.5);
+                }
+            }
+        }
+        let shown = bar_hits(&mut p, size);
+        assert!(!shown.is_empty(), "control: pc={pc} detached={detached}: the shown chat's bar takes a press");
+        hide(&["chat_window"]);
+        let hidden = bar_hits(&mut p, size);
+        assert!(hidden.is_empty(), "pc={pc} detached={detached}: hidden, the bar takes {} presses (first {:?})", hidden.len(), hidden.first());
+    }
+    hide(&[]);
+    interface(false);
+}
+
+/// A Channel 0x40 record (`Group::channel40`): id, hp known, hp, world, x, y, z.
+fn channel40_record(id: u32, world: i8, pos: [i16; 3]) -> Vec<u8> {
+    let mut v = id.to_le_bytes().to_vec();
+    v.extend([1, 100, world as u8]);
+    for c in pos {
+        v.extend(c.to_le_bytes());
+    }
+    v
+}
+
+/// The group's compass patches one HUD frame is given: its ids and places.
+fn compass_patches(p: &mut Play) -> Option<Vec<(u32, Option<[f32; 3]>)>> {
+    let (x, z) = (25275.115f32, 15766.627f32);
+    let Some(world) = crate::walker::tests::tunaria_round(x, z) else {
+        eprintln!("SKIP compass patches: no disc");
+        return None;
+    };
+    let instance = render::wgpu::Instance::new(render::wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let Some((device, _queue)) = pollster::block_on(instance.request_adapter(&render::wgpu::RequestAdapterOptions::default()))
+        .ok()
+        .and_then(|a| pollster::block_on(a.request_device(&Default::default())).ok())
+    else {
+        eprintln!("SKIP compass patches: no GPU adapter");
+        return None;
+    };
+    let mut ui = render::ui::Ui::new(&device, render::TARGET_FORMAT, render::DEPTH_FORMAT);
+    let walker = crate::walker::Walker::new(world, x, z, 0.0);
+    let _ = p.loading.wait.take();
+    p.hud = Some((crate::ui::Vui::new(Default::default(), Default::default(), vec![]), Default::default(), crate::hud::Hud::new()));
+    crate::hud::fork_hud::PATCHES_DRAWN.with(|d| *d.borrow_mut() = None);
+    p.draw_hud(&mut ui, &walker, 1000, glam::Mat4::IDENTITY, (640, 448));
+    Some(crate::hud::fork_hud::PATCHES_DRAWN.with(|d| d.borrow().clone()).expect("the HUD frame reached the compass"))
+}
+
+/// Review of sync 2026-11-26, upstream's bug at both plotting sites: a roster member that no Channel 0x40 record has
+/// placed (zero world and place), and one a later record left out (inactive, its old place kept), is not plotted on
+/// the compass: it is not a patch pointing at (0, 0, 0) or at where the groupmate once was. Control: the member the
+/// record names is plotted at its place. Negative control: without `m.active` in `draw_hud`'s patch place, the
+/// never-placed member and the left-out one both get a place. (The world map's dot is the same test at
+/// `map_frame`, which needs a window's device and is not run here.)
+#[test]
+fn sync_review_a_member_that_is_not_active_is_not_a_patch_on_the_compass() {
+    interface(true);
+    let mut p = tests::play();
+    p.session.self_id = Some(1);
+    p.player.world = 0;
+    p.group.in_group = true;
+    let names: Vec<String> = ["Me", "Never", "Gone", "Here"].iter().map(|s| s.to_string()).collect();
+    p.group.roster(&[1, 2, 3, 4], &names, Some(1));
+    let mut both = channel40_record(3, 0, [5, 0, 5]);
+    both.extend(channel40_record(4, 0, [10, 0, 20]));
+    p.group.channel40(&both);
+    // the next record leaves member 3 out: inactive, its old place still in the roster
+    p.group.channel40(&channel40_record(4, 0, [10, 0, 20]));
+    assert!(!p.group.members[1].active && !p.group.members[2].active && p.group.members[3].active, "the roster as the records left it");
+    assert_eq!(p.group.members[2].pos, [5.0, 0.0, 5.0], "the left-out member keeps its old place: the stale one to refuse");
+    let Some(patches) = compass_patches(&mut p) else { return };
+    let place = |id: u32| patches.iter().find(|m| m.0 == id).map(|m| m.1);
+    assert_eq!(place(2), Some(None), "never placed: no patch");
+    assert_eq!(place(3), Some(None), "left out of the last record: no patch");
+    assert_eq!(place(4), Some(Some([10.0, 0.0, 20.0])), "control: the member the record names is plotted");
+    interface(false);
+}
