@@ -242,7 +242,8 @@ pub(crate) fn draw(ui: &Ui, name_of: &dyn Fn(&str) -> String) -> bool {
     open_manager
 }
 
-#[cfg(test)]
+// not test-only: `window_takeover::reset_all_for_test` (built in every build) calls it
+#[allow(dead_code)]
 pub(crate) fn reset_for_test() {
     STATE.with(|s| *s.borrow_mut() = State::default());
 }
