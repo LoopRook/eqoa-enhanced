@@ -66,6 +66,7 @@ fn step(host: &Host, time: f64) {
             player_command: false,
             player_action: None,
             only_vm: None,
+            audience: None,
         }
     });
     native_events::publish(&event);

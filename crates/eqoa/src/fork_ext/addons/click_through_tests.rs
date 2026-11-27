@@ -483,3 +483,6 @@ fn the_bag_viewers_item_menu_over_another_window_takes_left_and_right_clicks_alo
     pointer_api::set_legacy_for_test(false);
     deliver(&[&book, &bag]);
 }
+
+// 2026-11-27: one press does one thing (keys and Escape in mod windows), on the same two real windows
+include!("mod_keys_one_press_tests.rs");

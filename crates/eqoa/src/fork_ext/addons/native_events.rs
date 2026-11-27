@@ -571,6 +571,7 @@ fn local(name: &str, data: serde_json::Value) -> Event {
             data: std::sync::Arc::new(data),
             bytes: 0,
             only_vm: None,
+            audience: None,
             seq: c.seq,
             time: super::native_core::time_unborrowed(&c),
             tick: c.tick,
@@ -1066,6 +1067,8 @@ pub(crate) fn publish(event: &Event) {
                         || event.data["owner"].as_u64() == Some(b.vm))
                     // an event made for one mod (the player's paste) goes to that mod and to no other
                     && event.only_vm.is_none_or(|vm| vm == b.vm)
+                    // a key typed into a mod's text editor goes to that mod, Escape to the window that holds it (`input.rs`)
+                    && event.audience.as_ref().is_none_or(|a| a.contains(&b.vm))
                     // the player's key for a piece goes to every mod that holds the piece hidden, and to no other
                     && (event.name != "hud.piece_requested"
                         || event.data["piece"].as_str().is_some_and(|piece| super::visibility::vm_holds(b.vm, piece)))

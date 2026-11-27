@@ -184,9 +184,12 @@ fn raise_pressed_window() {
     let (x, y) = (at[0] as f64, at[1] as f64);
     if let Some(front) = front_claim(now(), x, y)
         && !real_window_in_front(&front, x, y)
-        && let Some(win) = front.win
     {
-        super::pointer_order::raise_next_frame(win);
+        // the window clicked is the one in front: Escape is its (when it claimed Escape), as ImGui's order says
+        super::input::escape_raise(front.vm);
+        if let Some(win) = front.win {
+            super::pointer_order::raise_next_frame(win);
+        }
     }
 }
 pub(crate) fn observe(event: &winit::event::WindowEvent, size: (u32, u32)) -> bool {
