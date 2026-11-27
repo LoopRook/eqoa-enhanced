@@ -196,3 +196,79 @@ fn bundled_update_rejects_corrupt_or_oversized_registry_without_writes() {
         assert_eq!(fs::read(&reg).unwrap(), invalid);
     }
 }
+
+/// The Stats Box left the bundle on 2026-11-27 (the game's own Stat Window is the one players use). An install that an
+/// older client gave the mod still has its folder, recorded in `bundled.json` with the hashes the client wrote, and the
+/// player's profile may still have it on: the unchanged folder is taken out at start, so nothing loads and the game's
+/// window is the player's again. A folder the player changed is kept, as is a copy the bundler never put there.
+/// Control: the same folder with one changed byte is kept, and so is one not recorded as the bundler's.
+#[test]
+fn a_retired_mods_unchanged_folder_is_taken_out_and_a_changed_or_own_one_is_kept() {
+    let old: [(&str, &[u8]); 3] = [
+        ("eqoa_stats_box/mod.json", br#"{"schemaVersion":1,"runtime":"lua","api":"eqoa/1","id":"eqoa_stats_box","entry":"main.lua"}"#),
+        ("eqoa_stats_box/main.lua", b"-- an old client's Stats Box\n"),
+        ("eqoa_stats_box/README.md", b"# Stats Box\n"),
+    ];
+    let as_installed = |i: &Install, edit: bool| {
+        fs::create_dir_all(i.mods.join("eqoa_stats_box")).unwrap();
+        for (path, bytes) in old {
+            fs::write(i.mods.join(path), bytes).unwrap();
+            i.remember_old(path, bytes); // what the older client wrote in bundled.json when it installed the file
+        }
+        let file = bundled_registry_path(&i.cfg);
+        let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        value["folders"][mods_folder_key(&i.mods)].as_array_mut().unwrap().push("eqoa_stats_box".into());
+        fs::write(file, serde_json::to_vec(&value).unwrap()).unwrap();
+        if edit {
+            fs::write(i.mods.join("eqoa_stats_box/main.lua"), b"-- an old client's Stats Box, changed by the player\n").unwrap();
+        }
+    };
+
+    // a fresh install never gets it
+    let i = Install::new();
+    assert!(!i.mods.join("eqoa_stats_box").exists(), "the Stats Box is not installed any more");
+    assert!(!PACKAGES.contains(&"eqoa_stats_box") && RETIRED.contains(&"eqoa_stats_box"));
+
+    // an old install's unchanged folder: taken out, and not put back on the next start
+    as_installed(&i, false);
+    let r = install_bundled_mods(&i.mods, Some(&i.cfg)).unwrap();
+    assert_eq!(r.retired_removed, ["eqoa_stats_box"]);
+    assert!(r.retired_kept.is_empty());
+    assert!(!i.mods.join("eqoa_stats_box").exists(), "the unchanged folder is gone");
+    let again = install_bundled_mods(&i.mods, Some(&i.cfg)).unwrap();
+    assert!(again.retired_removed.is_empty() && !i.mods.join("eqoa_stats_box").exists());
+    assert!(i.mods.join("eqoa_dialogs/main.lua").is_file(), "the other bundled mods are untouched");
+    drop(i);
+
+    // control: the player changed a file: kept as it is
+    let i = Install::new();
+    as_installed(&i, true);
+    let r = install_bundled_mods(&i.mods, Some(&i.cfg)).unwrap();
+    assert!(r.retired_removed.is_empty());
+    assert_eq!(r.retired_kept, ["eqoa_stats_box"]);
+    assert_eq!(fs::read(i.mods.join("eqoa_stats_box/main.lua")).unwrap(), b"-- an old client's Stats Box, changed by the player\n");
+    drop(i);
+
+    // control: a copy the bundler never installed (a mod author's, from the examples) is not touched or reported
+    let i = Install::new();
+    fs::create_dir_all(i.mods.join("eqoa_stats_box")).unwrap();
+    for (path, bytes) in old {
+        fs::write(i.mods.join(path), bytes).unwrap();
+        i.remember_old(path, bytes);
+    }
+    let r = install_bundled_mods(&i.mods, Some(&i.cfg)).unwrap();
+    assert!(r.retired_removed.is_empty() && r.retired_kept.is_empty());
+    assert!(i.mods.join("eqoa_stats_box/main.lua").is_file(), "the author's own copy stays");
+}
+
+/// The bootstrap list holds every version of the retired mods the repository ever had, so an install whose
+/// `bundled.json` lost its history still has an unchanged folder recognised. Control: unknown bytes are not.
+#[test]
+fn every_shipped_version_of_a_retired_mod_is_in_the_bootstrap_list() {
+    for path in ["eqoa_stats_box/main.lua", "eqoa_stats_box/mod.json", "eqoa_stats_box/README.md", "eqoa_turnin/main.lua"] {
+        assert!(!bootstrap_hashes(path).is_empty(), "{path}");
+    }
+    // the last Stats Box the client shipped (bundled-mods/ at develop 4936f2c0 and after)
+    assert!(bootstrap_hashes("eqoa_stats_box/main.lua").contains("2192342f2d5c8c61a824254f0a5ad05a12e6b6ad2e22345b7aad5fb25eeaa755"));
+    assert!(!bootstrap_hashes("eqoa_stats_box/main.lua").contains(&hash(b"-- not a shipped file\n")));
+}

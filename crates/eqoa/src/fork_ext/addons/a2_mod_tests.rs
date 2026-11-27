@@ -166,8 +166,8 @@ fn a2_mods_and_addons_labels_the_dialog_mods() {
     );
     assert!(dialogs.contains(&"Provides: NPC dialog window".to_string()), "{dialogs:?}");
     assert!(crate::fork_ext::bundled::PACKAGES.iter().all(|p| *p != "eqoa_turnin"), "the separate helper is gone");
-    // the control: a mod that answers nothing says nothing of the kind
-    assert!(!lines("eqoa_stats_box").contains(&"Can answer NPC dialogs".to_string()));
+    // the control: a mod that answers nothing says nothing of the kind (Mana Bars; the Stats Box until it left the bundle)
+    assert!(!lines("eqoa_mana_bars").contains(&"Can answer NPC dialogs".to_string()));
 }
 
 /// Vertices drawn for one dialog with these answers, with the highlight option on or off (the same words either

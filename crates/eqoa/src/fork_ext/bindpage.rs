@@ -404,8 +404,6 @@ static SESSION: Mutex<Option<Vec<(String, String, Option<String>)>>> = Mutex::ne
 /// keys as they are, so a cancel can put them back with the game's. Mod keys are still
 /// written as they are changed; only a cancel rewrites them.
 pub fn session_begin() {
-    #[cfg(not(target_arch = "wasm32"))]
-    crate::fork_ext::addons::options::stat_window_session_begin();
     let binds = MOD_BINDS.lock().unwrap();
     let snapshot = binds
         .iter()
@@ -419,8 +417,6 @@ pub fn session_begin() {
 /// `options.rs` has just put back. A key whose file cannot be written stays as it is in
 /// memory too (memory and file agree) and the failure is said.
 pub fn session_cancel() {
-    #[cfg(not(target_arch = "wasm32"))]
-    crate::fork_ext::addons::options::stat_window_session_cancel();
     let errors = restore_session(|addon, id, key| match key {
         Some(key) => save_mod_bind(addon, id, key),
         None => forget_mod_bind(addon, id),
@@ -1489,6 +1485,32 @@ mod tests {
             Some(("test_addon".into(), "toggle_window".into()))
         );
     }
+    /// The Stats Box is not shipped any more (2026-11-27), but a player may have a saved key for it (the owner's
+    /// `mod.eqoa_stats_box.toggle=f1`; here F2, a key the game leaves free as his F1 is once Controls moved off it: a mod's
+    /// default key never takes one the game has). Nothing registers that binding, so the saved line makes no Controls row,
+    /// fires nothing, raises nothing and holds no key: another mod's binding on the same key gets it. Control: a mod that
+    /// DOES register that binding gets the saved key (so the line is read when asked for, and only then).
+    #[test]
+    fn a_saved_key_for_a_binding_no_mod_registers_is_unused_and_blocks_nothing() {
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+        crate::settings::testing::put(KEYS_FILE, b"mod.eqoa_stats_box.toggle=f2
+");
+        assert_eq!(extra_rows(), 0, "no row for a binding nobody registers");
+        assert_eq!(get_key("eqoa_stats_box", "toggle"), None);
+        assert_eq!(dispatch_keypress("f2"), None, "the saved key fires nothing");
+        register("alpha", "open", "f2", "Alpha");
+        assert_eq!(get_key("alpha", "open").as_deref(), Some("f2"), "and it does not hold the key: another mod's binding gets it");
+        assert_eq!(dispatch_keypress("f2"), Some(("alpha".into(), "open".into())));
+        assert_eq!(extra_rows(), 1);
+        // control: a mod that registers the binding is given its saved key
+        reset_in_memory();
+        register("eqoa_stats_box", "toggle", "", "Toggle");
+        assert_eq!(get_key("eqoa_stats_box", "toggle").as_deref(), Some("f2"));
+        crate::settings::testing::reset(false);
+        reset_in_memory();
+    }
+
     #[test]
     fn retained_keys_round_trip_with_mod_key_and_restart() {
         crate::settings::testing::reset(false);

@@ -1,6 +1,6 @@
--- EQOA Stats Box Mod
+-- EQOA Stats Box (an example mod: not shipped with the client since 2026-11-27; see README.md)
 -- Authentic 2-column x 8-row stat display matching the Summary order, with
--- click-to-open Summary and the rebindable B key (as the Controls page binds).
+-- click-to-open Summary, replacing the game's own Stat Window through the API.
 
 local gold = { 0.95, 0.82, 0.5, 1.0 }
 local off_white = { 0.96, 0.95, 0.9, 1.0 }
@@ -9,10 +9,9 @@ local lowered_red = { 1.0, 0.45, 0.4, 1.0 }
 
 eqoa.options.toggle({ id = "stats_box", label = "Stats Box", default = false })
 
--- This box replaces the game's Stat Window, and there is ONE state for both: the box's switch ("stats_box", the Enhanced page's
--- row) is the game's own Stat Window setting (the client keeps them as one). The game's Stat Window key (F4, or whatever the
--- player has bound it to), `/stats`, the HUD Extras row, this mod's own key and the row all show or hide this box. The mod's key
--- is an extra and is unbound until the player binds it.
+-- This box replaces the game's Stat Window. Its switch is this mod's own option ("stats_box", a row on the Enhanced page while
+-- the mod is on). The game's Stat Window key (F4, or whatever the player has bound it to) and `/stats` reach it as
+-- `hud.piece_requested` while it holds the game's window (below); this mod's own key is unbound until the player binds it.
 -- One line in the log for each flip, so a play can say who asked and what the box did.
 local function flip(who)
     local now, err = eqoa.actions.toggle_stats_box()

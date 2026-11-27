@@ -724,13 +724,14 @@ fn round4_seven_mods_in_a_real_shaped_scene_body() {
     use super::super::{addon_perf, hud_layer};
     let real = crate::map::extension::use_real_ui(true);
     eprintln!("R4P art: {}", if real { "the disc's atlas and strings (surfaces and font are stand-ins)" } else { "stand-ins (no disc)" });
-    const SEVEN: [&str; 7] = ["eqoa_stats_box", "eqoa_target_of_target", "eqoa_mana_bars", "eqoa_hud_numbers", "eqoa_creature_journal", "eqoa_map_search", "eqoa_round_minimap"];
+    // the bundled HUD and map mods (the Stats Box was the seventh until it left the bundle on 2026-11-27)
+    const SEVEN: [&str; 6] = ["eqoa_target_of_target", "eqoa_mana_bars", "eqoa_hud_numbers", "eqoa_creature_journal", "eqoa_map_search", "eqoa_round_minimap"];
     let samples: usize = std::env::var("R4C_SAMPLES").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
     let mut rows: Vec<(String, Vec<&str>)> = vec![("no mods".into(), vec![])];
     for m in SEVEN {
         rows.push((m.into(), vec![m]));
     }
-    rows.push(("all seven".into(), SEVEN.to_vec()));
+    rows.push(("all six".into(), SEVEN.to_vec()));
     let mut means = Vec::new();
     for (label, mods) in rows {
         addon_perf::force_for_test(false);
@@ -744,9 +745,6 @@ fn round4_seven_mods_in_a_real_shaped_scene_body() {
             rm.write_journal(&perf_journal(world, rm.me, 420));
         }
         rm.frames(6);
-        if mods.contains(&"eqoa_stats_box") {
-            lua(&rm.manager, "eqoa_stats_box").load("eqoa.options.set('stats_box', true)").exec().unwrap();
-        }
         if mods.contains(&"eqoa_target_of_target") {
             lua(&rm.manager, "eqoa_target_of_target").load("eqoa.options.set('target_of_target', true)").exec().unwrap();
         }

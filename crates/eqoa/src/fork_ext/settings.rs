@@ -197,29 +197,11 @@ pub fn migrate_configs() {
         }
 
         // Mod keys have their own store, so native Controls saves cannot erase them.
-        let had_stats_binding = crate::settings::read_config("keys.opt").is_some_and(|bytes| {
-            String::from_utf8_lossy(&bytes).lines().any(|line| {
-                line.starts_with("key.stats_box=") || line.starts_with("mod.eqoa_stats_box.toggle=")
-            })
-        });
         if let Err(error) = crate::fork_ext::bindpage::migrate_legacy_keys() {
             eprintln!("settings: mod key migration: {error}");
         }
-        // Preserve the legacy migration's immediately available Stats Box binding.
-        if had_stats_binding
-            && crate::settings::read_config("mod-keys.opt").is_some_and(|bytes| {
-                String::from_utf8_lossy(&bytes)
-                    .lines()
-                    .any(|line| line.starts_with("mod.eqoa_stats_box.toggle="))
-            })
-        {
-            crate::fork_ext::bindpage::register(
-                "eqoa_stats_box",
-                "toggle",
-                "b",
-                "Toggle Stats Box",
-            );
-        }
+        // (No Controls row is made here for an old Stats Box key: the mod left the bundle on 2026-11-27, and a saved
+        // `mod.eqoa_stats_box.toggle` line stays in mod-keys.opt unused, holding no key.)
     }
 }
 #[cfg(test)]
@@ -425,6 +407,7 @@ mod tests {
     #[test]
     fn migration_moves_legacy_options_and_binds_into_mods_and_strips_files() {
         super::super::testing::reset(false);
+        crate::fork_ext::bindpage::reset_in_memory(); // the mod keys in memory are the process's: start from none
         // Stage legacy files: client.opt and keys.opt
         let legacy_client = "lod=on\nbrightness=5\ncamera_distance=11\ntarget_of_target=on\nmana_bars=off\nstats_box=on\ntarget_hp_percent=off\nxp_details=off\nhud_numbers=off\n";
         let legacy_keys = "key.stats_box=j\nkey.attack=q\n";
@@ -464,10 +447,10 @@ mod tests {
             crate::fork_ext::addons::options::get_toggle("eqoa_mana_bars", "mana_bars"),
             Some(false)
         );
-        // the Stats Box is the game's own Stat Window setting now (one state): an old `stats_box=` line is not migrated
+        // an old `stats_box=` line is not migrated: the Stats Box is not shipped any more (2026-11-27)
         assert_eq!(
             crate::fork_ext::addons::options::get_toggle("eqoa_stats_box", "stats_box"),
-            Some(false)
+            None
         );
         assert_eq!(
             crate::fork_ext::addons::options::get_toggle("eqoa_hud_numbers", "target_hp_percent"),
@@ -482,11 +465,9 @@ mod tests {
             Some(false)
         );
 
-        // 2. Mod keybind received the migrated key
-        assert_eq!(
-            crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle"),
-            Some("j".to_string())
-        );
+        // 2. The old Stats Box key is carried into mod-keys.opt (step 4), but no Controls row is made for it: the mod is
+        //    not shipped any more, so no dead "Toggle Stats Box" row appears
+        assert_eq!(crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle"), None, "no Controls row for a mod that is not there");
 
         // 3. client.opt is stripped of legacy keys
         let kept_client =
@@ -537,7 +518,7 @@ mod tests {
             )
             .0,
             false,
-            "the Stats Box follows the game's own Stat Window setting, not a saved option of its own"
+            "the old `stats_box=on` line never became a saved option (the Stats Box is not shipped any more)"
         );
         assert_eq!(
             crate::fork_ext::addons::options::register_toggle(
@@ -651,7 +632,6 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let scripts = root.join("scripts");
         let ids = [
-            "eqoa_stats_box",
             "eqoa_target_of_target",
             "eqoa_mana_bars",
             "eqoa_hud_numbers",
@@ -667,14 +647,13 @@ mod tests {
             }
         }
         let mods = discovery::discover(&scripts).addons;
-        assert_eq!(mods.len(), 4);
-        let check_lua = |migrated: bool, stats: bool| {
+        assert_eq!(mods.len(), 3, "the bundled HUD mods (the Stats Box left the bundle on 2026-11-27)");
+        let check_lua = |migrated: bool| {
             options::reset_in_memory();
             for addon in &mods {
                 let host = Host::for_addon(addon).unwrap();
                 host.run_addon(addon).unwrap();
                 let assertion = match addon.id.as_str() {
-                    "eqoa_stats_box" => format!("assert(eqoa.options.get('stats_box')=={stats})"),
                     "eqoa_target_of_target" => {
                         format!("assert(eqoa.options.get('target_of_target')=={migrated})")
                     }
@@ -705,7 +684,7 @@ mod tests {
                     super::super::testing::kept("client.opt").unwrap(),
                     bad.as_bytes()
                 );
-                check_lua(false, false);
+                check_lua(false);
             }
             let file = super::super::own_file("client", place);
             super::super::testing::put(&file, b"brightness=9\nstats_box=on\ntarget_of_target=on\nmana_bars=off\nhud_numbers=off\nxp_details=off\ntarget_hp_percent=off\n");
@@ -713,13 +692,12 @@ mod tests {
             assert_eq!(
                 super::super::testing::kept(&file).unwrap(),
                 b"brightness=9\nstats_box=on\n",
-                "the other mods' old lines are stripped; the Stats Box's is the game's Stat Window setting now, left alone"
+                "the bundled mods' old lines are stripped; the retired Stats Box's line is left alone (nothing reads it)"
             );
-            check_lua(true, false);
-            // an old `stats_box=on` line never turns the box on (the game's Stat Window setting is the one state)
+            check_lua(true);
             super::super::testing::put(&file, b"stats_box=on\n");
             migrate_configs();
-            check_lua(true, false);
+            check_lua(true);
             let before = super::super::testing::kept(&file);
             migrate_configs();
             assert_eq!(super::super::testing::kept(&file), before);

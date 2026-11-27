@@ -1362,8 +1362,8 @@ fn round_3_hud_layer_draw_calls_and_queue() {
 // Package metadata supplies identity exactly as discovery does in production.
 fn option_test_host(id: &str) -> Host {
     use super::discovery::{DiscoveredAddon, EntryMode};
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../bundled-mods/eqoa_stats_box");
+    // any mod's folder: the Stats Box's, kept as an example (docs/modding/examples) since 2026-11-27
+    let root = super::example_mods::dir("eqoa_stats_box");
     Host::for_addon(&DiscoveredAddon {
         id: id.into(),
         name: id.into(),
@@ -1432,6 +1432,9 @@ fn failed_option_saves_leave_lua_and_controls_values_unchanged_and_diagnose() {
     "#,
     )
     .unwrap();
+    // the mod's option row: an ordinary mod option since the Stats Box left the bundle (2026-11-27; it had the fixed item 2000)
+    let item = super::options::register_toggle("eqoa_stats_box", "stats_box", "stats_box", false).1;
+    assert!(item > 2005, "a dynamic row, not the retired 2000: {item}");
     super::native_core::CORE.with(|c| {
         c.borrow_mut().emit(
             "input.key",
@@ -1443,8 +1446,8 @@ fn failed_option_saves_leave_lua_and_controls_values_unchanged_and_diagnose() {
         "assert(last_state == nil and last_action_err.code == 'io_error');assert(eqoa.options.get('stats_box') == false)",
     )
     .unwrap();
-    assert!(!super::options::toggle_by_item(2000));
-    assert_eq!(super::options::value_by_item(2000), Some(false));
+    assert!(!super::options::toggle_by_item(item));
+    assert_eq!(super::options::value_by_item(item), Some(false));
     assert!(!super::options::set_toggle(
         "eqoa_stats_box",
         "stats_box",
@@ -1454,8 +1457,8 @@ fn failed_option_saves_leave_lua_and_controls_values_unchanged_and_diagnose() {
         super::options::get_toggle("eqoa_stats_box", "stats_box"),
         Some(false)
     );
-    // the Stats Box is the game's Stat Window setting now: a failed save of client.opt leaves that setting as it was too
-    assert!(!crate::settings::stat_window(), "a failed save leaves the game's own setting, the row and Lua agreeing");
+    // the mod's option is its own: the game's own Stat Window setting is never touched by it
+    assert!(!crate::settings::stat_window(), "the game's own Stat Window setting is untouched");
     let logs = host.drain_logs().unwrap();
     assert!(
         logs.iter()
@@ -1487,8 +1490,8 @@ fn failed_option_saves_leave_lua_and_controls_values_unchanged_and_diagnose() {
     "#,
     )
     .unwrap();
-    assert!(super::options::toggle_by_item(2000));
-    assert_eq!(super::options::value_by_item(2000), Some(false));
+    assert!(super::options::toggle_by_item(item));
+    assert_eq!(super::options::value_by_item(item), Some(false));
     super::options::reset_in_memory();
     crate::settings::testing::reset(false);
 }
@@ -1569,9 +1572,11 @@ fn option_and_bind_names_never_redirect_caller_identity() {
             .unwrap();
         assert_eq!(super::options::get_toggle(id, "stats_box"), Some(false));
         assert!(crate::fork_ext::bindpage::get_key(id, "toggle").is_some());
+        // nothing was redirected to the Stats Box: it has no option and no key (it is not running, and since 2026-11-27 it
+        // has no built-in row either)
         assert_eq!(
             super::options::get_toggle("eqoa_stats_box", "stats_box"),
-            Some(false)
+            None
         );
         assert_eq!(
             crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle"),

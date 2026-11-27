@@ -16,7 +16,7 @@ fn status(host: &Host, path: &str) -> String {
 
 fn mod_host(id: &str) -> Host {
     use super::discovery::{DiscoveredAddon, EntryMode};
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods/eqoa_stats_box");
+    let root = super::example_mods::dir("eqoa_stats_box"); // any mod's folder: the Stats Box, kept as an example
     Host::for_addon(&DiscoveredAddon {
         id: id.into(),
         name: id.into(),

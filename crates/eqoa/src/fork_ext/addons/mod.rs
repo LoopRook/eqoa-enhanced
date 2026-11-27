@@ -65,6 +65,8 @@ mod bag_trade_tests;
 mod chat_history_tests;
 #[cfg(test)]
 mod docs_tests;
+#[cfg(test)]
+pub(crate) mod example_mods;
 pub(crate) mod combat;
 pub(crate) mod discovery;
 pub(crate) mod effects;

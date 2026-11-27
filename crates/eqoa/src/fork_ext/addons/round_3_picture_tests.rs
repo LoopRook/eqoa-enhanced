@@ -39,7 +39,8 @@ impl Drop for TestDir {
 
 fn bundled_tree() -> TestDir {
     let root = TestDir::new();
-    for file in crate::fork_ext::bundled::EMBEDDED_FILES {
+    // the bundled mods and the Stats Box, an example mod since it left the bundle on 2026-11-27 (docs/modding/examples)
+    for file in super::example_mods::with_bundled() {
         let path = root.path().join(file.path);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, file.data).unwrap();
@@ -1024,12 +1025,14 @@ fn fresh_hud_mod_load_defaults_and_live_stats_key_and_menu_wiring() {
     mana.execute("assert(eqoa.options.get('mana_bars') == true)")
         .unwrap();
     nums.execute("assert(eqoa.options.get('hud_numbers') and eqoa.options.get('xp_details') and eqoa.options.get('target_hp_percent'))").unwrap();
-    // Change the same item the native Enhanced HUD page changes; Lua must observe it.
-    assert!(options::toggle_by_item(2000));
+    // Change the same item the native Enhanced HUD page changes; Lua must observe it. (The mod's row: an ordinary mod option row
+    // since the Stats Box left the bundle on 2026-11-27; it had the fixed item 2000 until then.)
+    let stats_item = options::register_toggle("eqoa_stats_box", "stats_box", "Stats Box", false).1;
+    assert!(options::toggle_by_item(stats_item));
     stats
         .execute("assert(eqoa.options.get('stats_box') == true)")
         .unwrap();
-    assert!(options::toggle_by_item(2000));
+    assert!(options::toggle_by_item(stats_item));
     // the mod's own key is an extra: unbound until the player binds it (the game's Stat Window key opens the box)
     assert_eq!(crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle").as_deref().unwrap_or(""), "");
     assert!(crate::fork_ext::bindpage::set_key("eqoa_stats_box", "toggle", "y"));
@@ -1327,38 +1330,6 @@ fn menu_values_persist_on_disk_and_reach_reloaded_bundled_lua() {
     );
     options::set_storage_root(None);
     options::reset_in_memory();
-}
-/// The Stats Box's own case: its menu row is the game's Stat Window setting (one state), kept in the game's own `client.opt`, and the
-/// reloaded Lua reads it from there; the mod's own file is not where it lives.
-#[test]
-fn menu_value_of_the_stats_box_persists_through_the_games_setting_and_reaches_reloaded_bundled_lua() {
-    let tree = bundled_tree();
-    let config = TestDir::new();
-    crate::settings::testing::reset(false);
-    options::set_storage_root(Some(config.path().to_path_buf()));
-    options::reset_in_memory();
-    {
-        let host = load_hud_mod(&tree, "eqoa_stats_box");
-        host.execute("assert(eqoa.options.get('stats_box')==false)")
-            .unwrap();
-        assert!(options::toggle_by_item(2000));
-        host.execute("assert(eqoa.options.get('stats_box')==true)")
-            .unwrap();
-    }
-    options::reset_in_memory();
-    let host = load_hud_mod(&tree, "eqoa_stats_box");
-    host.execute("assert(eqoa.options.get('stats_box')==true)")
-        .unwrap();
-    let kept = String::from_utf8_lossy(&crate::settings::testing::kept("client.opt").unwrap_or_default()).into_owned();
-    assert!(kept.contains("stat_window=on"), "kept in client.opt: {kept}");
-    let key = storage::Storage::key_for_addon_id("eqoa_stats_box");
-    assert!(
-        !config.path().join("addons").join(format!("{key}.json")).is_file(),
-        "the mod's own file holds nothing for it"
-    );
-    options::set_storage_root(None);
-    options::reset_in_memory();
-    crate::settings::testing::reset(false);
 }
 #[test]
 fn round3_capabilities_and_stats_records_match_public_contract() {
