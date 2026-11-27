@@ -4,13 +4,13 @@
  "rule": "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
  "counts": {
   "total": 2601,
-  "proven": 872,
-  "provisional": 1362,
+  "proven": 879,
+  "provisional": 1355,
   "compat": 367,
   "by_kind": {
    "action": {
-    "proven": 84,
-    "provisional": 48,
+    "proven": 85,
+    "provisional": 47,
     "compat": 0
    },
    "compat": {
@@ -24,8 +24,8 @@
     "compat": 0
    },
    "field": {
-    "proven": 363,
-    "provisional": 948,
+    "proven": 368,
+    "provisional": 943,
     "compat": 0
    },
    "function": {
@@ -39,8 +39,8 @@
     "compat": 0
    },
    "type": {
-    "proven": 75,
-    "provisional": 86,
+    "proven": 76,
+    "provisional": 85,
     "compat": 0
    }
   }
@@ -144,7 +144,6 @@
   "eqoa.actions.autorun",
   "eqoa.actions.batch_status",
   "eqoa.actions.blacksmith_close",
-  "eqoa.actions.buy",
   "eqoa.actions.camera",
   "eqoa.actions.chat",
   "eqoa.actions.close_window",
@@ -577,8 +576,6 @@
   "eqoa.events.merc.changed",
   "eqoa.events.merc.changed.data.open",
   "eqoa.events.merc.changed.data.revision",
-  "eqoa.events.merchant.changed.data.after",
-  "eqoa.events.merchant.changed.data.before",
   "eqoa.events.merchant.changed.data.changed",
   "eqoa.events.once",
   "eqoa.events.player.changed.data.before",
@@ -856,7 +853,6 @@
   "eqoa.items.Container.full",
   "eqoa.items.Container.kind",
   "eqoa.items.Container.master_loot",
-  "eqoa.items.Container.merchant",
   "eqoa.items.Container.view",
   "eqoa.items.ContainerView",
   "eqoa.items.ContainerView.rows",
@@ -908,14 +904,11 @@
   "eqoa.items.MerchantOption.key",
   "eqoa.items.MerchantOption.label",
   "eqoa.items.MerchantOption.selected",
-  "eqoa.items.MerchantState",
   "eqoa.items.MerchantState.button_hint",
   "eqoa.items.MerchantState.buy_rate",
   "eqoa.items.MerchantState.entity_id",
   "eqoa.items.MerchantState.greeting",
   "eqoa.items.MerchantState.mode",
-  "eqoa.items.MerchantState.options",
-  "eqoa.items.MerchantState.pending",
   "eqoa.items.MerchantState.selected_option",
   "eqoa.items.MerchantState.sell_rate",
   "eqoa.items.SlotInfo.id",
