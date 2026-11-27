@@ -16,6 +16,7 @@ local T = {
     pad_list = false, pad_row = 1, page = 9, -- (`page`: the rows the list shows at once, set by the draw)
     auto_opened = false, was_bank = false, cache = nil,
     want_pass = {}, dead = false,
+    PASS_WAIT = 3.0, -- seconds a pass is waited for before its claim is let go anyway
     passing = {}, -- kind -> when its pass was asked: the claim is kept until the client says the session ended "passed"
 }
 B.trade = T
@@ -58,7 +59,7 @@ function T.poll(force)
     end
     local now = os.clock()
     for kind, since in pairs(T.passing) do
-        if now - since > PASS_WAIT then T.passing[kind] = nil end
+        if now - since > T.PASS_WAIT then T.passing[kind] = nil end
     end
     if not force and now - T.polled < 1.0 then return end
     T.polled = now
@@ -98,7 +99,7 @@ local function try_pass(kind)
     local ok, err = eqoa.windows.pass(s.ref)
     if ok then
         -- the client carries the pass out at its next step; a release before that drops it and closes the session. The
-        -- claim goes back when the session's end ("passed") is told, or after PASS_WAIT seconds at the latest
+        -- claim goes back when the session's end ("passed") is told, or after T.PASS_WAIT seconds at the latest
         T.passing[kind] = os.clock()
         note("the game's own " .. kind .. " window is being shown")
         return true
@@ -114,8 +115,6 @@ function T.hand_over(kind)
     T.want_pass[kind] = true
     try_pass(kind)
 end
-
-local PASS_WAIT = 3.0
 
 function T.on_session(d)
     if not d then return end

@@ -6186,3 +6186,108 @@ fn trade_sell_question_body() {
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Third check (PASS_WAIT used before its declaration): a poll while a pass is carried out, and the wait's fallback.
+
+/// The option goes off at an NPC; a `player.changed` poll arrives after the pass was asked and before the session's end
+/// is told: the game's window still opens, nothing fails, the claim goes back after.
+fn trade_phase_poll_while_passing(bv: &mut Bv) {
+    bv.trade_option(true);
+    bv.lua().load("eqoa.options.set('open_npc', false)").exec().unwrap();
+    bv.play.bags_merchant_wares_packet(9002, &trade_wares());
+    for _ in 0..8 {
+        bv.frames(1);
+        if bv.eval::<bool>("require('trade').passing.merchant ~= nil") {
+            break;
+        }
+    }
+    assert!(bv.eval::<bool>("require('trade').passing.merchant ~= nil"), "the pass was asked");
+    // what main.lua's player.changed handler does
+    bv.lua().load("require('trade').poll(true)").exec().unwrap();
+    for _ in 0..4 {
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+    }
+    assert!(bv.eval::<bool>("not require('trade').dead"), "the poll did not fail");
+    assert_eq!(bv.play.mode, 10, "the game's own merchant window is the open native window");
+    assert!(bv.merchant_open(), "and the NPC's session was not closed");
+    for _ in 0..4 {
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+    }
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('merchant')"), "the claim goes back after the pass");
+}
+
+#[test]
+fn trade_window_a_poll_between_the_pass_and_its_end_keeps_the_games_window_open() {
+    big_stack(trade_poll_while_passing_body)
+}
+fn trade_poll_while_passing_body() {
+    let Some(mut bv) = trade_setup("trade poll while passing") else { return };
+    trade_phase_poll_while_passing(&mut bv);
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn trade_window_a_poll_between_the_pass_and_its_end_control_with_pass_wait_used_before_its_declaration() {
+    big_stack(trade_poll_while_passing_control_body)
+}
+fn trade_poll_while_passing_control_body() {
+    BV_MUTATION.with(|m| *m.borrow_mut() = vec![("now - since > T.PASS_WAIT", "now - since > PASS_WAIT")]);
+    let Some(mut bv) = trade_setup("trade poll while passing control") else {
+        BV_MUTATION.with(|m| m.borrow_mut().clear());
+        return;
+    };
+    BV_MUTATION.with(|m| m.borrow_mut().clear());
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| trade_phase_poll_while_passing(&mut bv)));
+    assert!(result.is_err(), "negative control: the poll raised, both claims went, the queued pass was dropped");
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+/// The fallback: the pass was asked and its end is never told; after the wait the claim is let go, with no error.
+fn trade_phase_pass_wait_fallback(bv: &mut Bv) {
+    bv.trade_option(true);
+    bv.lua()
+        .load("local T = require('trade'); T.PASS_WAIT = 0.05; eqoa.options.set('open_npc', false); T.passing.merchant = os.clock()")
+        .exec()
+        .unwrap();
+    bv.lua().load("require('trade').poll(true)").exec().unwrap();
+    assert!(bv.eval::<bool>("eqoa.windows.taken('merchant') and not require('trade').dead"), "within the wait the claim is kept");
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    bv.lua().load("require('trade').poll(true)").exec().unwrap();
+    assert!(bv.eval::<bool>("not require('trade').dead"), "the poll after the wait did not fail");
+    assert!(bv.eval::<bool>("not eqoa.windows.taken('merchant')"), "after the wait the claim is let go");
+}
+
+#[test]
+fn trade_window_the_pass_wait_fallback_lets_the_claim_go_with_no_error() {
+    big_stack(trade_pass_wait_fallback_body)
+}
+fn trade_pass_wait_fallback_body() {
+    let Some(mut bv) = trade_setup("trade pass wait fallback") else { return };
+    trade_phase_pass_wait_fallback(&mut bv);
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn trade_window_the_pass_wait_fallback_control_with_pass_wait_used_before_its_declaration() {
+    big_stack(trade_pass_wait_fallback_control_body)
+}
+fn trade_pass_wait_fallback_control_body() {
+    BV_MUTATION.with(|m| *m.borrow_mut() = vec![("now - since > T.PASS_WAIT", "now - since > PASS_WAIT")]);
+    let Some(mut bv) = trade_setup("trade pass wait fallback control") else {
+        BV_MUTATION.with(|m| m.borrow_mut().clear());
+        return;
+    };
+    BV_MUTATION.with(|m| m.borrow_mut().clear());
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| trade_phase_pass_wait_fallback(&mut bv)));
+    assert!(result.is_err(), "negative control: every poll with a pass waiting raises, so the fallback can never run");
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}

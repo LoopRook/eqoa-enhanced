@@ -699,3 +699,25 @@ fn review8_items_marked_to_bank_or_keep_are_not_sold_by_sell_n_and_a_right_click
     run(&lua, "B.last_req = nil; T.sell_item(INV_ITEMS[1], {fx = 8, fy = 46})");
     assert_eq!(string(&lua, "T.prompt.kind"), "sell");
 }
+
+#[test]
+fn third_check_a_poll_while_a_pass_is_carried_keeps_the_claim_and_the_wait_lets_it_go() {
+    // the pass is asked (the option went off at an NPC); a player.changed poll arrives before the session's end is told
+    let flow = r#"
+        OPTIONS.open_npc = false; SESSIONS.merchant = {ref = 'ws-1'}; talk_merchant({ware_(1, 'Bread')})
+        T.poll(true)
+    "#;
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, flow);
+    assert_eq!(string(&lua, "#PASSED .. ':' .. tostring(PASSED[1])"), "1:ws-1");
+    assert!(boolean(&lua, "T.dead == false and not released('merchant')"), "the poll neither fails nor lets the claim go before the pass is carried out");
+    // "closed" is never told: after PASS_WAIT the claim is let go, no error
+    run(&lua, "NOW = NOW + 4; T.poll(true)");
+    assert!(boolean(&lua, "T.dead == false and released('merchant') and released('bank')"), "the wait ran out: the claims go back");
+    // negative control: PASS_WAIT used before it is declared is the global nil: the poll raises, the guard lets everything go
+    let bad = mutated(&[("now - since > T.PASS_WAIT", "now - since > PASS_WAIT")]);
+    viewer_closed(&bad);
+    run(&bad, flow);
+    assert!(boolean(&bad, "T.dead == true and released('merchant')"), "negative control: the poll raised and dropped the pass");
+}
