@@ -9,16 +9,27 @@ local lowered_red = { 1.0, 0.45, 0.4, 1.0 }
 
 eqoa.options.toggle({ id = "stats_box", label = "Stats Box", default = false })
 
--- The game's own Stat Window key (F4, or whatever the player has bound it to) and `/stats` open and close this box: the box
--- replaces that window, so it answers the window's key. This key is an extra and is unbound until the player binds it.
-eqoa.input.bind({ id = "toggle", label = "Toggle Stats Box", default_key = "" }, function()
-    eqoa.actions.toggle_stats_box()
-end)
+-- This box replaces the game's Stat Window, and there is ONE state for both: the box's switch ("stats_box", the Enhanced page's
+-- row) is the game's own Stat Window setting (the client keeps them as one). The game's Stat Window key (F4, or whatever the
+-- player has bound it to), `/stats`, the HUD Extras row, this mod's own key and the row all show or hide this box. The mod's key
+-- is an extra and is unbound until the player binds it.
+-- One line in the log for each flip, so a play can say who asked and what the box did.
+local function flip(who)
+    local now, err = eqoa.actions.toggle_stats_box()
+    if err then
+        eqoa.log.write("warn", "Stats Box: " .. who .. " asked, and the box could not change: " .. tostring(err.message or err.code))
+        return
+    end
+    local held = eqoa.hud.visible("stat_window") == false
+    eqoa.log.write("info", "Stats Box: " .. who .. " asked; the box is now " .. (now and "on" or "off") .. "; the game's own Stat Window is "
+        .. (held and "held back by this mod" or "NOT held back this frame (the HUD is not ready, or Use the game's windows is on)"))
+end
+eqoa.input.bind({ id = "toggle", label = "Toggle Stats Box", default_key = "" }, function() flip("this mod's key") end)
 eqoa.events.on("hud.piece_requested", function(e)
     local d = e.data
     if d.piece ~= "stat_window" then return end
     local shown = eqoa.options.get("stats_box") == true
-    if d.action == "toggle" or (d.action == "show") ~= shown then eqoa.actions.toggle_stats_box() end
+    if d.action == "toggle" or (d.action == "show") ~= shown then flip("the game's Stat Window key or /stats (" .. tostring(d.action) .. ")") end
 end)
 
 -- Stats change on server channels, not on every display frame. Copy only the
@@ -50,7 +61,7 @@ eqoa.events.on("state.reset", function() hold_stat_window(false) end)
 local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
 
 -- what the mod last worked out; read by its tests
-stats_box = { standing_down = false }
+stats_box = { standing_down = false, shown = false, drawn = false }
 
 -- With the box on and nothing on screen the player cannot tell why, so the reason is written to the log, once each time it changes.
 local told
@@ -61,6 +72,7 @@ local function why_not(reason)
 end
 
 eqoa.events.on("render", function()
+    stats_box.drawn, stats_box.shown = false, false
     hold_stat_window(true)
     -- With "Use the game's windows" on, the game's Stat Window and its key are the player's again (the window reads as visible
     -- here although this mod still holds its claim): the box stands down, draws nothing and takes no click, and comes back as
@@ -74,6 +86,7 @@ eqoa.events.on("render", function()
     if map_up() then return end
     if not on then why_not(nil) return end
     if not eqoa.hud.visible("stats_box") then why_not("the HUD is hidden or not in plain play") return end
+    stats_box.shown = true -- on, not standing down, the HUD up: drawn as soon as the figures are there
     if dirty then
         local s = eqoa.player.stats()
         if not s or not s.rows or #s.rows == 0 then why_not("the server has sent no stat figures yet") return end
@@ -95,6 +108,7 @@ eqoa.events.on("render", function()
     end
     if not rows then return end
     why_not(nil)
+    stats_box.drawn = true
     hud_panel(panel_spec)
     for i = 1, #rows do
         local r = rows[i]

@@ -9,6 +9,25 @@ pub(crate) use super::option_buttons::{activate_button, is_button};
 
 pub const MOD_OPTION_BASE: i32 = 2000;
 
+/// The Stats Box replaces the game's Stat Window, so its switch IS the game's own `stat_window` setting: one state, read and
+/// written here for every way of asking (the Enhanced page's row, the mod's key, the game's Stat Window key, `/stats`, the HUD
+/// Extras row, `eqoa.options.get/set`). The mod's saved `stats_box` option is no longer the truth. With the mod off the setting
+/// is the game's as it stood.
+fn is_game_stat_window(addon_id: &str, id: &str) -> bool {
+    addon_id == "eqoa_stats_box" && id == "stats_box"
+}
+
+fn game_stat_window() -> bool {
+    crate::settings::stat_window()
+}
+
+/// Whether Options row `item_id` is the Stats Box's, which is the game's Stat Window setting: the page flips `stat_window` in its
+/// own copy of the options (as the HUD Extras row does) and keeps it as it keeps every row, with Save Changes.
+pub(crate) fn is_game_stat_window_item(item_id: i32) -> bool {
+    bundled_info("eqoa_stats_box", "stats_box").is_some_and(|(item, _, _)| item == item_id)
+        && TOGGLES.with(|t| t.borrow().iter().any(|o| o.item_id == item_id && o.enabled))
+}
+
 #[derive(Clone, Debug)]
 pub struct ModToggle {
     pub item_id: i32,
@@ -129,7 +148,7 @@ pub fn effective_toggle(addon_id: &str, id: &str) -> bool {
                 .borrow()
                 .iter()
                 .find(|o| o.addon_id == addon_id && o.id == id)
-                .is_some_and(|o| o.enabled && o.current_value)
+                .is_some_and(|o| o.enabled && if is_game_stat_window(addon_id, id) { game_stat_window() } else { o.current_value })
         })
 }
 
@@ -257,6 +276,11 @@ pub fn set_addon_enabled(addon_id: &str, enabled: bool) {
 }
 
 pub fn register_toggle(addon_id: &str, id: &str, label: &str, default_value: bool) -> (bool, i32) {
+    let (value, item) = register_toggle_raw(addon_id, id, label, default_value);
+    (if is_game_stat_window(addon_id, id) { game_stat_window() } else { value }, item)
+}
+
+fn register_toggle_raw(addon_id: &str, id: &str, label: &str, default_value: bool) -> (bool, i32) {
     let enabled = DISABLED_ADDONS.with(|d| !d.borrow().contains(addon_id));
     TOGGLES.with(|t| {
         let mut t = t.borrow_mut();
@@ -306,6 +330,11 @@ pub fn unregister_addon_toggles(addon_id: &str) {
 }
 
 pub fn get_toggle(addon_id: &str, id: &str) -> Option<bool> {
+    let value = get_toggle_raw(addon_id, id);
+    if is_game_stat_window(addon_id, id) { value.map(|_| game_stat_window()) } else { value }
+}
+
+fn get_toggle_raw(addon_id: &str, id: &str) -> Option<bool> {
     TOGGLES.with(|t| {
         let mut t = t.borrow_mut();
         if let Some(o) = t.iter_mut().find(|o| o.addon_id == addon_id && o.id == id) {
@@ -341,7 +370,12 @@ pub fn get_toggle(addon_id: &str, id: &str) -> Option<bool> {
 }
 
 pub fn set_toggle_persisted(addon_id: &str, id: &str, value: bool) -> Result<(), String> {
-    persist_toggle(addon_id, id, value)?;
+    if is_game_stat_window(addon_id, id) {
+        // the game's own setting, kept the way the game keeps it (`Play::set_stat_window`)
+        crate::settings::set_stat_window(value)?;
+    } else {
+        persist_toggle(addon_id, id, value)?;
+    }
     let enabled = DISABLED_ADDONS.with(|d| !d.borrow().contains(addon_id));
     TOGGLES.with(|t| {
         let mut t = t.borrow_mut();
@@ -398,6 +432,11 @@ pub fn toggle_by_item(item_id: i32) -> bool {
 }
 
 pub fn value_by_item(item_id: i32) -> Option<bool> {
+    let value = value_by_item_raw(item_id);
+    if bundled_info("eqoa_stats_box", "stats_box").is_some_and(|(item, _, _)| item == item_id) { value.map(|_| game_stat_window()) } else { value }
+}
+
+fn value_by_item_raw(item_id: i32) -> Option<bool> {
     TOGGLES.with(|t| {
         let mut t = t.borrow_mut();
         let o = t.iter_mut().find(|o| o.item_id == item_id && o.enabled)?;

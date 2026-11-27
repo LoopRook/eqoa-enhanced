@@ -111,7 +111,6 @@ pub(super) fn parse(_c: &mut ClientOptions, key: &str, value: &str) {
         let target = match key {
             "target_of_target" => Some(("eqoa_target_of_target", "target_of_target")),
             "mana_bars" => Some(("eqoa_mana_bars", "mana_bars")),
-            "stats_box" => Some(("eqoa_stats_box", "stats_box")),
             "target_hp_percent" => Some(("eqoa_hud_numbers", "target_hp_percent")),
             "xp_details" => Some(("eqoa_hud_numbers", "xp_details")),
             "hud_numbers" => Some(("eqoa_hud_numbers", "hud_numbers")),
@@ -156,7 +155,6 @@ pub fn migrate_configs() {
                             Some(("eqoa_target_of_target", "target_of_target", b))
                         }
                         ("mana_bars", Some(b)) => Some(("eqoa_mana_bars", "mana_bars", b)),
-                        ("stats_box", Some(b)) => Some(("eqoa_stats_box", "stats_box", b)),
                         ("target_hp_percent", Some(b)) => {
                             Some(("eqoa_hud_numbers", "target_hp_percent", b))
                         }
@@ -466,9 +464,10 @@ mod tests {
             crate::fork_ext::addons::options::get_toggle("eqoa_mana_bars", "mana_bars"),
             Some(false)
         );
+        // the Stats Box is the game's own Stat Window setting now (one state): an old `stats_box=` line is not migrated
         assert_eq!(
             crate::fork_ext::addons::options::get_toggle("eqoa_stats_box", "stats_box"),
-            Some(true)
+            Some(false)
         );
         assert_eq!(
             crate::fork_ext::addons::options::get_toggle("eqoa_hud_numbers", "target_hp_percent"),
@@ -495,7 +494,6 @@ mod tests {
         for gone in [
             "target_of_target",
             "mana_bars",
-            "stats_box",
             "target_hp_percent",
             "xp_details",
             "hud_numbers",
@@ -538,8 +536,8 @@ mod tests {
                 false
             )
             .0,
-            true,
-            "stats_box persisted true survives restart even when default is false"
+            false,
+            "the Stats Box follows the game's own Stat Window setting, not a saved option of its own"
         );
         assert_eq!(
             crate::fork_ext::addons::options::register_toggle(
@@ -714,11 +712,11 @@ mod tests {
             migrate_configs();
             assert_eq!(
                 super::super::testing::kept(&file).unwrap(),
-                b"brightness=9\n"
+                b"brightness=9\nstats_box=on\n",
+                "the other mods' old lines are stripped; the Stats Box's is the game's Stat Window setting now, left alone"
             );
-            check_lua(true, true);
-            // Real mod storage wins over old settings reappearing on another start.
-            options::set_toggle("eqoa_stats_box", "stats_box", false);
+            check_lua(true, false);
+            // an old `stats_box=on` line never turns the box on (the game's Stat Window setting is the one state)
             super::super::testing::put(&file, b"stats_box=on\n");
             migrate_configs();
             check_lua(true, false);
