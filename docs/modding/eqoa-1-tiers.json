@@ -4,8 +4,8 @@
  "rule": "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
  "counts": {
   "total": 2601,
-  "proven": 832,
-  "provisional": 1402,
+  "proven": 846,
+  "provisional": 1388,
   "compat": 367,
   "by_kind": {
    "action": {
@@ -24,8 +24,8 @@
     "compat": 0
    },
    "field": {
-    "proven": 327,
-    "provisional": 984,
+    "proven": 337,
+    "provisional": 974,
     "compat": 0
    },
    "function": {
@@ -39,8 +39,8 @@
     "compat": 0
    },
    "type": {
-    "proven": 71,
-    "provisional": 90,
+    "proven": 75,
+    "provisional": 86,
     "compat": 0
    }
   }
@@ -250,14 +250,11 @@
   "eqoa.capabilities.Capability.status",
   "eqoa.capabilities.get",
   "eqoa.capabilities.list",
-  "eqoa.casts.Cast",
   "eqoa.casts.Cast.caster",
   "eqoa.casts.Cast.caster_id",
   "eqoa.casts.Cast.duration",
   "eqoa.casts.Cast.effect",
-  "eqoa.casts.Cast.fraction",
   "eqoa.casts.Cast.own",
-  "eqoa.casts.Cast.remaining",
   "eqoa.casts.Cast.target_id",
   "eqoa.casts.Cast.targets",
   "eqoa.casts.list",
@@ -387,20 +384,14 @@
   "eqoa.dye.State.title",
   "eqoa.dye.State.token",
   "eqoa.dye.get",
-  "eqoa.effects.Buff",
   "eqoa.effects.Buff.description",
   "eqoa.effects.Buff.icon",
   "eqoa.effects.Buff.index",
-  "eqoa.effects.Buff.name",
   "eqoa.effects.Buff.ref",
   "eqoa.effects.Buff.removable",
   "eqoa.effects.Buff.spell_id",
-  "eqoa.effects.Buff.time_left",
-  "eqoa.effects.Buff.whose",
-  "eqoa.effects.Effect",
   "eqoa.effects.Effect.icon",
   "eqoa.effects.Effect.index",
-  "eqoa.effects.Effect.name",
   "eqoa.effects.PetEffect",
   "eqoa.effects.PetEffect.icon",
   "eqoa.effects.PetEffect.index",
@@ -1054,7 +1045,6 @@
   "eqoa.map.MapState.revision",
   "eqoa.map.Marker.level_max",
   "eqoa.map.Marker.level_min",
-  "eqoa.map.Waypoint.label",
   "eqoa.map.Waypoint.owner",
   "eqoa.map.waypoint",
   "eqoa.mastery.Mastery.bonuses",
@@ -1234,11 +1224,8 @@
   "eqoa.quests.QuestGoal.have",
   "eqoa.quests.QuestGoal.need",
   "eqoa.quests.QuestGoal.text",
-  "eqoa.quests.QuestGoals",
   "eqoa.quests.QuestGoals.ability",
-  "eqoa.quests.QuestGoals.goals",
   "eqoa.quests.QuestGoals.quest",
-  "eqoa.quests.QuestGoals.title",
   "eqoa.quests.get",
   "eqoa.raid",
   "eqoa.raid.LootRollData",
@@ -1321,7 +1308,6 @@
   "eqoa.sound.stop",
   "eqoa.target.Consider.code",
   "eqoa.target.Consider.name",
-  "eqoa.target.TargetInfo.id",
   "eqoa.textures.TextureInfo.height",
   "eqoa.textures.TextureInfo.width",
   "eqoa.textures.formats.png",

@@ -136,6 +136,7 @@ RETURNS = {
 ACTION_RETURN = "eqoa.actions.RequestId"
 ACTION_NOT_REQUEST = {"stop_batch"}
 ERROR = "eqoa.Error"
+EVENT_RECORD = "eqoa.events.Event"  # the handler parameter of every event
 
 # What an event's `data` is: a record itself, or a table with before/after of a record.
 EVENT_SELF = {
@@ -198,7 +199,18 @@ def load_nested(rust_dir=RUST_DIR):
     found = 0
     for name in ("native.rs", "native_a11.rs"):
         text = (Path(rust_dir) / name).read_text(encoding="utf-8", errors="replace")
-        body = text[text.index("fn nested_type"):]
+        start = text.index("fn nested_type")
+        brace = text.index("{", start)
+        depth, end = 0, brace
+        while end < len(text):
+            if text[end] == "{":
+                depth += 1
+            elif text[end] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            end += 1
+        body = text[start:end + 1]
         for m in pat.finditer(body):
             paths = [a or b for a, b in re.findall(r'"([^"]+)"|(_)', m.group(1))]
             keys = re.findall(r'"([^"]+)"', m.group(2))
@@ -384,7 +396,7 @@ class Flow:
             event, why = value[1], value[2]
             key = f"eqoa.events.Event.{name}"
             if key in self.frozen:
-                self.reads.setdefault(("rec", "eqoa.events.Event", name), f"{self.note(line)}: .{name} of {why}")
+                self.reads.setdefault(("rec", EVENT_RECORD, name), f"{self.note(line)}: .{name} of {why}")
             if name == "data":
                 record = event_data_record(event)
                 if record:
@@ -473,7 +485,7 @@ class Flow:
                 st = toks[s]
                 why = f"handler parameter of {event}"
                 ev_value = ("ev", event, why)
-                self.receive("eqoa.events.Event", why, line)
+                self.receive(EVENT_RECORD, why, line)
                 if st[0] == "name" and st[1] == "function":
                     self.literal_types[s] = ev_value
                 elif st[0] == "name" and st[1] not in T.KEYWORDS:
@@ -563,9 +575,20 @@ class Flow:
         if t[0] == "name" and t[1] not in T.KEYWORDS:
             value, after, info = self.chain(i)
             nxt = toks[after] if after < len(toks) else ("op", ";", 0)
+            if nxt[0] == "name" and nxt[1] == "and" and after + 1 < len(toks) and T.is_name(toks[after + 1]):
+                # `cond and CHAIN` / `cond and CHAIN or nil`: the value is CHAIN's (or falsy)
+                value, after, info = self.chain(after + 1)
+                nxt = toks[after] if after < len(toks) else ("op", ";", 0)
+                if nxt[0] == "name" and nxt[1] == "or":
+                    tail = toks[after + 1] if after + 1 < len(toks) else ("op", ";", 0)
+                    if tail[1] not in ("{", "nil", "false"):
+                        value = None
+                elif (nxt[0] == "name" and nxt[1] in BINARY) or (nxt[0] == "op" and nxt[1] in BINARY):
+                    value = None
+                return value, after, info
             if nxt[0] == "name" and nxt[1] == "or":
                 tail = toks[after + 1] if after + 1 < len(toks) else ("op", ";", 0)
-                if not (tail[1] in ("{", "nil") and tail[0] in ("op", "name")):
+                if not (tail[1] in ("{", "nil", "false") and tail[0] in ("op", "name")):
                     value = None
             elif (nxt[0] == "name" and nxt[1] in BINARY) or (nxt[0] == "op" and nxt[1] in BINARY) \
                     or nxt[0] == "op" and nxt[1] == "#":
@@ -589,6 +612,16 @@ class Flow:
         values = [None] * len(names)
         if j < n and toks[j][1] == "=" and toks[j][0] == "op" and names:
             k = j + 1
+            if k + 2 < n and toks[k][1] == "pcall" and toks[k + 1][1] == "(" and T.is_name(toks[k + 2]) \
+                    and len(names) == 2:
+                fn, _, _ = self.chain(k + 2)
+                if fn is not None and fn[0] == "p" and ".".join(fn[1]) in RETURNS:
+                    record = RETURNS[".".join(fn[1])]
+                    why = f"pcall({'.'.join(fn[1])}) at {self.note(toks[i][2])}"
+                    self.receive(record, why, toks[i][2])
+                    self.scopes[-1][names[0]] = None
+                    self.scopes[-1][names[1]] = ("t", record, why)
+                    return j
             first, after, info = self.expr_value(k)
             if len(names) == 1:
                 values = [first]

@@ -1335,7 +1335,7 @@ The capability is checked before the arguments, except for `chat` and `command`,
 
 ### Requests and results
 
-An action call returns `RequestId, nil` once the request is accepted into the mod's queue, or `nil, Error` if it is not. Accepted is not done: the outcome arrives later as an `action.result` event and can be read with `eqoa.actions.status`. A `RequestId` is an opaque handle; compare with `==`, do not store it across sessions.
+An action call returns `RequestId, nil` once the request is accepted into the mod's queue, or `nil, Error` if it is not. Accepted is not done: the outcome arrives later as an `action.result` event and can be read with `eqoa.actions.status` (provisional). A `RequestId` is an opaque handle; compare with `==`, do not store it across sessions.
 
 `ActionResult = {request_id, kind, state, phase, ok, code, reason, queued_tick, dispatched_tick, completed_tick, detail}`
 
@@ -1546,7 +1546,7 @@ A step's fields are not always named as the function's arguments are (`kind` is 
 `BatchResult = {batch_id, state, ok, completed, total, current_step, code, reason, queued_tick, completed_tick, failed_step}`: `state` is `"running"`, then `"completed"`, `"refused"`, `"stopped"`, `"cancelled"` or `"unknown"`; `ok` is nil while `running` and for `unknown`, true for `completed`, false for `refused`, `stopped` and `cancelled`; `completed` counts the steps done out of `total`; `current_step` is the 1-based step in hand; `failed_step` the step that ended it. (`detail` is declared and never filled; each step's own facts are in that step's `action.result`.)
 
 - `batch.progress` fires as the batch advances and `batch.result` once when it ends, both with the `BatchResult`. Each step also fires its own `action.result`.
-- `eqoa.actions.batch_status(id:BatchId)` *(provisional)* returns the `BatchResult`; `eqoa.actions.status` does too.
+- `eqoa.actions.batch_status(id:BatchId)` *(provisional)* returns the `BatchResult`; `eqoa.actions.status` *(provisional)* does too.
 - `eqoa.actions.stop_batch(id:BatchId?)` returns `true` if it stopped the running batch, `false` if none was running. The batch ends `stopped` (code `cancelled`, reason `stopped`). A step not yet sent is never sent. A step already sent finishes: the one `batch.result` waits for the server's answer to it (at most 10 seconds) and counts the step if the server confirmed it.
 - A batch ends at once, and its remaining steps are dropped and never replayed, when: a step is refused; the window it needs closes (`window_closed`, reason `merchant closed`, `bank closed` or `corpse closed`); the server does not answer a step within 10 seconds (`unknown`); it waits more than 1 second for its turn (`rate_limited`); the player zones or logs out (`cancelled`); it is stopped; or the player turns on **Use the game's windows** while the batch holds or used a full replacement of a window (§7). Disabling or reloading the mod cancels its requests and its batch without an event: a disabled mod receives nothing.
 

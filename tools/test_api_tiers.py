@@ -313,6 +313,17 @@ class Records(unittest.TestCase):
                "local c = get()\nlocal x = c.items\n")
         self.assertEqual(self.check(src)["eqoa.items.Container.items"], "provisional")
 
+    def test_and_or_idioms_and_pcall(self):
+        tier = self.check("local ok = true\nlocal c = ok and eqoa.bank.get() or nil\nlocal x = c.items\n")
+        self.assertEqual(tier["eqoa.items.Container.items"], "proven")
+        # negative control: the fallback is something else
+        tier = self.check("local ok = true\nlocal c = ok and eqoa.bank.get() or other\nlocal x = c.items\n")
+        self.assertEqual(tier["eqoa.items.Container.items"], "provisional")
+        tier = self.check("local ok, c = pcall(eqoa.bank.get)\nlocal x = c.items\n")
+        self.assertEqual(tier["eqoa.items.Container.items"], "proven")
+        tier = self.check("local ok, c = pcall(other.get)\nlocal x = c.items\n")
+        self.assertEqual(tier["eqoa.items.Container.items"], "provisional")
+
     def test_loop_variable_over_a_list_of_records(self):
         src = "for _, e in ipairs(eqoa.entities.list()) do local n = e.name end\n"
         self.assertEqual(self.check(src)["eqoa.entities.Entity.name"], "proven")
@@ -632,6 +643,129 @@ class SpecMarks(unittest.TestCase):
         self.assertNotRegex(para, r"\btested\b")
         self.assertIn("## Proven and provisional names",
                       (T.ROOT / "docs/modding/VERSIONING.md").read_text(encoding="utf-8"))
+
+
+import api_tiers_flow as FL
+
+
+class ProducerTables(unittest.TestCase):
+    """The hand tables of api_tiers_flow stay in step with the frozen record and the Rust."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.frozen = json.loads(T.FROZEN.read_text(encoding="utf-8"))["supported"]
+        cls.names = set(cls.frozen)
+        cls.nested = FL.load_nested()
+
+    def test_every_producer_and_record_is_a_frozen_name(self):
+        self.assertEqual([k for k in FL.RETURNS if k not in self.names], [])
+        self.assertEqual([v for v in FL.RETURNS.values() if v not in self.names], [])
+        for table in (FL.EVENT_SELF, FL.EVENT_BEFORE_AFTER):
+            self.assertEqual([e for e in table if "eqoa.events." + e not in self.names], [])
+            self.assertEqual([r for r in table.values() if r not in self.names], [])
+        self.assertEqual([r for r in self.nested.values() if r not in self.names], [])
+
+    def test_every_record_type_has_a_producer_or_a_reason(self):
+        covered = (set(self.nested.values()) | set(FL.RETURNS.values()) | set(FL.EVENT_SELF.values())
+                   | set(FL.EVENT_BEFORE_AFTER.values()) | {FL.ERROR, FL.ACTION_RETURN, FL.EVENT_RECORD}
+                   | set(FL.NO_PRODUCER))
+        records = [n for n in self.frozen if T.classify(n, self.names)[0] in ("record", "type")]
+        self.assertGreater(len(records), 150)
+        self.assertEqual([r for r in records if r not in covered], [])
+        self.assertEqual([r for r in FL.NO_PRODUCER if r not in self.names], [])
+
+    def test_negative_control_a_record_nobody_produces_is_caught(self):
+        covered = set(self.nested.values()) | set(FL.RETURNS.values())
+        self.assertIn("eqoa.camera.Camera", covered)
+        self.assertNotIn("eqoa.nothing.Made", covered)
+        self.assertNotIn("eqoa.ChatHistory", covered)
+
+    def test_nested_types_match_the_rust_table(self):
+        self.assertGreater(len(self.nested), 140)
+        self.assertEqual(self.nested[("eqoa.items.Container", "merchant")], "eqoa.items.MerchantState")
+        self.assertEqual(self.nested[("eqoa.windows.Window", "dialog")], "eqoa.windows.Dialog")
+        self.assertEqual(self.nested[("_", "position")], "eqoa.Vec3")
+        # every `Some("eqoa...")` the Rust's nested_type returns was read
+        import re
+        for name in ("native.rs", "native_a11.rs"):
+            text = (FL.RUST_DIR / name).read_text(encoding="utf-8", errors="replace")
+            start = text.index("fn nested_type")
+            end = text.index("\n}\n", start)
+            rust = set(re.findall(r'=> Some\("(eqoa\.[A-Za-z.]+)"\)', text[start:end]))
+            self.assertTrue(rust)
+            self.assertEqual(sorted(r for r in rust if r not in set(self.nested.values())), [], name)
+
+    def test_negative_control_a_stale_pattern_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("native.rs", "native_a11.rs"):
+                (Path(tmp) / name).write_text("fn nested_type() { }\n", encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                FL.load_nested(tmp)
+
+
+class Reports(unittest.TestCase):
+    def test_report_writes_nothing_and_why_shows_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tiers, md = Path(tmp) / "t.json", Path(tmp) / "p.md"
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(T.main(["--report", "--tiers", str(tiers), "--md", str(md)]), 0)
+            self.assertFalse(tiers.exists() or md.exists())
+            self.assertIn('"proven"', out.getvalue())
+            # negative control: the plain run does write
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(T.main(["--tiers", str(tiers), "--md", str(md)]), 0)
+            self.assertTrue(tiers.exists() and md.exists())
+
+    def test_why_names_file_line_and_binding_for_each_kind(self):
+        doc = json.loads(T.TIERS.read_text(encoding="utf-8"))
+        provisional = set(doc["provisional"])
+        frozen = json.loads(T.FROZEN.read_text(encoding="utf-8"))["supported"]
+        names = set(frozen)
+
+        def why(name):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                T.main(["--why", name])
+            return out.getvalue()
+
+        for kind, pick in (("record_field", lambda n: T.classify(n, names)[0] == "record_field"),
+                           ("event_field", lambda n: T.classify(n, names)[0] == "event_field"),
+                           ("drawlist_method", lambda n: T.classify(n, names)[0] == "drawlist_method"),
+                           ("type", lambda n: T.classify(n, names)[0] == "type"),
+                           ("event", lambda n: T.classify(n, names)[0] == "event")):
+            name = next(n for n in sorted(frozen) if pick(n) and n not in provisional)
+            text = why(name)
+            self.assertIn(": proven", text.splitlines()[0], name)
+            self.assertRegex(text, r"\.lua:\d+", name)
+        # a provisional name prints no evidence line
+        self.assertEqual(len(why(next(iter(sorted(provisional)))).splitlines()), 1)
+
+
+class StatusProse(unittest.TestCase):
+    def test_every_prose_mention_of_a_provisional_action_is_marked(self):
+        import re
+        doc = json.loads(T.TIERS.read_text(encoding="utf-8"))
+        prov = {n.split(".")[2] for n in doc["provisional"]
+                if n.startswith("eqoa.actions.") and n.count(".") == 2 and n.split(".")[2][0].islower()}
+        spec = SPEC.read_text(encoding="utf-8").replace("\r\n", "\n").split("\n")
+        start = next(i for i, l in enumerate(spec) if l.startswith("## 8."))
+        unmarked = []
+        for i, line in enumerate(spec[start:], start):
+            # lines about what a call needs (its capability) or the permission table name actions without
+            # describing them; a line that describes one is marked
+            if "capabilit" in line or "grant" in line or line.startswith(("4. ", "6. ")) or "alias" in line \
+                    or "Mods & Addons" in line or line.startswith("| Guild Say"):
+                continue
+            for m in re.finditer(r"eqoa\.actions\.([a-z_0-9]+)", line):
+                if m.group(1) in prov and "rovisional" not in line:
+                    unmarked.append((i + 1, m.group(1)))
+        self.assertEqual(unmarked, [])
+
+    def test_negative_control_an_unmarked_mention_is_caught(self):
+        import re
+        line = "- `eqoa.actions.status` does too."
+        self.assertTrue(re.search(r"eqoa\.actions\.status", line) and "rovisional" not in line)
 
 
 if __name__ == "__main__":
