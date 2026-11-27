@@ -14,7 +14,8 @@ At the final freeze every `eqoa/1` name is either proven or provisional. The lis
 [PROVISIONAL.md](PROVISIONAL.md); the machine-readable form is
 [eqoa-1-tiers.json](eqoa-1-tiers.json). A name that is not on the list is proven.
 
-- **Proven** means a mod shipped with the client uses it, so it has been exercised in real play. A proven
+- **Proven** means a mod shipped with the client uses it, so it has been exercised in real play. A mod that
+  shipped and was later kept as an example instead ([examples/](examples/), e.g. the Stats Box) still counts. A proven
   name gets the full promise on this page: it never changes and never disappears.
 - **Provisional** means the name is covered by the client's automated tests but no shipped mod uses it
   yet. It works as documented, but it can still be **corrected** after the final freeze if real use shows

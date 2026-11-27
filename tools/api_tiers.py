@@ -7,7 +7,8 @@
                                        would move from proven to provisional (unless --allow-demote)
 
 A name is **proven** when a mod bundled with the client (bundled-mods/*) uses it, so it has been exercised in
-real play. It is **provisional** when only automated tests cover it. The rule is deliberately conservative:
+real play, or when a mod that shipped with the client and is now kept as an example (docs/modding/examples/*,
+e.g. the Stats Box, bundled until 2026-11-27) uses it: a name never goes back from proven to provisional. It is **provisional** when only automated tests cover it. The rule is deliberately conservative:
 when the scan cannot show that a bundled mod uses a name, the name is provisional. Calling an untested name
 "proven" is the mistake this scheme exists to avoid.
 
@@ -33,9 +34,11 @@ FROZEN = ROOT / "docs/modding/eqoa-1-frozen.json"
 TIERS = ROOT / "docs/modding/eqoa-1-tiers.json"
 PROVISIONAL_MD = ROOT / "docs/modding/PROVISIONAL.md"
 BUNDLED = ROOT / "bundled-mods"
+EXAMPLES = ROOT / "docs/modding/examples"   # mods that shipped with the client and are kept as examples
 
 RULE = (
-    "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); "
+    "A name is proven when a bundled mod, or a once-bundled mod kept in docs/modding/examples, uses it (a call or "
+    "reference, a subscribed event, a field it reads); "
     "every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven."
 )
 
@@ -435,10 +438,11 @@ def scan_mod(mod_dir, frozen, nested):
     return mod
 
 
-def scan_bundled(frozen, bundled=BUNDLED):
+def scan_bundled(frozen, bundled=BUNDLED, examples=None):
     import api_tiers_flow as flow
     nested = flow.load_nested()
-    return [scan_mod(d, set(frozen), nested) for d in sorted(p for p in bundled.iterdir() if p.is_dir())]
+    roots = [bundled] + ([examples] if examples is not None and examples.is_dir() else [])
+    return [scan_mod(d, set(frozen), nested) for r in roots for d in sorted(p for p in r.iterdir() if p.is_dir())]
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -566,9 +570,9 @@ def summarize(t):
     return total, by
 
 
-def build(frozen_path=FROZEN, bundled=BUNDLED):
+def build(frozen_path=FROZEN, bundled=BUNDLED, examples=None):
     frozen = json.loads(Path(frozen_path).read_text(encoding="utf-8"))
-    t = Tiers(frozen["supported"], scan_bundled(frozen["supported"], bundled)).run()
+    t = Tiers(frozen["supported"], scan_bundled(frozen["supported"], bundled, examples)).run()
     total, by = summarize(t)
     doc = {
         "api": "eqoa/1",
@@ -699,12 +703,14 @@ def main(argv=None):
                          "dropped a call, or the frozen record grew); without it both modes refuse")
     ap.add_argument("--frozen", default=str(FROZEN))
     ap.add_argument("--bundled", default=str(BUNDLED))
+    ap.add_argument("--examples", default=str(EXAMPLES),
+                    help="once-bundled mods kept as examples, which still prove the names they use ('' for none)")
     ap.add_argument("--tiers", default=str(TIERS))
     ap.add_argument("--md", default=str(PROVISIONAL_MD))
     ap.add_argument("--why", metavar="NAME", help="print where a bundled mod uses NAME (or that none does)")
     ap.add_argument("--report", action="store_true", help="print the counts and the unresolved subscriptions")
     args = ap.parse_args(argv)
-    doc, t = build(args.frozen, Path(args.bundled))
+    doc, t = build(args.frozen, Path(args.bundled), Path(args.examples) if args.examples else None)
     text, md = render_json(doc), render_md(doc, t)
     if args.why:
         print(f"{args.why}: {t.tier.get(args.why, 'not in the frozen record')}")

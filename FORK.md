@@ -23,8 +23,9 @@ broad unfreeze; the client/map scope limits and freeze policies remain in effect
 ## Goals and ownership
 
 Keep upstream engine/gameplay improvements while retaining the circular minimap,
-NPC/group search, guidance, waypoints, quest guide, Stats Box and optional HUD
-numbers. The separate parser project is outside this repository's scope.
+NPC/group search, guidance, waypoints, quest guide and optional HUD numbers
+(the Stats Box left the bundle on 2026-11-27 and is kept as an example mod in
+`docs/modding/examples/`). The separate parser project is outside this repository's scope.
 
 The complete file ownership map, exact shared-file budgets and hook table are in
 [docs/FORK-OWNERSHIP.md](docs/FORK-OWNERSHIP.md). Its executable policy is
