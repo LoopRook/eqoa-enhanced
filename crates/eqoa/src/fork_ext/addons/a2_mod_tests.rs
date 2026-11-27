@@ -285,11 +285,31 @@ fn a2_dialog_window_draws_a_dialog_answers_with_a_key_and_gives_it_back_on_escap
     assert!(logs.is_empty(), "no warning or error: {logs:?}");
     press(&r.host, "2");
     assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "key 2 answers the second option");
-    // Escape: back to the game's window, never dropped
+    // Escape leaves the conversation (the game's own "no choice"): the game's own window does NOT open (owner's test
+    // 2026-11-27: Escape in a conversation opened the game's dialog). Negative control: the mod before the fix passed
+    // the dialog back (`take_passes` of 1, no close queued).
     action_broker::reset_all_for_test();
+    dialog_sessions::take_passes();
     press(&r.host, "escape");
-    assert_eq!(dialog_sessions::take_passes().len(), 1, "Escape passes the dialog back (negative control: a mod that dropped it passes nothing)");
-    assert!(action_broker::queued_kinds_for_test().is_empty());
+    assert!(dialog_sessions::take_passes().is_empty(), "Escape does not hand the dialog to the game's window");
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["close_window"], "Escape leaves: one close of the dialog's session");
+}
+
+/// An offer has to be answered: Escape is held (the game never sees it) and does nothing: no answer, no close, and the offer is
+/// not handed to the game's window either.
+#[test]
+fn a2_dialog_window_an_offers_escape_does_nothing_and_does_not_pass() {
+    const ESCAPE: u8 = 0x1B;
+    let mut r = rig("eqoa_dialogs");
+    r.frames(2);
+    dialog_sessions::hold(Item::Offer { summons: true, name: "Mage".into(), text: wide("Mage summons you.") }, None);
+    r.frames(3);
+    assert!(super::input::is_key_suppressed(ESCAPE), "the offer holds Escape, so the game's Start menu does not open");
+    action_broker::reset_all_for_test();
+    dialog_sessions::take_passes();
+    press(&r.host, "escape");
+    assert!(action_broker::queued_kinds_for_test().is_empty(), "Escape neither declines nor answers an offer");
+    assert!(dialog_sessions::take_passes().is_empty(), "and does not hand it to the game's window");
 }
 
 #[test]
@@ -332,10 +352,12 @@ fn a2_dialog_window_keeps_enter_from_the_game_while_up_and_gives_it_back_after()
     assert!(suppressed(), "a text dialog: the game does not get Enter; {:?}", r.host.drain_logs());
     press(&r.host, "enter");
     assert_eq!(action_broker::queued_kinds_for_test(), vec!["dialog_answer"], "Enter presses Done");
-    // Escape gives it back to the game's window; the claims end with the window
+    // Escape leaves (the game's window does not open); the claims end with the window
     action_broker::reset_all_for_test();
+    dialog_sessions::take_passes();
     press(&r.host, "escape");
-    assert_eq!(dialog_sessions::take_passes().len(), 1);
+    assert!(dialog_sessions::take_passes().is_empty());
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["close_window"]);
     ws::reset_for_test();
     r.frames(3);
     assert!(!suppressed(), "the dialog is gone: Enter opens the chat line again");
@@ -377,4 +399,75 @@ fn a2_dialogs_draw_every_kind_they_hold_without_an_unknown_field_diagnostic() {
     assert!(r.frames(3) > 0, "the response dialog is drawn");
     let seen = noise(&mut r);
     assert!(seen.is_empty(), "a response dialog drew with diagnostics: {seen:?}");
+}
+
+/// Owner's test 2026-11-27: the Dialogs box lay over the round minimap's ring in the top right. The box (a dialog, and an
+/// offer) stays clear of the minimap's rectangle (`eqoa.hud.layout().minimap`, window pixels) at 100% and at other HUD
+/// scales, in the PC interface and in the Controller's. Control: with the minimap off the box keeps its old centred place, and
+/// that place does overlap the minimap's rectangle (so the check can fail), and the fix moves nothing then.
+#[test]
+fn a2_dialog_window_stays_clear_of_the_minimap_in_both_interfaces_at_any_hud_scale() {
+    // one more frame, and the vertices it drew: the box's bounds (the layer draws nothing else)
+    fn bounds(r: &mut Rig) -> Option<[f32; 4]> {
+        r.context.frame();
+        r.bridge
+            .invoke(|| {
+                native_events::dispatch(&r.host)?;
+                native_events::render(&r.host)
+            })
+            .unwrap();
+        let draw = r.context.render_legacy();
+        let mut b: Option<[f32; 4]> = None;
+        for list in draw.draw_data().draw_lists() {
+            for v in list.vtx_buffer() {
+                let c = b.get_or_insert([v.pos[0], v.pos[1], v.pos[0], v.pos[1]]);
+                *c = [c[0].min(v.pos[0]), c[1].min(v.pos[1]), c[2].max(v.pos[0]), c[3].max(v.pos[1])];
+            }
+        }
+        b
+    }
+    let overlaps = |a: [f32; 4], m: [f32; 4]| a[0] < m[0] + m[2] && a[2] > m[0] && a[1] < m[1] + m[3] && a[3] > m[1];
+    for pc in [true, false] {
+        for scale in [100u8, 150, 70] {
+            for offer in [false, true] {
+                crate::settings::testing::reset(false);
+                crate::settings::set_ui_mode(pc).unwrap();
+                crate::settings::set_hud_scale_percent(scale);
+                super::hud_layout::set_window_size(1024, 768);
+                super::hud_layout::set_hud_state(true, true, false, 93, 0);
+                let mut r = rig("eqoa_dialogs");
+                r.frames(2);
+                let minimap = |r: &Rig| -> [f32; 4] {
+                    let v: Vec<f32> = r.host.lua.load("local m = eqoa.hud.layout().minimap return {m.x, m.y, m.width, m.height}").eval::<Vec<f32>>().unwrap();
+                    [v[0], v[1], v[2], v[3]]
+                };
+                let show = |r: &mut Rig| {
+                    if offer {
+                        dialog_sessions::hold(Item::Offer { summons: true, name: "Mage".into(), text: wide("Mage summons you, and says a long thing about it besides.") }, None);
+                    } else {
+                        r.dialog(30, "Your account has no verified e-mail address. Please verify it on the website.", &["Done"]);
+                    }
+                    r.frames(3);
+                };
+                // control: minimap off: the box is at its old place, which lies over the minimap's rectangle
+                CORE.with(|c| c.borrow_mut().view.map = json!({"enabled": true, "open": false, "minimap": false, "markers_on": true, "world_id": 1, "revision": 1}));
+                show(&mut r);
+                let m = minimap(&r);
+                assert!(m[2] > 0.0, "pc={pc} scale={scale}: the layout has a minimap rectangle {m:?}");
+                let old = bounds(&mut r).expect("the box is drawn");
+                assert!(overlaps(old, m), "pc={pc} scale={scale} offer={offer}: control: the old place {old:?} is over the minimap {m:?}");
+                drop(r);
+                // the minimap on: the box is clear of it
+                let mut r = rig("eqoa_dialogs");
+                r.frames(2);
+                CORE.with(|c| c.borrow_mut().view.map = json!({"enabled": true, "open": false, "minimap": true, "markers_on": true, "world_id": 1, "revision": 2}));
+                show(&mut r);
+                let m = minimap(&r);
+                let now = bounds(&mut r).expect("the box is drawn");
+                assert!(!overlaps(now, m), "pc={pc} scale={scale} offer={offer}: the box {now:?} is clear of the minimap {m:?}");
+                assert!(now[0] >= 0.0 && now[2] <= 1024.0 && now[1] >= 0.0 && now[3] <= 768.0, "and on the screen: {now:?}");
+            }
+        }
+    }
+    crate::settings::testing::reset(false);
 }
