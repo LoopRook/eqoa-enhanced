@@ -15,7 +15,7 @@ local T = {
     prompt = nil, enter = nil, scroll = 0, hits = {}, prompt_rect = nil, rect = nil,
     pad_list = false, pad_row = 1,
     auto_opened = false, was_bank = false, cache = nil,
-    want_pass = {},
+    want_pass = {}, dead = false,
 }
 B.trade = T
 
@@ -47,6 +47,14 @@ end
 -- Held while the option is on, and held again every so often: a claim ends on zoning and with the player's "Use the
 -- game's windows" switch. Let go when the option is turned off.
 function T.poll(force)
+    if T.dead then return end
+    -- the window's drawing died (the client removes its session without telling the mod): never claim over a window that
+    -- cannot draw
+    if B.open and not eqoa.windows.session("inventory") then
+        T.fail("the Bags window lost its session")
+        if T.close_viewer then pcall(T.close_viewer) end
+        return
+    end
     local now = os.clock()
     if not force and now - T.polled < 1.0 then return end
     T.polled = now
@@ -495,12 +503,12 @@ function T.on_pointer(d)
             if inside(d.x, d.y, h) then h.run(); return true end
         end
         if mode == "bank" and not d.ctrl and not d.shift then
-            for _, h in ipairs(B.slot_hits) do
+            for _, h in ipairs(B.slot_hits or {}) do
                 if inside(d.x, d.y, h) then X.drop_selection(); T.click_move(h.item); return true end
             end
         end
     elseif d.button == "right" and mode == "merchant" then
-        for _, h in ipairs(B.slot_hits) do
+        for _, h in ipairs(B.slot_hits or {}) do
             -- a selected item's right-click is the group menu's (Sell (N))
             if inside(d.x, d.y, h) and not X.is_selected(h.item) then T.sell_item(h.item); return true end
         end
@@ -627,5 +635,50 @@ function T.draw(g)
         eqoa.input.capture_text(true)
     end
 end
+
+-- Any error in this module ends the visit and lets both windows go: a mod that cannot draw must not hold the game's
+-- windows, and a dead module does not claim them again (until the mod is reloaded). The client releases the claims by
+-- itself only for an error in `render`, `windows.key` or `windows.session`.
+function T.fail(err)
+    if T.dead then return end
+    T.dead = true
+    note("an error ended the merchant and bank view, the game's own windows are back: " .. tostring(err))
+    pcall(stop_typing)
+    T.prompt = nil
+    for _, kind in ipairs(KINDS) do
+        pcall(eqoa.windows.release, kind)
+        T.held[kind] = nil
+    end
+    if B.open then B.step_aside = true end
+end
+
+local function guarded(name, fallback)
+    local fn = T[name]
+    T[name] = function(...)
+        if T.dead then
+            if type(fallback) == "function" then return fallback(...) end
+            return fallback
+        end
+        local ok, a, b = pcall(fn, ...)
+        if ok then return a, b end
+        T.fail(a)
+        if type(fallback) == "function" then return fallback(...) end
+        return fallback
+    end
+end
+for _, name in ipairs({"poll", "after_release", "leaving", "after_close", "reset", "tick", "on_merchant", "on_bank",
+    "on_session", "cancel_prompt", "confirm_prompt", "on_key", "on_wheel", "on_pointer", "pad_key", "draw", "leave",
+    "click_ware", "click_move", "sell_item"}) do
+    guarded(name, false)
+end
+guarded("keeps", false)
+guarded("visit_merchant", false)
+guarded("mode", nil)
+guarded("entries", function() return {} end)
+guarded("hint", "")
+guarded("caption", "")
+guarded("leave_label", "")
+guarded("card", function(lines) return lines end)
+guarded("prompt_total", nil)
 
 return T

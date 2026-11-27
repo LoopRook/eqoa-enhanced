@@ -427,7 +427,7 @@ fn trade_leaving_the_tab_walking_away_the_option_and_zoning_end_the_visit() {
     // the option turned off while shopping: the claims are let go and the visit is over
     let lua = world();
     viewer_closed(&lua);
-    run(&lua, "B.open = true; talk_merchant({ware_(1, 'Bread')}); OPTIONS.open_npc = false; T.poll(true)");
+    run(&lua, "B.open = true; SESSIONS.inventory = {ref = 'inv'}; talk_merchant({ware_(1, 'Bread')}); OPTIONS.open_npc = false; T.poll(true)");
     assert!(boolean(&lua, "released('merchant') and released('bank')"));
     assert!(boolean(&lua, "not T.visit_merchant() and T.mode() == nil"));
 
@@ -533,4 +533,35 @@ fn review2_a_session_the_client_has_not_made_yet_is_passed_when_it_opens_and_a_r
     viewer_closed(&lua);
     run(&lua, "PASS_ANSWER = {code = 'not_ready'}; T.open_viewer = function() end; SESSIONS.merchant = {ref = 'ws-3'}; talk_merchant({ware_(1, 'Bread')})");
     assert!(boolean(&lua, "released('merchant')"), "a pass that is refused must not leave a hidden session");
+}
+
+#[test]
+fn review3_before_the_first_draw_a_click_does_not_crash_and_any_error_ends_the_visit_and_keeps_the_claims_off() {
+    // (a) no draw has happened yet: the window's hit lists do not exist
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, "talk_merchant({ware_(1, 'Bread')}); B.slot_hits = nil");
+    assert!(boolean(&lua, "pcall(T.on_pointer, {button = 'right', x = 5, y = 5})"), "a right-click before the first draw is not an error");
+    assert!(boolean(&lua, "pcall(T.on_pointer, {button = 'left', x = 5, y = 5})"));
+    // (b) an error inside the module: the visit ends, both windows are let go and are not taken again
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, "talk_merchant({ware_(1, 'Bread')}); T.hits = {{x = 0, y = 0, w = 10, h = 10, run = function() error('boom') end}}");
+    assert!(boolean(&lua, "pcall(T.on_pointer, {button = 'left', x = 1, y = 1})"), "the error stays inside the module");
+    assert!(boolean(&lua, "released('merchant') and released('bank')"), "the claims are let go");
+    assert!(boolean(&lua, "T.dead == true and not T.visit_merchant() and T.mode() == nil"));
+    run(&lua, "local n = #TAKEOVERS; NOW = NOW + 5; T.poll(true); LATER = #TAKEOVERS - n");
+    assert_eq!(int(&lua, "LATER"), 0, "a dead module does not claim the windows again");
+    // an error in an event handler of the module counts the same
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, "eqoa.merchant.get = function() error('boom') end");
+    assert!(boolean(&lua, "pcall(T.on_merchant, {before = nil, after = {}})"));
+    assert!(boolean(&lua, "T.dead == true and released('merchant')"));
+    // (c) the window's drawing died (the client removed its session without telling the mod): not claimed again
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, "B.open = true; SESSIONS.inventory = nil; NOW = NOW + 5; local n = #TAKEOVERS; T.poll(true); LATER = #TAKEOVERS - n");
+    assert_eq!(int(&lua, "LATER"), 0, "no claim over a window that cannot draw");
+    assert!(boolean(&lua, "T.dead == true and not B.open"), "the stale window is closed");
 }

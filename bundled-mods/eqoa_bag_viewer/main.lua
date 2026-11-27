@@ -23,6 +23,7 @@ local wmemo, wmemo_k, wmemo_n = {}, nil, 0
 local session
 local pad = {on = false, idx = 1, msel = 1}
 local tokens, escape, tab_hits, slot_hits, menu_hits, action_hits, log_rect, grid_rect = {}, nil, {}, {}, {}, {}, nil, nil
+B.tab_hits, B.slot_hits, B.menu_hits, B.action_hits = tab_hits, slot_hits, menu_hits, action_hits -- (no draw has run yet)
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
@@ -287,6 +288,7 @@ local function open()
 end
 
 T.open_viewer = open
+T.close_viewer = function() close() end
 T.poll(true)
 eqoa.input.bind({id = "open", label = "Bag viewer", default_key = "shift+b"}, function()
     if B.open then close() else open() end
