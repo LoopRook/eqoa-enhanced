@@ -554,7 +554,14 @@ additions come after the offer to upstream.
 `tools/api_tiers.py` proves a record field only on a value it can follow from the API call. Fields our mods
 really read stay provisional when the value is kept in a table first (`state.guild = eqoa.guild.get()`), copied
 into a sorted list, passed to a function that also takes other tables, returned from a function with two
-returns, or defaulted after `or` (the builder's 30 examples: `~/Paseo/reports/eqoa-api-tiers-2026-11-27.md`
+returns, or defaulted after `or` (30 examples are in the builder's report of 2026-11-27,
 section 7; `Ability.name`, `Friend.name`, `ChatMessage.text`, `Guild.motd` among them). Extending the scan only
 promotes names (no `--allow-demote`); each new pattern needs a negative control, and the reviewer's 128 names
 must stay provisional.
+
+A second review (2026-11-27) found no falsely proven name, and five loose bindings in `tools/api_tiers_flow.py`
+that prove nothing wrong today but could with a future mod; fix them in the same round, each with a negative
+control: the second result of an `eqoa.imgui.*` call is typed as `eqoa.Error` (it is for data calls only); a
+function name defined once in a mod is tied to any `x.name(...)` or `x:name(...)` call in another file; call
+arguments are typed before `and`, `or` and comparisons are looked at (`f(c == nil)` passes `c`'s record);
+`pairs(x)` and `x[k]` keep the record type of a single record; `producer() or {}` keeps the record type.
