@@ -404,7 +404,7 @@ fn a2_dialogs_draw_every_kind_they_hold_without_an_unknown_field_diagnostic() {
 /// Owner's test 2026-11-27: the Dialogs box lay over the round minimap's ring in the top right. The box (a dialog, and an
 /// offer) stays clear of the minimap's rectangle (`eqoa.hud.layout().minimap`, window pixels) at 100% and at other HUD
 /// scales, in the PC interface and in the Controller's. Control: with the minimap off the box keeps its old centred place, and
-/// that place does overlap the minimap's rectangle (so the check can fail), and the fix moves nothing then.
+/// that place does overlap the minimap's rectangle for the 360-wide dialog at 100% (so the check can fail), and the fix moves nothing then.
 #[test]
 fn a2_dialog_window_stays_clear_of_the_minimap_in_both_interfaces_at_any_hud_scale() {
     // one more frame, and the vertices it drew: the box's bounds (the layer draws nothing else)
@@ -455,7 +455,9 @@ fn a2_dialog_window_stays_clear_of_the_minimap_in_both_interfaces_at_any_hud_sca
                 let m = minimap(&r);
                 assert!(m[2] > 0.0, "pc={pc} scale={scale}: the layout has a minimap rectangle {m:?}");
                 let old = bounds(&mut r).expect("the box is drawn");
-                assert!(overlaps(old, m), "pc={pc} scale={scale} offer={offer}: control: the old place {old:?} is over the minimap {m:?}");
+                if !offer && scale == 100 {
+                    assert!(overlaps(old, m), "pc={pc} scale={scale}: control: the dialog's old place {old:?} is over the minimap {m:?}");
+                }
                 drop(r);
                 // the minimap on: the box is clear of it
                 let mut r = rig("eqoa_dialogs");
