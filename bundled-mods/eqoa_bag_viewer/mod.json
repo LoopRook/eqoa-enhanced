@@ -8,7 +8,8 @@
   "entryMode": "once",
   "enabled": false,
   "provides": [
-    "Bags window (Shift+B)"
+    "Bags window (Shift+B)",
+    "Merchant and Bank tabs (option)"
   ],
   "replaces": [
     "loot",
@@ -64,7 +65,9 @@
     "eqoa.auction.get",
     "eqoa.input.capture_text",
     "eqoa.actions.auction_sell",
-    "eqoa.mods.send"
+    "eqoa.mods.send",
+    "eqoa.options.toggle",
+    "eqoa.options.get"
   ],
   "commands": [
     "open"

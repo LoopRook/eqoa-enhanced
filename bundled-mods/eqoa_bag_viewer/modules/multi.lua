@@ -370,6 +370,21 @@ function X.build_menu(fx, fy)
     return B.menu
 end
 
+-- The selected stacks the merchant can take (worn ones left out), and the worn ones: the Merchant tab's Sell (N) button.
+function X.sellable()
+    return split_worn((X.current()))
+end
+
+-- Sell (N) of the Merchant tab: the same run as the group menu's row.
+function X.sell_selected()
+    local usable, worn = X.sellable()
+    if #usable == 0 then
+        B.result = {text = "Sell: all selected items are worn", ok = false}
+        return false
+    end
+    return X.start("sell", usable, worn)
+end
+
 function X.open_menu(h)
     if X.is_selected(h.item) then X.build_menu(h.fx, h.fy) end
     return B.menu ~= nil and B.menu.group == true

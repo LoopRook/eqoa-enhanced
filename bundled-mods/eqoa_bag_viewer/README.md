@@ -168,3 +168,39 @@ A group is listed one item at a time: the form comes again for each, with its ow
 the next waits until the server has answered the last. A line at the end says how many went up. Mods & Addons shows
 **Asks you first: put an item up at the auction**. The **Auction** button on the title row opens the EQOA Auction
 window when that mod is on.
+
+## Merchants and bankers in this window (option, off by default)
+
+In Mods & Addons, the game's options list the mod's switch **Open merchants and bankers in Bag Viewer**. It is **off**: the
+game's own merchant and bank windows open as always, and nothing here changes. Turned **on**, the mod holds those two
+windows whole (`eqoa.windows.takeover(kind, {scope = "all"})`; the manifest lists `merchant` and `bank` in `replaces`, and the
+player's **Use the game's windows** switch still overrides it) and a merchant or banker you talk to opens this window instead.
+If the window was shut it opens by itself; if the window cannot open the game's own window is shown (`eqoa.windows.pass`).
+
+- **Merchant tab** (there only while a merchant is open). Wares and their prices on the left, your pack on the right. A click on a
+  ware buys one. A ware that stacks asks **how many** first, with the **total** in tunar (the game's own price for exactly that
+  count); type the number, step with **-**, **+**, **-10**, **+10** or **Max** (or the wheel), Enter or **Buy** to confirm, Esc or
+  **Cancel** to leave. A ware that costs more than you carry is greyed, and a click on it says so and buys nothing. **Right-click** a
+  bag item to sell it: one item goes at once, a stack asks how many first (starting on the whole stack, with the total).
+  Hover a bag item for what it sells for. Where the game's merchant window would ask Yes or No (a quick-slotted, no-trade or not
+  ordinary item), `eqoa.actions.sell` puts the game's own question on the screen and only your Yes sells. Select several bag items
+  (Ctrl+click, Shift+click) and the **Sell (N) for T tunar** button under the wares sells them in one go, with one question where
+  any needs it (`sell_many`). The menu the game's merchant opens on (buy, sell, leave) is the tab itself: **Buy** is the wares,
+  **Sell** is the right-click, and the button at the top right, labelled with the merchant's own word for leaving, ends the visit.
+- **Bank tab.** With a banker you talked to, the bank's items are on the left and your pack on the right: a click on a bank item
+  takes it out, a click on a pack item puts it in; a stack asks how many first. The tunar row (Deposit, Withdraw, the box, **All**) is
+  unchanged. The tab stays readable anywhere, with no bank open it is the plain list as before. Done (top right) ends the visit.
+- **Ending a visit.** **Esc** (one press; the first press of a "how many" question only ends the question), the window's key, the
+  top-right button, leaving the tab, walking away from the NPC (25 units), zoning, or turning the option off. The game's session with
+  the merchant or banker ends with it, so you are never left "talking" to an NPC with nothing on the screen. A visit that opened
+  the window closes it; one that found it open leaves it open on the first tab.
+- Everything else keeps working in these tabs: junk and bank marks, **Sell junk**, **Restock**, **Bank marked**, **Do it when I get
+  near**, multi-select, the repair panel and the Auction button. A merchant or banker the mod's own helpers talk to (Sell junk
+  from the All tab) is not a visit: nothing opens for it.
+- The controller: **left** at the first column of the pack goes to the left panel, up and down move over its rows, confirm presses
+  one, **right** goes back; while the "how many" question is up, up and down change the count by 1, left and right by 10, confirm
+  answers and back cancels. HUD Scale scales the wider window as it scales the narrow one.
+
+It uses only names of `eqoa/1`: `eqoa.windows.takeover`, `eqoa.windows.release`, `eqoa.windows.pass`, `eqoa.options.toggle`,
+`eqoa.options.get`, `eqoa.merchant.get`, `eqoa.merchant.price`, `eqoa.actions.buy`, `eqoa.actions.sell`, `eqoa.actions.sell_many`,
+`eqoa.actions.bank_move`, and the `merchant.changed` and `bank.changed` events.
