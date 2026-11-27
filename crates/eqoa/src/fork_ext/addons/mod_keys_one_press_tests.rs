@@ -396,6 +396,12 @@ fn one_press_l1_body() {
     frames(&mods, &mut context, 1);
     super::visibility::publish_claims(&claims.borrow());
     assert!(!crate::hud::fork_hud::chat_window_visible(), "control: the mod hides the game's chat");
+    let told = || KEYS_CORE.with(|c| c.borrow().stream_counts.get("chat.history_scroll").copied().unwrap_or(0));
+    let last_told = || {
+        KEYS_CORE.with(|c| {
+            c.borrow().events.iter().rev().find(|e| e.name == "chat.history_scroll").map(|e| e.data.to_string()).unwrap_or_default()
+        })
+    };
     let scroll = |play: &mut crate::play::Play, key: i32, context: &mut Context| {
         play.chat_history_key(key, true);
         play.chat_history_key(key, false);
@@ -403,10 +409,16 @@ fn one_press_l1_body() {
         frames(&mods, context, 1);
         keys_str(&chat, "chat_probe.state.scroll")
     };
+    let base = told();
     assert_eq!(scroll(&mut play, 19, &mut context), "0", "control: Up without the history key held scrolls nothing");
+    assert_eq!(told(), base, "control: and the game told the mods nothing");
     play.chat_history_key(99, true);
     assert_eq!(play.mode, 33, "control: C held is the game's chat history");
-    assert_eq!(scroll(&mut play, 19, &mut context), "1", "Up with the history key held scrolls back a row");
+    let up = scroll(&mut play, 19, &mut context);
+    // each link of the route said apart, so a failure names where it stopped
+    assert_eq!(told(), base + 1, "the game's history key told the mods (`chat.history_scroll`)");
+    assert!(last_told().contains("\"active\":true"), "with the game's chat hidden: {}", last_told());
+    assert_eq!(up, "1", "Up with the history key held scrolls back a row");
     assert_eq!(scroll(&mut play, 19, &mut context), "2");
     assert_eq!(scroll(&mut play, 20, &mut context), "1", "Down scrolls forward");
     assert_eq!(scroll(&mut play, 20, &mut context), "0");
