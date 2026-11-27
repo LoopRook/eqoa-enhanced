@@ -152,6 +152,17 @@ pub(super) fn change(c: &mut ClientOptions, item: i32) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     if crate::fork_ext::addons::options::is_button(item) { return false; }
     match item {
+        // The Stats Box row is the game's Stat Window setting (the box replaces that window: one state). The page flips it in its
+        // own copy of the options, as it does the HUD Extras row, and `set_client`s the copy: setting it anywhere else here
+        // would be written over by that copy at once (the row would read Off again).
+        #[cfg(not(target_arch = "wasm32"))]
+        item if crate::fork_ext::addons::options::is_game_stat_window_item(item) => {
+            c.stat_window = !c.stat_window;
+            // kept at once, as F4 keeps it: the row is not one of the page's previews that backing out puts back
+            if !crate::fork_ext::addons::options::keep_stat_window_from_the_row(c.stat_window) {
+                c.stat_window = !c.stat_window; // the save failed: the row stays as it was
+            }
+        }
         #[cfg(not(target_arch = "wasm32"))]
         item if item >= crate::fork_ext::addons::options::MOD_OPTION_BASE => {
             return crate::fork_ext::addons::options::toggle_by_item(item);
@@ -570,5 +581,188 @@ quest_tracker=off
         assert_eq!(ClientOptions::from_text(&c.to_text()), c);
         assert!(!change(&mut c, 41));
         assert!(!change(&mut c, 9999));
+    }
+
+    use vi::ui::{Raster, Window};
+
+    /// The game's font for the measure: ARIALUI.CSF off the disc (`$EQOA_ISO`, else `run/eqoa.iso`), as the options page draws
+    /// with it. With no disc (the CI runners have none) glyphs are 9.5 a character: the disc's font draws the longer labels at
+    /// about 9 (a capital-heavy short one at 10), so this is an estimate that keeps labels near the limit honest; the run with
+    /// the disc is the exact one.
+    struct GameFont(Option<esf::font::Font>);
+    impl crate::ui::Layout for GameFont {}
+    impl Raster for GameFont {
+        fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+        fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+        fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
+        fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
+        fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) {}
+        fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16], _: u32) {}
+        fn string_width(&self, s: &[u16]) -> i32 {
+            match &self.0 {
+                Some(f) => s.iter().map(|&c| f.glyph(c).or_else(|| f.glyph(b'?' as u16)).map_or(0, |g| g.width as i32 + 1)).sum(),
+                None => s.len() as i32 * 19 / 2,
+            }
+        }
+        fn point_size(&self) -> i32 {
+            self.0.as_ref().map_or(21, |f| f.height as i32)
+        }
+        fn viewport(&self) -> [i32; 4] {
+            [0, 0, 639, 447]
+        }
+        fn set_viewport(&mut self, _: [i32; 4]) {}
+    }
+    fn game_font() -> GameFont {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let path = std::env::var_os("EQOA_ISO").map(std::path::PathBuf::from).unwrap_or_else(|| root.join("run/eqoa.iso"));
+        let font = iso::Iso::open(&path).ok().and_then(|mut d| d.read("ARIALUI.CSF").ok()).and_then(|b| esf::Container::open(b).ok()).and_then(|c| {
+            (0..c.nodes.len()).filter(|&i| c.nodes[i].ty == 0x7000).find_map(|i| esf::font::read(&c, i).filter(|f| f.id == vi::ui::font_id() as i32))
+        });
+        GameFont(font)
+    }
+
+    /// Every label the fork puts on the Enhanced page: its own rows and the labels of the bundled mods' option rows
+    /// (`eqoa.options.toggle` / `button` / ... in each `main.lua`), the rows that page lists when those mods are on.
+    fn fork_row_labels() -> Vec<String> {
+        let mut labels: Vec<String> = ITEMS.iter().map(|(_, l)| l.to_string()).collect();
+        for file in crate::fork_ext::bundled::EMBEDDED_FILES.iter().filter(|f| f.path.ends_with("/main.lua")) {
+            let text = String::from_utf8_lossy(file.data);
+            for line in text.lines().filter(|l| l.contains("eqoa.options.") && l.contains("label")) {
+                let Some(at) = line.find("label") else { continue };
+                let rest = &line[at + 5..];
+                let Some(open) = rest.find('"') else { continue };
+                let Some(close) = rest[open + 1..].find('"') else { continue };
+                labels.push(rest[open + 1..open + 1 + close].to_string());
+            }
+        }
+        labels
+    }
+
+    /// The label column of an options page, as `WndOptions::draw_rows_painted` lays it out: the labels start at x 40 and the
+    /// value box is at `width - 176`, `width` being the page window's own (440 for every page, `page_window`), and the game's
+    /// own label hit area stops 8 short of the box (`width - 176 - 48` wide). A label wider than that is drawn under the box.
+    fn label_column(r: &dyn Raster) -> i32 {
+        let vui = vi::ui::Vui::new(Default::default(), Default::default(), Vec::new());
+        let mut w = Window::default();
+        for rows in [9, 12] {
+            w.init(&vui, r, [320, 246], 440, rows, 0);
+            assert_eq!(w.size[0], 440, "the page's window width");
+        }
+        (w.size[0] - 176) - 40 - 8
+    }
+
+    /// Owner's test 2026-11-27: three labels ran under the On/Off box. Every label of the fork's pages fits the column in the
+    /// game's font. Negative control: the labels before the shortening ("Show invitations, summons and resurrection offers",
+    /// "Answer quest hand-ins automatically", "World Map: text and marker size...") do not (asserted below).
+    #[test]
+    fn every_fork_row_label_fits_its_column_in_the_games_font() {
+        let font = game_font();
+        let column = label_column(&font);
+        let vui = vi::ui::Vui::new(Default::default(), Default::default(), Vec::new());
+        let measure = |label: &str| Window::default().text_width(&vui, &font, &wide(label));
+        let labels = fork_row_labels();
+        assert!(labels.len() >= 17, "the scan found the fork's rows and the bundled mods' rows: {labels:?}");
+        let too_wide: Vec<String> = labels.iter().filter(|l| measure(l) > column).map(|l| format!("{l:?} is {} wide, the column {column}", measure(l))).collect();
+        assert!(too_wide.is_empty(), "labels that run under the value box: {too_wide:#?}");
+        for old in ["Show invitations, summons and resurrection offers", "Answer quest hand-ins automatically", "World Map: text and marker size..."] {
+            assert!(measure(old) > column, "control: {old:?} ({}) does not fit {column}", measure(old));
+        }
+    }
+
+    /// Owner 2026-11-27, in the world with the Options page open on Options, Extended, Other, Enhanced: "Stats Box" set to On read Off
+    /// again at once. The real page, the way a player changes a row: right, left, a click on the right and the left half of the
+    /// value, and ✕ (which changes nothing on any row of a page, the game's rule). The row is the game's Stat Window setting
+    /// (`stat_window`, the box replaces that window): set On it reads On, in the row and in the game's own setting, through the
+    /// frames the page draws, and Off again with the next change. Control: the game's Stat Window row (HUD Extras) is flipped the same
+    /// way by the same page, and a copy of the options the page writes back (`set_client`) would undo a setting written anywhere else.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn owner1127a_the_enhanced_stats_box_row_set_on_stays_on_on_the_real_options_page() {
+        use crate::fork_ext::addons::options::value_by_item;
+        testing::reset(false);
+        crate::fork_ext::addons::options::reset_in_memory();
+        let _pages = ForkPages::enter();
+        let vui = vui();
+        let mut w = WndOptions::default();
+        let mut o = GameOptions::default();
+        let (mut cues, mut ups) = (Vec::new(), Vec::new());
+        w.open(&vui, &NullRaster, &o);
+        w.sel = 3;
+        w.key(&vui, &mut NullRaster, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+        let groups = &super::super::GROUPS;
+        let other = groups.iter().position(|g| g.0 == super::super::Group::Other).unwrap();
+        let in_other = super::super::group_categories(other);
+        w.grp_sel = other as i32;
+        w.key(&vui, &mut NullRaster, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+        w.cat_sel = (in_other.len() - 1) as i32;
+        w.key(&vui, &mut NullRaster, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+        w.draw(&vui, &mut NullRaster, &o, &mut ups);
+        assert_eq!(w.item, 2000, "the cursor is on Stats Box, the page's first row");
+        let (width, left) = (w.window2.size[0], w.window2.top_left()[0]);
+        let frame = (left + width - 176) as f32;
+        let y = w.window2.row_center(&vui, &NullRaster, 1)[1] as f32;
+        let state = |w: &mut WndOptions, o: &GameOptions, ups: &mut Vec<crate::options::OptionsUp>| {
+            for _ in 0..3 {
+                w.draw(&vui, &mut NullRaster, o, ups); // the frames the page draws while it stays open
+            }
+            (value_by_item(2000), settings::stat_window())
+        };
+        for how in ["right", "left", "click on the right half", "click on the left half"] {
+            settings::set_stat_window(false).unwrap();
+            assert_eq!(state(&mut w, &o, &mut ups), (Some(false), false), "{how}: control: Off to begin with");
+            let keys = match how {
+                "right" => vec![key::RIGHT],
+                "left" => vec![key::LEFT],
+                "click on the right half" => w.point([frame + 110.0, y]),
+                _ => w.point([frame + 20.0, y]),
+            };
+            assert!(!keys.is_empty(), "{how}: the click is a key");
+            for k in keys {
+                w.key(&vui, &mut NullRaster, &mut o, k, 0, &mut cues, &mut ups);
+            }
+            assert_eq!(state(&mut w, &o, &mut ups), (Some(true), true), "{how}: set to On, the row and the game's setting read On");
+            let again = if how == "left" || how == "click on the left half" { key::LEFT } else { key::RIGHT };
+            w.key(&vui, &mut NullRaster, &mut o, again, 0, &mut cues, &mut ups);
+            assert_eq!(state(&mut w, &o, &mut ups), (Some(false), false), "{how}: the next change turns it Off");
+        }
+        // ✕ changes nothing on a row of a page, here as on every row
+        settings::set_stat_window(false).unwrap();
+        w.key(&vui, &mut NullRaster, &mut o, key::CROSS, 0, &mut cues, &mut ups);
+        assert_eq!(state(&mut w, &o, &mut ups), (Some(false), false), "✕ does nothing on the row");
+
+        // Round 2b: the row keeps at once. Set On, back out of the page WITHOUT Save Changes (Triangle up to the menu, Triangle on
+        // the menu): the setting, client.opt as kept and the row on opening the page again all say On. Control: another option
+        // changed in the same visit (not saved) IS put back, in memory and out of the file.
+        let kept_text = || String::from_utf8_lossy(&testing::kept("client.opt").unwrap_or_default()).into_owned();
+        let visit = |w: &mut WndOptions, o: &mut GameOptions, cues: &mut Vec<i32>, ups: &mut Vec<crate::options::OptionsUp>| {
+            w.open(&vui, &NullRaster, o);
+            w.sel = 3;
+            w.key(&vui, &mut NullRaster, o, key::CROSS, 0, cues, ups);
+            w.grp_sel = other as i32;
+            w.key(&vui, &mut NullRaster, o, key::CROSS, 0, cues, ups);
+            w.cat_sel = (in_other.len() - 1) as i32;
+            w.key(&vui, &mut NullRaster, o, key::CROSS, 0, cues, ups);
+            w.draw(&vui, &mut NullRaster, o, ups);
+        };
+        settings::set_stat_window(false).unwrap();
+        let marks_before = settings::client().quest_markers;
+        visit(&mut w, &mut o, &mut cues, &mut ups);
+        assert_eq!(w.item, 2000);
+        // another option changed in the same visit, as the page does it (a copy of the options, `set_client`)
+        let mut other_row = settings::client();
+        other_row.quest_markers = !marks_before;
+        settings::set_client(other_row);
+        w.key(&vui, &mut NullRaster, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
+        assert_eq!(state(&mut w, &o, &mut ups), (Some(true), true), "the row set On");
+        assert!(kept_text().contains("stat_window=on"), "kept at once, in client.opt: {}", kept_text());
+        for _ in 0..4 {
+            w.key(&vui, &mut NullRaster, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups); // up to the menu (three), then the cancel
+        }
+        assert!(settings::stat_window(), "backing out without saving leaves the Stats Box as it was set");
+        assert!(kept_text().contains("stat_window=on"), "and client.opt as kept says On: {}", kept_text());
+        assert_eq!(settings::client().quest_markers, marks_before, "control: the other option, changed in the same visit, is put back");
+        assert_eq!(kept_text().contains("quest_markers=off"), !marks_before, "control: and it never reached client.opt");
+        visit(&mut w, &mut o, &mut cues, &mut ups);
+        assert_eq!(state(&mut w, &o, &mut ups), (Some(true), true), "the row reads On when the page is opened again");
     }
 }

@@ -1454,6 +1454,8 @@ fn failed_option_saves_leave_lua_and_controls_values_unchanged_and_diagnose() {
         super::options::get_toggle("eqoa_stats_box", "stats_box"),
         Some(false)
     );
+    // the Stats Box is the game's Stat Window setting now: a failed save of client.opt leaves that setting as it was too
+    assert!(!crate::settings::stat_window(), "a failed save leaves the game's own setting, the row and Lua agreeing");
     let logs = host.drain_logs().unwrap();
     assert!(
         logs.iter()
@@ -1487,6 +1489,45 @@ fn failed_option_saves_leave_lua_and_controls_values_unchanged_and_diagnose() {
     .unwrap();
     assert!(super::options::toggle_by_item(2000));
     assert_eq!(super::options::value_by_item(2000), Some(false));
+    super::options::reset_in_memory();
+    crate::settings::testing::reset(false);
+}
+
+/// The promise of the test above for a plain mod option (Mana Bars, on by default), which the Stats Box no longer is: a save that
+/// fails leaves Lua's value and the menu row unchanged and says so; the same calls work once storage is writable.
+#[test]
+fn failed_option_saves_leave_a_plain_mod_option_unchanged_and_diagnose() {
+    super::options::set_storage_root(None);
+    crate::settings::testing::reset(true);
+    super::options::reset_in_memory();
+    let host = option_test_host("eqoa_mana_bars");
+    host.execute(
+        r#"
+        eqoa.options.toggle({id='mana_bars',default=true})
+        local ok,err = eqoa.options.set('mana_bars',false)
+        assert(ok == nil and err.code == 'io_error')
+        assert(eqoa.options.get('mana_bars') == true)
+    "#,
+    )
+    .unwrap();
+    assert!(!super::options::toggle_by_item(2002));
+    assert_eq!(super::options::value_by_item(2002), Some(true));
+    assert!(!super::options::set_toggle("eqoa_mana_bars", "mana_bars", false));
+    assert_eq!(super::options::get_toggle("eqoa_mana_bars", "mana_bars"), Some(true));
+    let logs = host.drain_logs().unwrap();
+    assert!(logs.iter().any(|line| line.contains("eqoa.options.set") && line.contains("io_error")), "said: {logs:?}");
+    // positive control: the same calls work once storage is writable
+    crate::settings::testing::reset(false);
+    host.execute(
+        r#"
+        local ok,save_err = eqoa.options.set('mana_bars',false)
+        assert(ok == true and save_err == nil)
+        assert(eqoa.options.get('mana_bars') == false)
+    "#,
+    )
+    .unwrap();
+    assert!(super::options::toggle_by_item(2002));
+    assert_eq!(super::options::value_by_item(2002), Some(true));
     super::options::reset_in_memory();
     crate::settings::testing::reset(false);
 }

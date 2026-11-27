@@ -1244,6 +1244,8 @@ include!("perf_mods_tests.rs");
 
 include!("hide_under_map_tests.rs");
 
+include!("chat_hud_scale_tests.rs");
+
 /// Owner test 2026-11-26: "being able to paste into it would be nice". The player's paste key (Ctrl+V) while the chat line holds
 /// the keyboard hands the clipboard's text to the mod as typed text (single line, control characters left out, the mod's own
 /// limit), and the mod never asks for the clipboard. Control: a plain V types the letter. Negative control: without the paste

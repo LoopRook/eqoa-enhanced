@@ -12,6 +12,20 @@
 local ui = eqoa.imgui
 -- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
 local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
+-- Plates belong to the world: they are not drawn over a game window that fills the screen (Options, the Start menu and its
+-- pages, the Abilities, Character Summary, quest log and the like). `eqoa.windows.get().native_mode` is the game's own number
+-- for what has its controls (the table in the API spec's "Reading the game's windows"); the small windows over the world (loot,
+-- a merchant, a dialog) leave the plates alone.
+local FULL_SCREEN_MODES = {
+    [5] = true, [6] = true, [12] = true, [13] = true, [18] = true, [21] = true, [22] = true, [23] = true, [24] = true,
+    [26] = true, [28] = true, [29] = true, [31] = true, [32] = true, [33] = true, [34] = true, [35] = true, [37] = true,
+    [39] = true, [40] = true, [41] = true, [42] = true, [60] = true,
+}
+local function game_page_up()
+    local w = eqoa.windows.get()
+    if not w then return false end
+    return w.start_menu_open == true or FULL_SCREEN_MODES[w.native_mode] == true
+end
 
 local DEFAULTS = {
     players = true, npcs = true, creatures = true,
@@ -39,7 +53,7 @@ eqoa.settings.on_load(function(saved)
     if type(saved.size) == "number" then S.size = math.max(60, math.min(200, saved.size)) end
 end)
 
-eqoa.options.button({ id = "settings", label = "Name Plates: settings..." }, function()
+eqoa.options.button({ id = "settings", label = "Name Plate settings..." }, function()
     show_window = not show_window
 end)
 
@@ -447,6 +461,8 @@ eqoa.events.on("render", function()
     now_time = ui.GetTime()
     -- under the game's full map: no plates, numbers or settings window (the game's own are still hidden by the claims)
     if map_up() then return end
-    draw_layer(player)
+    -- over a full-screen game page (Options, the Start menu's pages) no plates or numbers either; the settings window is
+    -- opened from the Options page, so it stays
+    if not game_page_up() then draw_layer(player) end
     settings_window()
 end)

@@ -30,6 +30,9 @@ fn enhanced_report_transport_only_posts_to_explicit_loopback() {
                 Err(e) => panic!("fixture did not receive the request: {e}"),
             }
         };
+        // on Windows the accepted socket inherits the listener's non-blocking mode: a read before the request has arrived
+        // would fail with WouldBlock (seen once on a runner); block for it, within the timeout below
+        stream.set_nonblocking(false).unwrap();
         stream
             .set_read_timeout(Some(std::time::Duration::from_secs(3)))
             .unwrap();
@@ -77,6 +80,9 @@ fn enhanced_report_transport_does_not_follow_redirects() {
                 Err(e) => panic!("fixture did not receive the request: {e}"),
             }
         };
+        // on Windows the accepted socket inherits the listener's non-blocking mode: a read before the request has arrived
+        // would fail with WouldBlock (seen once on a runner); block for it, within the timeout below
+        stream.set_nonblocking(false).unwrap();
         stream
             .set_read_timeout(Some(std::time::Duration::from_secs(3)))
             .unwrap();
