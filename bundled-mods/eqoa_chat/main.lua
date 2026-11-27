@@ -151,7 +151,7 @@ local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >=
 
 local function add_line(m)
     state.seq = state.seq + 1
-    state.lines[#state.lines + 1] = { text = m.text, kind = m.kind or "system", links = m.links or {}, color = m.color, seq = state.seq }
+    state.lines[#state.lines + 1] = { text = m.text, kind = m.kind or "system", links = m.links or {}, color = m.color, seq = state.seq, sender = m.sender }
     while #state.lines > MAX_LINES do table.remove(state.lines, 1) end
     state.rev = state.rev + 1
 end
@@ -498,6 +498,19 @@ local function open_link(link)
     if err then notice("Could not open " .. link.name .. ": " .. tostring(err.message)) end
 end
 
+-- A click on a player's name (`ChatMessage.sender`: the game's own reading of who spoke) opens the line with the tell to
+-- them, as the game's own chat does; nothing is sent. With the line already open it only fills an empty one: what is being
+-- typed is never replaced.
+local function open_tell(name)
+    local command = "/tell " .. name .. " "
+    if state.session then
+        if state.text == "" then state.text = command else state.note = "Finish or clear the line first" end
+        return
+    end
+    local _, err = eqoa.actions.open_chat_line(command)
+    if err then notice("Could not open a tell to " .. name .. ": " .. tostring(err.message)) end
+end
+
 local function pointer_pressed(d)
     -- an open menu has the press: a row runs, anything else closes it
     if state.menu then
@@ -828,6 +841,8 @@ eqoa.events.on("render", function()
     -- the oldest row is at the top at the most: that many rows back, and no more
     if found < need then state.scroll = math.max(0, found - ROWS) end
     state.drawn = {}
+    -- the pointer, for the hover on a name that opens a tell (not over the open menu or while a drag has the window)
+    local ptr = not (state.menu or state.drag) and eqoa.input.pointer() or nil
     for row = 1, ROWS do
         local pk = picked[state.scroll + (ROWS - row) + 1]
         if pk then
@@ -856,6 +871,20 @@ eqoa.events.on("render", function()
                     if lx + lw < W - PAD + 0.5 then
                         text(lx, y, name, c.link)
                         state.hits[#state.hits + 1] = tag(hit(lx, y, lw, LINE, function() open_link(link) end), "link")
+                    end
+                end
+            end
+            -- the speaker's name on the line's first row: click it for a tell to them
+            local who = l.sender
+            if who and pk.b0 == l.wrows[1][1] then
+                local from, upto = body:find(who, 1, true)
+                if from and from >= pk.b0 and upto <= pk.b1 then
+                    local lx = PAD + width(body:sub(pk.b0, from - 1)) / k
+                    local lw = width(who) / k
+                    if lx + lw < W - PAD + 0.5 then
+                        local h = tag(hit(lx, y, lw, LINE, function() open_tell(who) end), "name")
+                        state.hits[#state.hits + 1] = h
+                        if ptr and ptr.inside_window and inside(ptr.x, ptr.y, h) then text(lx, y, who, c.link) end
                     end
                 end
             end
