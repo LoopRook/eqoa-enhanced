@@ -49,6 +49,11 @@ fn bv_corpse() -> serde_json::Value {
     ])
 }
 
+thread_local! {
+    /// (from, to): a line of the shipped Bag Viewer source this thread's `Bv` is built without (a negative control).
+    static BV_MUTATION: std::cell::RefCell<Option<(&'static str, &'static str)>> = const { std::cell::RefCell::new(None) };
+}
+
 struct Bv {
     gpu: Gpu,
     _root: Scratch,
@@ -105,7 +110,15 @@ impl Bv {
                 Some(dir) => {
                     fs::copy(PathBuf::from(dir).join(file.path.strip_prefix("eqoa_bag_viewer/").unwrap()), &path).unwrap();
                 }
-                None => fs::write(path, file.data).unwrap(),
+                None => fs::write(&path, file.data).unwrap(),
+            }
+            // a negative control inside the test: this thread's one-line change of the shipped source
+            if let Some((from, to)) = BV_MUTATION.with(|m| *m.borrow()) {
+                if let Ok(text) = fs::read_to_string(&path) {
+                    if text.contains(from) {
+                        fs::write(&path, text.replace(from, to)).unwrap();
+                    }
+                }
             }
         }
         let mut play = crate::play::Play::bundled_ui_fixture();
@@ -5515,15 +5528,8 @@ fn trade_setup(name: &str) -> Option<Bv> {
     Some(bv)
 }
 
-#[test]
-fn trade_window_option_off_the_game_shows_its_merchant_on_the_merchant_tab_buys_and_ends_with_esc_and_walking_away() {
-    big_stack(trade_window_merchant_body)
-}
-fn trade_window_merchant_body() {
-    use winit::keyboard::Key;
-    let Some(mut bv) = trade_setup("trade merchant") else { return };
-
-    // option off (the default): the merchant a player talks to is the game's own window, and Bag Viewer stays shut
+/// Option off (the default): the merchant a player talks to is the game's own window, and Bag Viewer stays shut.
+fn trade_option_off_phase(bv: &mut Bv) {
     bv.play.bags_merchant_wares_packet(9002, &trade_wares());
     bv.frames(3);
     assert_eq!(bv.play.mode, 10, "off: the game's merchant window opens");
@@ -5531,6 +5537,34 @@ fn trade_window_merchant_body() {
     assert!(bv.eval::<bool>("not eqoa.windows.taken('merchant')"), "off: nothing is held");
     bv.play.bags_close_merchant();
     bv.frames(2);
+}
+
+/// The negative control of the option-off assertions: with the option read as always on, the same phase fails.
+#[test]
+fn trade_window_option_off_control_with_the_option_ignored_the_off_phase_fails() {
+    big_stack(trade_window_option_off_control_body)
+}
+fn trade_window_option_off_control_body() {
+    BV_MUTATION.with(|m| *m.borrow_mut() = Some(("function T.refresh() T.on = eqoa.options.get(OPTION) == true end", "function T.refresh() T.on = true end")));
+    let Some(mut bv) = trade_setup("trade option-off control") else {
+        BV_MUTATION.with(|m| *m.borrow_mut() = None);
+        return;
+    };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| trade_option_off_phase(&mut bv)));
+    BV_MUTATION.with(|m| *m.borrow_mut() = None);
+    assert!(result.is_err(), "negative control: with the option ignored the game's window must NOT be the one drawn");
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn trade_window_option_off_the_game_shows_its_merchant_on_the_merchant_tab_buys_and_ends_with_esc_and_walking_away() {
+    big_stack(trade_window_merchant_body)
+}
+fn trade_window_merchant_body() {
+    use winit::keyboard::Key;
+    let Some(mut bv) = trade_setup("trade merchant") else { return };
+    trade_option_off_phase(&mut bv);
 
     // option on: the merchant's window is held, and a talk opens the viewer on the Merchant tab
     bv.trade_option(true);
@@ -5643,11 +5677,6 @@ fn trade_window_sell_body() {
     bv.play.bags_merchant_wares_packet(9002, &trade_wares());
     bv.frames(3);
     assert_eq!(bv.eval::<u32>("require('bags').tab"), 8);
-    // the hover card of a pack item says what it sells for (a stack: for the whole stack)
-    bv.point(bv.pack_slot(7));
-    bv.frames(2);
-    let card: Vec<String> = bv.eval("(function() local t = {} local h = require('bags').hover if h then for _, l in ipairs(h.lines) do t[#t + 1] = l[1] end end return t end)()");
-    let _ = card; // the card is built from the item; the price line is added where it is drawn (see the picture)
 
     // right-click a stack (3 Rat Pelts): it asks how many, starting on all three, with the total
     let sends = bv.play.bags_sends_lost();
@@ -5695,8 +5724,6 @@ fn trade_window_sell_body() {
     assert_eq!(bv.eval::<i64>("require('multi').n"), 2);
     let tex = bv.frames(2);
     bv_png(&rm_pixels(&bv.gpu, &tex), bv.win, "bagviewer-merchant-sell-n.png");
-    let label: String = bv.eval("(function() local h = require('trade').hits local n = #h return tostring(n) end)()");
-    let _ = label;
     let sends = bv.play.bags_sends_lost();
     bv.click(bv.trade_hit(bv.eval::<usize>("#require('trade').hits")));
     bv.play.bags_broker_tick();

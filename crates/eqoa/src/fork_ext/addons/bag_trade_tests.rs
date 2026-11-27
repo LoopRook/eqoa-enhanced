@@ -74,8 +74,23 @@ eqoa.input = {
   capture_text = function(on) INPUT.text = on end,
 }
 SESSIONS, PASSED, BUYS, MOVES = {}, {}, {}, {}
+PASS_ANSWER = true
+EVENTS = {}
+eqoa.events = {on = function(name, fn) EVENTS[name] = EVENTS[name] or {}; table.insert(EVENTS[name], fn) return #EVENTS[name] end}
+function emit(name, data) for _, fn in ipairs(EVENTS[name] or {}) do fn({data = data}) end end
 eqoa.windows.session = function(kind) return SESSIONS[kind] end
-eqoa.windows.pass = function(ref) PASSED[#PASSED + 1] = ref return true end
+eqoa.windows.pass = function(ref)
+  if PASS_ANSWER ~= true then return nil, PASS_ANSWER end
+  PASSED[#PASSED + 1] = ref
+  return true
+end
+-- an item by its handle, as the client answers: the stack as it is now, or stale_handle
+eqoa.items.get = function(ref)
+  for _, list in ipairs({INV_ITEMS, WARES or {}, BANK.items or {}}) do
+    for _, it in ipairs(list) do if it.ref == ref then return it end end
+  end
+  return nil, {code = "stale_handle"}
+end
 eqoa.windows.confirm = function() return nil end
 eqoa.actions.buy = function(ref, n) BUYS[#BUYS + 1] = {ref = ref, n = n} return "buy" .. #BUYS end
 eqoa.actions.bank_move = function(from, ref, n) MOVES[#MOVES + 1] = {from = from, ref = ref, n = n} return "move" .. #MOVES end
@@ -85,7 +100,8 @@ T = TRADE_LOADER()
 package.loaded["trade"] = T
 OPENED = 0
 -- the viewer's own `open` (main.lua): the window is up on the All tab
-T.open_viewer = function() OPENED = OPENED + 1; B.open = true; B.tab = 1 end
+T.open_viewer = function() OPENED = OPENED + 1; B.open = true; B.tab = 1; SESSIONS.inventory = {ref = "inv"} end
+T.close_viewer = function() B.open = false; SESSIONS.inventory = nil end
 
 function it_(id, name, o)
   local t = item(id, name, o)
@@ -104,7 +120,7 @@ OPTIONS_OF_MERCHANT = {{key = "buy", selected = true}, {key = "sell", selected =
 function talk_merchant(wares, options)
   WARES = wares
   MERCH = {kind = "merchant", items = wares, revision = (MERCH and MERCH.revision or 0) + 1,
-    merchant = {mode = "menu", pending = false, options = options or OPTIONS_OF_MERCHANT}}
+    merchant = {entity_id = ENTITY or 500, mode = "menu", pending = false, options = options or OPTIONS_OF_MERCHANT}}
   T.on_merchant({before = nil, after = MERCH, cause = "open"})
 end
 function banker_talk(items, money)
@@ -122,7 +138,7 @@ function released(kind) for _, k in ipairs(RELEASED) do if k == kind then return
 "##;
 
 fn viewer_closed(lua: &Lua) {
-    run(lua, "OPTIONS.open_npc = true; T.poll(true); B.open = false; B.tab = 1");
+    run(lua, "OPTIONS.open_npc = true; T.poll(true); B.open = false; B.tab = 1; SESSIONS.inventory = nil");
 }
 
 #[test]
