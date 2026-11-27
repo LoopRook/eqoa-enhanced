@@ -492,6 +492,13 @@ A font restored after going missing is retried after a face or size change or af
   itself in the long run (see the settings pane below); with the Dialog mod's options today is fine for now. Mod only
   (`eqoa_dialogs`); replaces today's "Auto-answer hand-ins" rule, which fits almost no real quest; cap the run and
   stop when who is talked to is unknown. Check first whether the retired Turn-in Helper still loads in an old install.
+- **One text size for every mod** (owner, 2026-11-27: "font scale, other ui scale like the tooltips on the map").
+  Today each mod sizes its own text: the World Map has its own Text size choice (Small to Very large), the Round
+  Minimap's hover text and the Chat box follow the window only, and the game has no text size setting besides HUD
+  Scale. One choice the player makes once, followed by every mod's text and tooltips, needs one additive read in
+  `eqoa/1` (a client-wide text scale beside `hud.layout()`'s `hud_scale`; a mod cannot read another mod's option) and
+  a row for it; a tooltip needs no new call (`SetWindowFontScale` covers it). Needs its own five lines for the owner;
+  after the offer to upstream because it adds a name. Read from the code, nothing run.
 - **One settings pane for the mods' options** (owner, 2026-11-27: "we will need a settings pane eventually. Think
   something like OneForAll on wow"). New request: needs its own five lines for the owner before it is built. See also
   "One home for the fork's options" and "Bag Viewer: move the switches ... into a settings pane".
@@ -519,8 +526,9 @@ A font restored after going missing is retried after a face or size change or af
   the scale: Mana Bars, Target of Target, the Target Frame demo, Round Minimap, Dialogs, HUD Numbers. To fix:
   **Map Search** sizes its Search button, its panel and the Track waypoint button on the game's full map from the
   minimap piece (`eqoa_map_search/main.lua` near line 93), so they are 1.5 times too big at 150% and three quarters
-  size at 75%; its test belongs beside the map mod tests. **Chat** never reads `hud.layout()` or HUD Scale: the
-  owner decides whether its box scales or keeps its size and keeps clear of the game's bars (asked 2026-11-27).
+  size at 75%; its test belongs beside the map mod tests. **Chat** never reads `hud.layout()` or HUD Scale. Owner, 2026-11-27: the
+  box should follow it ("if they set it up the way they like it, then reduce the ui scale, maybe it should scale
+  with the ui scale"): the size and place set by dragging stay the saved truth, HUD Scale multiplies on top.
   Small: Round Minimap's hover text ignores the scale; HUD Numbers has no test at a scale other than 100%. Fixed
   size by design: Example Hearts and the Forge packages.
 - Dropped by the owner 2026-11-27 ("un-needed, assume i'm the only player right now"): a once-only notice that
