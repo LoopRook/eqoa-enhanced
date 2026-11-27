@@ -212,7 +212,7 @@ fn trade_option_on_holds_both_windows_whole_and_a_merchant_opens_the_merchant_ta
     assert_eq!(int(&lua, "OPENED"), 0, "a helper's session shows nothing");
     assert!(!boolean(&lua, "T.visit_merchant()"));
     // negative control: without telling the helper's session from the player's, Sell junk opens the Merchant tab
-    let bad = mutated(&[("if d.before == nil and not B.helper_hold.merchant then begin_visit(\"merchant\") end", "if d.before == nil then begin_visit(\"merchant\") end")]);
+    let bad = mutated(&[("if d.before == nil and not B.helper_hold.merchant then opened(\"merchant\") end", "if d.before == nil then opened(\"merchant\") end")]);
     viewer_closed(&bad);
     run(&bad, "B.helper_hold.merchant = true; talk_merchant({ware_(1, 'Bread')})");
     assert_eq!(int(&bad, "OPENED"), 1, "negative control: a helper's talk opened the window");
@@ -483,4 +483,17 @@ fn trade_a_banker_opens_the_bank_tab_a_click_moves_one_across_and_a_stack_asks_h
     run(&bad, setup);
     run(&bad, "T.click_move(INV_ITEMS[2])");
     assert_eq!(string(&bad, "#MOVES .. ':' .. MOVES[1].n"), "1:5", "negative control: the whole stack went without asking");
+}
+
+#[test]
+fn review4_a_window_another_mod_holds_is_left_alone() {
+    let lua = world();
+    run(&lua, "eqoa.windows.takeover = function(k, o) return nil, {code = 'busy', message = 'held by eqoa_other'} end; OPTIONS.open_npc = true; T.poll(true); B.open = false");
+    run(&lua, "talk_merchant({ware_(1, 'Bread')})");
+    assert_eq!(int(&lua, "OPENED"), 0, "not our claim: Bag Viewer does not open over the other mod's window");
+    assert_eq!(int(&lua, "#PASSED"), 0, "and does not take the session from it");
+    assert!(boolean(&lua, "not released('merchant') and not T.visit_merchant()"));
+    run(&lua, "banker_talk({bank_it(7, 'Moonstone', 3)})");
+    assert_eq!(int(&lua, "OPENED"), 0);
+    assert!(boolean(&lua, "T.mode() == nil"));
 }

@@ -86,14 +86,14 @@ end
 
 -- The merchant the player talked to (a helper's own talk is not a visit).
 function T.visit_merchant()
-    return T.on and not B.helper_hold.merchant and eqoa.merchant.get() ~= nil
+    return T.on and T.held.merchant == true and not B.helper_hold.merchant and eqoa.merchant.get() ~= nil
 end
 
 -- "merchant" on the Merchant tab, "bank" on the Bank tab while the bank is open here, else nil.
 function T.mode()
     if not T.on then return nil end
     if B.tab == T.TAB then return T.visit_merchant() and "merchant" or nil end
-    if B.tab == 6 then
+    if B.tab == 6 and T.held.bank == true then
         local bank = eqoa.bank.get()
         if bank and bank.open then return "bank" end
     end
@@ -110,18 +110,26 @@ local function begin_visit(kind)
     T.auto_opened = not was_open -- (after the select: leaving a tab clears it)
 end
 
+-- An NPC the player talked to. Only a window this mod holds is ours to open over: another mod's claim, or none, is left
+-- alone (its window, or the game's, is what the player sees).
+local function opened(kind)
+    T.refresh()
+    if not T.held[kind] then return end
+    begin_visit(kind)
+end
+
 -- merchant.changed / bank.changed (the mod's always-on listeners): an NPC the player talked to opens the window.
 function T.on_merchant(d)
     if not d then return end
     if d.after == nil then B.helper_hold.merchant = nil; return end
-    if d.before == nil and not B.helper_hold.merchant then begin_visit("merchant") end
+    if d.before == nil and not B.helper_hold.merchant then opened("merchant") end
 end
 
 function T.on_bank(d)
     if not d then return end
     local after, before = d.after, d.before
     if after == nil or not after.open then B.helper_hold.bank = nil; return end
-    if not (before and before.open) and not B.helper_hold.bank then begin_visit("bank") end
+    if not (before and before.open) and not B.helper_hold.bank then opened("bank") end
 end
 
 -- The Merchant tab is left: the visit ends (the game's session with it).
