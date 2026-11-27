@@ -393,6 +393,11 @@ fn one_press_l1_body() {
     keys_core::fixture_demand(true);
     KEYS_CORE.with(|c| c.borrow_mut().view.in_world = true);
     play.mode = 0;
+    // forty lines of chat, so there is something to scroll back through (the window keeps its scroll within its lines)
+    for i in 0..40 {
+        keys_core::observe_text(&format!("Dab: line {i}"), [1.0; 4]);
+    }
+    keys_core::flush_deferred();
     frames(&mods, &mut context, 1);
     super::visibility::publish_claims(&claims.borrow());
     assert!(!crate::hud::fork_hud::chat_window_visible(), "control: the mod hides the game's chat");
