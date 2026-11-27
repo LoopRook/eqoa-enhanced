@@ -473,12 +473,11 @@ A font restored after going missing is retried after a face or size change or af
 
 ## Mod work approved or asked for, not built (2026-11-26)
 
-- **Bag Viewer: "Open merchants and bankers in Bag Viewer"** (spec approved by the owner 2026-11-25). One option, off
-  by default. On: talking to a merchant opens Bag Viewer on a Merchant tab (wares and prices left, bags right; a click
-  buys one, stackables ask how many with the total, what you cannot afford is greyed; right-click or Sell (N) sells
-  with the price shown and the API's sell question; Esc or walking away closes); talking to a banker opens the Bank
-  tab (a click moves an item across, stacks ask how many, a tunar row). The Bank tab stays readable anywhere; the
-  Merchant tab exists only while a merchant is open. Option off, or Bag Viewer off: the game's windows as today.
+- **A mod toggle that IS a game setting** (lead, 2026-11-27; needs an additive `eqoa/1` option field, so it is the
+  lead's call once a second mod wants it). Today the client special-cases the mod id `eqoa_stats_box` in
+  `addons/options.rs` so that its `stats_box` toggle reads and writes the game's own Stat Window setting. A
+  third-party mod cannot do the same. A general form would be a field on `eqoa.options.toggle` naming the game
+  setting the toggle stands for, from a short list the client allows.
 - **Order agreed with the owner 2026-11-27** (he approved the "what you will see" lines below): first the Map Search
   HUD Scale fix, the two-mods message and the hand-ins (none adds an API name); after the offer to upstream the chat
   line, the quest guide, then the two map colour items (each adds `eqoa/1` names).
