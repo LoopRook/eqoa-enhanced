@@ -43,9 +43,14 @@ appear in the mod's window instead of the game's dialog window.
   **To stop it:** press Escape (between two steps too: the late step is then shown, not answered), click an answer
   yourself, click the x, or walk away. It also stops by itself after 12 steps, when the person who speaks is not
   known, or when the server sends the very same step again. After you have answered a step yourself, the rest of that
-  talk is yours. The "?" person is recognised by name: the speaker is the NPC you had targeted when the words arrived
-  (a best guess, as for the title), matched to a quest step mark of the client's quest guide, so two NPCs of one
-  name in one world are not told apart.
+  talk is yours. **Who counts as "a "?" for you":** the creature you had targeted when the words arrived (a best guess, as for the
+  title), when the client has a quest step mark ("?") of the same name within 60 units of where that creature stands, in
+  the world you are in. **It does not run** when Map Markers is off, in the first seconds after entering a world (the
+  client builds its quest marks a moment later), when the creature cannot be found, or when the journal has no step
+  there. **It could run on the wrong person** when the speaker was not the creature you had targeted, or when a kill,
+  loot or reach step's creature of the same name stands at the mark; the cost is only that it presses Done or a
+  single answer for you (never a Goodbye, never one of two or more answers), and Escape stops it. After you leave a
+  talk with Escape or the x, or about two seconds after a stopped talk ends, the next talk starts afresh.
 
 It uses the window sessions of `eqoa/1` (`eqoa.windows.takeover` with `scope = "all"` for `text_dialog`,
 `response_dialog`, `group_invite`, `revive_offer`, `summon_offer`; `eqoa.windows.session`, `pass`, and

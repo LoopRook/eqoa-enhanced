@@ -354,8 +354,8 @@ def restart_scene(suite):
 
 # --- scene 10: REAL quests, unchanged rows (only the character's own quest row, items and position are set) -------------
 # A diagnostic edit of a COPY of the Dialog Window's main.lua (not the bundled mod) logs what the mod sees at each dialog.
-DUMP_OLD = "    state.auto_ref = s.ref" + chr(10) + "    if s.kind"
-DUMP_NEW = """    state.auto_ref = s.ref
+DUMP_OLD = "    state.judged = s.ref" + chr(10) + "    if s.kind"
+DUMP_NEW = """    state.judged = s.ref
     do
         local d = s.data or {}
         local seen = {}

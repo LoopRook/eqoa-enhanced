@@ -26,6 +26,7 @@
     "eqoa.map.get",
     "eqoa.map.markers",
     "eqoa.client.get",
+    "eqoa.entities.find",
     "eqoa.options.toggle",
     "eqoa.options.get",
     "eqoa.log.write",

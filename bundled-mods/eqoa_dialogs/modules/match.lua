@@ -45,15 +45,19 @@ end
 local GUIDE = " (guide)"
 
 -- true when a quest "step" mark (a "?": a step to do or a hand-in, not a quest on offer) is on this name.
--- Names are compared whole, any case, punctuation ignored; the mark's position is never used.
-function M.has_step_mark(markers, name)
+-- Names are compared whole, any case, punctuation ignored. With `near` ({x, z}) the mark must also lie within `radius` of it.
+function M.has_step_mark(markers, name, near, radius)
     local want = M.norm(name)
     if want == "" then return false end
     for _, m in ipairs(markers or {}) do
         if m.kind == "quest" and m.step == true and type(m.name) == "string" then
             local plain = m.name
             if plain:sub(-#GUIDE) == GUIDE then plain = plain:sub(1, #plain - #GUIDE) end
-            if M.norm(plain) == want then return true end
+            if M.norm(plain) == want then
+                if not near then return true end
+                local dx, dz = (m.x or 0) - near.x, (m.z or 0) - near.z
+                if dx * dx + dz * dz <= radius * radius then return true end
+            end
         end
     end
     return false

@@ -4,8 +4,8 @@
  "rule": "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
  "counts": {
   "total": 2604,
-  "proven": 894,
-  "provisional": 1343,
+  "proven": 895,
+  "provisional": 1342,
   "compat": 367,
   "by_kind": {
    "action": {
@@ -24,8 +24,8 @@
     "compat": 0
    },
    "field": {
-    "proven": 378,
-    "provisional": 935,
+    "proven": 379,
+    "provisional": 934,
     "compat": 0
    },
    "function": {
@@ -1367,7 +1367,6 @@
   "eqoa.windows.StartEntry.entries",
   "eqoa.windows.StartEntry.native",
   "eqoa.windows.StartEntry.text",
-  "eqoa.windows.TalkedTo.id",
   "eqoa.windows.Window",
   "eqoa.windows.Window.dialog",
   "eqoa.windows.Window.focused",

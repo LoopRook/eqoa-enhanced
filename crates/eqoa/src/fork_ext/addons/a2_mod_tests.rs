@@ -218,18 +218,42 @@ fn a2_dialogs_match_on_the_options_words_never_on_their_position() {
 
 const NPC: &str = "Commander Nothard";
 
-/// The client's quest marks: a "?" step on `name` (the guide's tag on the name, as the client writes it) in world 0.
+thread_local! {
+    /// What the next `speed_rig` puts into the client's view: (name, step, world of the mark). Applied AFTER the rig, because
+    /// the rig starts from a blank `Core` (an earlier version set the marks first and the rig wiped them).
+    static MARK: std::cell::RefCell<Option<(String, bool, i64, f64)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// A quest mark on `name`, a "?" step, in world 0, the guide's tag on the name as the client writes it.
 fn mark_step(name: &str) {
+    mark_step_with(name, true, 0);
+}
+
+fn mark_step_with(name: &str, step: bool, world: i64) {
+    MARK.with(|m| *m.borrow_mut() = Some((name.to_string(), step, world, 110.0)));
+}
+
+/// The same name marked far from where the creature stands (a namesake elsewhere in the world).
+fn mark_step_far(name: &str) {
+    MARK.with(|m| *m.borrow_mut() = Some((name.to_string(), true, 0, 5000.0)));
+}
+
+/// The creature the dialogs are from (id 7, standing at 100/200) and the marks, put into the view.
+fn apply_mark() {
+    let Some((name, step, world, mark_x)) = MARK.with(|m| m.borrow().clone()) else { return };
     CORE.with(|c| {
         let mut c = c.borrow_mut();
         c.view.map = json!({"enabled": true, "open": false, "minimap": false, "markers_on": true, "world_id": 0, "revision": 1});
-        c.view.map_markers = vec![json!({"world_id": 0, "kind": "quest", "step": true, "name": format!("{name} (guide)"), "x": 100.0, "z": 200.0, "level_min": 1, "level_max": 9, "label": null})];
+        c.view.map_markers = vec![json!({"world_id": world, "kind": "quest", "step": step, "name": format!("{name} (guide)"), "x": mark_x, "z": 205.0, "level_min": 1, "level_max": 9, "label": null})];
+        c.view.entities = vec![json!({"ref": {"$ref": "entity", "key": "7", "generation": 0, "incarnation": 1}, "id": 7, "name": NPC, "level": 30, "kind": "npc", "is_creature": true,
+            "position": {"x": 100.0, "y": 0.0, "z": 200.0}, "actor_position": {"x": 100.0, "y": 0.0, "z": 200.0}})];
     });
 }
 
 fn speed_rig(on: bool) -> Rig {
     let mut r = rig("eqoa_dialogs");
     options::set_toggle("eqoa_dialogs", "speed_hand_ins", on);
+    apply_mark();
     r.frames(2);
     r
 }
@@ -311,20 +335,40 @@ fn speed_hand_ins_leaves_a_talk_with_someone_without_a_question_mark_alone() {
     assert_eq!(answers_sent(), 0, "no mark on this name: nothing answered");
     drop(r);
     // a mark that is a quest on offer (a "!", step = false) is not a "?" either
-    mark_step(NPC);
-    CORE.with(|c| c.borrow_mut().view.map_markers[0]["step"] = json!(false));
+    mark_step_with(NPC, false, 0);
     let mut r = speed_rig(true);
     r.say_text(Some(NPC), "Greetings, friend.");
     r.frames(3);
     assert_eq!(answers_sent(), 0, "a quest on offer is not a hand-in");
     drop(r);
     // a mark in another world does not count
-    mark_step(NPC);
-    CORE.with(|c| c.borrow_mut().view.map_markers[0]["world_id"] = json!(5));
+    mark_step_with(NPC, true, 5);
     let mut r = speed_rig(true);
     r.say_text(Some(NPC), "Greetings, friend.");
     r.frames(3);
     assert_eq!(answers_sent(), 0, "a mark elsewhere is not this person");
+    drop(r);
+    // a namesake's mark far from where this creature stands is not this person either
+    mark_step_far(NPC);
+    let mut r = speed_rig(true);
+    r.say_text(Some(NPC), "Greetings, friend.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 0, "a mark 5000 units away is a namesake");
+    drop(r);
+    // Map Markers off: no marks, nothing runs
+    mark_step(NPC);
+    let mut r = speed_rig(true);
+    CORE.with(|c| c.borrow_mut().view.map["markers_on"] = json!(false));
+    r.say_text(Some(NPC), "Greetings, friend.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 0, "Map Markers off: it does not run");
+    drop(r);
+    // the control for all of the above: the same dialog with the mark in place is answered
+    mark_step(NPC);
+    let mut r = speed_rig(true);
+    r.say_text(Some(NPC), "Greetings, friend.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 1, "with a mark on this creature it is answered: {:?}", r.host.drain_logs());
 }
 
 /// (c) control: with the switch off, nothing is answered, even to a marked person.
@@ -338,6 +382,12 @@ fn speed_hand_ins_does_nothing_with_the_switch_off() {
     r.say_box(1, Some(NPC), "Take it?", &["Yes, I will take it"]);
     r.frames(3);
     assert_eq!(answers_sent(), 0, "off: nothing runs");
+    drop(r);
+    // the control: the same talk with the switch on is answered
+    let mut r = speed_rig(true);
+    r.say_text(Some(NPC), "Greetings, friend.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 1, "on: answered");
 }
 
 /// (d) the run is capped at 12 steps.
@@ -419,6 +469,45 @@ fn speed_hand_ins_never_picks_a_goodbye_or_close() {
         r.frames(3);
         assert_eq!(answers_sent(), 0, "{lone} is not picked");
     }
+    // the control: a real single answer in the same place is picked
+    let mut r = speed_rig(true);
+    r.say_box(1, Some(NPC), "Anything else?", &["Yes, I will take it"]);
+    r.frames(3);
+    assert_eq!(answers_sent(), 1, "a real single answer is picked");
+}
+
+/// Review HIGH-3: leaving a stopped talk with Escape ends it, so hailing the person again starts afresh (before the fix the
+/// close came back as "answered", the stopped talk stayed for five seconds and the new talk was not sped through).
+#[test]
+fn speed_hand_ins_a_left_talk_does_not_leak_into_the_next_one() {
+    mark_step(NPC);
+    let mut r = speed_rig(true);
+    r.say_box(3, Some(NPC), "Which road?", &["North", "South"]);
+    r.frames(3);
+    press(&r.host, "escape");
+    assert_eq!(action_broker::queued_kinds_for_test(), vec!["close_window"]);
+    r.answered();
+    r.say_text(Some(NPC), "Greetings again.");
+    r.frames(3);
+    assert_eq!(answers_sent(), 1, "the new talk is sped through: {:?}", r.host.drain_logs());
+}
+
+/// Review MEDIUM-2: an answer the client refuses after accepting it (not ready, rate limited) stops the run.
+#[test]
+fn speed_hand_ins_stops_when_the_client_refuses_the_answer_it_accepted() {
+    mark_step(NPC);
+    let mut r = speed_rig(true);
+    r.say_text(Some(NPC), "Greetings, friend.");
+    r.frames(2);
+    assert_eq!(answers_sent(), 1);
+    action_broker::refuse_all_for_test();
+    r.frames(2);
+    let logs = r.host.drain_logs().unwrap();
+    assert!(logs.iter().any(|l| l.contains("stopped: refused") && l.contains("0 steps in the record")), "{logs:?}");
+    r.answered();
+    r.say_text(Some(NPC), "And then?");
+    r.frames(3);
+    assert_eq!(answers_sent(), 0, "after a refusal the rest is the player's (the refused answer is gone from the queue)");
 }
 
 /// (h) one answer per step: the same session seen for many frames is answered once, and the same words coming again

@@ -63,6 +63,7 @@ local state = {
     rec_off = 0, rec_n = 0, rec_rect = nil,   -- the record's scroll (lines up from the newest), its length, its screen box
 }
 local MAX_STEPS = 12
+local STOPPED_WAIT_TICKS = 60 -- a stopped talk is forgotten sooner: a new hail then starts afresh
 local WAIT_TICKS = 150  -- 30 Hz steps (5 s) to wait for the server's next step before the talk is forgotten
 local REC_ROWS = 6
 local STOPPED = {
@@ -190,12 +191,18 @@ local function record_step(s, said)
     run.record[#run.record + 1] = { text = tostring(data.text or ""), said = tostring(said) }
 end
 
--- Whether the journal sends the player to this person: a quest "step" mark on a name, in the world the player is in.
--- The marks are the client's quest marks (`eqoa.map.markers`, kind "quest", step = true), matched by name only.
-local function sent_to(name)
+-- Whether the journal sends the player to this person. The client's quest "step" marks (`eqoa.map.markers`, kind "quest",
+-- step = true) are matched by NAME, in the world the player is in, with the Map Markers setting on, and only a mark within
+-- NEAR game units of where that very creature (the dialog's `talked_to`, found by id) stands, so a namesake elsewhere in the
+-- world does not count. Nothing runs when the creature is not found or there is no mark.
+local NEAR = 60
+local function sent_to(who)
     local m = eqoa.map.get()
-    if not (m and m.world_id) then return false end
-    return match.has_step_mark(eqoa.map.markers(m.world_id) or {}, name)
+    if not (m and m.world_id and m.markers_on == true) then return false end
+    local e = who.id and eqoa.entities.find(who.id)
+    local at = e and e.position
+    if not (at and at.x and at.z) then return false end
+    return match.has_step_mark(eqoa.map.markers(m.world_id) or {}, who.name, at, NEAR)
 end
 
 -- Looks at a dialog the first time it is seen and, when the talk is being sped through, answers it.
@@ -212,9 +219,11 @@ local function consider(s)
     local name = data.talked_to and data.talked_to.name
     local who = match.norm(name)
     local run = state.run
+    if run and run.idle and (tick_now() or 0) - run.idle > (run.active and WAIT_TICKS or STOPPED_WAIT_TICKS) then end_run(); run = nil end
     if run and who ~= "" and run.npc ~= who then end_run(); run = nil end
+    if run and who == "" and not run.active then end_run(); run = nil end -- a stopped talk's words are not shown on an unnamed speaker
     if not run then
-        local sent = who ~= "" and sent_to(name)
+        local sent = who ~= "" and sent_to(data.talked_to)
         note("debug", "speed-through: " .. tostring(name) .. (sent and " has a step mark" or " has no step mark"))
         if not sent then return end
         run = { npc = who, steps = 0, active = true, record = {} }
@@ -237,7 +246,9 @@ local function consider(s)
     end
     run.sig = sig
     run.steps = run.steps + 1
-    if answer(s.ref, index, label) then
+    local request = answer(s.ref, index, label)
+    if request then
+        run.pending = request
         record_step(s, label)
     else
         halt("refused")
@@ -287,6 +298,20 @@ eqoa.events.on("pointer.pressed", function(e)
         if inside(d.x, d.y, h) and h.run then h.run(); return end
     end
 end)
+-- A refusal that comes after the call was accepted (not ready, rate limited...): the step was not sent, so it stops
+-- and the record does not claim it was answered.
+eqoa.events.on("action.result", function(e)
+    local d = e.data
+    local run = state.run
+    if not (run and run.pending and d.request_id == run.pending) then return end
+    if d.state == "refused" or (d.state == "cancelled" and d.ok == false) then
+        run.pending = nil
+        run.record[#run.record] = nil
+        halt("refused")
+    elseif d.state ~= "queued" and d.state ~= "dispatched" then
+        run.pending = nil
+    end
+end)
 eqoa.events.on("pointer.wheel", function(e)
     local d = e.data
     if map_up() or not inside(d.x, d.y, state.rec_rect) then return end
@@ -320,8 +345,10 @@ eqoa.events.on("windows.session", function(e)
     end
 end)
 -- the host lets go of every claim when the world is left: held again as soon as the new one is up
-eqoa.events.on("world.entered", function() end_run(); claim() end)
-eqoa.events.on("state.reset", function() end_run(); claim() end)
+eqoa.events.on("world.entered", function() claim() end)
+eqoa.events.on("world.entered", function() end_run() end)
+eqoa.events.on("state.reset", function() claim() end)
+eqoa.events.on("state.reset", function() end_run() end)
 eqoa.events.on("disabling", function()
     for key, token in pairs(state.claimed) do eqoa.input.release(token); state.claimed[key] = nil end
     eqoa.windows.release()
@@ -427,7 +454,7 @@ local function draw_dialog(s, f, k, dw, dh)
     t.fill(W - 18, 4, 12, 12, col.raised)
     t.frame(W - 18, 4, 12, 12, col.border)
     t.text(W - 15, 4, "x", col.text)
-    t.hit(W - 18, 4, 12, 12, function() halt("player"); leave(s.ref) end)
+    t.hit(W - 18, 4, 12, 12, function() end_run(); leave(s.ref) end)
     if rec_rows > 0 then
         local last_row = #rec - state.rec_off
         for i = 1, rec_rows do
@@ -453,7 +480,7 @@ local function draw_dialog(s, f, k, dw, dh)
     end
     local answers_top = y
     -- Escape stops the speed-through and leaves, as it does without it
-    local keys = { escape = function() halt("player"); leave(s.ref) end }
+    local keys = { escape = function() end_run(); leave(s.ref) end }
     if response then
         -- Enter is this window's while a dialog is up, so it never reaches the game (it would open the chat line);
         -- on answers it does nothing: the number keys and clicks answer
@@ -542,12 +569,12 @@ eqoa.events.on("render", function()
         if s and not dialog then dialog = s end
     end
     if dialog then
-        if state.run then state.run.idle = nil end
         consider(dialog)
+        if state.run then state.run.idle = nil end
     elseif state.run then
         -- between steps: the server's next one is awaited, and Escape (held for that time) stops the run
         local now = tick_now()
-        if state.run.idle and now and now - state.run.idle > WAIT_TICKS then end_run() end
+        if state.run.idle and now and now - state.run.idle > (state.run.active and WAIT_TICKS or STOPPED_WAIT_TICKS) then end_run() end
     end
     local offer
     for _, kind in ipairs(OFFER_KINDS) do
@@ -583,7 +610,7 @@ eqoa.events.on("render", function()
         local keys = draw_offer(offer, f, k, dw, dh, below)
         if not dialog then
             state.keys = keys
-            state.keys.escape = function() end -- an offer is answered, never left: Escape is held and does nothing
+            state.keys.escape = function() halt("player") end -- an offer is answered, never left: Escape is held and does nothing
         end
     end
     local want = {}
