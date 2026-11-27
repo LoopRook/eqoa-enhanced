@@ -434,12 +434,19 @@ A font restored after going missing is retried after a face or size change or af
 - **Status:** Deferred by the owner (2026-11-26): the offer goes first, because one consistent API matters more than
   coverage. All of these are additive to `eqoa/1`. Source: the gap check of 2026-11-26 (eight items; three were built
   in batch 8) and the reviews of batch 8.
-- **The World Map follows the player's Minimap Colors choices** (owner asked 2026-11-27): today the mod copies
-  upstream's default colours. Needs an API read of the player's palette (Extended > Minimap Colors) and of the PvP
-  flag (the game's green for a flagged player).
-- **Colour choices for players, pets and creatures on both maps** (owner asked 2026-11-27): upstream's Minimap Colors
-  covers friendly NPC roles only; the rest use the game's fixed name colours. The API would hand the colour table to
-  mods, and a mod would offer the choices.
+- **The World Map uses your Minimap Colors** (approved 2026-11-27 as written here). The colours picked in Options,
+  Extended, Minimap Colors (bankers, smiths, merchants and so on) show on the World Map too. A player flagged for PvP
+  shows in the game's green, as on the minimap. Change a colour in Options and the World Map follows at once.
+  Hovering a dot names its role ("Banker", "Spell Merchant (Wizard)") as the minimap's hover does. With "Default"
+  picked for a role the World Map uses the minimap's colour. One additive read: the colour the game's minimap paints
+  each dot (a `colors` column on `eqoa.entities.dots()` is the suggested shape), plus the role label.
+- **Your own colours for players, pets and creatures on both maps** (approved 2026-11-27 as written here; after the
+  item above). The game's Minimap Colors page gets new rows: Other Players, PvP Players, Group Members, Pets and
+  Mercenaries, Creatures. Each row offers the same colour list as the rows already there; "Default" keeps today's
+  look (group members keep the game's colour per place by default, one colour is a choice). Creatures can also be
+  **By difficulty**: each dot in its con colour. What is picked shows on the minimap, the round minimap and the World
+  Map alike, and is kept for each interface (PC and Controller). The rows go on the game's page as a fork-owned block
+  (check the footprint budget).
 - **Meters:** a read-only `eqoa.combat.dps_meter()`, and the server-fed group meter.
 - **Effects on others:** a target's or creature's debuffs, and the effects on each group member.
 - **Focus:** `eqoa.focus.get()` and a `focus` element for `eqoa.hud.hide`.
@@ -472,13 +479,42 @@ A font restored after going missing is retried after a face or size change or af
   with the price shown and the API's sell question; Esc or walking away closes); talking to a banker opens the Bank
   tab (a click moves an item across, stacks ask how many, a tunar row). The Bank tab stays readable anywhere; the
   Merchant tab exists only while a merchant is open. Option off, or Bag Viewer off: the game's windows as today.
-- **Quest turn-in that speeds through every step** and stops only at a real choice (later: the player picks a path and
-  it follows). Needs a five-line "what you will see" for the owner first: today's match rule fits almost no real quest,
-  and a stale Turn-in Helper beside Dialogs fights it for the same window.
-- **A quest guide for this server; the World Map highlighting creatures a quest needs; an XP-camp flag on the World Map.**
-- **Auto-repair's chat line.**
-- **A plain-words message when two mods want the same window** (today: "response_dialog window is already taken over
-  by eqoa_dialogs" in the log).
+- **Order agreed with the owner 2026-11-27** (he approved the "what you will see" lines below): first the Map Search
+  HUD Scale fix, the two-mods message and the hand-ins (none adds an API name); after the offer to upstream the chat
+  line, the quest guide, then the two map colour items (each adds `eqoa/1` names).
+- **Quest hand-ins go by themselves** (approved 2026-11-27, with changes). A switch **Speed through hand-ins**, off
+  until turned on. Talking to someone the journal sends you to (the one with a "?" for you), the window steps through
+  the talk by itself: it presses Done and picks the only answer, and goes straight to the end (owner: "the point is
+  for people like me who don't care or know the quest etc and just want to turn it in"). It stops and waits the moment
+  there is a real choice (two or more answers), and marks where it stopped. What was said stays readable in the
+  window. Escape stops it at once; talking to anyone without a "?" for you works as today. It keeps going through a
+  quest offered with a single answer (say so in the README). The owner does not want the switch in the Dialog window
+  itself in the long run (see the settings pane below); with the Dialog mod's options today is fine for now. Mod only
+  (`eqoa_dialogs`); replaces today's "Auto-answer hand-ins" rule, which fits almost no real quest; cap the run and
+  stop when who is talked to is unknown. Check first whether the retired Turn-in Helper still loads in an old install.
+- **One settings pane for the mods' options** (owner, 2026-11-27: "we will need a settings pane eventually. Think
+  something like OneForAll on wow"). New request: needs its own five lines for the owner before it is built. See also
+  "One home for the fork's options" and "Bag Viewer: move the switches ... into a settings pane".
+- **Quest guide, quest creatures on the World Map, XP camps** (approved 2026-11-27; after the offer; needs API work).
+  The Quest Journal shows each quest's next step: who to see or what to kill or bring, and how many you have. A
+  **Show on map** button by each step opens the World Map on that place or person. On the World Map the creatures a
+  quest needs stand out with a ring in the quest colour, and their "?" area too (World Map only at first). The
+  well-known XP camps get the red-and-gold XP badge the game's own map has; other camps show as a smaller plain mark.
+  Hovering an XP camp shows its levels, its note and the rare creatures near it. Additive names needed: the client's
+  own guide reaching `quests.goals()`, a hunt flag and creature names on quest marks, and `xp_camp`, note and rare
+  creatures on markers. Three pieces, the XP badge first.
+- **Auto-repair says what it spent in chat** (approved 2026-11-27; after the offer; one additive name,
+  `eqoa.chat.local`). After the smith repairs your gear one line appears in chat: "Repaired 4 items for 1g 20s". If
+  items were skipped for lack of coin the line says how many; if you walk away mid-repair it says what was done and
+  that it stopped. Selling junk gets the same kind of line. The line shows in the game's chat and in the Chat mod's
+  window; the Repair box still shows the result. The Bag Viewer already calls the name when it is there. A mod must
+  not be able to word the line as a tell or a GM line: one fixed colour, a length limit and a rate limit.
+- **A plain message when two mods want the same window** (approved 2026-11-27; client only, no API name). Only the
+  first mod gets the window; today only the log says so. A small box says it once in plain words: "Dialog window:
+  EQOA Dialog Window is using it, so Quest Turn-in Helper's is not shown." It has **OK** and **Open Mods & Addons**
+  and does not come back for the same pair until something changes; the client never turns a mod off by itself. In
+  Mods & Addons the mod that lost shows a yellow line under its name: which window it did not get and who has it.
+  Turning one of the two off clears the message and the other mod takes the window at once.
 - **Mods that drift at a HUD Scale other than 100%** (audit of 2026-11-27, read from the code, nothing run). Follow
   the scale: Mana Bars, Target of Target, the Target Frame demo, Round Minimap, Dialogs, HUD Numbers. To fix:
   **Map Search** sizes its Search button, its panel and the Track waypoint button on the game's full map from the
@@ -487,7 +523,8 @@ A font restored after going missing is retried after a face or size change or af
   owner decides whether its box scales or keeps its size and keeps clear of the game's bars (asked 2026-11-27).
   Small: Round Minimap's hover text ignores the scale; HUD Numbers has no test at a scale other than 100%. Fixed
   size by design: Example Hearts and the Forge packages.
-- **A once-only notice that Mods & Addons moved from F10 to Shift+F10** (today a log line only).
+- Dropped by the owner 2026-11-27 ("un-needed, assume i'm the only player right now"): a once-only notice that
+  Mods & Addons moved from F10 to Shift+F10.
 
 ## From the night audits of 2026-11-27 (read from the code and the owner's logs; not run)
 
