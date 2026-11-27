@@ -434,6 +434,12 @@ A font restored after going missing is retried after a face or size change or af
 - **Status:** Deferred by the owner (2026-11-26): the offer goes first, because one consistent API matters more than
   coverage. All of these are additive to `eqoa/1`. Source: the gap check of 2026-11-26 (eight items; three were built
   in batch 8) and the reviews of batch 8.
+- **The World Map follows the player's Minimap Colors choices** (owner asked 2026-11-27): today the mod copies
+  upstream's default colours. Needs an API read of the player's palette (Extended > Minimap Colors) and of the PvP
+  flag (the game's green for a flagged player).
+- **Colour choices for players, pets and creatures on both maps** (owner asked 2026-11-27): upstream's Minimap Colors
+  covers friendly NPC roles only; the rest use the game's fixed name colours. The API would hand the colour table to
+  mods, and a mod would offer the choices.
 - **Meters:** a read-only `eqoa.combat.dps_meter()`, and the server-fed group meter.
 - **Effects on others:** a target's or creature's debuffs, and the effects on each group member.
 - **Focus:** `eqoa.focus.get()` and a `focus` element for `eqoa.hud.hide`.
