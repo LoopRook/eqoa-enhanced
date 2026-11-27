@@ -397,6 +397,9 @@ class SpecMarks(unittest.TestCase):
             text = (T.ROOT / "docs/modding" / page).read_text(encoding="utf-8")
             self.assertNotIn("—", text, page)
             self.assertIn("provisional", text.lower())
+        # docs_tests.rs lets only the limits table say "tested": the spec's new paragraph must not
+        para = next(l for l in self.spec.splitlines() if l.startswith("- **Proven and provisional.**"))
+        self.assertNotRegex(para, r"\btested\b")
         self.assertIn("## Proven and provisional names",
                       (T.ROOT / "docs/modding/VERSIONING.md").read_text(encoding="utf-8"))
 
