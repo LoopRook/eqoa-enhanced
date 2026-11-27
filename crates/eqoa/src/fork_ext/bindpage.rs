@@ -404,6 +404,7 @@ static SESSION: Mutex<Option<Vec<(String, String, Option<String>)>>> = Mutex::ne
 /// keys as they are, so a cancel can put them back with the game's. Mod keys are still
 /// written as they are changed; only a cancel rewrites them.
 pub fn session_begin() {
+    #[cfg(not(target_arch = "wasm32"))]
     crate::fork_ext::addons::options::stat_window_session_begin();
     let binds = MOD_BINDS.lock().unwrap();
     let snapshot = binds
@@ -418,6 +419,7 @@ pub fn session_begin() {
 /// `options.rs` has just put back. A key whose file cannot be written stays as it is in
 /// memory too (memory and file agree) and the failure is said.
 pub fn session_cancel() {
+    #[cfg(not(target_arch = "wasm32"))]
     crate::fork_ext::addons::options::stat_window_session_cancel();
     let errors = restore_session(|addon, id, key| match key {
         Some(key) => save_mod_bind(addon, id, key),

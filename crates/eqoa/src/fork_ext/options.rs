@@ -159,7 +159,9 @@ pub(super) fn change(c: &mut ClientOptions, item: i32) -> bool {
         item if crate::fork_ext::addons::options::is_game_stat_window_item(item) => {
             c.stat_window = !c.stat_window;
             // kept at once, as F4 keeps it: the row is not one of the page's previews that backing out puts back
-            crate::fork_ext::addons::options::keep_stat_window_from_the_row(c.stat_window);
+            if !crate::fork_ext::addons::options::keep_stat_window_from_the_row(c.stat_window) {
+                c.stat_window = !c.stat_window; // the save failed: the row stays as it was
+            }
         }
         #[cfg(not(target_arch = "wasm32"))]
         item if item >= crate::fork_ext::addons::options::MOD_OPTION_BASE => {

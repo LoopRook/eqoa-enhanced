@@ -933,12 +933,13 @@ fn stats_box_answers_the_games_stat_window_key_and_command_body() {
         assert!(!shown(&stats), "{note}: the box starts off");
         assert!(rm.manager.is_hud_element_hidden("stat_window"), "{note}: the game's Stat Window is held while the box is off");
         assert!(!crate::hud::fork_hud::stat_window_visible(), "{note}: and the game is told so");
-        // the game's key opens the box and closes it; the player's own Stat Window setting is not touched
+        // the game's key opens the box and closes it. One state (since round 2 of the owner's 2026-11-27 test): the box IS the
+        // game's own Stat Window setting, so the setting turns with it and the game's own window is held back all the same
         for (step, want) in [("F4", true), ("F4", false), ("F4", true)] {
             rm.play.toggle_stat_window();
             rm.frames(3);
             assert_eq!(shown(&stats), want, "{note}: {step} gives the box {want}");
-            assert!(!settings::stat_window(), "{note}: the game's own setting stays as it was");
+            assert_eq!(settings::stat_window(), want, "{note}: the game's own setting is the box's state");
             assert!(rm.manager.is_hud_element_hidden("stat_window"), "{note}: the game's window stays held");
         }
         // /stats toggles; on and off say what they mean whichever way the box is
@@ -964,32 +965,36 @@ fn stats_box_answers_the_games_stat_window_key_and_command_body() {
         // with the box open BEFORE the switch (review point 4): the box stands down, the game's window is the game's,
         // and the box comes back as it was when the switch goes off
         let standing_down = || stats.load("return stats_box.standing_down").eval::<bool>().unwrap();
+        let drawing = || stats.load("return stats_box.shown == true").eval::<bool>().unwrap();
         rm.play.toggle_stat_window();
         rm.frames(3);
-        assert!(shown(&stats) && !standing_down(), "{note}: the box is open and drawing");
+        assert!(shown(&stats) && drawing() && !standing_down(), "{note}: the box is open and drawing");
         super::super::window_takeover::set_use_game_windows(true);
         rm.frames(3);
         assert!(crate::hud::fork_hud::stat_window_visible(), "{note}: the switch gives the game's window back");
-        assert!(standing_down(), "{note}: the box stands down while the game's windows are in use, so the two are never both up");
-        assert!(shown(&stats), "{note}: its option is left as it was");
+        assert!(standing_down() && !drawing(), "{note}: the box stands down while the game's windows are in use, so the two are never both up");
+        assert!(shown(&stats) && settings::stat_window(), "{note}: the one state is left as it was");
+        // the game's key is the game's own with the switch on: it turns the game's window, which is the one setting
         rm.play.toggle_stat_window();
         rm.frames(3);
-        assert!(settings::stat_window(), "{note}: the game's key turns the game's window with the switch on");
-        assert!(shown(&stats), "{note}: and not the box");
+        assert!(!settings::stat_window() && !shown(&stats) && !drawing(), "{note}: the game's key turns the game's window (the one setting) with the switch on; the box does not draw");
+        rm.play.toggle_stat_window();
+        rm.frames(3);
+        assert!(settings::stat_window() && !drawing(), "{note}: and back: still the game's window, not the box");
         super::super::window_takeover::set_use_game_windows(false);
         rm.frames(3);
-        assert!(!standing_down() && shown(&stats), "{note}: the box is back as it was when the switch goes off");
+        assert!(!standing_down() && drawing() && shown(&stats), "{note}: the box is back, as the one state was left, when the switch goes off");
         assert!(!crate::hud::fork_hud::stat_window_visible(), "{note}: and the game's window is held again");
         rm.play.toggle_stat_window();
         rm.frames(3);
-        assert!(!shown(&stats), "{note}: the key closes it again");
+        assert!(!shown(&stats) && !settings::stat_window(), "{note}: the key closes it again");
         // the mod off: the game's key is the game's, as upstream
         rm.manager.queue(Command::Enable("eqoa_stats_box".into(), false));
         rm.frames(3);
         assert!(!rm.manager.is_hud_element_hidden("stat_window"), "{note}: the mod off lets go of the window");
         assert!(crate::hud::fork_hud::stat_window_visible());
         rm.play.toggle_stat_window();
-        assert!(!settings::stat_window(), "{note}: with the mod off F4 turns the game's window as before");
+        assert!(settings::stat_window(), "{note}: with the mod off F4 turns the game's window as before (the setting the player last saw was Off)");
         super::super::window_takeover::forget_switch_for_test();
         rm.manager.shutdown();
     }

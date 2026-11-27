@@ -31,10 +31,20 @@ thread_local! {
 
 /// The Enhanced "Stats Box" row set to `on`: kept at once, in memory and in client.opt as F4 keeps it (`set_stat_window`), so the
 /// row reads the new value on the frames after and backing out of the page does not undo it.
-pub(crate) fn keep_stat_window_from_the_row(on: bool) {
+pub(crate) fn keep_stat_window_from_the_row(on: bool) -> bool {
+    let before = game_stat_window();
     match crate::settings::set_stat_window(on) {
-        Ok(()) => STAT_WINDOW_KEPT.with(|k| k.set(Some(on))),
-        Err(error) => crate::say(&format!("stats box {}, not kept: {error}", if on { "shown" } else { "hidden" })),
+        Ok(()) => {
+            STAT_WINDOW_KEPT.with(|k| k.set(Some(on)));
+            true
+        }
+        Err(error) => {
+            // not kept: the setting stays as it was, and the row with it
+            let now = crate::settings::client();
+            crate::settings::set_client(crate::settings::ClientOptions { stat_window: before, ..now });
+            crate::say(&format!("stats box {}, not kept: {error}", if on { "shown" } else { "hidden" }));
+            false
+        }
     }
 }
 
@@ -400,8 +410,14 @@ fn get_toggle_raw(addon_id: &str, id: &str) -> Option<bool> {
 
 pub fn set_toggle_persisted(addon_id: &str, id: &str, value: bool) -> Result<(), String> {
     if is_game_stat_window(addon_id, id) {
-        // the game's own setting, kept the way the game keeps it (`Play::set_stat_window`)
-        crate::settings::set_stat_window(value)?;
+        // the game's own setting, kept the way the game keeps it (`Play::set_stat_window`); a save that fails leaves the setting
+        // as it was (the row, the setting and Lua then agree with the file) and the failure is said by the caller
+        let before = game_stat_window();
+        if let Err(error) = crate::settings::set_stat_window(value) {
+            let now = crate::settings::client();
+            crate::settings::set_client(crate::settings::ClientOptions { stat_window: before, ..now });
+            return Err(error);
+        }
     } else {
         persist_toggle(addon_id, id, value)?;
     }
