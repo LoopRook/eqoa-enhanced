@@ -518,3 +518,19 @@ fn review1_the_option_turned_off_at_an_npc_hands_the_window_to_the_game_and_lets
     run(&lua, "banker_talk({bank_it(7, 'Moonstone', 3)}); OPTIONS.open_npc = false; T.tick()");
     assert!(boolean(&lua, "released('bank')"), "the player is not left talking to a banker with no window");
 }
+
+#[test]
+fn review2_a_session_the_client_has_not_made_yet_is_passed_when_it_opens_and_a_refused_pass_ends_it() {
+    // Bag Viewer cannot open (the player died in flight): the session does not exist yet on the open's own frame
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, "T.open_viewer = function() OPENED = OPENED + 1 end; talk_merchant({ware_(1, 'Bread')})");
+    assert_eq!(int(&lua, "#PASSED"), 0, "no session yet: nothing to pass on this frame");
+    run(&lua, "SESSIONS.merchant = {ref = 'ws-9'}; emit('windows.session', {phase = 'opened', kind = 'merchant', ref = 'ws-9'})");
+    assert_eq!(string(&lua, "#PASSED .. ':' .. tostring(PASSED[1])"), "1:ws-9", "passed when the client makes the session");
+    // the game will not show it now (not_ready): the session is ended rather than left hidden
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, "PASS_ANSWER = {code = 'not_ready'}; T.open_viewer = function() end; SESSIONS.merchant = {ref = 'ws-3'}; talk_merchant({ware_(1, 'Bread')})");
+    assert!(boolean(&lua, "released('merchant')"), "a pass that is refused must not leave a hidden session");
+}

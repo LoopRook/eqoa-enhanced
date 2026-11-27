@@ -15,6 +15,7 @@ local T = {
     prompt = nil, enter = nil, scroll = 0, hits = {}, prompt_rect = nil, rect = nil,
     pad_list = false, pad_row = 1,
     auto_opened = false, was_bank = false, cache = nil,
+    want_pass = {},
 }
 B.trade = T
 
@@ -75,19 +76,34 @@ local function end_visit(kind)
     T.after_release(kind)
 end
 
--- The game's own window for the session this mod holds (the option went off, or Bag Viewer could not open).
+-- The game's own window for the session this mod holds (the option went off, or Bag Viewer could not open). The client
+-- makes a held session a frame after the NPC's open, so when there is none yet it is passed as soon as `windows.session`
+-- says it is there. A pass the game refuses ends the session instead: never a hidden NPC with no window.
 local function try_pass(kind)
     local s = eqoa.windows.session(kind)
     if not s then return false end
+    T.want_pass[kind] = nil
     local ok, err = eqoa.windows.pass(s.ref)
-    note(ok and ("the game's own " .. kind .. " window is shown") or ("the game's " .. kind .. " window could not be shown (" .. tostring(err and err.code) .. ")"))
-    if not T.on then T.poll(true) end
+    if ok then
+        note("the game's own " .. kind .. " window is shown")
+    else
+        eqoa.windows.release(kind)
+        T.held[kind] = nil
+        note("the game's " .. kind .. " window could not be shown (" .. tostring(err and err.code) .. "): the session is closed, talk again")
+    end
+    if not T.on then T.poll(true) elseif not ok then T.after_release(kind) end
     return true
 end
 
 function T.hand_over(kind)
+    T.want_pass[kind] = true
     try_pass(kind)
 end
+
+function T.on_session(d)
+    if d and d.phase == "opened" and T.want_pass[d.kind] then try_pass(d.kind) end
+end
+eqoa.events.on("windows.session", function(e) T.on_session(e.data) end)
 
 -- ---------------------------------------------------------------- what is on show
 
@@ -128,14 +144,14 @@ end
 -- merchant.changed / bank.changed (the mod's always-on listeners): an NPC the player talked to opens the window.
 function T.on_merchant(d)
     if not d then return end
-    if d.after == nil then B.helper_hold.merchant = nil; return end
+    if d.after == nil then B.helper_hold.merchant, T.want_pass.merchant = nil, nil; return end
     if d.before == nil and not B.helper_hold.merchant then opened("merchant") end
 end
 
 function T.on_bank(d)
     if not d then return end
     local after, before = d.after, d.before
-    if after == nil or not after.open then B.helper_hold.bank = nil; return end
+    if after == nil or not after.open then B.helper_hold.bank, T.want_pass.bank = nil, nil; return end
     if not (before and before.open) and not B.helper_hold.bank then opened("bank") end
 end
 
@@ -156,7 +172,7 @@ end
 -- A new world: the claims ended with the old one.
 function T.reset()
     T.cancel_prompt()
-    T.auto_opened, T.was_bank, T.held, T.told, T.cache = false, false, {}, {}, nil
+    T.auto_opened, T.was_bank, T.held, T.told, T.cache, T.want_pass = false, false, {}, {}, nil, {}
     T.poll(true)
 end
 
