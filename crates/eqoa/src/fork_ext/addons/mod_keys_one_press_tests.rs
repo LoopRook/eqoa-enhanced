@@ -388,12 +388,14 @@ fn one_press_l1_body() {
     let (chat, _lease) = keys_hud_mod("eqoa_chat", &claims);
     let mods = [&chat];
     frames(&mods, &mut context, 3);
-    super::visibility::publish_claims(&claims.borrow());
-    assert!(!crate::hud::fork_hud::chat_window_visible(), "control: the mod hides the game's chat");
+    // the game made first (its fixture publishes the HUD as it starts), then the mod's hide published as the runtime does
     let mut play = crate::play::Play::bundled_ui_fixture();
     keys_core::fixture_demand(true);
     KEYS_CORE.with(|c| c.borrow_mut().view.in_world = true);
     play.mode = 0;
+    frames(&mods, &mut context, 1);
+    super::visibility::publish_claims(&claims.borrow());
+    assert!(!crate::hud::fork_hud::chat_window_visible(), "control: the mod hides the game's chat");
     let scroll = |play: &mut crate::play::Play, key: i32, context: &mut Context| {
         play.chat_history_key(key, true);
         play.chat_history_key(key, false);
