@@ -13,7 +13,7 @@ local T = {
     PANEL_W = 270, -- the left panel's width, in HUD frame pixels (the window is this much wider while it is up)
     on = false, held = {}, told = {}, polled = 0,
     prompt = nil, enter = nil, scroll = 0, hits = {}, prompt_rect = nil, rect = nil,
-    pad_list = false, pad_row = 1,
+    pad_list = false, pad_row = 1, page = 9, -- (`page`: the rows the list shows at once, set by the draw)
     auto_opened = false, was_bank = false, cache = nil,
     want_pass = {}, dead = false,
 }
@@ -131,10 +131,16 @@ function T.mode()
     return nil
 end
 
+-- A new visit starts at the top of the list, with nothing left over from the last one.
+function T.top()
+    T.scroll, T.pad_row, T.pad_list = 0, 1, false
+end
+
 local function begin_visit(kind)
     local was_open = B.open
     if not was_open then T.open_viewer() end
     if not B.open then T.hand_over(kind); return end -- the window would not open: the game's own is shown
+    T.top()
     B.select(kind == "merchant" and T.TAB or 6)
     T.auto_opened = not was_open -- (after the select: leaving a tab clears it)
 end
@@ -167,13 +173,14 @@ end
 function T.leaving(old)
     T.cancel_prompt()
     T.auto_opened = false
-    T.pad_list = false
+    T.top()
     if old == T.TAB and eqoa.merchant.get() ~= nil then end_visit("merchant") end
 end
 
 function T.after_close()
     T.cancel_prompt()
-    T.auto_opened, T.was_bank, T.pad_list, T.hits, T.cache = false, false, false, {}, nil
+    T.auto_opened, T.was_bank, T.hits, T.cache = false, false, {}, nil
+    T.top()
     for _, kind in ipairs(KINDS) do T.after_release(kind) end
 end
 
@@ -181,6 +188,7 @@ end
 function T.reset()
     T.cancel_prompt()
     T.auto_opened, T.was_bank, T.held, T.told, T.cache, T.want_pass = false, false, {}, {}, nil, {}
+    T.top()
     T.poll(true)
 end
 
@@ -195,7 +203,7 @@ function T.tick()
     T.was_bank = mode == "bank"
     if T.prompt and mode == nil then T.cancel_prompt() end
     if ended_merchant or ended_bank then
-        T.pad_list = false
+        T.top()
         if T.auto_opened then B.step_aside = true -- the visit opened the window: it goes with it
         elseif ended_merchant then B.select(1) end
     end
@@ -365,6 +373,13 @@ end
 
 -- ---------------------------------------------------------------- the controller
 
+-- The row the controller is on stays on the screen: the list scrolls to it.
+local function reveal()
+    if T.pad_row <= T.scroll then T.scroll = T.pad_row - 1
+    elseif T.pad_row > T.scroll + T.page then T.scroll = T.pad_row - T.page end
+    T.scroll = math.max(0, T.scroll)
+end
+
 -- Left at the pack grid's first column goes to the left panel; up and down move over its rows, confirm presses one, right
 -- goes back to the grid. While the question is up: up and down change the count, confirm answers, back cancels.
 function T.pad_key(key, col0)
@@ -382,8 +397,8 @@ function T.pad_key(key, col0)
     end
     if T.pad_list then
         local entries = T.entries(mode)
-        if key == "up" then T.pad_row = math.max(1, T.pad_row - 1)
-        elseif key == "down" then T.pad_row = math.min(math.max(1, #entries), T.pad_row + 1)
+        if key == "up" then T.pad_row = math.max(1, T.pad_row - 1); reveal()
+        elseif key == "down" then T.pad_row = math.min(math.max(1, #entries), T.pad_row + 1); reveal()
         elseif key == "right" then T.pad_list = false
         elseif key == "confirm" then
             local e = entries[T.pad_row]
@@ -397,6 +412,7 @@ function T.pad_key(key, col0)
     end
     if key == "left" and col0 then
         T.pad_list, T.pad_row = true, math.max(1, math.min(T.pad_row, #T.entries(mode)))
+        reveal()
         return true
     end
     return false
@@ -547,8 +563,10 @@ function T.draw(g)
     local entries = T.entries(mode)
     local foot = mode == "merchant" and X.n > 0
     local rows = math.floor((h - HEAD - (foot and FOOT or 0)) / ROW)
+    T.page = math.max(1, rows)
     T.scroll = math.max(0, math.min(math.max(0, #entries - rows), T.scroll))
     T.pad_row = math.max(1, math.min(T.pad_row, math.max(1, #entries)))
+    if T.pad_list then reveal() end
     local visible = {}
     for i = 1, rows do
         local e = entries[T.scroll + i]

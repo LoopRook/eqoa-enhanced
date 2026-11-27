@@ -565,3 +565,36 @@ fn review3_before_the_first_draw_a_click_does_not_crash_and_any_error_ends_the_v
     assert_eq!(int(&lua, "LATER"), 0, "no claim over a window that cannot draw");
     assert!(boolean(&lua, "T.dead == true and not B.open"), "the stale window is closed");
 }
+
+#[test]
+fn review5_the_controller_keeps_its_row_on_screen_and_a_new_visit_starts_at_the_top() {
+    let setup = r#"
+        local wares = {}
+        for i = 1, 20 do wares[i] = ware_(i, "Ware " .. i) end
+        talk_merchant(wares)
+        T.page = 9
+        T.pad_key("left", true)                              -- from the pack's first column into the list
+    "#;
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, setup);
+    run(&lua, "for i = 1, 14 do T.pad_key('down', false) end");
+    assert_eq!(int(&lua, "T.pad_row"), 15);
+    assert!(
+        boolean(&lua, "T.pad_row > T.scroll and T.pad_row <= T.scroll + T.page"),
+        "row {} with the list scrolled to {}",
+        int(&lua, "T.pad_row"),
+        int(&lua, "T.scroll")
+    );
+    // and back up past the top of the page
+    run(&lua, "for i = 1, 14 do T.pad_key('up', false) end");
+    assert!(boolean(&lua, "T.pad_row == 1 and T.scroll == 0"));
+    // a visit that ended at row 15 does not leave it for the next merchant
+    run(&lua, "for i = 1, 14 do T.pad_key('down', false) end; MERCH = nil; T.tick(); B.open = true; talk_merchant({ware_(1, 'A'), ware_(2, 'B')})");
+    assert!(
+        boolean(&lua, "T.pad_row == 1 and T.scroll == 0 and not T.pad_list"),
+        "stale row {} scroll {}",
+        int(&lua, "T.pad_row"),
+        int(&lua, "T.scroll")
+    );
+}
