@@ -13,7 +13,7 @@ and **resize** (drag the corner). Its place and size are kept.
 - **Hover** a dot or a mark (creatures and players near you, camps, coaches, towns, quests, pins, your waypoint) for a card
   with its name, its level (camps and quests give their level range) and how far away it is. It shows you as a dart facing
   your way, your group in their colours, your target's ring, quests to take (!) and steps to do (?), camps (bigger for an XP
-  camp), coaches and town names. The Map Markers setting hides camps and coaches here as it does on the game's map.
+  camp), coaches and town names. The creature dots are coloured as the game's minimap colours them: friendly NPCs by what they do (coachmen light blue, bankers cyan, smiths orange, merchants yellow, trainers pink, spell merchants purple, quest givers white), other NPCs tan, pets blue, a mercenary a reddish blue and players green. Minimap Colors choices are not readable by a mod, so these are the defaults. The Map Markers setting hides camps and coaches here as it does on the game's map.
 - **Right-click** the map: **Set waypoint here** (the game's own waypoint, shown on this map with its distance and on the minimap), **Drop a pin here...** (type a short note, Enter saves, Esc cancels), or **Clear waypoint**. Right-click a pin or
   the waypoint to remove it (a waypoint you placed in the game's own map is taken over first, then cleared). A waypoint you
   set here stays when you turn the mod off. Pins are kept for each world (up to 60 in a world, the whole of Tunaria for

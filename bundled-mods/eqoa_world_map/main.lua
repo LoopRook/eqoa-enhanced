@@ -49,10 +49,46 @@ local state = {
     hits = {}, rect = nil, drag = nil, held = {},
     menu = nil, note = nil, search = nil, results = {}, focus = nil, capturing = false,
     markers = {}, markers_world = nil, markers_stale = true, markers_on = true, marker_calls = 0,
-    player = nil, dots = { ids = {}, xs = {}, zs = {} },
+    player = nil, dots = { ids = {}, xs = {}, zs = {} }, dot_cache = {}, dot_cache_at = 0,
     now = 0, message = nil, message_until = 0, overflow = -1e9, expect = {},
 }
 world_map = state -- read by the mod's tests
+
+-- The live dots in the game's minimap colours (`Play::mini_view`): a friendly NPC with a role (Minimap Colors, `minimapcolor::role`)
+-- in the role's default colour, else its name plate's colour (`Play::name_color`): NPCs tan, pets blue, a mercenary a reddish
+-- blue, players green. The API gives no Minimap Colors choice, no spell-merchant list from the server and no other class's
+-- facts, so the role colours are the defaults and a spell merchant is one with "Spell" in its name. Bit tests by division: no
+-- bit operators needed.
+local TAN, PET, MERC, PLAYER = { .831, .753, .435 }, { .392, .686, .863 }, { .608, .647, .824 }, { .353, 1, .314 }
+local ROLE_RGB = {
+    spells = { .69, .376, 1 }, smiths = { 1, .549, 0 }, merchants = { 1, .925, .157 }, bankers = { 0, .941, .941 },
+    trainers = { 1, .431, .78 }, coachmen = { .51, .745, 1 }, quest = { 1, 1, 1 },
+}
+local SMITHS = { Smithy = 1, Smith = 1, Blacksmith = 1, Armorer = 1, Armourer = 1, Weaponsmith = 1, Shieldsmith = 1, Bowyer = 1, Fletcher = 1 }
+local TRAINERS = { Guildmaster = 1, Trainer = 1, Training = 1, Master = 1, Rehabilitator = 1, Guild = 1 }
+local function has_bit(n, bit) return math.floor((n or 0) / bit) % 2 == 1 end
+
+local function role_of(e)
+    local flags = e.npc_flags or 0
+    if not has_bit(flags, 128) then return nil end
+    local name = e.name or ""
+    local first = name:match("%S+") or ""
+    local merchant = has_bit(flags, 1)
+    if name:sub(1, 9) == "Coachman " or name:sub(1, 11) == "Coachwoman " then return "coachmen" end
+    if has_bit(flags, 2) or first == "Banker" then return "bankers" end
+    if merchant and name:find("Spell", 1, true) then return "spells" end
+    if has_bit(flags, 8) or (merchant and SMITHS[first]) then return "smiths" end
+    if TRAINERS[first] or name:sub(1, 12) == "Guild Master" then return "trainers" end
+    if e.head_mark then return "quest" end
+    return merchant and "merchants" or nil
+end
+
+-- the minimap's colour for an entity, as {r, g, b}
+function state.dot_rgb(e)
+    if e.kind == "player" then return PLAYER end
+    if e.kind == "pet" then return e.merc_tag and MERC or PET end
+    return ROLE_RGB[role_of(e) or ""] or TAN
+end
 
 local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
@@ -619,6 +655,22 @@ local function colours()
     }
 end
 
+-- A dot's colour, worked out once a second for each creature (a record read for every dot every frame would cost more than it
+-- shows); `c.npc` while the record is not there.
+local DOT_KEEP = 1
+local function dot_colour(id)
+    local k = state.dot_cache[id]
+    if k and state.now - k.at < DOT_KEEP then return k.col end
+    local e = eqoa.entities.find(id)
+    local col = C.npc
+    if e then
+        local rgb = state.dot_rgb(e)
+        col = ui.GetColorU32(rgb[1], rgb[2], rgb[3], 1)
+    end
+    state.dot_cache[id] = { col = col, at = state.now }
+    return col
+end
+
 -- the factors, from the client's UI scale and the two settings; the layout's pixels follow
 local function set_factor()
     local f = eqoa.hud.frame()
@@ -739,6 +791,7 @@ function draw(e)
     refresh_markers(map.world_id)
     if state.focus or state.note then set_capture(true) else set_capture(false) end
     if v.scale <= 12 then state.dots = eqoa.entities.dots() or state.dots end
+    if state.now - state.dot_cache_at > 10 then state.dot_cache, state.dot_cache_at = {}, state.now end
 
     -- the font: baked at the size drawn (or the old size scaled until the new one is ready)
     local want_px = clamp(math.floor(TEXT_BASE * F + 0.5), 6, 96)
@@ -887,7 +940,7 @@ function draw(e)
         local dots = state.dots
         for i = 1, #dots.ids do
             local sx2, sy2 = to_screen(area, dots.xs[i], dots.zs[i])
-            if on_screen(sx2, sy2, 3) and dots.ids[i] ~= state.self_id then dl:AddCircleFilled(V(sx2, sy2), 2 * FM, c.npc, 8) end
+            if on_screen(sx2, sy2, 3) and dots.ids[i] ~= state.self_id then dl:AddCircleFilled(V(sx2, sy2), 2 * FM, dot_colour(dots.ids[i]), 8) end
         end
     end
     local show_marks = state.markers_on -- the game's Map Markers setting: camps, coaches and community marks

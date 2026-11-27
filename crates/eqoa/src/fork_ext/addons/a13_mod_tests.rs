@@ -906,3 +906,57 @@ fn a13_world_map_asks_for_its_picture_at_scale_one_or_more_even_when_zoomed_clos
     assert_eq!(rig.lua_str("world_map.terrain_error"), "nil", "the resized picture request was accepted at 0.25");
     assert_eq!(rig.lua_str("world_map.terrain ~= nil"), "true");
 }
+
+/// The live dots wear the game's minimap colours (`Play::mini_view`): one colour for each kind the API can tell, and
+/// each is not another kind's (the negative control: a plain NPC is tan, so every other kind differs from it).
+#[test]
+fn world_map_dots_use_the_minimaps_colours_for_each_kind() {
+    fresh();
+    let mut rig = rig([1024.0, 768.0], None);
+    rig.open();
+    let rgb = |rig: &Rig, e: &str| rig.lua_str(&format!("(function() local c = world_map.dot_rgb({e}) return string.format('%.0f,%.0f,%.0f', c[1] * 255, c[2] * 255, c[3] * 255) end)()"));
+    let cases = [
+        ("an NPC with no role: tan", "{ kind = 'npc', name = 'Barmaid Terese', npc_flags = 128 }", "212,192,111"),
+        ("a creature (no NPC bit): tan", "{ kind = 'npc', name = 'orc pawn', npc_flags = 0 }", "212,192,111"),
+        ("a pet: blue", "{ kind = 'pet', name = 'Fang' }", "100,175,220"),
+        ("a mercenary: reddish blue", "{ kind = 'pet', name = 'Merc', merc_tag = '<Ann Mercenary>' }", "155,165,210"),
+        ("a player: green", "{ kind = 'player', name = 'Ann' }", "90,255,80"),
+        ("a coachman: light blue", "{ kind = 'npc', name = 'Coachman Ronks', npc_flags = 129 }", "130,190,255"),
+        ("a banker by the flag: cyan", "{ kind = 'npc', name = 'The Treasurer', npc_flags = 130 }", "0,240,240"),
+        ("a spell merchant by name: purple", "{ kind = 'npc', name = 'Spell Archivist', npc_flags = 129 }", "176,96,255"),
+        ("a smith by the flag: orange", "{ kind = 'npc', name = 'Yiggins', npc_flags = 136 }", "255,140,0"),
+        ("a trainer by name: pink", "{ kind = 'npc', name = 'Guildmaster Ferris', npc_flags = 128 }", "255,110,199"),
+        ("a quest giver with a mark: white", "{ kind = 'npc', name = 'Dilana', npc_flags = 128, head_mark = '!' }", "255,255,255"),
+        ("a merchant: yellow", "{ kind = 'npc', name = 'Merchant Perry', npc_flags = 129 }", "255,236,40"),
+        ("a coachman who sells is still a coachman", "{ kind = 'npc', name = 'Coachman Ronks', npc_flags = 129 }", "130,190,255"),
+    ];
+    for (what, entity, want) in cases {
+        assert_eq!(rgb(&rig, entity), want, "{what}");
+    }
+}
+
+/// The dots a frame draws are coloured from the entity records, not a single colour.
+#[test]
+fn world_map_dots_are_drawn_in_their_colours() {
+    fresh();
+    let entity = |id: u64, name: &str, kind: &str, flags: u64| {
+        json!({
+            "ref": {"$ref": "entity", "key": id.to_string(), "generation": 0, "incarnation": 1},
+            "id": id, "name": name, "level": 7, "kind": kind, "is_creature": true, "corpse": false, "hp_fraction": 1.0,
+            "search_flags": 0, "class_code": 0, "world_id": 0, "npc_flags": flags,
+            "position": {"x": 25300.0, "y": 0.0, "z": 15200.0}, "actor_position": {"x": 25300.0, "y": 0.0, "z": 15200.0},
+        })
+    };
+    CORE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.view.entities = vec![entity(9001, "Coachman Ronks", "npc", 129), entity(9002, "orc pawn", "npc", 0), entity(9003, "Ann", "player", 0)];
+        c.view.dots = vec![(9001, 25300.0, 15200.0), (9002, 25310.0, 15200.0), (9003, 25320.0, 15200.0)];
+    });
+    let mut rig = rig([1024.0, 768.0], None);
+    rig.open();
+    rig.frames(3);
+    let col = |id: u32| rig.lua_f64(&format!("world_map.dot_cache[{id}] and world_map.dot_cache[{id}].col or 0"));
+    let (coach, orc, ann) = (col(9001), col(9002), col(9003));
+    assert!(coach != 0.0 && orc != 0.0 && ann != 0.0, "each dot was coloured: {coach} {orc} {ann}");
+    assert!(coach != orc && ann != orc && coach != ann, "a coachman, an orc and a player are three colours: {coach} {orc} {ann}");
+}

@@ -4,8 +4,8 @@
  "rule": "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
  "counts": {
   "total": 2601,
-  "proven": 872,
-  "provisional": 1362,
+  "proven": 874,
+  "provisional": 1360,
   "compat": 367,
   "by_kind": {
    "action": {
@@ -24,8 +24,8 @@
     "compat": 0
    },
    "field": {
-    "proven": 363,
-    "provisional": 948,
+    "proven": 365,
+    "provisional": 946,
     "compat": 0
    },
    "function": {
@@ -400,8 +400,6 @@
   "eqoa.entities.Entity.diseased",
   "eqoa.entities.Entity.disposition",
   "eqoa.entities.Entity.entity_type",
-  "eqoa.entities.Entity.head_mark",
-  "eqoa.entities.Entity.merc_tag",
   "eqoa.entities.Entity.poisoned",
   "eqoa.entities.Entity.ref",
   "eqoa.entities.Entity.status_flags",
