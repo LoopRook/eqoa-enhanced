@@ -1299,8 +1299,42 @@ fn assert_mod_click(id: &str, option: &str, frame_rect: [f32; 4], vertical: &str
 }
 #[test]
 fn menu_values_persist_on_disk_and_reach_reloaded_bundled_lua() {
+    // A plain mod option (Mana Bars, on by default): its menu row's value is kept in the mod's own file and reaches the reloaded
+    // Lua. (This used the Stats Box until its switch became the game's own Stat Window setting; its case is the next test.)
     let tree = bundled_tree();
     let config = TestDir::new();
+    options::set_storage_root(Some(config.path().to_path_buf()));
+    options::reset_in_memory();
+    {
+        let host = load_hud_mod(&tree, "eqoa_mana_bars");
+        host.execute("assert(eqoa.options.get('mana_bars')==true)")
+            .unwrap();
+        assert!(options::toggle_by_item(2002));
+        host.execute("assert(eqoa.options.get('mana_bars')==false)")
+            .unwrap();
+    }
+    options::reset_in_memory();
+    let host = load_hud_mod(&tree, "eqoa_mana_bars");
+    host.execute("assert(eqoa.options.get('mana_bars')==false)")
+        .unwrap();
+    let key = storage::Storage::key_for_addon_id("eqoa_mana_bars");
+    assert!(
+        config
+            .path()
+            .join("addons")
+            .join(format!("{key}.json"))
+            .is_file()
+    );
+    options::set_storage_root(None);
+    options::reset_in_memory();
+}
+/// The Stats Box's own case: its menu row is the game's Stat Window setting (one state), kept in the game's own `client.opt`, and the
+/// reloaded Lua reads it from there; the mod's own file is not where it lives.
+#[test]
+fn menu_value_of_the_stats_box_persists_through_the_games_setting_and_reaches_reloaded_bundled_lua() {
+    let tree = bundled_tree();
+    let config = TestDir::new();
+    crate::settings::testing::reset(false);
     options::set_storage_root(Some(config.path().to_path_buf()));
     options::reset_in_memory();
     {
@@ -1315,16 +1349,16 @@ fn menu_values_persist_on_disk_and_reach_reloaded_bundled_lua() {
     let host = load_hud_mod(&tree, "eqoa_stats_box");
     host.execute("assert(eqoa.options.get('stats_box')==true)")
         .unwrap();
+    let kept = String::from_utf8_lossy(&crate::settings::testing::kept("client.opt").unwrap_or_default()).into_owned();
+    assert!(kept.contains("stat_window=on"), "kept in client.opt: {kept}");
     let key = storage::Storage::key_for_addon_id("eqoa_stats_box");
     assert!(
-        config
-            .path()
-            .join("addons")
-            .join(format!("{key}.json"))
-            .is_file()
+        !config.path().join("addons").join(format!("{key}.json")).is_file(),
+        "the mod's own file holds nothing for it"
     );
     options::set_storage_root(None);
     options::reset_in_memory();
+    crate::settings::testing::reset(false);
 }
 #[test]
 fn round3_capabilities_and_stats_records_match_public_contract() {
