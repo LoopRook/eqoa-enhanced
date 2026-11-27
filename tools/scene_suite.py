@@ -63,6 +63,11 @@ class Scene:
     fresh_db: bool = False                           # restart the server on a fresh copy of the seed database first
     patch: dict = field(default_factory=dict)         # mod id -> [(old, new)] edits to a COPY of its main.lua, every run (diagnostics)
     control_patch: dict = field(default_factory=dict)  # negative control: mod id -> [(old, new)] edits to its main.lua
+    files: dict = field(default_factory=dict)          # file name -> text written in the scratch config folder (e.g. client.opt)
+    control_files: dict = field(default_factory=dict)  # negative control: more such files (e.g. enhanced.opt with a switch on)
+    leftovers: dict = field(default_factory=dict)      # mod id -> git revision: an older client's install of a mod (its files at
+                                                       # that revision in the mods folder, recorded in bundled.json as installed)
+    control_leftovers_edited: bool = False             # negative control: the leftovers carry a player's edit (so they are kept)
 
 
 def evaluate(log, expect, absent):
@@ -322,7 +327,7 @@ class Suite:
                 pass
 
     # --- one client launch --------------------------------------------------------
-    def profile(self, config, scene):
+    def profile(self, config, scene, control=False):
         profiles = config / "addons" / "profiles"
         profiles.mkdir(parents=True)
         enabled = {addon_key(m): True for m in scene.mods}
@@ -332,6 +337,8 @@ class Suite:
             (files / "junk.cfg").write_text(f"grey=0\n{ls.JUNK_ID}\n", encoding="utf-8")
         if scene.mod_keys_file:
             (config / "mod-keys.opt").write_text(scene.mod_keys_file, encoding="utf-8")
+        for name, text in {**scene.files, **(scene.control_files if control else {})}.items():   # the player's saved options
+            (config / name).write_text(text, encoding="utf-8")
         for m, opts in scene.options.items():      # a mod's switches are kept in addons/<its key>.json
             ls.write_json(config / "addons" / f"{addon_key(m)}.json", {"table": [[k, v] for k, v in opts.items()]})
         ls.write_json(profiles / "Default.json", {"schemaVersion": 1, "enabled": enabled, "addons": {}, "layout": ""})
@@ -342,8 +349,10 @@ class Suite:
         run_dir = self.dir / folder
         run_dir.mkdir()
         self.profile_dir = run_dir / "config"
-        self.profile(run_dir / "config", scene)
+        self.profile(run_dir / "config", scene, control)
         mods = run_dir / "mods"      # per run, so a negative control's edited mod never reaches another scene
+        if scene.leftovers:
+            write_leftovers(mods, run_dir / "config", scene.leftovers, edited=control and scene.control_leftovers_edited)
         env = {
             **ls.base_environment(),
             "EQOA_CONFIG": str(run_dir / "config"), "EQOA_CACHE": str(self.dir / "cache"),
@@ -428,6 +437,39 @@ class Suite:
                 "notes": scene.notes, "note": note}
 
 
+def mods_folder_key(mods):
+    """The client's `bundled::mods_folder_key` on Windows: the SHA-256 of the canonical folder, lower case, backslashes."""
+    s = os.path.realpath(mods)
+    for prefix in ("\\\\?\\UNC\\", "\\\\?\\"):
+        if s.startswith(prefix):
+            s = ("\\\\" if "UNC" in prefix else "") + s[len(prefix):]
+    return sha256(s.replace("/", "\\").lower().encode()).hexdigest()
+
+
+def write_leftovers(mods, config, leftovers, edited=False):
+    """An older client's install of each mod: its files at a git revision written into `mods`, and `bundled.json` saying
+    the bundler installed them with those hashes (as an older client wrote it). `edited` adds a player's line to each
+    main.lua (a control: a folder the player changed is kept)."""
+    mods.mkdir(parents=True, exist_ok=True)
+    key = mods_folder_key(mods)
+    registry = {"folders": {key: []}, "shipped": {key: {}}}
+    for mod_id, rev in leftovers.items():
+        names = subprocess.run(["git", "-c", "safe.directory=*", "ls-tree", "-r", "--name-only", rev, f"bundled-mods/{mod_id}"],
+                               cwd=ls.ROOT, capture_output=True, check=True).stdout.decode().split()
+        for name in names:
+            data = subprocess.run(["git", "-c", "safe.directory=*", "show", f"{rev}:{name}"], cwd=ls.ROOT,
+                                  capture_output=True, check=True).stdout
+            rel = name[len("bundled-mods/"):]
+            registry["shipped"][key][rel] = [sha256(data).hexdigest()]
+            if edited and rel.endswith("/main.lua"):
+                data += b"\n-- a line the player added\n"
+            (mods / rel).parent.mkdir(parents=True, exist_ok=True)
+            (mods / rel).write_bytes(data)
+        registry["folders"][key].append(mod_id)
+    (config / "addons").mkdir(parents=True, exist_ok=True)
+    ls.write_json(config / "addons" / "bundled.json", registry)
+
+
 def build_release(run_dir):
     """Build this tree's release client under the shared cargo lock (a no-op when already up to date)."""
     env = {**ls.base_environment(), "CARGO_TARGET_DIR": str(ls.TARGET)}
@@ -476,7 +518,8 @@ def main(argv=None):
         for scene in build_scenes(suite):
             if wanted and scene.number not in wanted and scene.number.rstrip("abcd") not in wanted:
                 continue
-            if args.control and not (scene.control_patch or scene.control_env or scene.restart_at):
+            if args.control and not (scene.control_patch or scene.control_env or scene.control_files
+                                     or scene.control_leftovers_edited or scene.restart_at):
                 continue
             print(f"Scene {scene.number}: {scene.name}" + (" (negative control)" if args.control else ""), flush=True)
             r = suite.run_scene(scene, control=args.control)
