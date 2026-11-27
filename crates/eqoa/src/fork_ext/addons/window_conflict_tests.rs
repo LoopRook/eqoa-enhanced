@@ -268,9 +268,10 @@ fn a_long_name_and_many_conflicts_keep_the_box_short() {
     assert!(!line.contains(&"A".repeat(33)), "{line}");
     assert!(line.contains('\u{2026}'));
     // seven windows at once: five lines and a count
-    let a = mod_with("a", &[]);
-    let b = mod_with("b", &[]);
-    for kind in ["loot", "merchant", "bank", "map", "trade", "duel"] {
+    let kinds = ["loot", "merchant", "bank", "map", "trade", "duel"];
+    let a = mod_with("a", &kinds);
+    let b = mod_with("b", &kinds);
+    for kind in kinds {
         assert!(a.lua.load(format!("return eqoa.windows.takeover('{kind}', {{scope = 'all'}})")).eval::<bool>().unwrap());
         assert!(!b.lua.load(format!("local ok = eqoa.windows.takeover('{kind}', {{scope = 'all'}}); return ok == true")).eval::<bool>().unwrap());
     }
