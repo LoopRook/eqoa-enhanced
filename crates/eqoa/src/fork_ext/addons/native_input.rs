@@ -103,6 +103,26 @@ pub(crate) fn install(host: &Host) -> mlua::Result<()> {
             }) {
                 return error(lua, "eqoa.input.claim", "busy", "key already has an owner");
             }
+            // One claim of Escape per mod: asked again while it holds one, the mod gets the same claim back (the same
+            // token, its place in the line unchanged, its `suppress` as asked now), so the line never grows past one
+            // claim per mod and a claim made each frame does not jump to the front each frame.
+            if escape {
+                let vm = bus(lua).borrow().vm;
+                let held = INPUT_STATE.with(|s| s.borrow().escape_claim_of(vm));
+                if let Some(owner) = held
+                    && let Some(id) = owner.rsplit(':').next().and_then(|id| id.parse::<u64>().ok())
+                {
+                    INPUT_STATE.with(|s| {
+                        let mut s = s.borrow_mut();
+                        if let Some(claim) = s.escape_line.iter_mut().find(|(o, _)| *o == owner) {
+                            claim.1 = suppress;
+                        }
+                        s.mirror_escape();
+                    });
+                    let t = super::super::native_events::Token { vm, id, kind: "input" };
+                    return lua.pack_multi((lua.create_userdata(t)?, Value::Nil));
+                }
+            }
             let t = token(lua, "input");
             INPUT_STATE.with(|s| {
                 let mut s = s.borrow_mut();

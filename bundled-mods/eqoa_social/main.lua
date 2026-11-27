@@ -58,11 +58,16 @@ local function say(text, ok)
     state.status = { text = tostring(text), ok = ok }
 end
 
+-- Asked every frame a box is being typed in: the client lets the hold lapse about a second after the last ask, and then
+-- the keys typed would reach the game and every other mod again.
 local function set_text_capture(on)
     on = on == true
-    if state.capturing_text ~= on then
-        state.capturing_text = on
-        eqoa.input.capture_text(on)
+    if on then
+        state.capturing_text = true
+        eqoa.input.capture_text(true)
+    elseif state.capturing_text then
+        state.capturing_text = false
+        eqoa.input.capture_text(false)
     end
 end
 

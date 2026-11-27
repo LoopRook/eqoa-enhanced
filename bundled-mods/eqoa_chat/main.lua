@@ -278,7 +278,16 @@ local function index_of(t)
     for i, e in ipairs(edited_tabs()) do if e == t then return i end end
 end
 
-local function close_menu() state.menu = nil; state.menu_hits = {} end
+-- The menu is a window of its own while it is up: it holds Escape (one press closes the menu and nothing else, not a
+-- window behind it and not the game's Start menu) and lets go of it when it closes.
+local function close_menu()
+    state.menu = nil; state.menu_hits = {}
+    if state.menu_escape then eqoa.input.release(state.menu_escape); state.menu_escape = nil end
+end
+local function open_menu(m)
+    state.menu = m
+    if not state.menu_escape then state.menu_escape = eqoa.input.claim("Escape", true) end
+end
 
 local function move_tab(t, delta)
     local list = edited_tabs()
@@ -786,7 +795,7 @@ eqoa.events.on("render", function()
             -- a click chooses the tab; a right click (the styles' tabs) opens its menu
             local entry = t.entry
             state.hits[#state.hits + 1] = tag(hit(tx, HEAD + 2, tw, 12, function() state.tab, state.scroll = t.id, 0 end),
-                "tab:" .. t.id, entry and function(d) state.menu = { x = d.x, y = d.y, entry = entry } end or nil)
+                "tab:" .. t.id, entry and function(d) open_menu({ x = d.x, y = d.y, entry = entry }) end or nil)
             tx = tx + tw + 2
         end
         do
@@ -799,7 +808,7 @@ eqoa.events.on("render", function()
         if tx < limit then
             -- the empty strip beside the tabs: a right click there offers New tab and Reset tabs
             state.hits[#state.hits + 1] = tag(hit(tx, HEAD + 2, limit - tx, 12, function() end), "strip",
-                function(d) state.menu = { x = d.x, y = d.y } end)
+                function(d) open_menu({ x = d.x, y = d.y }) end)
         end
     end
 

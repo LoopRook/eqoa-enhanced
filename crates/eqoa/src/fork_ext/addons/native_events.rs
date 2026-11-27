@@ -831,6 +831,12 @@ fn deliver_data(
                 super::window_takeover::release_vm(vm);
                 super::window_sessions::end_vm_told(vm, "failed");
             }
+            // 2026-11-27: a window whose key handling or drawing just failed cannot act on Escape: its claim of Escape
+            // ends, and the window before it holds Escape (or the game has it), never a window that cannot close
+            if matches!(e.name.as_str(), "render" | "input.key") {
+                let vm = shared.borrow().vm;
+                super::input::escape_drop_vm(vm);
+            }
         }
     }
     Ok(())
@@ -908,7 +914,12 @@ pub(crate) fn render(host: &Host) -> Result<()> {
         .last_render
         .replace(now)
         .map_or(0.0, |last| now.duration_since(last).as_secs_f64());
-    deliver(&host.lua, &local("render", json!({"dt":dt})), None)
+    // the windows this mod begins while it draws are its own (`pointer_order`: a click on one gives its mod Escape)
+    let vm = b.borrow().vm;
+    super::pointer_order::begin_vm_draw();
+    let drawn = deliver(&host.lua, &local("render", json!({"dt":dt})), None);
+    super::pointer_order::end_vm_draw(vm);
+    drawn
 }
 pub(crate) fn clear(host: &Host) {
     super::player_files::close(&host.lua);
@@ -1119,6 +1130,16 @@ pub(crate) fn has_consumers() -> bool {
             .iter()
             .filter_map(std::rc::Weak::upgrade)
             .any(|b| b.borrow().active)
+    })
+}
+
+/// Whether the running mod `vm` listens to `name` now (a bus being changed right now is taken to listen).
+pub(crate) fn vm_listens(vm: u64, name: &str) -> bool {
+    REGISTRY.with(|r| {
+        r.borrow().iter().filter_map(std::rc::Weak::upgrade).any(|b| match b.try_borrow() {
+            Ok(b) => b.vm == vm && b.active && b.listens(name),
+            Err(_) => true,
+        })
     })
 }
 
