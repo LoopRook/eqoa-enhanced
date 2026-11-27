@@ -421,6 +421,14 @@ fn open_chat_line(play: &mut Play, text: &str) -> DispatchOutcome {
     if play.is_dead() {
         return refuse("not_ready", "cannot open the chat line while dead");
     }
+    // never over a line already open (the game's, or a mod's `chat_entry` session, whose draft a second opening would
+    // replace), nor over a mod's Start menu or map, which keep `mode` 0
+    if (play.mode == 2 && play.edit.purpose == CHAT_PURPOSE) || chat_line_open() {
+        return refuse("busy", "a chat line is already open");
+    }
+    if window_sessions::any_open_of(&["start_menu", "map"]) {
+        return refuse("busy", "a mod's Start menu or map is up");
+    }
     if play.mode != 0 || !play.hud_ready() {
         return refuse("not_ready", "the chat line opens only in the world with no window open");
     }

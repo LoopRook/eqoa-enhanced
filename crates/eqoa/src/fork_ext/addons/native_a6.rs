@@ -437,6 +437,11 @@ pub(crate) fn install(host: &Host) -> Result<()> {
                 if super::chat::report_route(&text) {
                     return Err(("permission_denied", "report routes are forbidden".into()));
                 }
+                // judged by the line that would be sent (spec section 8, rule 4), left for the player to send as with
+                // `input_text`: a slash line needs `command`, any other line `chat`; an empty line needs neither
+                if !text.is_empty() {
+                    super::native::require_capability(lua, "eqoa.actions.open_chat_line", super::chat::line_capability(&text))?;
+                }
                 Ok(ActionKind::A6(A6Action::OpenChatLine { text }))
             })
         })?,

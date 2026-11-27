@@ -973,6 +973,7 @@ pub(crate) fn autonomous_action_label(caps: &[String]) -> Option<String> {
                 k if super::native_a10::is_a10_action(k) => continue,
                 // round A5: the same for spending training points and the two Class Mastery steps
                 "train_stats" | "mastery_buy" | "mastery_refund" => continue,
+                "open_chat_line" => "open your chat line with a text in it (you still press Enter to send it)",
                 "request_factions" => "ask for faction standings",
                 "request_combat_record" => "ask for the combat record",
                 _ => kind,
@@ -2797,6 +2798,10 @@ mod tests {
             ])
             .as_deref(),
             Some("Actions: can act on its own (loot, sell, bank_move)")
+        );
+        assert_eq!(
+            autonomous_action_label(&["eqoa.actions.open_chat_line".into()]).as_deref(),
+            Some("Actions: can act on its own (open your chat line with a text in it (you still press Enter to send it))")
         );
         assert_eq!(
             autonomous_action_label(&["eqoa.player.stats".into(), "eqoa.hud.text".into()]),
