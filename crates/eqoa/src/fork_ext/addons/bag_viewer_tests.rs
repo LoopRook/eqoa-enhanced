@@ -2619,7 +2619,7 @@ fn round65_bag_viewer_standalone_loot_sell_bank_without_native_windows_and_refus
     assert_eq!(
         super::super::runtime::autonomous_action_label(&entry.metadata.requested_capabilities)
             .as_deref(),
-        Some("Actions: can act on its own (open_loot, talk, loot, loot_all, sell, buy, bank_move, bank_money, use_item, equip, quick_slot, batch, sell_many, link_item, hide_look, repair items (spends your coin))"),
+        Some("Actions: can act on its own (open_loot, talk, loot, loot_all, sell, buy, bank_move, bank_money, use_item, equip, quick_slot, batch, sell_many, link_item, hide_look, repair items (spends your coin), target)"),
         "L7: the label names exactly the actions the mod uses, not all of them"
     );
 
