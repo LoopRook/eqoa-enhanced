@@ -939,6 +939,10 @@ impl Manager {
     }
 
     fn command(&mut self, command: Command) {
+        // a mod turned on or off, reloaded or rescanned: two mods that want one window may be told about again
+        if matches!(command, Command::Enable(..) | Command::Reload(_) | Command::Rescan) {
+            super::window_conflict::changed();
+        }
         if matches!(command, Command::Rescan) {
             self.rescan(true);
             return;
@@ -990,7 +994,13 @@ impl Manager {
                         self.diagnostic(Some(&entry.metadata.id), "storage", e);
                     }
                     if !enabled {
+                        // the mods this one kept from a window get their turn: each is reloaded, and asks again as
+                        // it starts (`window_conflict`)
+                        let turn = super::window_conflict::losers_of(&entry.metadata.id);
                         self.disable(&mut entry, true, true, Disposition::Retain);
+                        for loser in turn {
+                            self.commands.push_back(Command::Reload(loser));
+                        }
                     } else if entry.instance.as_ref().is_some_and(|i| {
                         self.retired
                             .iter()
@@ -1253,6 +1263,7 @@ mod tests {
     include!("bag_viewer_tests.rs");
     include!("bag_multi_window_tests.rs");
     include!("perf_round_tests.rs");
+    include!("window_conflict_manager_tests.rs");
 
     use super::super::big_stack;
     use super::*;

@@ -475,6 +475,10 @@ impl Runtime {
         if event.down && !event.repeat && !event.synthetic && super::confirm::is_open() && super::confirm::key(event.logical) {
             return true;
         }
+        // the box that says two mods want one window: Escape closes it and nothing else happens
+        if event.down && !event.repeat && !event.synthetic && super::window_conflict::is_open() && super::window_conflict::key(event.logical) {
+            return true;
+        }
         // The manager key opens and closes the Mods & Addons window, with or without a mod.
         if super::input::manager_key_pressed(
             event.logical,
@@ -1111,6 +1115,11 @@ fn declares_dialog_actions(caps: &[String]) -> bool {
         .any(|action| super::native::capability_grants(caps, action))
 }
 
+/// A mod's display name by its id (the id itself when the mod is not known).
+fn name_of(names: &[(String, String)], id: &str) -> String {
+    names.iter().find(|(i, _)| i == id).map_or_else(|| id.to_string(), |(_, n)| n.clone())
+}
+
 fn controls(
     ui: &Ui,
     manager: &mut Manager,
@@ -1128,6 +1137,7 @@ fn controls(
             super::window_takeover::set_use_game_windows(use_game_windows);
         }
         let entries=manager.entries();
+        let entries_all: Vec<(String, String)> = entries.iter().map(|e| (e.metadata.id.clone(), e.metadata.name.clone())).collect();
         if entries.is_empty() {ui.text_wrapped("No addons found. Open Mods Folder in Options to add Lua files or addon folders, then rescan.");}
         for entry in entries {
             ui.separator();ui.text(format!("{} ({})",entry.metadata.name,entry.metadata.id));
@@ -1139,6 +1149,10 @@ fn controls(
             }
             for line in disclosure_lines(&entry.metadata) {
                 ui.text_wrapped(line);
+            }
+            // a window this mod asked for and another mod has (`window_conflict`)
+            for line in super::window_conflict::unmet_lines(&entry.metadata.id, &|id| name_of(&entries_all, id)) {
+                ui.text_colored([1.0, 0.85, 0.2, 1.0], line);
             }
             let id=&entry.metadata.id;
             let warnings=manager.diagnostics().iter().filter(|d|d.id.as_ref()==Some(id)).count();
@@ -1187,6 +1201,7 @@ fn render_managed(
         if !snapshot.start_menu {
             manager.profile_setup_controls(ui);
         }
+        let snapshot_start_menu = snapshot.start_menu;
         let mut open = plan.controls.unwrap_or(false);
         super::window_sessions::set_manager_open(open && !snapshot.start_menu);
         if open && !snapshot.start_menu {
@@ -1196,7 +1211,17 @@ fn render_managed(
             plan.settings = extra.settings;
         }
         let probe = super::stall_probe::scope("mods frame (all mods)");
-        let settings = with_question_on_top(ui, || dispatch_frame(ui, manager, snapshot, plan));
+        let mut show_manager = false;
+        let settings = with_question_on_top(ui, || {
+            let settings = dispatch_frame(ui, manager, snapshot, plan);
+            // two mods wanted one window (`window_conflict`): its box, over the mods' windows
+            if super::window_conflict::is_open() {
+                let names: Vec<(String, String)> = manager.entries().iter().map(|e| (e.metadata.id.clone(), e.metadata.name.clone())).collect();
+                show_manager = super::window_conflict::draw(ui, &|id| name_of(&names, id));
+            }
+            settings
+        });
+        open |= show_manager && !snapshot_start_menu;
         drop(probe);
         #[cfg(test)]
         if fault == Some(RenderFault::PrepareRender) {
