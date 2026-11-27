@@ -985,3 +985,30 @@ fn world_map_dots_are_drawn_in_their_colours() {
     }
     assert_eq!(rig.lua_str("tostring(world_map.drawn_dots[9007])"), "nil", "a group member gets no dot");
 }
+
+/// The guard against drift: each role's colour the mod draws is what upstream's own code gives for that role now
+/// (`minimapcolor::rgba` with its `DEFAULTS`, from `numcolor::PALETTE`), so a sync that changes a role's default colour or
+/// the roles' order fails here instead of leaving the World Map stale. Only `NAME_COLORS` and `MERC_COLOR` (private to
+/// `play.rs`) are literals in `MINIMAP_DOTS`, with their file:line.
+#[test]
+fn world_map_role_colours_follow_upstreams_own_defaults() {
+    use crate::minimapcolor::{DEFAULTS, Role, rgba};
+    fresh();
+    let mut rig = rig([1024.0, 768.0], None);
+    rig.open();
+    let roles = [
+        (Role::Spells, "{ kind = 'npc', name = 'Spell Archivist', npc_flags = 129 }"),
+        (Role::Smiths, "{ kind = 'npc', name = 'Yiggins', npc_flags = 136 }"),
+        (Role::Merchants, "{ kind = 'npc', name = 'Merchant Perry', npc_flags = 129 }"),
+        (Role::Bankers, "{ kind = 'npc', name = 'The Treasurer', npc_flags = 130 }"),
+        (Role::Trainers, "{ kind = 'npc', name = 'Guildmaster Ferris', npc_flags = 128 }"),
+        (Role::Coachmen, "{ kind = 'npc', name = 'Coachman Ronks', npc_flags = 128 }"),
+        (Role::QuestGivers, "{ kind = 'npc', name = 'Dilana', npc_flags = 128, head_mark = '!' }"),
+    ];
+    for (role, entity) in roles {
+        let want = rgba(role, &DEFAULTS).expect("a role is coloured by default");
+        let got = rig.lua_str(&format!("(function() local c = world_map.dot_rgb({entity}) return string.format('%.0f,%.0f,%.0f', c[1] * 255, c[2] * 255, c[3] * 255) end)()"));
+        let want = format!("{:.0},{:.0},{:.0}", want[0] * 255.0, want[1] * 255.0, want[2] * 255.0);
+        assert_eq!(got, want, "{role:?}: the mod's colour is upstream's default (minimapcolor::DEFAULTS)");
+    }
+}
