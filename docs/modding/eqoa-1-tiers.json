@@ -3,13 +3,13 @@
  "schema_version": 1,
  "rule": "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
  "counts": {
-  "total": 2601,
-  "proven": 874,
-  "provisional": 1360,
+  "total": 2604,
+  "proven": 878,
+  "provisional": 1359,
   "compat": 367,
   "by_kind": {
    "action": {
-    "proven": 84,
+    "proven": 85,
     "provisional": 48,
     "compat": 0
    },
@@ -24,7 +24,7 @@
     "compat": 0
    },
    "field": {
-    "proven": 365,
+    "proven": 367,
     "provisional": 946,
     "compat": 0
    },
@@ -39,8 +39,8 @@
     "compat": 0
    },
    "type": {
-    "proven": 75,
-    "provisional": 86,
+    "proven": 76,
+    "provisional": 85,
     "compat": 0
    }
   }
@@ -263,7 +263,6 @@
   "eqoa.chat.ChatLink.len",
   "eqoa.chat.ChatLink.name",
   "eqoa.chat.ChatLink.start",
-  "eqoa.chat.ChatMessage",
   "eqoa.chat.ChatMessage.channel",
   "eqoa.chat.ChatMessage.color",
   "eqoa.chat.ChatMessage.kind",

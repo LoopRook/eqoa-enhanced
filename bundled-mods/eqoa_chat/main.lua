@@ -149,9 +149,9 @@ end)
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
-local function add_line(m)
+local function add_line(m, sender)
     state.seq = state.seq + 1
-    state.lines[#state.lines + 1] = { text = m.text, kind = m.kind or "system", links = m.links or {}, color = m.color, seq = state.seq, sender = m.sender }
+    state.lines[#state.lines + 1] = { text = m.text, kind = m.kind or "system", links = m.links or {}, color = m.color, seq = state.seq, sender = sender }
     while #state.lines > MAX_LINES do table.remove(state.lines, 1) end
     state.rev = state.rev + 1
 end
@@ -562,9 +562,9 @@ end
 -- the history first, then every line as it comes
 do
     local old = eqoa.chat.history(200)
-    for _, m in ipairs(old or {}) do add_line(m) end
+    for _, m in ipairs(old or {}) do add_line(m, m.sender) end
 end
-listen("chat.message", function(e) add_line(e.data) end)
+listen("chat.message", function(e) add_line(e.data, e.data.sender) end)
 listen("combat.hit", function(e) on_hit(e.data) end)
 listen("pointer.pressed", function(e) pointer_pressed(e.data) end)
 listen("pointer.wheel", function(e) on_wheel(e.data) end)
