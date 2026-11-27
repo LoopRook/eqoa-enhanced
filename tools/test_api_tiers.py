@@ -156,11 +156,12 @@ class Events(unittest.TestCase):
         _, tier = tiers_for({"m": {"main.lua": src}})
         self.assertEqual(tier["eqoa.events.raid.changed"], "proven")
 
-    def test_wrapper_called_from_another_file_of_the_mod(self):
+    def test_wrapper_called_on_a_global_of_another_file_is_not_resolved(self):
+        # `M` is a global here, not the result of require: the call does not resolve to the definition
         a = 'M = {}\nfunction M.listen(name, fn) eqoa.events.on(name, fn) end\n'
         b = 'M.listen("render", function() end)\n'
         _, tier = tiers_for({"m": {"a.lua": a, "b.lua": b}})
-        self.assertEqual(tier["eqoa.events.render"], "proven")
+        self.assertEqual(tier["eqoa.events.render"], "provisional")
 
     def test_loop_over_names(self):
         src = 'for _, name in ipairs({"world.entered", "render"}) do eqoa.events.on(name, function() end) end\n'
@@ -173,66 +174,295 @@ class Events(unittest.TestCase):
         doc, tier = tiers_for({"m": {"main.lua": src}})
         self.assertEqual(tier["eqoa.events.combat.hit"], "provisional")
 
-    def test_event_data_field_needs_event_and_a_read_in_the_subscribing_file(self):
-        src = 'eqoa.events.on("combat.hit", function(e) local a = e.data.amount end)\n'
-        _, tier = tiers_for({"m": {"main.lua": src}})
-        self.assertEqual(tier["eqoa.events.combat.hit.data.amount"], "proven")
-        self.assertEqual(tier["eqoa.events.combat.hit.data.source"], "provisional")
-
-    def test_event_data_field_read_without_a_subscription_is_not_proven(self):
-        # a mod reads `.members` but never subscribes to raid.changed
-        _, tier = tiers_for({"m": {"main.lua": "local m = x.members\n"}})
-        self.assertEqual(tier["eqoa.events.raid.changed.data.members"], "provisional")
-
-    def test_event_data_field_read_in_another_file_is_not_proven(self):
-        a = 'eqoa.events.on("combat.hit", function(e) helper(e.data) end)\n'
-        b = 'function helper(d) return d.amount end\n'
+    def test_wrapper_must_resolve_to_a_definition(self):
+        # a different function that shares the wrapper's last name, in another file, does not subscribe
+        a = 'local function listen(name, fn) eqoa.events.on(name, fn) end\nlisten("render", function() end)\n'
+        b = 'local O = {}\nfunction O.listen(name, fn) return name end\nO.listen("world.entered", function() end)\n'
         _, tier = tiers_for({"m": {"a.lua": a, "b.lua": b}})
-        self.assertEqual(tier["eqoa.events.combat.hit.data.amount"], "provisional")
+        self.assertEqual(tier["eqoa.events.render"], "proven")
+        self.assertEqual(tier["eqoa.events.world.entered"], "provisional")
+
+    def test_wrapper_called_through_require_resolves(self):
+        a = 'local M = {}\nfunction M.listen(name, fn) eqoa.events.on(name, fn) end\nreturn M\n'
+        b = 'local H = require("helpers")\nH.listen("world.entered", function() end)\n'
+        _, tier = tiers_for({"m": {"helpers.lua": a, "main.lua": b}})
+        self.assertEqual(tier["eqoa.events.world.entered"], "proven")
+        # negative control: the same call on a receiver that was not required from the wrapper's file
+        c = 'local H = {}\nH.listen("world.entered", function() end)\n'
+        _, tier = tiers_for({"m": {"helpers.lua": a, "main.lua": c}})
+        self.assertEqual(tier["eqoa.events.world.entered"], "provisional")
+
+
+FIELDS = FROZEN + [
+    "eqoa.camera.get", "eqoa.camera.Camera", "eqoa.camera.Camera.distance", "eqoa.camera.Camera.position",
+    "eqoa.bank.get", "eqoa.merchant.get", "eqoa.items.Container", "eqoa.items.Container.items",
+    "eqoa.items.Container.merchant", "eqoa.items.MerchantState", "eqoa.items.MerchantState.mode",
+    "eqoa.items.Item.range",
+    "eqoa.windows.confirm", "eqoa.windows.Confirm", "eqoa.windows.Confirm.id",
+    "eqoa.events.confirm.closed", "eqoa.events.confirm.closed.data.confirm",
+    "eqoa.events.state.reset", "eqoa.events.state.reset.data.initial",
+    "eqoa.events.batch.progress", "eqoa.actions.BatchResult", "eqoa.actions.BatchResult.ok",
+    "eqoa.actions.BatchResult.total", "eqoa.actions.BatchId", "eqoa.actions.batch",
+    "eqoa.events.Event", "eqoa.events.Event.name", "eqoa.events.Event.data",
+    "eqoa.events.auction.changed", "eqoa.events.auction.changed.data.open",
+    "eqoa.events.bank.changed", "eqoa.events.bank.changed.data.after",
+    "eqoa.entities.list", "eqoa.entities.Entity", "eqoa.entities.Entity.name", "eqoa.entities.Entity.kind",
+    "eqoa.Error", "eqoa.Error.message",
+]
 
 
 class Records(unittest.TestCase):
-    def test_field_needs_a_proven_function_of_the_module_and_a_read(self):
-        src = "local i = eqoa.items.get(1)\nlocal n = i.name\n"
-        _, tier = tiers_for({"m": {"main.lua": src}})
+    def check(self, src, **files):
+        mods = {"m": {"main.lua": src, **files}}
+        return tiers_for(mods, FIELDS)[1]
+
+    def test_read_from_a_producer_result_is_proven(self):
+        tier = self.check("local i = eqoa.items.get(1)\nlocal n = i.name\n")
         self.assertEqual(tier["eqoa.items.Item.name"], "proven")
         self.assertEqual(tier["eqoa.items.Item.stack"], "provisional")
         self.assertEqual(tier["eqoa.items.Item"], "proven")
 
-    def test_field_read_without_using_the_module_stays_provisional(self):
-        _, tier = tiers_for({"m": {"main.lua": "local n = thing.size\neqoa.items.get(1)\n"}})
-        self.assertEqual(tier["eqoa.raid.Raid.size"], "provisional")
+    def test_same_name_on_something_else_is_not_a_read(self):
+        # the reviewer's `S.distance` case: a settings table, and eqoa.camera.get never called
+        tier = self.check("local S = { distance = 5 }\nlocal d = S.distance\nlocal c = eqoa.items.get(1)\n")
+        self.assertEqual(tier["eqoa.camera.Camera.distance"], "provisional")
+        self.assertEqual(tier["eqoa.camera.Camera"], "provisional")
+        # positive control: the same read from a real camera record
+        tier = self.check("local c = eqoa.camera.get()\nlocal d = c.distance\n")
+        self.assertEqual(tier["eqoa.camera.Camera.distance"], "proven")
+        self.assertEqual(tier["eqoa.camera.Camera.position"], "provisional")
 
-    def test_negative_control_module_with_no_proven_function(self):
-        # reading .size is not enough: no bundled mod calls anything of eqoa.raid
-        _, tier = tiers_for({"m": {"main.lua": "local n = thing.size\n"}})
-        self.assertEqual(tier["eqoa.raid.Raid.size"], "provisional")
-        self.assertEqual(tier["eqoa.raid"], "provisional")
+    def test_negative_control_range_on_a_local_table(self):
+        # the reviewer's `M.range`: a mod calls eqoa.bank.get and reads .items, and has its own M.range
+        src = ("local M = {}\nM.range = 3\nlocal r = M.range\n"
+               "local c = eqoa.bank.get()\nfor _, it in ipairs(c.items) do local nm = it.name end\n")
+        tier = self.check(src)
+        self.assertEqual(tier["eqoa.items.Item.range"], "provisional")
+        self.assertEqual(tier["eqoa.items.Item.name"], "proven")
+        self.assertEqual(tier["eqoa.items.Container.items"], "proven")
+        # positive control
+        tier = self.check("local c = eqoa.bank.get()\nfor _, it in ipairs(c.items) do local r = it.range end\n")
+        self.assertEqual(tier["eqoa.items.Item.range"], "proven")
 
-    def test_method_style_read_counts(self):
-        _, tier = tiers_for({"m": {"main.lua": "eqoa.items.get(1)\nlocal ok = r:stack()\n"}})
-        self.assertEqual(tier["eqoa.items.Item.stack"], "proven")
+    def test_path_segments_are_not_field_reads(self):
+        # `.merchant` and `.confirm` here are parts of eqoa.merchant.get / eqoa.windows.confirm
+        src = ("local c = eqoa.bank.get()\nlocal m = eqoa.merchant.get()\nlocal q = eqoa.windows.confirm()\n"
+               "local ok = c ~= nil\n")
+        tier = self.check(src)
+        self.assertEqual(tier["eqoa.items.Container.merchant"], "provisional")
+        self.assertEqual(tier["eqoa.windows.Confirm.id"], "provisional")
+        # the record is received but only tested for nil: a record with fields is proven by a field read
+        self.assertEqual(tier["eqoa.windows.Confirm"], "provisional")
+        # positive control: reading the field of the received record
+        tier = self.check("local c = eqoa.bank.get()\nlocal x = c.merchant\n")
+        self.assertEqual(tier["eqoa.items.Container.merchant"], "proven")
 
-    def test_record_type_is_proven_when_any_field_is(self):
-        _, tier = tiers_for({"m": {"main.lua": "eqoa.actions.cast(1)\nlocal ok = r.ok\n"}})
-        self.assertEqual(tier["eqoa.actions.ActionResult.ok"], "proven")
-        self.assertEqual(tier["eqoa.actions.ActionResult"], "proven")
-        self.assertEqual(tier["eqoa.actions.ActionResult.detail"], "provisional")
-        # a type with no fields is not shown to be used
-        self.assertEqual(tier["eqoa.actions.RequestId"], "provisional")
+    def test_a_nested_record_is_reached_through_its_proven_parent_field(self):
+        tier = self.check("local c = eqoa.bank.get()\nlocal mode = c.merchant.mode\n")
+        self.assertEqual(tier["eqoa.items.MerchantState.mode"], "proven")
+        self.assertEqual(tier["eqoa.items.MerchantState"], "proven")
+        # negative control: a field of that name on something not reached from a Container
+        tier = self.check("local c = eqoa.bank.get()\nlocal t = {}\nlocal mode = t.mode\n")
+        self.assertEqual(tier["eqoa.items.MerchantState.mode"], "provisional")
+
+    def test_scope_a_shadowing_local_is_not_the_record(self):
+        src = ("local c = eqoa.bank.get()\nlocal a = c.items\n"
+               "do local c = {}\nlocal x = c.merchant end\n")
+        tier = self.check(src)
+        self.assertEqual(tier["eqoa.items.Container.items"], "proven")
+        self.assertEqual(tier["eqoa.items.Container.merchant"], "provisional")
+
+    def test_a_reassigned_variable_is_no_longer_the_record(self):
+        tier = self.check("local c = eqoa.bank.get()\nc = {}\nlocal x = c.items\n")
+        self.assertEqual(tier["eqoa.items.Container.items"], "provisional")
+
+    def test_function_parameter_filled_at_every_call_site(self):
+        src = ("local function show(c) return c.items end\nshow(eqoa.bank.get())\n"
+               "local b = eqoa.merchant.get()\nshow(b)\n")
+        self.assertEqual(self.check(src)["eqoa.items.Container.items"], "proven")
+        # negative control: one call site passes something that is not a Container
+        src += "show({})\n"
+        self.assertEqual(self.check(src)["eqoa.items.Container.items"], "provisional")
+        # negative control: the function is also passed around as a value (a callback the scan cannot follow)
+        src = "local function show(c) return c.items end\nshow(eqoa.bank.get())\nlater(show)\n"
+        self.assertEqual(self.check(src)["eqoa.items.Container.items"], "provisional")
+
+    def test_a_name_defined_in_two_files_is_resolved_only_when_the_call_says_which(self):
+        a = "local function show(c) return c.items end\nshow(eqoa.bank.get())\n"
+        b = "local function show(c) return c end\n"
+        # a plain call resolves to the definition in its own file
+        tier = tiers_for({"m": {"a.lua": a, "b.lua": b}}, FIELDS)[1]
+        self.assertEqual(tier["eqoa.items.Container.items"], "proven")
+        # negative control: a call on an unknown receiver cannot be tied to either definition
+        a = "function M.show(c) return c.items end\nX.show(eqoa.bank.get())\n"
+        b = "function N.show(c) return c end\n"
+        tier = tiers_for({"m": {"a.lua": a, "b.lua": b}}, FIELDS)[1]
+        self.assertEqual(tier["eqoa.items.Container.items"], "provisional")
+        # the same call through a module the mod required resolves
+        a = "local M = {}\nfunction M.show(c) return c.items end\nreturn M\n"
+        b = 'local A = require("a")\nA.show(eqoa.bank.get())\n'
+        c = "local function show(c) return c end\n"
+        tier = tiers_for({"m": {"a.lua": a, "main.lua": b, "c.lua": c}}, FIELDS)[1]
+        self.assertEqual(tier["eqoa.items.Container.items"], "proven")
+
+    def test_function_that_returns_a_record(self):
+        src = "local function get() return eqoa.bank.get() end\nlocal c = get()\nlocal x = c.items\n"
+        self.assertEqual(self.check(src)["eqoa.items.Container.items"], "proven")
+        # negative control: one return is something else
+        src = ("local function get(a) if a then return {} end return eqoa.bank.get() end\n"
+               "local c = get()\nlocal x = c.items\n")
+        self.assertEqual(self.check(src)["eqoa.items.Container.items"], "provisional")
+
+    def test_loop_variable_over_a_list_of_records(self):
+        src = "for _, e in ipairs(eqoa.entities.list()) do local n = e.name end\n"
+        self.assertEqual(self.check(src)["eqoa.entities.Entity.name"], "proven")
+        src = "for _, e in ipairs(other.list()) do local n = e.name end\n"
+        self.assertEqual(self.check(src)["eqoa.entities.Entity.name"], "provisional")
+
+    def test_error_result_of_an_api_call(self):
+        src = "local r, err = eqoa.actions.cast(1)\nlocal m = err.message\n"
+        tier = self.check(src)
+        self.assertEqual(tier["eqoa.Error.message"], "proven")
+        src = "local r, err = something(1)\nlocal m = err.message\n"
+        self.assertEqual(self.check(src)["eqoa.Error.message"], "provisional")
+
+    def test_fieldless_type_needs_a_received_value(self):
+        tier = self.check("local id = eqoa.actions.batch({})\n")
+        self.assertEqual(tier["eqoa.actions.BatchId"], "proven")
+        tier = self.check("local id = other.batch({})\n")
+        self.assertEqual(tier["eqoa.actions.BatchId"], "provisional")
 
     def test_container_is_proven_with_any_proven_child(self):
         _, tier = tiers_for({"m": {"main.lua": "eqoa.items.find(1)\n"}})
         self.assertEqual(tier["eqoa.items"], "proven")
         self.assertEqual(tier["eqoa.raid"], "provisional")
 
-    def test_draw_list_methods_need_a_draw_list(self):
+    def test_draw_list_methods_need_a_variable_bound_from_a_getter(self):
         src = "local dl = ImGui.GetWindowDrawList()\ndl:AddLine(1, 2)\n"
         _, tier = tiers_for({"m": {"main.lua": src}})
         self.assertEqual(tier["ImDrawList.AddLine"], "proven")
         self.assertEqual(tier["ImDrawList.AddRect"], "provisional")
+        # negative controls: a method call on something else, in a file that does get a draw list
+        src = "local dl = ImGui.GetWindowDrawList()\nlocal x = {}\nx:AddRect(1, 2)\n"
+        _, tier = tiers_for({"m": {"main.lua": src}})
+        self.assertEqual(tier["ImDrawList.AddRect"], "provisional")
         _, tier = tiers_for({"m": {"main.lua": "x:AddLine(1, 2)\n"}})
         self.assertEqual(tier["ImDrawList.AddLine"], "provisional")
+
+    def test_draw_list_through_a_parameter(self):
+        src = "local function draw(dl) dl:AddLine(1, 2) end\ndraw(ImGui.GetWindowDrawList())\n"
+        _, tier = tiers_for({"m": {"main.lua": src}})
+        self.assertEqual(tier["ImDrawList.AddLine"], "proven")
+
+
+class EventData(unittest.TestCase):
+    def check(self, src, **files):
+        return tiers_for({"m": {"main.lua": src, **files}}, FIELDS)[1]
+
+    def test_a_read_by_the_handler_of_that_event_proves_the_field(self):
+        # state.reset + `j.initial` (the reviewer's case): the handler ignores its event
+        src = ('local j = {}\nlocal x = j.initial\n'
+               'eqoa.events.on("state.reset", function() scan = true end)\n')
+        self.assertEqual(self.check(src)["eqoa.events.state.reset.data.initial"], "provisional")
+        # positive control
+        src = 'eqoa.events.on("state.reset", function(e) if e.data.initial then scan = true end end)\n'
+        self.assertEqual(self.check(src)["eqoa.events.state.reset.data.initial"], "proven")
+
+    def test_path_segment_of_an_api_call_is_not_a_data_field(self):
+        # the reviewer's `.confirm()`: eqoa.windows.confirm() in a mod that listens to confirm.closed
+        src = ('eqoa.events.on("confirm.closed", function(e) done = true end)\n'
+               'local q = eqoa.windows.confirm()\n')
+        tier = self.check(src)
+        self.assertEqual(tier["eqoa.events.confirm.closed"], "proven")
+        self.assertEqual(tier["eqoa.events.confirm.closed.data.confirm"], "provisional")
+        src = 'eqoa.events.on("confirm.closed", function(e) done = e.data.confirm end)\n'
+        self.assertEqual(self.check(src)["eqoa.events.confirm.closed.data.confirm"], "proven")
+
+    def test_a_read_in_a_handler_of_another_event_does_not_count(self):
+        src = ('eqoa.events.on("auction.changed", function() redraw() end)\n'
+               'eqoa.events.on("bank.changed", function(e) local o = e.data.open end)\n')
+        self.assertEqual(self.check(src)["eqoa.events.auction.changed.data.open"], "provisional")
+
+    def test_data_passed_to_a_function_and_read_there(self):
+        # batch.progress: the helper reads `total`; the `.ok` in the same file belongs to another table
+        src = ('local function on_progress(d) return d.total end\n'
+               'eqoa.events.on("batch.progress", function(e) on_progress(e.data) end)\n'
+               'local B = { ok = true }\nlocal flag = B.ok\n')
+        tier = self.check(src)
+        self.assertEqual(tier["eqoa.actions.BatchResult.total"], "proven")
+        self.assertEqual(tier["eqoa.actions.BatchResult.ok"], "provisional")
+        # negative control: the helper is also called with something else
+        src += "on_progress({})\n"
+        self.assertEqual(self.check(src)["eqoa.actions.BatchResult.total"], "provisional")
+
+    def test_handler_given_by_name_and_through_a_wrapper(self):
+        src = ('local function on_reset(e) return e.data.initial end\n'
+               'eqoa.events.on("state.reset", on_reset)\n')
+        self.assertEqual(self.check(src)["eqoa.events.state.reset.data.initial"], "proven")
+        src = ('local function listen(name, fn) eqoa.events.on(name, fn) end\n'
+               'listen("state.reset", function(e) return e.data.initial end)\n')
+        self.assertEqual(self.check(src)["eqoa.events.state.reset.data.initial"], "proven")
+
+    def test_event_record_fields_and_before_after(self):
+        src = ('eqoa.events.on("bank.changed", function(e)\n'
+               '  local n = e.name\n  local a = e.data.after\n  local i = a.items\nend)\n')
+        tier = self.check(src)
+        self.assertEqual(tier["eqoa.events.Event.name"], "proven")
+        self.assertEqual(tier["eqoa.events.bank.changed.data.after"], "proven")
+        self.assertEqual(tier["eqoa.items.Container.items"], "proven")
+        # `.name` on a variable that is not an event
+        tier = self.check('eqoa.events.on("bank.changed", function(e) end)\nlocal t = {}\nlocal n = t.name\n')
+        self.assertEqual(tier["eqoa.events.Event.name"], "provisional")
+
+    def test_the_handler_parameter_is_scoped_to_its_function(self):
+        src = ('eqoa.events.on("state.reset", function(e) return 1 end)\n'
+               'local function other(e) return e.data.initial end\n')
+        self.assertEqual(self.check(src)["eqoa.events.state.reset.data.initial"], "provisional")
+
+
+class Reviewer(unittest.TestCase):
+    """The names the independent review found proven without a real use stay provisional."""
+
+    RECORDS = [
+        "eqoa.camera.Camera", "eqoa.capabilities.Capability", "eqoa.files.FileEntry", "eqoa.group.RaidRole",
+        "eqoa.group.RaidMember", "eqoa.group.Invite", "eqoa.hotbar.Hotbar", "eqoa.hotbar.HotbarSlot",
+        "eqoa.items.MasterLoot", "eqoa.items.MasterLootMember", "eqoa.items.ContainerView", "eqoa.items.Tab",
+        "eqoa.items.MerchantState", "eqoa.items.MerchantOption", "eqoa.player.Breath", "eqoa.player.Resists",
+        "eqoa.player.StatRange", "eqoa.hud.GroupMemberLayout", "eqoa.hud.LayoutPieces",
+        "eqoa.hud.SinglePanelLayout", "eqoa.input.Pad", "eqoa.input.RawAxes", "eqoa.windows.Window",
+        "eqoa.windows.Dialog", "eqoa.windows.MenuRow", "eqoa.windows.ButtonHint", "eqoa.windows.Confirm",
+    ]
+    NAMES = [
+        "eqoa.items.Container.merchant", "eqoa.hud.Layout.pet", "eqoa.items.Item.range",
+        "eqoa.blacksmith.Item.worn", "eqoa.player.StatItem.base", "eqoa.player.Vital.base",
+        "eqoa.mastery.Mastery.stats", "eqoa.events.Event.name", "eqoa.events.Event.seq", "eqoa.events.Event.tick",
+        "eqoa.events.auction.changed.data.open", "eqoa.events.batch.progress.data.ok",
+        "eqoa.events.batch.progress.data.reason", "eqoa.events.confirm.closed.data.confirm",
+        "eqoa.events.entity.added.data.changed", "eqoa.events.state.reset.data.initial",
+        "eqoa.events.world.leaving.data.world_id",
+        "eqoa.windows.Windows.active", "eqoa.windows.Windows.mode", "eqoa.windows.Windows.windows",
+        "eqoa.windows.Session.focused", "eqoa.windows.Session.revision",
+    ] + ["eqoa.windows.SessionData." + f for f in
+         "available current id inventory list message open state target title".split()]
+
+    def violations(self, provisional, frozen):
+        families = [n for n in frozen if any(n == r or n.startswith(r + ".") for r in self.RECORDS)]
+        return [n for n in families + self.NAMES if n not in provisional]
+
+    def test_every_reviewed_name_is_provisional_in_the_committed_file(self):
+        doc = json.loads(T.TIERS.read_text(encoding="utf-8"))
+        frozen = json.loads(T.FROZEN.read_text(encoding="utf-8"))["supported"]
+        self.assertGreater(len([n for n in frozen if any(n == r or n.startswith(r + ".") for r in self.RECORDS)]), 100)
+        self.assertEqual(self.violations(set(doc["provisional"]), frozen), [])
+        # the names are real frozen names (the list does not rot)
+        self.assertEqual([n for n in self.NAMES if n not in frozen], [])
+
+    def test_negative_control_a_reviewed_name_that_is_proven_is_caught(self):
+        doc = json.loads(T.TIERS.read_text(encoding="utf-8"))
+        frozen = json.loads(T.FROZEN.read_text(encoding="utf-8"))["supported"]
+        provisional = set(doc["provisional"]) - {"eqoa.camera.Camera.distance", "eqoa.windows.SessionData.state"}
+        self.assertEqual(sorted(self.violations(provisional, frozen)),
+                         ["eqoa.camera.Camera.distance", "eqoa.windows.SessionData.state"])
 
 
 class Output(unittest.TestCase):

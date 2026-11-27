@@ -273,24 +273,14 @@ class ModUse:
     def __init__(self, name):
         self.name = name
         self.paths = {}           # every chain referenced (full chains and their prefixes) -> (file, line)
-        self.fields = set()       # identifiers read as .x / :x / ["x"] anywhere in the mod
-        self.events = set()       # event names subscribed to
-        self.event_fields = {}    # event name -> identifiers read as fields in the subscribing file(s)
+        self.events = {}          # event name -> evidence: subscribed to (directly, in a loop, or via a wrapper)
         self.unresolved = []      # (file, line) of events.on calls whose name could not be read
+        self.reads = {}           # ("rec", R, f) | ("ev", E, f) | ("dl", method) -> evidence (api_tiers_flow)
+        self.received = {}        # record -> evidence: a value of that record was really received
 
 
 def lua_files(mod_dir):
     return sorted(p for p in mod_dir.rglob("*.lua") if p.is_file())
-
-
-def field_reads(toks):
-    out = set()
-    for i, t in enumerate(toks):
-        if t[0] == "name" and i > 0 and toks[i - 1][0] == "op" and toks[i - 1][1] in (".", ":"):
-            out.add(t[1])
-        elif t[0] == "str" and i > 0 and i + 1 < len(toks) and toks[i - 1][1] == "[" and toks[i + 1][1] == "]":
-            out.add(t[1])
-    return out
 
 
 def find_wrappers(toks, aliases):
@@ -371,14 +361,11 @@ def _do_index(toks, for_index):
     return k
 
 
-def scan_file(path, mod, wrappers_by_mod_name, pending_calls):
+def scan_file(path, mod):
     toks = tokenize(path.read_text(encoding="utf-8", errors="replace"))
     aliases = resolve_aliases(find_bindings(toks))
-    mod.fields |= field_reads(toks)
     n = len(toks)
     wrappers = find_wrappers(toks, aliases)
-    wrappers_by_mod_name.update(wrappers)
-    file_events = set()
     i = 0
     while i < n:
         t = toks[i]
@@ -393,21 +380,18 @@ def scan_file(path, mod, wrappers_by_mod_name, pending_calls):
         if full == ("eqoa", "events", "on") and after < n and toks[after][1] == "(":
             arg = toks[after + 1] if after + 1 < n else None
             if arg is not None and arg[0] == "str":
-                file_events.add(arg[1])
+                mod.events.setdefault(arg[1], f"{path.name}:{arg[2]}")
             elif arg is not None and is_name(arg):
                 names = loop_strings(toks, i, arg[1])
                 if names:
-                    file_events.update(names)
+                    for name in names:
+                        mod.events.setdefault(name, f"{path.name}:{arg[2]}: in a loop over names")
                 elif arg[1] not in {p for p in _params_of_enclosing(toks, i)}:
                     mod.unresolved.append((path, arg[2]))
             else:
                 mod.unresolved.append((path, t[2]))
-        # calls of a wrapper: collected here, resolved once every file's wrappers are known
-        if after < n and toks[after][1] == "(":
-            pending_calls.append((segs[-1], toks, after, path))
         i = max(after, i + 1)
-    # a later wrapper-call pass in finish_mod; remember per-file event data reads for the subscriptions
-    return toks, file_events
+    return toks, wrappers
 
 
 def _params_of_enclosing(toks, i):
@@ -431,44 +415,30 @@ def _params_of_enclosing(toks, i):
     return best or []
 
 
-def scan_mod(mod_dir):
+def scan_mod(mod_dir, frozen, nested):
+    import api_tiers_flow as flow
     mod = ModUse(mod_dir.name)
-    wrappers, pending, files = {}, [], []
+    files, wrappers = [], {}
     for f in lua_files(mod_dir):
-        toks, events = scan_file(f, mod, wrappers, pending)
-        files.append((f, toks, events))
-    # wrapper calls: `listen("combat.hit", fn)` where listen passes its parameter to eqoa.events.on
-    file_events = {f: set(ev) for f, _, ev in files}
-    for fname, toks, after, path in pending:
-        idx = wrappers.get(fname)
-        if idx is None:
-            continue
-        j, depth, arg = after + 1, 0, 0
-        while j < len(toks) and arg < idx:
-            if toks[j][0] == "op" and toks[j][1] in "({[":
-                depth += 1
-            elif toks[j][0] == "op" and toks[j][1] in ")}]":
-                depth -= 1
-                if depth < 0:
-                    break
-            elif toks[j][0] == "op" and toks[j][1] == "," and depth == 0:
-                arg += 1
-            j += 1
-        if j < len(toks) and arg == idx and toks[j][0] == "str":
-            file_events[path].add(toks[j][1])
-    for f, toks, _ in files:
-        reads = field_reads(toks)
-        for name in file_events[f]:
-            mod.events.add(name)
-            mod.event_fields.setdefault(name, set()).update(reads)
+        toks, wrap = scan_file(f, mod)
+        files.append((f, toks))
+        wrappers[f] = wrap
+    stems = {}
+    for f, _ in files:
+        stems.setdefault(f.stem, []).append(f)
+    stems = {stem: paths[0] for stem, paths in stems.items() if len(paths) == 1}
+    result = flow.analyze_mod(files, frozen, nested, wrappers, stems)
+    mod.reads = result.reads
+    mod.received = result.received
+    for event, why in result.events.items():
+        mod.events.setdefault(event, why)
     return mod
 
 
-def scan_bundled(bundled=BUNDLED):
-    mods = []
-    for d in sorted(p for p in bundled.iterdir() if p.is_dir()):
-        mods.append(scan_mod(d))
-    return mods
+def scan_bundled(frozen, bundled=BUNDLED):
+    import api_tiers_flow as flow
+    nested = flow.load_nested()
+    return [scan_mod(d, set(frozen), nested) for d in sorted(p for p in bundled.iterdir() if p.is_dir())]
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -527,19 +497,6 @@ class Tiers:
         direct = set()
         for m in self.mods:
             direct |= set(m.paths)
-        drawlist_mods = [m for m in self.mods if any(f"ImGui.{s}" in m.paths or f"eqoa.imgui.{s}" in m.paths
-                                                      for s in DRAWLIST_SOURCES)]
-
-        def mods_using(module):
-            """Mods that reference eqoa.<module>.* or subscribe to an event named <module>.*"""
-            short = module.split(".")[-1]
-            out = []
-            for m in self.mods:
-                if any(x == module or x.startswith(module + ".") for x in m.paths) or \
-                        any(e.startswith(short + ".") for e in m.events if module.startswith("eqoa.")):
-                    out.append(m)
-            return out
-
         proven = set()
         # 1 functions, constants, values: referenced by path
         for n in names:
@@ -552,48 +509,34 @@ class Tiers:
                 ev = n[len("eqoa.events."):]
                 if any(ev in m.events for m in self.mods):
                     proven.add(n)
-        # 3 event data fields: the event is proven and a mod that subscribes reads that name in the same file
+        # 3 event data fields: the event is proven and a handler of THAT event reads the field from its
+        #   data (api_tiers_flow: the handler's own parameter, or a function it passes the data to)
         for n in names:
             if kind[n][0] == "event_field":
                 ev_name, field = kind[n][1]
-                if ev_name not in proven:
-                    continue
                 ev = ev_name[len("eqoa.events."):]
-                leaf = field.split(".")[-1]
-                if any(leaf in m.event_fields.get(ev, ()) for m in self.mods):
+                if ev_name in proven and any(("ev", ev, field) in m.reads for m in self.mods):
                     proven.add(n)
-        # 4 record fields: the module has a proven function or event and a mod using it reads the name
-        module_ok = {}
+        # 4 record fields: read from a value of that record that a mod really received
         for n in names:
             if kind[n][0] == "record_field":
-                module, record = kind[n][1]
-                if module == "eqoa":  # eqoa.Color etc: values of any module; needs a mod reading the field
-                    leaf = n.split(".")[-1]
-                    if any(leaf in m.fields for m in self.mods) and any(
-                            x in proven for x in names if kind[x][0] == "function" and x.startswith("eqoa.")):
-                        proven.add(n)
-                    continue
-                if module not in module_ok:
-                    ok = any(x in proven for x in names
-                             if x.startswith(module + ".") and kind[x][0] in ("function", "event", "constant"))
-                    ok = ok or any(
-                        x in proven for x in names if kind[x][0] == "event"
-                        and x.startswith("eqoa.events." + module.split(".")[-1] + "."))
-                    module_ok[module] = ok
-                if module_ok[module]:
-                    leaf = n.split(".")[-1]
-                    if any(leaf in m.fields for m in mods_using(module)):
-                        proven.add(n)
-        # 5 record types: proven when any field is (a type with no fields stays provisional)
-        for n in names:
-            if kind[n][0] in ("record", "type"):
-                if kind[n][0] == "record" and any(x in proven for x in names if x.startswith(n + ".")):
+                record, field = n.rsplit(".", 1)
+                if any(("rec", record, field) in m.reads for m in self.mods):
                     proven.add(n)
-        # 6 ImDrawList methods: used as a method (`dl:AddLine(`) by a mod that obtains a draw list
+        # 5 record types: a type with fields is proven when one of its fields is (receiving a value and only
+        #   testing it for nil proves nothing); a type with no fields (RequestId, BatchId) is proven when a mod
+        #   really received a value of it from a producer call
+        for n in names:
+            if kind[n][0] == "record":
+                if any(x in proven for x in names if x.startswith(n + ".")):
+                    proven.add(n)
+            elif kind[n][0] == "type":
+                if any(n in m.received for m in self.mods):
+                    proven.add(n)
+        # 6 ImDrawList methods: a `:Method(` call on a value bound from a draw-list getter
         for n in names:
             if kind[n][0] == "drawlist_method":
-                leaf = n.split(".")[-1]
-                if any(leaf in m.fields for m in drawlist_mods):
+                if any(("dl", n.split(".")[-1]) in m.reads for m in self.mods):
                     proven.add(n)
         # 7 modules and containers: proven when anything below is proven
         for n in names:
@@ -625,7 +568,7 @@ def summarize(t):
 
 def build(frozen_path=FROZEN, bundled=BUNDLED):
     frozen = json.loads(Path(frozen_path).read_text(encoding="utf-8"))
-    t = Tiers(frozen["supported"], scan_bundled(bundled)).run()
+    t = Tiers(frozen["supported"], scan_bundled(frozen["supported"], bundled)).run()
     total, by = summarize(t)
     doc = {
         "api": "eqoa/1",
@@ -700,6 +643,47 @@ def render_md(doc, t):
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
+def evidence(t, name):
+    """Lines saying where a bundled mod uses `name` (empty when none does): the mod, file:line and how the
+    value was bound (a producer call, a handler parameter, a parameter its callers fill, a returned value)."""
+    out = []
+    kind = t.kind.get(name, (None, None))
+    k = kind[0]
+    for m in t.mods:
+        if k in ("function", "constant"):
+            hit = m.paths.get(name)
+            if hit:
+                out.append(f"{m.name}: {hit[0].name}:{hit[1]}: referenced by path")
+        elif k == "event":
+            ev = name[len("eqoa.events."):]
+            if ev in m.events:
+                out.append(f"{m.name}: {m.events[ev]}: subscribed")
+        elif k == "event_field":
+            ev = kind[1][0][len("eqoa.events."):]
+            if ("ev", ev, kind[1][1]) in m.reads:
+                out.append(f"{m.name}: {m.reads[('ev', ev, kind[1][1])]}")
+        elif k == "record_field":
+            record, field = name.rsplit(".", 1)
+            if ("rec", record, field) in m.reads:
+                out.append(f"{m.name}: {m.reads[('rec', record, field)]}")
+        elif k == "drawlist_method":
+            key = ("dl", name.split(".")[-1])
+            if key in m.reads:
+                out.append(f"{m.name}: {m.reads[key]}")
+        elif k == "type":
+            if name in m.received:
+                out.append(f"{m.name}: received: {m.received[name]}")
+        elif k == "record":
+            prefix = name + "."
+            for key, why in m.reads.items():
+                if key[0] == "rec" and f"{key[1]}.{key[2]}".startswith(prefix) and key[1] == name:
+                    out.append(f"{m.name}: field {key[2]}: {why}")
+                    break
+    if k == "module" and t.tier.get(name) == "proven":
+        out.append("a name below it is proven")
+    return out
+
+
 def demotions(old, new):
     """Names the committed file counts as proven (not listed) that a fresh run lists as provisional."""
     old_prov = set(old.get("provisional", []))
@@ -724,18 +708,15 @@ def main(argv=None):
     text, md = render_json(doc), render_md(doc, t)
     if args.why:
         print(f"{args.why}: {t.tier.get(args.why, 'not in the frozen record')}")
-        for m in t.mods:
-            hit = m.paths.get(args.why)
-            if hit:
-                print(f"  {m.name}: {hit[0].relative_to(Path(args.bundled).parent) if Path(args.bundled).parent in hit[0].parents else hit[0]}:{hit[1]}")
-            if args.why.startswith("eqoa.events.") and args.why[12:] in m.events:
-                print(f"  {m.name}: subscribes")
+        for line in evidence(t, args.why):
+            print("  " + line)
         return 0
     if args.report:
         print(json.dumps(doc["counts"], indent=1))
         for m in t.mods:
             for path, line in m.unresolved:
                 print(f"unresolved events.on: {path.relative_to(ROOT) if ROOT in path.parents else path}:{line}")
+        return 0
     if args.check:
         tiers_path, md_path = Path(args.tiers), Path(args.md)
         problems = []
