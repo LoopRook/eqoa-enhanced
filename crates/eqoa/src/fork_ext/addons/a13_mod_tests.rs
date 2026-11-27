@@ -907,56 +907,81 @@ fn a13_world_map_asks_for_its_picture_at_scale_one_or_more_even_when_zoomed_clos
     assert_eq!(rig.lua_str("world_map.terrain ~= nil"), "true");
 }
 
-/// The live dots wear the game's minimap colours (`Play::mini_view`): one colour for each kind the API can tell, and
-/// each is not another kind's (the negative control: a plain NPC is tan, so every other kind differs from it).
+/// What upstream draws for each kind of live dot, as (what, entity in Lua, the colour as 8-bit channels). Each colour is
+/// written here from upstream's own constants, not from the mod's table: `NAME_COLORS` (`play.rs:190`), `MERC_COLOR`
+/// (`play.rs:198`), the palette (`numcolor.rs:88-100`) and the roles' defaults (`minimapcolor.rs:68`).
+const MINIMAP_DOTS: [(&str, &str, [u32; 3]); 15] = [
+    ("an NPC with no role: NAME_COLORS[0], play.rs:190", "{ kind = 'npc', name = 'Barmaid Terese', npc_flags = 128 }", [212, 192, 111]),
+    ("a creature with no NPC bit: NAME_COLORS[0]", "{ kind = 'npc', name = 'orc pawn', npc_flags = 0 }", [212, 192, 111]),
+    ("a pet: NAME_COLORS[1], play.rs:190", "{ kind = 'pet', name = 'Fang', class_code = 3 }", [100, 175, 220]),
+    ("a player not flagged for PvP: NAME_COLORS[1] (play.rs:5549-5553)", "{ kind = 'player', name = 'Ann', class_code = 2 }", [100, 175, 220]),
+    ("another code from 2 up (4, a PvP foe): the same blue (play.rs:5549)", "{ kind = 'other', name = 'Foe', class_code = 4 }", [100, 175, 220]),
+    ("a mercenary: MERC_COLOR, play.rs:198", "{ kind = 'pet', name = 'Merc', class_code = 3, merc_tag = '<Ann Mercenary>' }", [155, 165, 210]),
+    ("a coachman: Light Blue, numcolor.rs:96", "{ kind = 'npc', name = 'Coachman Ronks', npc_flags = 129 }", [130, 190, 255]),
+    ("a banker by the flag: Cyan, numcolor.rs:97", "{ kind = 'npc', name = 'The Treasurer', npc_flags = 130 }", [0, 240, 240]),
+    ("a spell merchant by name: Purple, numcolor.rs:94", "{ kind = 'npc', name = 'Spell Archivist', npc_flags = 129 }", [176, 96, 255]),
+    ("a smith by the flag: Orange, numcolor.rs:91", "{ kind = 'npc', name = 'Yiggins', npc_flags = 136 }", [255, 140, 0]),
+    ("a trainer by name: Pink, numcolor.rs:93", "{ kind = 'npc', name = 'Guildmaster Ferris', npc_flags = 128 }", [255, 110, 199]),
+    ("a quest giver with a mark: White, numcolor.rs:89", "{ kind = 'npc', name = 'Dilana', npc_flags = 128, head_mark = '!' }", [255, 255, 255]),
+    ("a merchant: Yellow, numcolor.rs:90", "{ kind = 'npc', name = 'Merchant Perry', npc_flags = 129 }", [255, 236, 40]),
+    ("a coachman who sells is still a coachman (minimapcolor.rs:101)", "{ kind = 'npc', name = 'Coachman Ronks', npc_flags = 129 }", [130, 190, 255]),
+    ("a record with no colour of its own: tan", "{ kind = 'other', name = '' }", [212, 192, 111]),
+];
+
+/// Each kind's colour is the one upstream's minimap draws; every one of them differs from the plain NPC's tan except the
+/// NPC cases themselves, so one colour for all fails.
 #[test]
 fn world_map_dots_use_the_minimaps_colours_for_each_kind() {
     fresh();
     let mut rig = rig([1024.0, 768.0], None);
     rig.open();
-    let rgb = |rig: &Rig, e: &str| rig.lua_str(&format!("(function() local c = world_map.dot_rgb({e}) return string.format('%.0f,%.0f,%.0f', c[1] * 255, c[2] * 255, c[3] * 255) end)()"));
-    let cases = [
-        ("an NPC with no role: tan", "{ kind = 'npc', name = 'Barmaid Terese', npc_flags = 128 }", "212,192,111"),
-        ("a creature (no NPC bit): tan", "{ kind = 'npc', name = 'orc pawn', npc_flags = 0 }", "212,192,111"),
-        ("a pet: blue", "{ kind = 'pet', name = 'Fang' }", "100,175,220"),
-        ("a mercenary: reddish blue", "{ kind = 'pet', name = 'Merc', merc_tag = '<Ann Mercenary>' }", "155,165,210"),
-        ("a player: green", "{ kind = 'player', name = 'Ann' }", "90,255,80"),
-        ("a coachman: light blue", "{ kind = 'npc', name = 'Coachman Ronks', npc_flags = 129 }", "130,190,255"),
-        ("a banker by the flag: cyan", "{ kind = 'npc', name = 'The Treasurer', npc_flags = 130 }", "0,240,240"),
-        ("a spell merchant by name: purple", "{ kind = 'npc', name = 'Spell Archivist', npc_flags = 129 }", "176,96,255"),
-        ("a smith by the flag: orange", "{ kind = 'npc', name = 'Yiggins', npc_flags = 136 }", "255,140,0"),
-        ("a trainer by name: pink", "{ kind = 'npc', name = 'Guildmaster Ferris', npc_flags = 128 }", "255,110,199"),
-        ("a quest giver with a mark: white", "{ kind = 'npc', name = 'Dilana', npc_flags = 128, head_mark = '!' }", "255,255,255"),
-        ("a merchant: yellow", "{ kind = 'npc', name = 'Merchant Perry', npc_flags = 129 }", "255,236,40"),
-        ("a coachman who sells is still a coachman", "{ kind = 'npc', name = 'Coachman Ronks', npc_flags = 129 }", "130,190,255"),
-    ];
-    for (what, entity, want) in cases {
-        assert_eq!(rgb(&rig, entity), want, "{what}");
+    for (what, entity, want) in MINIMAP_DOTS {
+        let got = rig.lua_str(&format!("(function() local c = world_map.dot_rgb({entity}) return string.format('%.0f,%.0f,%.0f', c[1] * 255, c[2] * 255, c[3] * 255) end)()"));
+        assert_eq!(got, format!("{},{},{}", want[0], want[1], want[2]), "{what}");
     }
 }
 
-/// The dots a frame draws are coloured from the entity records, not a single colour.
+/// The colour each dot is drawn with (the value handed to the circle call) is upstream's for that creature; a member of the
+/// group gets no dot, as the minimap leaves the group out.
 #[test]
 fn world_map_dots_are_drawn_in_their_colours() {
     fresh();
-    let entity = |id: u64, name: &str, kind: &str, flags: u64| {
-        json!({
+    let entity = |id: u64, name: &str, kind: &str, code: u64, flags: u64, extra: serde_json::Value| {
+        let mut e = json!({
             "ref": {"$ref": "entity", "key": id.to_string(), "generation": 0, "incarnation": 1},
             "id": id, "name": name, "level": 7, "kind": kind, "is_creature": true, "corpse": false, "hp_fraction": 1.0,
-            "search_flags": 0, "class_code": 0, "world_id": 0, "npc_flags": flags,
+            "search_flags": 0, "class_code": code, "world_id": 0, "npc_flags": flags,
             "position": {"x": 25300.0, "y": 0.0, "z": 15200.0}, "actor_position": {"x": 25300.0, "y": 0.0, "z": 15200.0},
-        })
+        });
+        for (k, v) in extra.as_object().unwrap() {
+            e[k] = v.clone();
+        }
+        e
     };
+    let drawn: [(u64, &str, &str, u64, u64, [u32; 3]); 6] = [
+        (9001, "Coachman Ronks", "npc", 0, 129, [130, 190, 255]),
+        (9002, "orc pawn", "npc", 0, 0, [212, 192, 111]),
+        (9003, "Ann", "player", 2, 0, [100, 175, 220]),
+        (9004, "Fang", "pet", 3, 0, [100, 175, 220]),
+        (9005, "Banker Lars", "npc", 0, 130, [0, 240, 240]),
+        (9006, "Foe", "other", 4, 0, [100, 175, 220]),
+    ];
+    let mut entities: Vec<serde_json::Value> = drawn.iter().map(|d| entity(d.0, d.1, d.2, d.3, d.4, json!({}))).collect();
+    entities.push(entity(9007, "Grouped Gus", "player", 2, 0, json!({})));
     CORE.with(|c| {
         let mut c = c.borrow_mut();
-        c.view.entities = vec![entity(9001, "Coachman Ronks", "npc", 129), entity(9002, "orc pawn", "npc", 0), entity(9003, "Ann", "player", 0)];
-        c.view.dots = vec![(9001, 25300.0, 15200.0), (9002, 25310.0, 15200.0), (9003, 25320.0, 15200.0)];
+        c.view.entities = entities;
+        c.view.dots = (9001u32..=9007).enumerate().map(|(i, id)| (id, 25300.0 + 10.0 * i as f32, 15200.0)).collect();
+        c.view.group = json!({"in_group": true, "self_leader": null, "members": [{"id": 9007, "name": "Grouped Gus", "active": true}], "raid": [], "invites": []});
     });
     let mut rig = rig([1024.0, 768.0], None);
     rig.open();
     rig.frames(3);
-    let col = |id: u32| rig.lua_f64(&format!("world_map.dot_cache[{id}] and world_map.dot_cache[{id}].col or 0"));
-    let (coach, orc, ann) = (col(9001), col(9002), col(9003));
-    assert!(coach != 0.0 && orc != 0.0 && ann != 0.0, "each dot was coloured: {coach} {orc} {ann}");
-    assert!(coach != orc && ann != orc && coach != ann, "a coachman, an orc and a player are three colours: {coach} {orc} {ann}");
+    for (id, name, _, _, _, want) in drawn {
+        // ImGui's packing (IM_COL32: alpha 255 on top, then blue, green, red), as the signed 32-bit number the host hands back
+        let packed = (255u32 << 24 | want[2] << 16 | want[1] << 8 | want[0]) as i32;
+        let same = rig.lua_str(&format!("tostring(world_map.drawn_dots[{id}] == {packed})"));
+        assert_eq!(same, "true", "{name} is drawn in {want:?}: drew {}", rig.lua_str(&format!("tostring(world_map.drawn_dots[{id}])")));
+    }
+    assert_eq!(rig.lua_str("tostring(world_map.drawn_dots[9007])"), "nil", "a group member gets no dot");
 }

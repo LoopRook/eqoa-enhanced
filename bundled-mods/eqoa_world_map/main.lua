@@ -49,20 +49,22 @@ local state = {
     hits = {}, rect = nil, drag = nil, held = {},
     menu = nil, note = nil, search = nil, results = {}, focus = nil, capturing = false,
     markers = {}, markers_world = nil, markers_stale = true, markers_on = true, marker_calls = 0,
-    player = nil, dots = { ids = {}, xs = {}, zs = {} }, dot_cache = {}, dot_cache_at = 0,
+    player = nil, dots = { ids = {}, xs = {}, zs = {} }, dot_cache = {}, dot_cache_at = 0, drawn_dots = {},
     now = 0, message = nil, message_until = 0, overflow = -1e9, expect = {},
 }
 world_map = state -- read by the mod's tests
 
 -- The live dots in the game's minimap colours (`Play::mini_view`): a friendly NPC with a role (Minimap Colors, `minimapcolor::role`)
--- in the role's default colour, else its name plate's colour (`Play::name_color`): NPCs tan, pets blue, a mercenary a reddish
--- blue, players green. The API gives no Minimap Colors choice, no spell-merchant list from the server and no other class's
--- facts, so the role colours are the defaults and a spell merchant is one with "Spell" in its name. Bit tests by division: no
--- bit operators needed.
-local TAN, PET, MERC, PLAYER = { .831, .753, .435 }, { .392, .686, .863 }, { .608, .647, .824 }, { .353, 1, .314 }
+-- in the role's default colour, else its name plate's colour (`Play::name_color`, `play.rs` 5548): a creature with code 0 or 1
+-- tan; a player, a pet or any other code from 2 up blue (a mercenary a reddish blue). The game paints a player flagged for PvP
+-- green; the flag is not readable by a mod, so that player is blue here. The API gives no Minimap Colors choice and no
+-- spell-merchant list from the server, so the role colours are the defaults and a spell merchant is one with "Spell" in its
+-- name. Bit tests by division: no bit operators needed.
+local function rgb8(r, g, b) return { r / 255, g / 255, b / 255 } end
+local TAN, BLUE, MERC = rgb8(212, 192, 111), rgb8(100, 175, 220), rgb8(155, 165, 210)
 local ROLE_RGB = {
-    spells = { .69, .376, 1 }, smiths = { 1, .549, 0 }, merchants = { 1, .925, .157 }, bankers = { 0, .941, .941 },
-    trainers = { 1, .431, .78 }, coachmen = { .51, .745, 1 }, quest = { 1, 1, 1 },
+    spells = rgb8(176, 96, 255), smiths = rgb8(255, 140, 0), merchants = rgb8(255, 236, 40), bankers = rgb8(0, 240, 240),
+    trainers = rgb8(255, 110, 199), coachmen = rgb8(130, 190, 255), quest = rgb8(255, 255, 255),
 }
 local SMITHS = { Smithy = 1, Smith = 1, Blacksmith = 1, Armorer = 1, Armourer = 1, Weaponsmith = 1, Shieldsmith = 1, Bowyer = 1, Fletcher = 1 }
 local TRAINERS = { Guildmaster = 1, Trainer = 1, Training = 1, Master = 1, Rehabilitator = 1, Guild = 1 }
@@ -85,8 +87,10 @@ end
 
 -- the minimap's colour for an entity, as {r, g, b}
 function state.dot_rgb(e)
-    if e.kind == "player" then return PLAYER end
-    if e.kind == "pet" then return e.merc_tag and MERC or PET end
+    -- a creature with code 0 or 1 (kind "npc") is an NPC; a player, a pet or another code from 2 up is blue
+    if e.kind == "player" or e.kind == "pet" or (e.kind == "other" and (e.class_code or 0) >= 2) then
+        return e.merc_tag and MERC or BLUE
+    end
     return ROLE_RGB[role_of(e) or ""] or TAN
 end
 
@@ -655,20 +659,25 @@ local function colours()
     }
 end
 
--- A dot's colour, worked out once a second for each creature (a record read for every dot every frame would cost more than it
--- shows); `c.npc` while the record is not there.
-local DOT_KEEP = 1
+-- A dot's colour, worked out about once a second for each creature, each at its own moment (a record read for every dot every
+-- frame would cost more than it shows, and all of them together would be one slow frame). A creature that is gone is dropped
+-- (`prune_dots`). TAN while the record is not there, as upstream's name plate colour for a creature it cannot place.
 local function dot_colour(id)
     local k = state.dot_cache[id]
-    if k and state.now - k.at < DOT_KEEP then return k.col end
+    if k and state.now - k.at < 1 + (id % 8) / 8 then return k.col end
     local e = eqoa.entities.find(id)
-    local col = C.npc
-    if e then
-        local rgb = state.dot_rgb(e)
-        col = ui.GetColorU32(rgb[1], rgb[2], rgb[3], 1)
-    end
+    local rgb = e and state.dot_rgb(e) or TAN
+    local col = ui.GetColorU32(rgb[1], rgb[2], rgb[3], 1)
     state.dot_cache[id] = { col = col, at = state.now }
     return col
+end
+
+-- every ten seconds the cache keeps only the creatures that are still dots
+local function prune_dots()
+    if state.now - state.dot_cache_at <= 10 then return end
+    local keep = {}
+    for _, id in ipairs(state.dots.ids) do keep[id] = state.dot_cache[id] end
+    state.dot_cache, state.dot_cache_at = keep, state.now
 end
 
 -- the factors, from the client's UI scale and the two settings; the layout's pixels follow
@@ -791,7 +800,7 @@ function draw(e)
     refresh_markers(map.world_id)
     if state.focus or state.note then set_capture(true) else set_capture(false) end
     if v.scale <= 12 then state.dots = eqoa.entities.dots() or state.dots end
-    if state.now - state.dot_cache_at > 10 then state.dot_cache, state.dot_cache_at = {}, state.now end
+    prune_dots()
 
     -- the font: baked at the size drawn (or the old size scaled until the new one is ready)
     local want_px = clamp(math.floor(TEXT_BASE * F + 0.5), 6, 96)
@@ -938,9 +947,19 @@ function draw(e)
     end
     if v.scale <= 12 then
         local dots = state.dots
+        -- the group's members are drawn below with their own colours, as the minimap leaves them out of its dots
+        local grouped = {}
+        local grp0 = eqoa.group.get()
+        for _, m in ipairs(grp0 and grp0.members or {}) do grouped[m.id] = true end
+        state.drawn_dots = {}
         for i = 1, #dots.ids do
+            local id = dots.ids[i]
             local sx2, sy2 = to_screen(area, dots.xs[i], dots.zs[i])
-            if on_screen(sx2, sy2, 3) and dots.ids[i] ~= state.self_id then dl:AddCircleFilled(V(sx2, sy2), 2 * FM, dot_colour(dots.ids[i]), 8) end
+            if on_screen(sx2, sy2, 3) and id ~= state.self_id and not grouped[id] then
+                local col = dot_colour(id)
+                state.drawn_dots[id] = col
+                dl:AddCircleFilled(V(sx2, sy2), 2 * FM, col, 8)
+            end
         end
     end
     local show_marks = state.markers_on -- the game's Map Markers setting: camps, coaches and community marks
