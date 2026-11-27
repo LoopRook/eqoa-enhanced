@@ -124,7 +124,9 @@ end
 function T.mode()
     if not T.on then return nil end
     if B.tab == T.TAB then return T.visit_merchant() and "merchant" or nil end
-    if B.tab == 6 and T.held.bank == true then
+    -- the Bank tab is wide only for a bank the player talked to and this mod holds: the tab's own refresh session (a
+    -- helper's talk) leaves it exactly as it was
+    if B.tab == 6 and T.held.bank == true and not B.helper_hold.bank then
         local bank = eqoa.bank.get()
         if bank and bank.open then return "bank" end
     end

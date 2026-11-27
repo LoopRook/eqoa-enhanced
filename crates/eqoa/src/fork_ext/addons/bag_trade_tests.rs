@@ -647,3 +647,18 @@ fn review6_the_answer_acts_on_the_same_stack_merchant_and_price_the_question_sho
     run(&lua, "MONEY = 100; BUYP.w2 = 12; talk_merchant({ware_(2, 'Healing Potion', 20)}); T.click_ware(WARES[1]); type_digits('50')");
     assert_eq!(string(&lua, "T.prompt.text .. ':' .. T.prompt.qty"), "8:8", "the box shows the 8 that Enter buys, not the 50 typed");
 }
+
+#[test]
+fn review7_the_two_panel_bank_tab_is_only_for_a_bank_the_player_talked_to() {
+    let lua = world();
+    viewer_closed(&lua);
+    // the Bank tab's own refresh session (a helper's talk) near a banker: the tab stays as it was before the feature
+    run(&lua, "B.open = true; B.tab = 6; B.helper_hold.bank = true; BANK.open = true");
+    assert_eq!(string(&lua, "T.mode()"), "nil", "a helper's session is not a visit");
+    // the player's own talk: two panels
+    run(&lua, "B.helper_hold.bank = nil");
+    assert_eq!(string(&lua, "T.mode()"), "bank");
+    // and the claim must be ours: another mod's bank is not shown
+    run(&lua, "T.held.bank = false");
+    assert_eq!(string(&lua, "T.mode()"), "nil");
+}
