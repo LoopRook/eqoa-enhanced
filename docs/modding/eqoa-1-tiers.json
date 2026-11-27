@@ -4,8 +4,8 @@
  "rule": "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
  "counts": {
   "total": 2601,
-  "proven": 879,
-  "provisional": 1355,
+  "proven": 882,
+  "provisional": 1352,
   "compat": 367,
   "by_kind": {
    "action": {
@@ -24,13 +24,13 @@
     "compat": 0
    },
    "field": {
-    "proven": 368,
-    "provisional": 943,
+    "proven": 370,
+    "provisional": 941,
     "compat": 0
    },
    "function": {
-    "proven": 260,
-    "provisional": 242,
+    "proven": 261,
+    "provisional": 241,
     "compat": 0
    },
    "module": {
@@ -873,7 +873,6 @@
   "eqoa.items.Item.equippable",
   "eqoa.items.Item.equipped_slot",
   "eqoa.items.Item.icon",
-  "eqoa.items.Item.id",
   "eqoa.items.Item.index",
   "eqoa.items.Item.level_required",
   "eqoa.items.Item.list",
@@ -906,7 +905,6 @@
   "eqoa.items.MerchantOption.selected",
   "eqoa.items.MerchantState.button_hint",
   "eqoa.items.MerchantState.buy_rate",
-  "eqoa.items.MerchantState.entity_id",
   "eqoa.items.MerchantState.greeting",
   "eqoa.items.MerchantState.mode",
   "eqoa.items.MerchantState.selected_option",
@@ -930,7 +928,6 @@
   "eqoa.items.attack_types.two_hand_crossbow",
   "eqoa.items.attack_types.two_hand_pierce",
   "eqoa.items.attack_types.two_hand_slash",
-  "eqoa.items.get",
   "eqoa.items.slots",
   "eqoa.items.slots.alchemy",
   "eqoa.items.slots.armor_craft",

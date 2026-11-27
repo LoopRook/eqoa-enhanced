@@ -473,11 +473,11 @@ class Reviewer(unittest.TestCase):
     ] + ["eqoa.windows.SessionData." + f for f in
          "available current id inventory list message open state target title".split()]
 
-    # Names a bundled mod really reads now (the Bag Viewer's Merchant tab, 2026-11-27: `eqoa.merchant.get().merchant.options`
-    # and `.pending`), so they are proven for a real use. They stay exempt only while that is so (checked below).
+    # Names a bundled mod really reads now (the Bag Viewer's Merchant tab, 2026-11-27: `eqoa.merchant.get().merchant.options`,
+    # `.pending` and `.entity_id`), so they are proven for a real use. They stay exempt only while that is so (checked below).
     USED_SINCE_REVIEW = [
         "eqoa.items.Container.merchant", "eqoa.items.MerchantState", "eqoa.items.MerchantState.options",
-        "eqoa.items.MerchantState.pending",
+        "eqoa.items.MerchantState.pending", "eqoa.items.MerchantState.entity_id",
     ]
 
     def violations(self, provisional, frozen):
