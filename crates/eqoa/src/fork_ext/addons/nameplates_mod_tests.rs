@@ -772,7 +772,7 @@ fn nameplates_are_not_drawn_over_a_full_screen_game_page() {
     for (mode, native, kinds, start) in [
         ("options", 34, &["options"][..], false),
         ("start_menu", 13, &["start_menu"][..], true),
-        ("normal", 0, &["inventory"][..], false),
+        ("start_menu", 13, &["start_menu", "inventory"][..], false),
         ("trainer", 12, &["trainer"][..], false),
         ("quest_log", 22, &["quest_log"][..], false),
         ("spellbook", 5, &["spellbook"][..], false),
