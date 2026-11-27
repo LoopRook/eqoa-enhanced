@@ -50,8 +50,8 @@ fn bv_corpse() -> serde_json::Value {
 }
 
 thread_local! {
-    /// (from, to): a line of the shipped Bag Viewer source this thread's `Bv` is built without (a negative control).
-    static BV_MUTATION: std::cell::RefCell<Option<(&'static str, &'static str)>> = const { std::cell::RefCell::new(None) };
+    /// (from, to) pairs: lines of the shipped Bag Viewer source this thread's `Bv` is built without (a negative control).
+    static BV_MUTATION: std::cell::RefCell<Vec<(&'static str, &'static str)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 struct Bv {
@@ -113,7 +113,7 @@ impl Bv {
                 None => fs::write(&path, file.data).unwrap(),
             }
             // a negative control inside the test: this thread's one-line change of the shipped source
-            if let Some((from, to)) = BV_MUTATION.with(|m| *m.borrow()) {
+            for (from, to) in BV_MUTATION.with(|m| m.borrow().clone()) {
                 if let Ok(text) = fs::read_to_string(&path) {
                     if text.contains(from) {
                         fs::write(&path, text.replace(from, to)).unwrap();
@@ -5545,13 +5545,13 @@ fn trade_window_option_off_control_with_the_option_ignored_the_off_phase_fails()
     big_stack(trade_window_option_off_control_body)
 }
 fn trade_window_option_off_control_body() {
-    BV_MUTATION.with(|m| *m.borrow_mut() = Some(("function T.refresh() T.on = eqoa.options.get(OPTION) == true end", "function T.refresh() T.on = true end")));
+    BV_MUTATION.with(|m| *m.borrow_mut() = vec![("function T.refresh() T.on = eqoa.options.get(OPTION) == true end", "function T.refresh() T.on = true end")]);
     let Some(mut bv) = trade_setup("trade option-off control") else {
-        BV_MUTATION.with(|m| *m.borrow_mut() = None);
+        BV_MUTATION.with(|m| m.borrow_mut().clear());
         return;
     };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| trade_option_off_phase(&mut bv)));
-    BV_MUTATION.with(|m| *m.borrow_mut() = None);
+    BV_MUTATION.with(|m| m.borrow_mut().clear());
     assert!(result.is_err(), "negative control: with the option ignored the game's window must NOT be the one drawn");
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();
@@ -5825,6 +5825,169 @@ fn trade_window_bank_body() {
     bv.play.bags_broker_tick();
     bv.frames(2);
     assert!(bv.eval::<bool>("not eqoa.bank.get().open"), "the bank session ended with the window");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Second check of the review fixes (run against the client, with a negative control each where the fault can be shown).
+
+/// The option goes off between two polls and an NPC is talked to: the game's own window opens for real, the NPC's session
+/// is not closed, and the claim goes back once the client has carried the pass out.
+fn trade_phase_option_off_at_an_npc(bv: &mut Bv, bank: bool) {
+    bv.trade_option(true);
+    // (no poll: the claim is still held)
+    bv.lua().load("eqoa.options.set('open_npc', false)").exec().unwrap();
+    if bank {
+        bv.play.bags_bank_packet();
+    } else {
+        bv.play.bags_merchant_wares_packet(9002, &trade_wares());
+    }
+    for _ in 0..4 {
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+    }
+    let (mode, kind) = if bank { (11, "bank") } else { (10, "merchant") };
+    assert_eq!(bv.play.mode, mode, "the game's own {kind} window is the open native window");
+    assert!(bv.eval::<bool>(&format!("eqoa.{kind}.get() ~= nil and (eqoa.{kind}.get().open ~= false)")), "and the NPC's session was not closed");
+    assert!(!bv.is_open(), "Bag Viewer stays shut with the option off");
+    for _ in 0..4 {
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+    }
+    assert!(bv.eval::<bool>(&format!("not eqoa.windows.taken('{kind}')")), "the claim goes back after the pass: the {kind}");
+}
+
+#[test]
+fn trade_window_option_turned_off_at_an_npc_shows_the_games_own_window_and_keeps_the_session() {
+    big_stack(trade_option_off_client_body)
+}
+fn trade_option_off_client_body() {
+    for bank in [false, true] {
+        let Some(mut bv) = trade_setup("trade option off at an npc") else { return };
+        trade_phase_option_off_at_an_npc(&mut bv, bank);
+        bv.clean();
+        super::super::window_takeover::reset_all_for_test();
+        super::super::action_broker::reset_all_for_test();
+    }
+}
+
+#[test]
+fn trade_window_option_turned_off_at_an_npc_control_with_the_claim_let_go_at_once_the_window_does_not_open() {
+    big_stack(trade_option_off_client_control_body)
+}
+fn trade_option_off_client_control_body() {
+    // the review-fix-1 code: the claim is let go in the same call as the pass
+    BV_MUTATION.with(|m| *m.borrow_mut() = vec![("T.passing[kind] = os.clock()", "T.passing[kind] = nil; T.poll(true)")]);
+    let Some(mut bv) = trade_setup("trade option off control") else {
+        BV_MUTATION.with(|m| m.borrow_mut().clear());
+        return;
+    };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| trade_phase_option_off_at_an_npc(&mut bv, false)));
+    BV_MUTATION.with(|m| m.borrow_mut().clear());
+    assert!(result.is_err(), "negative control: with the claim let go at once the game's window must not be the open one");
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn trade_window_use_the_games_windows_switch_on_the_games_merchant_window_alone() {
+    big_stack(trade_switch_body)
+}
+fn trade_switch_body() {
+    let Some(mut bv) = trade_setup("trade switch") else { return };
+    bv.trade_option(true);
+    // the player turns "Use the game's windows" on: the client drops the claims by itself, `T.held` has not heard yet
+    super::super::window_takeover::set_use_game_windows(true);
+    bv.play.bags_merchant_wares_packet(9002, &trade_wares());
+    for _ in 0..3 {
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+    }
+    let opened = bv.is_open();
+    let tab: u32 = bv.eval("require('bags').tab");
+    let mode = bv.play.mode;
+    super::super::window_takeover::set_use_game_windows(false);
+    assert_eq!(mode, 10, "the game's own merchant window opens");
+    assert!(!opened && tab != 8, "and Bag Viewer does not show a Merchant tab over it");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn trade_window_an_error_in_an_always_on_listener_lets_both_claims_go_and_the_games_windows_come_back() {
+    big_stack(trade_listener_error_body)
+}
+/// `broken`: helpers.lua's bank handler (run from the always-on `bank.changed` listener) throws.
+fn trade_phase_listener_error(broken: bool, unguarded: bool) -> bool {
+    if broken {
+        BV_MUTATION.with(|m| m.borrow_mut().push(("function H.on_bank_changed(d)", "function H.on_bank_changed(d) error('boom')")));
+    }
+    if unguarded {
+        // the old always-on listener: an error ends it with the claims still held
+        BV_MUTATION.with(|m| m.borrow_mut().push(("local ok, err = pcall(fn, e)", "local ok, err = true, nil; fn(e)")));
+    }
+    let Some(mut bv) = trade_setup("trade listener error") else {
+        BV_MUTATION.with(|m| m.borrow_mut().clear());
+        return true;
+    };
+    BV_MUTATION.with(|m| m.borrow_mut().clear());
+    bv.trade_option(true);
+    bv.play.bags_bank_packet();
+    for _ in 0..3 {
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+    }
+    let released = bv.eval::<bool>("not eqoa.windows.taken('merchant') and not eqoa.windows.taken('bank')");
+    // a later merchant talk is the game's own window, not a hidden session with nothing on the screen
+    bv.play.mode = 0;
+    bv.play.bags_merchant_wares_packet(9002, &trade_wares());
+    for _ in 0..3 {
+        bv.frames(2);
+        bv.play.bags_broker_tick();
+    }
+    let games_window = bv.play.mode == 10;
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+    released && games_window
+}
+fn trade_listener_error_body() {
+    assert!(trade_phase_listener_error(true, false), "after an error in the listener both claims are let go and a merchant talk shows the game's window");
+    // controls: without the error the claims stay; with the listener left unguarded (the old code) an error leaves them held
+    assert!(!trade_phase_listener_error(false, false), "negative control: without the error the claims are still held");
+    assert!(!trade_phase_listener_error(true, true), "negative control: an unguarded listener error leaves the claims held");
+}
+
+/// A visit that found the window open, a marked item's "Sell it?" question up, and the player walks away.
+fn trade_phase_sell_question_after_walking_away(bv: &mut Bv) -> bool {
+    bv.trade_option(true);
+    bv.lua().load("require('helpers').bank['900007'] = true").exec().unwrap();
+    bv.open();
+    bv.play.bags_merchant_wares_packet(9002, &trade_wares());
+    bv.frames(3);
+    assert_eq!(bv.eval::<u32>("require('bags').tab"), 8, "on the Merchant tab, the window was open already");
+    bv.click_with(bv.pack_slot(7), winit::event::MouseButton::Right, false, false);
+    bv.frames(2);
+    assert!(bv.eval::<bool>("require('bags').menu ~= nil and require('bags').menu.asking == true"), "the Sell it? question is up");
+    bv.play.bags_player_at([400.0, 0.0, 400.0]);
+    for _ in 0..4 {
+        bv.play.bags_broker_tick();
+        bv.frames(2);
+    }
+    assert!(bv.is_open(), "the window was open before the visit: it stays");
+    bv.eval::<bool>("require('bags').menu == nil")
+}
+
+#[test]
+fn trade_window_the_sell_question_is_gone_after_the_player_walks_away_from_the_merchant() {
+    big_stack(trade_sell_question_body)
+}
+fn trade_sell_question_body() {
+    let Some(mut bv) = trade_setup("trade sell question") else { return };
+    // (the tab change that ends the visit also clears the menu, so no cleanup of its own is needed: this is the guard)
+    assert!(trade_phase_sell_question_after_walking_away(&mut bv), "the question is gone with the visit");
     bv.clean();
     super::super::window_takeover::reset_all_for_test();
     super::super::action_broker::reset_all_for_test();

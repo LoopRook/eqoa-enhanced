@@ -506,7 +506,9 @@ fn review1_the_option_turned_off_at_an_npc_hands_the_window_to_the_game_and_lets
     run(&lua, "OPTIONS.open_npc = false; SESSIONS.merchant = {ref = 'ws-1'}; talk_merchant({ware_(1, 'Bread')})");
     assert_eq!(int(&lua, "OPENED"), 0, "off: Bag Viewer stays shut");
     assert_eq!(string(&lua, "#PASSED .. ':' .. tostring(PASSED[1])"), "1:ws-1", "the game's own merchant window is shown");
-    assert!(boolean(&lua, "released('merchant') and released('bank')"), "and the claims are let go at once, not a second later");
+    assert!(!boolean(&lua, "released('merchant')"), "the claim is kept until the client has carried the pass out");
+    run(&lua, "emit('windows.session', {phase = 'closed', kind = 'merchant', reason = 'passed', ref = 'ws-1'})");
+    assert!(boolean(&lua, "released('merchant') and released('bank')"), "and let go when the session's end is told");
     // the same for a banker
     let lua = world();
     viewer_closed(&lua);

@@ -342,16 +342,27 @@ HP.on_auto_change = helper_listeners
 B.on_character = helper_listeners
 helper_listeners()
 -- a merchant or bank the player opened by hand is a real answer from where they stand: the mod learns the reach
-eqoa.events.on("merchant.changed", function(e)
+-- An always-on listener that fails ends, and with it the one that would have opened the window for an NPC: the claims are
+-- let go first (`T.fail`), so the game's own windows are back rather than every NPC hidden with no window.
+local function listener(fn)
+    return function(e)
+        local ok, err = pcall(fn, e)
+        if not ok then
+            T.fail(err)
+            error(err, 0)
+        end
+    end
+end
+eqoa.events.on("merchant.changed", listener(function(e)
     T.on_merchant(e.data) -- before the window's own listener: a helper's talk is still pending then
     if e.data and e.data.cause == "open" and eqoa.merchant.get() ~= nil then B.learn_native_open("merchant") end
-end)
-eqoa.events.on("bank.changed", function(e)
+end))
+eqoa.events.on("bank.changed", listener(function(e)
     T.on_bank(e.data)
     HP.on_bank_changed(e.data) -- an item taken out of the bank is no longer marked to bank
     local b = eqoa.bank.get()
     if e.data and e.data.cause == "open" and b and b.open then B.learn_native_open("bank") end
-end)
+end))
 eqoa.events.on("action.result", function(e)
     if not B.open then B.on_action_result(e.data) end
 end)
@@ -368,9 +379,9 @@ end)
 eqoa.events.on("world.leaving", function(e)
     if e.data and e.data.reason == "disconnect" then B.on_disconnect() end
 end)
-eqoa.events.on("state.reset", function() T.reset(); AL.on_session({phase = "closed", ref = AL.session}); X.clear(); B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); HP.reset(); B.char_dirty = true; B.dirty() end)
+eqoa.events.on("state.reset", listener(function() T.reset(); AL.on_session({phase = "closed", ref = AL.session}); X.clear(); B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); HP.reset(); B.char_dirty = true; B.dirty() end))
 -- the character is read once the world is up (and again after a new world or login): the Auto-loot choice is per character
-eqoa.events.on("player.changed", function(e)
+eqoa.events.on("player.changed", listener(function(e)
     -- asked on a new world or login, when the update names another character, and once a second besides
     T.poll() -- the claim on the merchant and bank windows follows the option (once a second)
     local after = e.data and e.data.after
@@ -379,7 +390,7 @@ eqoa.events.on("player.changed", function(e)
         B.char_checked = now
         B.sync_character()
     end
-end)
+end))
 eqoa.events.on("disabling", function()
     auto_listeners(false)
     if helper_token then eqoa.events.off(helper_token); helper_token = nil end

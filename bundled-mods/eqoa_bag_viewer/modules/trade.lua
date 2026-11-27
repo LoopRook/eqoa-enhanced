@@ -16,6 +16,7 @@ local T = {
     pad_list = false, pad_row = 1, page = 9, -- (`page`: the rows the list shows at once, set by the draw)
     auto_opened = false, was_bank = false, cache = nil,
     want_pass = {}, dead = false,
+    passing = {}, -- kind -> when its pass was asked: the claim is kept until the client says the session ended "passed"
 }
 B.trade = T
 
@@ -56,13 +57,16 @@ function T.poll(force)
         return
     end
     local now = os.clock()
+    for kind, since in pairs(T.passing) do
+        if now - since > PASS_WAIT then T.passing[kind] = nil end
+    end
     if not force and now - T.polled < 1.0 then return end
     T.polled = now
     T.refresh()
     for _, kind in ipairs(KINDS) do
         if T.on then
             claim(kind)
-        elseif T.held[kind] then
+        elseif T.held[kind] and not T.passing[kind] then
             eqoa.windows.release(kind)
             T.held[kind], T.told[kind] = nil, nil
             note("no longer holding the " .. kind .. " window")
@@ -93,13 +97,16 @@ local function try_pass(kind)
     T.want_pass[kind] = nil
     local ok, err = eqoa.windows.pass(s.ref)
     if ok then
-        note("the game's own " .. kind .. " window is shown")
-    else
-        eqoa.windows.release(kind)
-        T.held[kind] = nil
-        note("the game's " .. kind .. " window could not be shown (" .. tostring(err and err.code) .. "): the session is closed, talk again")
+        -- the client carries the pass out at its next step; a release before that drops it and closes the session. The
+        -- claim goes back when the session's end ("passed") is told, or after PASS_WAIT seconds at the latest
+        T.passing[kind] = os.clock()
+        note("the game's own " .. kind .. " window is being shown")
+        return true
     end
-    if not T.on then T.poll(true) elseif not ok then T.after_release(kind) end
+    eqoa.windows.release(kind)
+    T.held[kind] = nil
+    note("the game's " .. kind .. " window could not be shown (" .. tostring(err and err.code) .. "): the session is closed, talk again")
+    if not T.on then T.poll(true) else T.after_release(kind) end
     return true
 end
 
@@ -108,8 +115,15 @@ function T.hand_over(kind)
     try_pass(kind)
 end
 
+local PASS_WAIT = 3.0
+
 function T.on_session(d)
-    if d and d.phase == "opened" and T.want_pass[d.kind] then try_pass(d.kind) end
+    if not d then return end
+    if d.phase == "opened" and T.want_pass[d.kind] then try_pass(d.kind) end
+    if d.phase == "closed" and T.passing[d.kind] then
+        T.passing[d.kind] = nil
+        if not T.on then T.poll(true) end -- the game's window is up: the claims can go
+    end
 end
 eqoa.events.on("windows.session", function(e) T.on_session(e.data) end)
 
