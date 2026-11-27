@@ -154,6 +154,14 @@ fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     })
 }
 
+/// Mod `vm` has a window session up or a pass to the game's own window waiting (what a reload would end).
+pub(crate) fn vm_busy(vm: u64) -> bool {
+    STATE.with(|s| {
+        let s = s.borrow();
+        s.sessions.iter().any(|x| x.vm == vm) || s.passes.iter().any(|p| p.0 == vm)
+    })
+}
+
 pub(crate) fn is_active() -> bool {
     ACTIVE.with(Cell::get)
 }

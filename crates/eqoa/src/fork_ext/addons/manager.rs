@@ -940,8 +940,10 @@ impl Manager {
 
     fn command(&mut self, command: Command) {
         // a mod turned on or off, reloaded or rescanned: two mods that want one window may be told about again
-        if matches!(command, Command::Enable(..) | Command::Reload(_) | Command::Rescan) {
-            super::window_conflict::changed();
+        match &command {
+            Command::Enable(id, _) | Command::Reload(id) => super::window_conflict::changed_for(id),
+            Command::Rescan => super::window_conflict::changed(),
+            _ => {}
         }
         if matches!(command, Command::Rescan) {
             self.rescan(true);
@@ -998,8 +1000,13 @@ impl Manager {
                         // it starts (`window_conflict`)
                         let turn = super::window_conflict::losers_of(&entry.metadata.id);
                         self.disable(&mut entry, true, true, Disposition::Retain);
-                        for loser in turn {
-                            self.commands.push_back(Command::Reload(loser));
+                        for (loser, vm) in turn {
+                            // not one in the middle of something (a window of its own up, a text box typed into, a
+                            // question open): it takes the window when it next asks, and its yellow line stays until
+                            // then
+                            if !super::window_conflict::mid_use(vm) {
+                                self.commands.push_back(Command::Reload(loser));
+                            }
                         }
                     } else if entry.instance.as_ref().is_some_and(|i| {
                         self.retired

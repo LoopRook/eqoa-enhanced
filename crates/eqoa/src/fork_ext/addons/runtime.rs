@@ -476,7 +476,7 @@ impl Runtime {
             return true;
         }
         // the box that says two mods want one window: Escape closes it and nothing else happens
-        if event.down && !event.repeat && !event.synthetic && super::window_conflict::is_open() && super::window_conflict::key(event.logical) {
+        if event.down && !event.repeat && !event.synthetic && self.error.is_none() && super::window_conflict::key(event.logical) {
             return true;
         }
         // The manager key opens and closes the Mods & Addons window, with or without a mod.
@@ -1201,7 +1201,8 @@ fn render_managed(
         if !snapshot.start_menu {
             manager.profile_setup_controls(ui);
         }
-        let snapshot_start_menu = snapshot.start_menu;
+        let (snapshot_start_menu, snapshot_in_game) = (snapshot.start_menu, snapshot.in_game);
+        super::window_conflict::begin_frame();
         let mut open = plan.controls.unwrap_or(false);
         super::window_sessions::set_manager_open(open && !snapshot.start_menu);
         if open && !snapshot.start_menu {
@@ -1215,13 +1216,15 @@ fn render_managed(
         let settings = with_question_on_top(ui, || {
             let settings = dispatch_frame(ui, manager, snapshot, plan);
             // two mods wanted one window (`window_conflict`): its box, over the mods' windows
-            if super::window_conflict::is_open() {
+            // only in the world with nothing of the game's up: the button must open Mods & Addons, which cannot open
+            // over Options, the Start menu, the map or a game window, and nothing is said over login or the pregame
+            if super::window_conflict::is_open() && snapshot_in_game && !snapshot_start_menu {
                 let names: Vec<(String, String)> = manager.entries().iter().map(|e| (e.metadata.id.clone(), e.metadata.name.clone())).collect();
                 show_manager = super::window_conflict::draw(ui, &|id| name_of(&names, id));
             }
             settings
         });
-        open |= show_manager && !snapshot_start_menu;
+        open |= show_manager;
         drop(probe);
         #[cfg(test)]
         if fault == Some(RenderFault::PrepareRender) {

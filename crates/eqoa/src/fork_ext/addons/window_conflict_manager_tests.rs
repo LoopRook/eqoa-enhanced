@@ -56,3 +56,41 @@ fn two_mods_one_window_turning_the_holder_off_gives_the_loser_the_window_at_once
     assert!(manager.entries().iter().find(|e| e.metadata.id == "bb_loser").is_some_and(|e| e.enabled_intent), "no mod was turned off by the client");
     manager.shutdown();
 }
+
+#[test]
+fn a_loser_in_the_middle_of_typing_is_not_reloaded_when_the_holder_is_turned_off() {
+    super::super::window_takeover::reset_all_for_test();
+    let Some(mut gpu) = Gpu::new() else { return };
+    let scripts = Scratch::new();
+    let config = Scratch::new();
+    conflict_mod(&scripts, "aa_holder", "EQOA Dialog Window");
+    conflict_mod(&scripts, "bb_loser", "Quest Turn-in Helper");
+    let mut manager = gpu.manager(&scripts.0, Some(config.0.clone()));
+    for _ in 0..4 {
+        gpu.frame(&mut manager);
+    }
+    let vm = {
+        let entry = manager.entries.iter().find(|e| e.metadata.id == "bb_loser").unwrap();
+        super::super::native_events::bus(&entry.instance.as_ref().unwrap().host.lua).borrow().vm
+    };
+    // the player is typing into the losing mod's text box
+    super::super::input::set_text_capture_for_test(vm, true);
+    manager.queue(Command::Enable("aa_holder".into(), false));
+    for _ in 0..4 {
+        gpu.frame(&mut manager);
+    }
+    let entry = manager.entries.iter().find(|e| e.metadata.id == "bb_loser").unwrap();
+    assert!(entry.status == Status::Enabled && entry.enabled_intent, "still running");
+    assert_eq!(
+        super::super::native_events::bus(&entry.instance.as_ref().unwrap().host.lua).borrow().vm,
+        vm,
+        "not reloaded: the same machine, with what the player typed"
+    );
+    assert!(
+        !super::super::window_takeover::is_taken(super::super::window_takeover::TakeoverKind::TextDialog),
+        "it takes the window when it next asks"
+    );
+    assert!(!super::super::window_conflict::is_open(), "nobody is using the window now: nothing to say");
+    super::super::input::set_text_capture_for_test(vm, false);
+    manager.shutdown();
+}

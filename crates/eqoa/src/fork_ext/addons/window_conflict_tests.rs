@@ -139,7 +139,7 @@ fn turning_the_holder_off_clears_the_message_and_the_other_mod_takes_the_window(
     fresh();
     let (holder, rival) = two_mods();
     // the manager asks before it turns the holder off who is waiting for the window
-    assert_eq!(wc::losers_of("eqoa_dialogs"), ["turnin"]);
+    assert_eq!(wc::losers_of("eqoa_dialogs").iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(), ["turnin"]);
     assert!(wc::losers_of("turnin").is_empty(), "the loser keeps nobody from a window");
     // the production disable path of a mod (`manager::disable`)
     native_events::clear(&holder);
@@ -184,16 +184,32 @@ fn several_conflicts_are_one_box_with_a_line_each() {
     assert_eq!(wc::unmet_lines("turnin", &names).len(), 2);
 }
 
+fn draw_frame(context: &mut dear_imgui_rs::Context) -> bool {
+    wc::begin_frame();
+    let ui = context.frame();
+    let open_manager = wc::draw(ui, &names);
+    drop(context.render_legacy());
+    open_manager
+}
+
 #[test]
 fn escape_closes_the_box_and_only_the_box() {
     use winit::keyboard::SmolStr;
     fresh();
+    let mut context = h::context();
     // control: no box, Escape is not the box's
     assert!(!wc::key(&Key::Named(NamedKey::Escape)));
     let (_holder, _rival) = two_mods();
+    // the box is up but not on the screen (not yet drawn; or addon drawing stopped): Escape is not taken
+    assert!(!wc::key(&Key::Named(NamedKey::Escape)), "a box that is not drawn takes no Escape");
+    draw_frame(&mut context);
     assert!(!wc::key(&Key::Named(NamedKey::Enter)), "Enter is not taken: the chat line still opens");
     assert!(!wc::key(&Key::Character(SmolStr::new("a"))));
     assert!(wc::is_open());
+    // a frame in which it was not drawn (the world is not showing): Escape is not taken
+    wc::begin_frame();
+    assert!(!wc::key(&Key::Named(NamedKey::Escape)));
+    draw_frame(&mut context);
     assert!(wc::key(&Key::Named(NamedKey::Escape)), "Escape is taken by the box");
     assert!(!wc::is_open());
     assert!(!wc::key(&Key::Named(NamedKey::Escape)), "the next Escape is not the box's");
@@ -201,10 +217,73 @@ fn escape_closes_the_box_and_only_the_box() {
 }
 
 #[test]
+fn an_unrelated_mod_changing_does_not_bring_back_a_box_that_was_answered() {
+    fresh();
+    let (holder, rival) = two_mods();
+    wc::dismiss();
+    // an unrelated mod is turned on or off (the manager says so by id)
+    wc::changed_for("third");
+    // a zone change: every claim is let go and both mods claim again
+    window_takeover::release_all();
+    assert!(ask(&holder).0);
+    assert!(!ask(&rival).0);
+    assert!(!wc::is_open(), "control: the pair did not change, so it is not told again");
+    // a mod of the pair changes: told again
+    wc::changed_for("turnin");
+    window_takeover::release_all();
+    assert!(ask(&holder).0);
+    assert!(!ask(&rival).0);
+    assert!(wc::is_open(), "a change to one of the pair brings it back");
+    // a new session or profile forgets everything
+    wc::dismiss();
+    wc::changed();
+    window_takeover::release_all();
+    assert!(ask(&holder).0);
+    assert!(!ask(&rival).0);
+    assert!(wc::is_open());
+}
+
+#[test]
+fn a_mod_in_the_middle_of_something_is_not_reloaded() {
+    fresh();
+    let (_holder, rival) = two_mods();
+    let vm = native_events::bus(&rival.lua).borrow().vm;
+    assert!(!wc::mid_use(vm), "control: a mod with nothing up can be reloaded");
+    super::input::set_text_capture_for_test(vm, true);
+    assert!(wc::mid_use(vm), "typing into its text box");
+    super::input::set_text_capture_for_test(vm, false);
+    assert!(!wc::mid_use(vm));
+    let _s = super::window_sessions::open_client(vm, "turnin", "map", "key", serde_json::json!({}));
+    assert!(wc::mid_use(vm), "a window of its own up");
+    super::window_sessions::end_vm(vm);
+    assert!(!wc::mid_use(vm));
+}
+
+#[test]
+fn a_long_name_and_many_conflicts_keep_the_box_short() {
+    fresh();
+    let long = |_: &str| "A".repeat(100);
+    let (_holder, _rival) = two_mods();
+    let line = wc::box_lines(&long).remove(0);
+    assert!(line.chars().count() < 100, "{line}");
+    assert!(line.contains('\u{2026}'));
+    // seven windows at once: five lines and a count
+    let a = mod_with("a", &[]);
+    let b = mod_with("b", &[]);
+    for kind in ["loot", "merchant", "bank", "map", "trade", "duel"] {
+        assert!(a.lua.load(format!("return eqoa.windows.takeover('{kind}', {{scope = 'all'}})")).eval::<bool>().unwrap());
+        assert!(!b.lua.load(format!("local ok = eqoa.windows.takeover('{kind}', {{scope = 'all'}}); return ok == true")).eval::<bool>().unwrap());
+    }
+    let lines = wc::box_lines(&names);
+    assert_eq!(lines.len(), 6, "{lines:?}");
+    assert!(lines[5].starts_with("and 2 more"), "{lines:?}");
+}
+
+#[test]
 fn the_box_is_drawn_with_both_buttons_over_play_and_not_when_nothing_conflicts() {
     fresh();
     let mut context = h::context();
-    let mut draw = |context: &mut dear_imgui_rs::Context| {
+    let draw = |context: &mut dear_imgui_rs::Context| {
         let ui = context.frame();
         let open_manager = wc::draw(ui, &names);
         drop(context.render_legacy());

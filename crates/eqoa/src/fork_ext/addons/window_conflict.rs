@@ -39,6 +39,8 @@ struct State {
     conflicts: Vec<Conflict>,
     /// Pairs the box has already been shown for since something last changed.
     announced: HashSet<PairKey>,
+    /// Whether the box was drawn in the frame just rendered: only a drawn box takes Escape.
+    drawn: bool,
     /// What the box shows now: the conflicts it was raised for, until OK, Escape, or they no longer stand.
     boxed: Vec<Conflict>,
 }
@@ -100,9 +102,19 @@ pub(crate) fn is_open() -> bool {
     live(|s| !s.boxed.is_empty())
 }
 
-/// Something changed (a mod turned on or off, mods reloaded or rescanned): every pair may be told again.
+/// A new session or profile, or mods rescanned: every pair may be told again.
 pub(crate) fn changed() {
     STATE.with(|s| s.borrow_mut().announced.clear());
+}
+
+/// Mod `id` was turned on or off or reloaded: the pairs it is in may be told again; other pairs are not.
+pub(crate) fn changed_for(id: &str) {
+    STATE.with(|s| s.borrow_mut().announced.retain(|(_, holder, loser)| holder != id && loser != id));
+}
+
+/// A frame is about to be drawn: the box has not been drawn in it yet.
+pub(crate) fn begin_frame() {
+    STATE.with(|s| s.borrow_mut().drawn = false);
 }
 
 /// A mod's machine ended (turned off, reloaded, failed): every conflict it was in, as holder or as loser, is over.
@@ -114,34 +126,59 @@ pub(crate) fn clear_vm(vm: u64) {
     });
 }
 
-/// The mods (by id, each once) that were refused a window `holder_id` has now: when that mod is turned off, these are
-/// the ones that get their turn.
-pub(crate) fn losers_of(holder_id: &str) -> Vec<String> {
+/// The mods (by id and machine, each once) that were refused a window `holder_id` has now: when that mod is turned off,
+/// these are the ones that get their turn.
+pub(crate) fn losers_of(holder_id: &str) -> Vec<(String, u64)> {
     live(|s| {
-        let mut out: Vec<String> = Vec::new();
+        let mut out: Vec<(String, u64)> = Vec::new();
         for c in s.conflicts.iter().filter(|c| c.holder_id == holder_id) {
-            if !out.contains(&c.loser_id) {
-                out.push(c.loser_id.clone());
+            if !out.iter().any(|(id, _)| *id == c.loser_id) {
+                out.push((c.loser_id.clone(), c.loser_vm));
             }
         }
         out
     })
 }
 
+/// A reload would cost the mod something the player is in the middle of: a window of its own up, a pass to the
+/// game's window waiting, its text box being typed into, or its question to the player open.
+pub(crate) fn mid_use(vm: u64) -> bool {
+    super::window_sessions::vm_busy(vm) || super::input::vm_has_text_capture(vm) || super::confirm::current_for(vm).is_some()
+}
+
+/// At most this many conflicts are listed in the box (the rest are counted), and a name this long is cut short.
+const MAX_LINES: usize = 5;
+const MAX_NAME: usize = 32;
+
+fn short(name: String) -> String {
+    if name.chars().count() <= MAX_NAME {
+        return name;
+    }
+    let mut cut: String = name.chars().take(MAX_NAME - 1).collect();
+    cut.push('\u{2026}');
+    cut
+}
+
 /// The box's lines, one per conflict, by display name.
 pub(crate) fn box_lines(name_of: &dyn Fn(&str) -> String) -> Vec<String> {
     live(|s| {
-        s.boxed
+        let mut lines: Vec<String> = s
+            .boxed
             .iter()
+            .take(MAX_LINES)
             .map(|c| {
                 format!(
                     "{}: {} is using it, so {}'s is not shown.",
                     window_name(c.kind),
-                    name_of(&c.holder_id),
-                    name_of(&c.loser_id)
+                    short(name_of(&c.holder_id)),
+                    short(name_of(&c.loser_id))
                 )
             })
-            .collect()
+            .collect();
+        if s.boxed.len() > MAX_LINES {
+            lines.push(format!("and {} more (see Mods & Addons).", s.boxed.len() - MAX_LINES));
+        }
+        lines
     })
 }
 
@@ -161,11 +198,12 @@ pub(crate) fn dismiss() {
     STATE.with(|s| s.borrow_mut().boxed.clear());
 }
 
-/// A key the player pressed while the box is up; true when the box took it. Only Escape: it closes the box and
-/// nothing else happens (every other key is the game's or the mods').
+/// A key the player pressed while the box is up; true when the box took it. Only Escape, and only while the box is
+/// on the screen (drawn in the last frame): it closes the box and nothing else happens (every other key is the game's
+/// or the mods').
 pub(crate) fn key(key: &winit::keyboard::Key) -> bool {
     use winit::keyboard::{Key, NamedKey};
-    if !matches!(key, Key::Named(NamedKey::Escape)) || !is_open() {
+    if !matches!(key, Key::Named(NamedKey::Escape)) || !is_open() || !STATE.with(|s| s.borrow().drawn) {
         return false;
     }
     dismiss();
@@ -178,13 +216,14 @@ pub(crate) fn draw(ui: &Ui, name_of: &dyn Fn(&str) -> String) -> bool {
     if lines.is_empty() {
         return false;
     }
+    STATE.with(|s| s.borrow_mut().drawn = true);
     let [w, h] = ui.io().display_size();
     let width = (w * 0.6).clamp(280.0, 460.0);
     let (mut ok, mut open_manager) = (false, false);
     ui.window(WINDOW)
         // in front of every mod window, every frame it is shown (an earlier-drawn window never covers it)
         .focused(true)
-        .position([(w - width) * 0.5, h * 0.3], Condition::Always)
+        .position([(w - width) * 0.5, h * 0.12], Condition::Always)
         .size([width, 0.0], Condition::Always)
         .flags(WindowFlags::NO_COLLAPSE | WindowFlags::NO_MOVE | WindowFlags::NO_SAVED_SETTINGS | WindowFlags::ALWAYS_AUTO_RESIZE)
         .build(|| {

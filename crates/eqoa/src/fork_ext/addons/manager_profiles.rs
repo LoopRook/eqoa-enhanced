@@ -170,6 +170,8 @@ impl Manager {
                 false
             }
         };
+        // a new session: the message about two mods and one window may come again
+        super::window_conflict::changed();
         let mut entries = std::mem::take(&mut self.entries);
         for entry in &mut entries {
             self.disable(entry, false, false, Disposition::Retain);
@@ -352,6 +354,7 @@ impl Manager {
         data: Document,
         context: &mut Context,
     ) {
+        super::window_conflict::changed();
         let mut entries = std::mem::take(&mut self.entries);
         for entry in &mut entries {
             self.disable(entry, false, false, Disposition::Retire);
