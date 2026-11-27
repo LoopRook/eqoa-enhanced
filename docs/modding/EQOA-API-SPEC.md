@@ -1380,7 +1380,7 @@ All of these are functions of `eqoa.actions`, need their capability, and return 
 
 | Function | What it does |
 |---|---|
-| `eqoa.actions.target(entity)` | *Provisional.* Targets an entity (`EntityRef` or entity id); `nil` clears the target. `not_found` if it cannot be targeted now. |
+| `eqoa.actions.target(entity)` | Targets an entity (`EntityRef` or entity id); `nil` clears the target. `not_found` if it cannot be targeted now. |
 | `eqoa.actions.cycle_target(filter:string?)` | *Provisional.* The game's next-target key. `"group"` cycles group members, `"corpse"` cycles corpses in view; with no filter (or `"any"`, `"nearby"`) it cycles as the key does. The game has no hostile or friendly cycling: `"hostile"` and `"friendly"` are refused with `unsupported`; any other filter is `invalid_argument`. |
 | `eqoa.actions.assist()`, `eqoa.actions.target_target()` | *Provisional: `eqoa.actions.target_target`.* Targets your target's target (the game's Assist). The two names are the same action; a `target_target` call needs `eqoa.actions.target_target`, an `assist` call `eqoa.actions.assist`. `refused` if there is no target to assist. |
 | `eqoa.actions.interact()` | *Provisional.* The game's interact with the current target: talks to an NPC, opens a corpse, as the player's key does. |

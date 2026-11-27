@@ -67,7 +67,8 @@
     "eqoa.actions.auction_sell",
     "eqoa.mods.send",
     "eqoa.options.toggle",
-    "eqoa.options.get"
+    "eqoa.options.get",
+    "eqoa.actions.target"
   ],
   "commands": [
     "open"

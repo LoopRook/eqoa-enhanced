@@ -352,6 +352,7 @@ end
 eqoa.events.on("merchant.changed", function(e)
     failed(pcall(function()
         B.tick_leaving()
+        if e.data and e.data.after == nil then B.restore_target("merchant") end
         T.on_merchant(e.data) -- before the window's own listener: a helper's talk is still pending then
         if e.data and e.data.cause == "open" and eqoa.merchant.get() ~= nil then B.learn_native_open("merchant") end
     end))
@@ -359,6 +360,7 @@ end)
 eqoa.events.on("bank.changed", function(e)
     failed(pcall(function()
         B.tick_leaving()
+        if e.data and e.data.after and not e.data.after.open then B.restore_target("bank") end
         T.on_bank(e.data)
         HP.on_bank_changed(e.data) -- an item taken out of the bank is no longer marked to bank
         local b = eqoa.bank.get()
@@ -390,6 +392,7 @@ eqoa.events.on("player.changed", function(e)
         -- asked on a new world or login, when the update names another character, and once a second besides
         T.poll() -- the claim on the merchant and bank windows follows the option (once a second)
         B.tick_leaving()
+        B.tick_talk_targets()
         local after = e.data and e.data.after
         local now = os.clock()
         if B.char_dirty or now - B.char_checked >= 1.0 or (after and after.name and after.name ~= B.character) then

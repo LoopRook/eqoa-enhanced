@@ -4,13 +4,13 @@
  "rule": "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
  "counts": {
   "total": 2604,
-  "proven": 893,
-  "provisional": 1344,
+  "proven": 894,
+  "provisional": 1343,
   "compat": 367,
   "by_kind": {
    "action": {
-    "proven": 87,
-    "provisional": 46,
+    "proven": 88,
+    "provisional": 45,
     "compat": 0
    },
    "compat": {
@@ -179,7 +179,6 @@
   "eqoa.actions.status",
   "eqoa.actions.stop",
   "eqoa.actions.swap_items",
-  "eqoa.actions.target",
   "eqoa.actions.target_target",
   "eqoa.actions.use_hotbar",
   "eqoa.actions.weapon_set",

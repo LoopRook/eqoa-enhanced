@@ -951,6 +951,34 @@ function M.open_loot_corpse(after_kind, corpse_id, keep_target)
     return req, nil
 end
 
+-- The talk a helper starts targets the NPC (the game talks to its target). The client puts the player's earlier target back, but
+-- with none it leaves the NPC targeted: this mod clears it again when the conversation is over (see `restore_target`).
+M.talk_target = {}
+
+local function player_target()
+    local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
+    local id = pl and pl.target_id
+    if id == nil or id == 0 or id == 4294967295 then return nil end
+    return id
+end
+
+-- The conversation is over (the merchant closed, the bank's session ended): a target the player did not have before the
+-- helper's talk, and still the NPC it talked to, is cleared. Another target (the player chose one) is left alone.
+function M.restore_target(kind)
+    local r = M.talk_target[kind]
+    if not r then return end
+    M.talk_target[kind] = nil
+    if r.prev == nil and r.npc ~= nil and player_target() == r.npc then eqoa.actions.target(nil) end
+end
+
+-- A talk that never opened anything is let go after a while the same way.
+function M.tick_talk_targets()
+    local now = os.clock()
+    for kind, r in pairs(M.talk_target) do
+        if now - r.at > 20 then M.restore_target(kind) end
+    end
+end
+
 function M.open_talk_npc(talk_kind, verb, after_fn)
     -- one open at a time, as for corpses: a second talk while the first is unanswered would take over the
     -- first's answer (its item unsold, the second sold in its place)
@@ -962,6 +990,8 @@ function M.open_talk_npc(talk_kind, verb, after_fn)
     if M.far_gate(talk_kind, verb) then return nil, {message = TOO_FAR[talk_kind]} end
     if not M.ensure_takeover(talk_kind) then return nil, {message = "window busy"} end
     M.helper_hold[talk_kind] = true
+    local npc = M.nearby_npc(talk_kind)
+    M.talk_target[talk_kind] = {prev = player_target(), npc = npc and npc.id or nil, at = os.clock()}
     local req, err = eqoa.actions.talk(nil, {kind = talk_kind})
     if not req then
         release_takeover(talk_kind)

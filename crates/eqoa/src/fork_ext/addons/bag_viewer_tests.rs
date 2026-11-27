@@ -6309,22 +6309,70 @@ fn trade_pass_wait_fallback_control_body() {
 // The owner's play on build 4936f2c0 (2026-11-27): the helpers change his target; the "Auction window is a mod" line stays;
 // the tooltip's long line runs off the edge. (The Lua-only checks are `bag_owner1127h_tests.rs`.)
 
-#[test]
-fn owner_h_the_tooltip_of_a_long_class_line_is_drawn_wrapped() {
-    big_stack(owner_h_tooltip_body)
-}
-fn owner_h_tooltip_body() {
-    let Some(mut bv) = trade_setup("owner h tooltip") else { return };
-    // a piece of gear every class can wear: "All classes"... and one for many: a class mask of the first twelve
-    bv.play.bags_added(&serde_json::json!({"name":"Fists of Might","id":900500,"key":61,"wear":12,"class_mask":4095,"level":59,"max_hp":11000,"cur_hp":11000,"value":4792,"icon":4001,
-        "stats":[[0,40],[8,75]],"desc":"These knuckles are strong and are able to cause massive amounts of damage."}));
+fn owner_h_banker_setup(name: &str) -> Option<Bv> {
+    let mut bv = trade_setup(name)?;
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9003, "Banker Bo", 0x80 | 2, 1, [6.0, 0.0, 0.0]);
+    bv.lua().load("require('helpers').bank['900007'] = true; require('bags').scan_reset()").exec().unwrap();
     bv.open();
-    let n: usize = bv.eval("(function() for i, e in ipairs(require('bags').grid.items) do if e.item.name == 'Fists of Might' then return i end end end)()");
-    bv.point(bv.slot(n));
-    bv.frames(3);
-    let (card, drawn): (usize, usize) = bv.eval("(function() local B = require('bags') local it for _, e in ipairs(B.grid.items) do if e.item.name == 'Fists of Might' then it = e.item end end return #B.card(it), #(B.last_card or {}) end)()");
-    assert!(drawn > card, "the long class line is drawn as several lines ({card} lines in the card, {drawn} drawn)");
-    bv.clean();
+    Some(bv)
+}
+
+/// One pass of Sell junk at a merchant (declined, so the pass ends), then the client's steps until it has settled; the
+/// target is what is left.
+fn owner_h_target_after_sell_junk(prev_target: Option<u32>) -> u32 {
+    let Some(mut bv) = owner_setup("owner h target merchant", false) else { return u32::MAX };
+    if let Some(id) = prev_target {
+        bv.play.bags_spawn_npc(id, "Town Guard", 0x80, 1, [3.0, 0.0, 3.0]);
+        bv.play.bags_target(id);
+    } else {
+        bv.play.bags_target(0); // (the fixture starts with its Moss Snake targeted)
+    }
+    bv.open();
+    owner_decline_junk_sale(&mut bv);
+    for _ in 0..8 {
+        bv.play.bags_broker_tick();
+        bv.frames(2);
+    }
+    let target = bv.play.target;
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+    target
+}
+
+#[test]
+fn owner_h_sell_junk_leaves_a_player_with_no_target_with_no_target() {
+    // (the client's "no target" is 0 or its all-ones clear value)
+    big_stack(|| assert!(matches!(owner_h_target_after_sell_junk(None), 0 | u32::MAX), "nothing was targeted before the pass: nothing is after it"));
+}
+
+#[test]
+fn owner_h_sell_junk_puts_the_players_own_target_back() {
+    big_stack(|| assert_eq!(owner_h_target_after_sell_junk(Some(9100)), 9100, "the target the player had is the one left"));
+}
+
+#[test]
+fn owner_h_bank_marked_leaves_a_player_with_no_target_with_no_target() {
+    big_stack(owner_h_bank_target_body)
+}
+fn owner_h_bank_target_body() {
+    let Some(mut bv) = owner_h_banker_setup("owner h target bank") else { return };
+    bv.play.bags_target(0); // (the fixture starts with its Moss Snake targeted)
+    let (x, y, _) = bv.action_hit("Bank marked").expect("the Bank marked button with a banker near");
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    bv.play.bags_bank_packet();
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_bank_state(), 2, "the deposit is out");
+    bv.play.bags_bank_deposit_confirm(17, 900007, "Rat Pelt", 3);
+    for _ in 0..10 {
+        bv.play.bags_broker_tick();
+        bv.frames(2);
+    }
+    assert!(matches!(bv.play.target, 0 | u32::MAX), "nothing was targeted before the pass: nothing is after it (target {})", bv.play.target);
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
 }
 
 #[test]
@@ -6348,3 +6396,20 @@ fn owner_h_auction_line_body() {
     bv.clean();
 }
 
+#[test]
+fn owner_h_the_tooltip_of_a_long_class_line_is_drawn_wrapped() {
+    big_stack(owner_h_tooltip_body)
+}
+fn owner_h_tooltip_body() {
+    let Some(mut bv) = trade_setup("owner h tooltip") else { return };
+    // a piece of gear every class can wear: "All classes"... and one for many: a class mask of the first twelve
+    bv.play.bags_added(&serde_json::json!({"name":"Fists of Might","id":900500,"key":61,"wear":12,"class_mask":4095,"level":59,"max_hp":11000,"cur_hp":11000,"value":4792,"icon":4001,
+        "stats":[[0,40],[8,75]],"desc":"These knuckles are strong and are able to cause massive amounts of damage."}));
+    bv.open();
+    let n: usize = bv.eval("(function() for i, e in ipairs(require('bags').grid.items) do if e.item.name == 'Fists of Might' then return i end end end)()");
+    bv.point(bv.slot(n));
+    bv.frames(3);
+    let (card, drawn): (usize, usize) = bv.eval("(function() local B = require('bags') local it for _, e in ipairs(B.grid.items) do if e.item.name == 'Fists of Might' then it = e.item end end return #B.card(it), #(B.last_card or {}) end)()");
+    assert!(drawn > card, "the long class line is drawn as several lines ({card} lines in the card, {drawn} drawn)");
+    bv.clean();
+}
