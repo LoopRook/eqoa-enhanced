@@ -1461,6 +1461,23 @@ fn a6_open_chat_line_opens_the_line_with_the_text_and_sends_nothing() {
     let d = ws::get(vm, "chat_entry").expect("the mod has a session").data;
     assert_eq!(d["text"], "/tell Ann ");
     assert!(sent(&mut p).is_empty(), "nothing was sent");
+    // never over a line already open: a mod's own line with a draft in it stays as it is
+    ws::reset_for_test();
+    ws::open_client(vm, "a6_mod", "chat_entry", "key", json!({"text": "half a mess", "channel": "say", "links": []}));
+    assert!(matches!(dispatch(&mut p, &A6Action::OpenChatLine { text: "x".into() }), DispatchOutcome::Refused { code: "busy", .. }));
+    step(&mut p, &h);
+    assert_eq!(ws::get(vm, "chat_entry").unwrap().data["text"], "half a mess", "the draft is untouched");
+    assert_eq!(p.mode, 0, "and the game's box did not open");
+    // nor over the game's own line
+    ws::reset_for_test();
+    p.chat_key("", true);
+    assert!(matches!(dispatch(&mut p, &A6Action::OpenChatLine { text: "x".into() }), DispatchOutcome::Refused { code: "busy", .. }));
+    p.mode = 0;
+    p.edit.clear();
+    // nor over a mod's Start menu (the game's mode stays 0 under it)
+    ws::open_client(vm, "a6_mod", "start_menu", "key", json!({"entries": []}));
+    assert!(matches!(dispatch(&mut p, &A6Action::OpenChatLine { text: "x".into() }), DispatchOutcome::Refused { code: "busy", .. }));
+    assert_eq!(p.mode, 0, "and the game's box did not open");
     // refused where the key opens nothing
     ws::reset_for_test();
     p.mode = 5;

@@ -1475,7 +1475,24 @@ fn a6_open_chat_line_checks_its_text_and_needs_its_capability() {
     fresh();
     let none = host_with("none", &["eqoa.actions.chat", "eqoa.actions.command"], &[]);
     none.execute("local r, e = eqoa.actions.open_chat_line('/tell Ann '); assert(r == nil and e.code == 'permission_denied', e and e.code)").unwrap();
-    let h = host_with("opener", &["eqoa.actions.open_chat_line"], &[]);
+    // the line is judged by what would be sent (spec section 8, rule 4), though the player sends it: a slash line needs
+    // `command`, any other `chat`, an empty one neither
+    let only = host_with("only", &["eqoa.actions.open_chat_line"], &[]);
+    only.execute(
+        r#"
+        local r, e = eqoa.actions.open_chat_line('/tell Ann '); assert(r == nil and e.code == 'permission_denied', e and e.code)
+        local r2, e2 = eqoa.actions.open_chat_line('/quit'); assert(r2 == nil and e2.code == 'permission_denied', e2 and e2.code)
+        local r3, e3 = eqoa.actions.open_chat_line('hello'); assert(r3 == nil and e3.code == 'permission_denied', e3 and e3.code)
+        assert(eqoa.actions.open_chat_line(''))
+    "#,
+    )
+    .unwrap();
+    let chat_only = host_with("chat_only", &["eqoa.actions.open_chat_line", "eqoa.actions.chat"], &[]);
+    chat_only
+        .execute("local r, e = eqoa.actions.open_chat_line('/quit'); assert(r == nil and e.code == 'permission_denied', 'chat does not cover a slash line'); assert(eqoa.actions.open_chat_line('hello'))")
+        .unwrap();
+    action_broker::reset_all_for_test();
+    let h = host_with("opener", &["eqoa.actions.open_chat_line", "eqoa.actions.chat", "eqoa.actions.command"], &[]);
     h.execute(
         r#"
         local function refused(text, code)
