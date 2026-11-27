@@ -639,9 +639,15 @@ eqoa.events.on("render", function()
         return
     end
     local f = eqoa.hud.frame()
-    local k = math.min(f.scale_x, f.scale_y)
+    -- HUD Scale multiplies the box the player sized: `kf` is window pixels per saved frame pixel (the window's), `k` that
+    -- times the scale; drawing, text, hit areas and the claim all use `k`. What is saved stays in frame units at scale 1.
+    local hs = eqoa.hud.layout().hud_scale
+    if type(hs) ~= 'number' or hs ~= hs or hs <= 0 then hs = 1 end
+    local kf = math.min(f.scale_x, f.scale_y)
+    local k = kf * hs
     local dw, dh = ui.GetDisplaySize()
-    if k <= 0 or dw <= 0 then return end
+    if kf <= 0 or dw <= 0 then return end
+    state.k = k -- read by the mod's tests: window pixels per saved frame pixel
     -- the client lets a text capture lapse after a second unless it is asked for again: every frame it is wanted
     local want = state.session ~= nil or state.rename ~= nil
     if want then
@@ -662,8 +668,15 @@ eqoa.events.on("render", function()
         -- a line wrapped to more rows grows the window upward: its bottom edge stays where it was
         local extra = state.session and (entry_h - 40) or 0
         local ly = state.ly and (state.ly - extra) or (448 - Ht - 24)
-        x0 = clamp(f.offset_x + state.lx * f.scale_x, 0, math.max(0, dw - W * k))
-        y0 = clamp(f.offset_y + ly * f.scale_y, 0, math.max(0, dh - Ht * k))
+        -- the box grows and shrinks about the corner of the screen it sits nearest (the game's own pieces grow about a
+        -- fixed corner and are kept on screen, hudlayout.rs scale/clamp; its place is the nearest side, Place::of): a
+        -- box at the left and bottom keeps its distance from them, one dragged to the top right keeps to that corner.
+        -- The corner is chosen from the box as saved (scale 1) and held while it is dragged, so it never flips.
+        local bx, by = f.offset_x + state.lx * f.scale_x, f.offset_y + ly * f.scale_y
+        local pv = state.drag and state.pivot
+        if not pv then pv = { r = bx + W * kf / 2 > dw / 2, b = by + Ht * kf / 2 > dh / 2 }; state.pivot = pv end
+        x0 = clamp(pv.r and (bx + W * kf - W * k) or bx, 0, math.max(0, dw - W * k))
+        y0 = clamp(pv.b and (by + Ht * kf - Ht * k) or by, 0, math.max(0, dh - Ht * k))
         state.eff_ly = ly + (state.ly and extra or 0)
         state.rect = { x = x0, y = y0, w = W * k, h = Ht * k }
     end
@@ -712,6 +725,10 @@ eqoa.events.on("render", function()
             else
                 state.w = clamp(d.w + dx / k, MIN_W, MAX_W)
                 state.h = clamp(d.h + dy / k, MIN_H, MAX_H)
+                -- a box held at its right or bottom keeps its far edge on the corner it grows about, so its saved place moves by what the scale adds (nothing at 100%)
+                local pv = state.pivot
+                if pv and pv.r then state.lx = d.lx + (state.w - d.w) * (k - kf) / f.scale_x end
+                if pv and pv.b and state.ly then state.ly = d.ly + (state.h - d.h) * (k - kf) / f.scale_y end
             end
             layout()
         elseif d.seen or d.age > 5 then

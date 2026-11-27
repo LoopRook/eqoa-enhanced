@@ -90,7 +90,10 @@ local function draw()
     local w,h=ui.GetDisplaySize()
     local layout=eqoa.hud.layout();local m=layout.minimap
     -- sizes are the native search's, in HUD frame pixels, scaled as the HUD is: k window pixels a frame pixel
+    -- under the minimap the controls follow the minimap piece (HUD Scale and its own size); on the game's full map they
+    -- follow what that page is laid out in, the window per HUD frame pixel, which neither HUD Scale nor the piece change
     local k=math.max(m.height/112,0.5)
+    if map.open then local f=eqoa.hud.frame();k=math.max(math.min(f.scale_x,f.scale_y),0.5) end
     local anchor=map.search_anchor
     if map.open and not anchor then return end
     local bw=mini and 20*k or 100*k
