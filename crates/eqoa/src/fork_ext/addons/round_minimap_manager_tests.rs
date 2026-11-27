@@ -1519,3 +1519,203 @@ fn addon_perf_line_splits_each_addons_lua_from_its_native_calls_body() {
     rm.manager.shutdown();
     super::super::addon_perf::force_for_test(false);
 }
+
+// ---- the owner's test 2026-11-27: the Stats Box's keys ---------------------------------------------------------------------
+
+/// What one press of physical key `name` does, as the viewer does it: the mod runtime hears the raw key (`input.key`, the mod's
+/// own key fires if the game does not have the name), and the game sees the key its bindings send it on as (`KeyEdge`), where F4
+/// is the Stat Window and F1 the Controls page.
+#[derive(Default)]
+struct KeyProbe {
+    edge: crate::binds::KeyEdge,
+}
+/// What a press did: the box's own switch changed, the game's own Stat Window setting changed, the Controls page was asked.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+struct Pressed {
+    mod_box: bool,
+    game_window: bool,
+    controls: bool,
+}
+impl KeyProbe {
+    fn press(&mut self, rm: &mut Rm, name: &str, pc: bool) -> Pressed {
+        let box_now = || super::super::options::get_toggle("eqoa_stats_box", "stats_box").unwrap_or(false);
+        let (box_before, window_before) = (box_now(), crate::settings::stat_window());
+        super::super::native_core::CORE.with(|c| {
+            c.borrow_mut().emit("input.key", serde_json::json!({"key": name, "combo": name, "down": true, "repeat": false, "synthetic": false, "text": ""}))
+        });
+        self.edge.pc_mode = pc;
+        let sent = crate::settings::with_binds(|b| self.edge.key(name, true, false, false, b));
+        let mut controls = false;
+        if let Some(crate::binds::Sent::Key(to)) = &sent {
+            match to.as_str() {
+                "f4" => rm.play.toggle_stat_window(),
+                "f1" => controls = true,
+                _ => {}
+            }
+        }
+        rm.frames(3);
+        self.edge.key(name, false, false, false, &crate::settings::binds());
+        Pressed { mod_box: box_now() != box_before, game_window: crate::settings::stat_window() != window_before, controls }
+    }
+}
+
+/// The Controls page's own capture, as the page runs it for a row given a key: the fork's hook first (a mod on the key, or a
+/// mod's row), else upstream's rule for two game rows.
+fn give_key(row: usize, key: &str, pc: bool) -> Option<String> {
+    let mut capture = Some(crate::bindpage::Column::Keyboard);
+    let mut note = None;
+    let mut cues = Vec::new();
+    if !crate::fork_ext::bindpage::capture_key(&mut capture, &mut note, row, key, &mut cues) && row < crate::binds::ROWS.len() {
+        let mut b = crate::settings::binds();
+        b.bind_key_profile(row, key, pc);
+        crate::settings::set_binds(b);
+        note = Some(format!("{}: {key}", crate::binds::ROWS[row].id));
+    }
+    note
+}
+
+/// Owner's test 2026-11-27 (Stats Box keys). With the mod on, the game's Stat Window key (F4) and the mod's own key (once the
+/// player gives it one) each open and close the mod's box once, the game's window is never touched, and the two rows hold
+/// different keys (F1 and F4) as the player gave them; giving one row the other's key is the Controls page's rule for two rows
+/// (the keys swap, a row left with no key says so), and each row then still does its own thing. With the mod off the game's key
+/// is the game's and the mod's key does nothing, in either interface.
+#[test]
+fn owner1127a_stats_box_keys_each_flip_the_box_once_and_the_game_window_only_with_the_mod_off() {
+    big_stack(owner1127a_stats_box_keys_body)
+}
+fn owner1127a_stats_box_keys_body() {
+    use crate::binds::row_named;
+    for pc in [true, false] {
+        super::super::options::reset_in_memory();
+        crate::fork_ext::bindpage::reset_in_memory();
+        let Some(mut rm) = Rm::with(|p| p == "eqoa_stats_box", 0) else { return };
+        crate::settings::set_ui_mode(pc).unwrap();
+        rm.frames(6);
+        let note = if pc { "PC interface" } else { "controller interface" };
+        let (mod_row, stat, controls) = (crate::binds::ROWS.len(), row_named("stat_window").unwrap(), row_named("controls").unwrap());
+        let mut probe = KeyProbe::default();
+        let only_box = Pressed { mod_box: true, game_window: false, controls: false };
+        let key_of = |row: usize| crate::settings::binds().profile_key(row, pc).map(str::to_string);
+        assert_eq!(crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle").as_deref(), Some(""), "{note}: the mod's own key is unbound by default");
+        // the mod on, its own key unbound: the game's key (F4) works the box, and F1 is still the Controls page's
+        assert_eq!(probe.press(&mut rm, "f4", pc), only_box, "{note}: F4 flips the box, not the game's window");
+        assert_eq!(probe.press(&mut rm, "f4", pc), only_box, "{note}: and again");
+        assert_eq!(probe.press(&mut rm, "f1", pc), Pressed { mod_box: false, game_window: false, controls: true }, "{note}: F1 is Controls'");
+        // the player gives the mod's row F1 (Controls' key): Controls is left with none, and the page says so
+        let said = give_key(mod_row, "f1", pc).unwrap_or_default();
+        assert!(said.contains("Toggle Stats Box: F1") && said.contains("Controls has no key now"), "{note}: {said}");
+        assert_eq!((key_of(stat).as_deref(), key_of(controls).as_deref()), (Some("f4"), Some("")), "{note}: the rows hold F4 and nothing");
+        assert_eq!(probe.press(&mut rm, "f1", pc), only_box, "{note}: the mod's F1 flips the box once");
+        assert_eq!(probe.press(&mut rm, "f4", pc), only_box, "{note}: the game's F4 flips the box once, with the mod's row on F1");
+        // the mod's row given the game's key swaps (the page's rule): the Stat Window row takes F1, each key still flips the box once
+        let said = give_key(mod_row, "f4", pc).unwrap_or_default();
+        assert!(said.contains("Toggle Stats Box: F4") && said.contains("Stat Window: F1"), "{note}: the swap is said: {said}");
+        assert_eq!(crate::fork_ext::bindpage::get_key("eqoa_stats_box", "toggle").as_deref(), Some("f4"));
+        assert_eq!(key_of(stat).as_deref(), Some("f1"));
+        assert_eq!(probe.press(&mut rm, "f4", pc), only_box, "{note}: F4, now the mod's row's");
+        assert_eq!(probe.press(&mut rm, "f1", pc), only_box, "{note}: F1, now the Stat Window row's, asks the box through the game's key");
+        // and the other way: the Stat Window row given F4 back swaps again; the mod's row has F1
+        let said = give_key(stat, "f4", pc).unwrap_or_default();
+        assert!(said.contains("Stat Window: F4") && said.contains("Toggle Stats Box: F1"), "{note}: {said}");
+        assert_eq!(probe.press(&mut rm, "f1", pc), only_box, "{note}: the mod's F1");
+        assert_eq!(probe.press(&mut rm, "f4", pc), only_box, "{note}: the game's F4");
+        // the mod off: F4 is the game's (it turns the game's own window), and the mod's F1 does nothing at all
+        rm.manager.queue(Command::Enable("eqoa_stats_box".into(), false));
+        rm.frames(4);
+        assert!(!rm.manager.is_hud_element_hidden("stat_window"), "{note}: the mod off lets go of the Stat Window");
+        assert_eq!(probe.press(&mut rm, "f4", pc), Pressed { mod_box: false, game_window: true, controls: false }, "{note}: F4 is the game's: its window turns");
+        assert_eq!(probe.press(&mut rm, "f1", pc), Pressed { mod_box: false, game_window: false, controls: false }, "{note}: the mod's own key does nothing, and does not open the game's window");
+        rm.manager.shutdown();
+    }
+    crate::settings::testing::reset(false);
+}
+
+/// Owner's test 2026-11-27: the Enhanced page's "Stats Box" row set to On went back to Off. The row set to On (as the Options
+/// page does it: the fork's `change`, then `set_client`) stays On, the mod keeps running, and after leaving the page and after a
+/// restart (the mod stopped, the in-memory options forgotten, a new manager on the same config) it is still On and the mod is
+/// running and holding the Stat Window. Control: the box is off before and the row reads Off.
+#[test]
+fn owner1127a_stats_box_row_set_to_on_stays_on_and_the_mod_keeps_running() {
+    big_stack(owner1127a_stats_box_row_body)
+}
+fn owner1127a_stats_box_row_body() {
+    for pc in [true, false] {
+        super::super::options::reset_in_memory();
+        crate::fork_ext::bindpage::reset_in_memory();
+        let Some(mut rm) = Rm::with(|p| p == "eqoa_stats_box" || p == "eqoa_target_of_target" || p == "eqoa_mana_bars", 0) else { return };
+        crate::settings::set_ui_mode(pc).unwrap();
+        rm.frames(6);
+        let note = if pc { "PC interface" } else { "controller interface" };
+        let running = |rm: &Rm| rm.manager.entries.iter().filter(|e| e.metadata.id == "eqoa_stats_box").all(|e| e.status == Status::Enabled) && rm.manager.entries.iter().any(|e| e.metadata.id == "eqoa_stats_box");
+        let row = || super::super::options::value_by_item(2000);
+        let box_on = |rm: &Rm| lua(&rm.manager, "eqoa_stats_box").load("return eqoa.options.get('stats_box') == true").eval::<bool>().unwrap();
+        assert!(running(&rm), "{note}: the mod runs: {:?}", rm.manager.diagnostics());
+        assert_eq!(row(), Some(false), "{note}: control: the row reads Off at first");
+        // the player sets the row to On
+        let mut c = crate::settings::client();
+        let _ = &mut c; // the page's step on the row is `fork_options::change`, which is `toggle_by_item` for a mod's row
+        assert!(super::super::options::toggle_by_item(2000), "{note}: the row takes the step");
+        crate::settings::set_client(c);
+        rm.frames(4);
+        assert_eq!((row(), box_on(&rm)), (Some(true), true), "{note}: the row is On and the mod sees it");
+        // leaving the page and playing on: frames, a Settings save, the other rows still working
+        for _ in 0..3 {
+            crate::settings::set_client(crate::settings::client());
+            rm.frames(5);
+        }
+        assert_eq!((row(), box_on(&rm), running(&rm)), (Some(true), true, true), "{note}: still On after leaving the page: {:?}", rm.manager.diagnostics());
+        assert!(rm.manager.is_hud_element_hidden("stat_window"), "{note}: the mod holds the game's Stat Window");
+        // a restart: the mod stopped (its settings flushed), the options forgotten, a new manager on the same folders
+        rm.manager.shutdown();
+        super::super::options::reset_in_memory();
+        crate::fork_ext::bindpage::reset_in_memory();
+        rm.manager = rm.gpu.manager(&rm._root.0, Some(rm._config.0.clone()));
+        rm.frames(6);
+        assert!(running(&rm), "{note}: the mod runs after a restart: {:?}", rm.manager.diagnostics());
+        assert_eq!((row(), box_on(&rm)), (Some(true), true), "{note}: On after a restart");
+        assert!(rm.manager.is_hud_element_hidden("stat_window"), "{note}: and holds the Stat Window again");
+        rm.manager.shutdown();
+    }
+    crate::settings::testing::reset(false);
+}
+
+/// Owner's files 2026-11-27: every "stats box shown" was followed at once by "stats box hidden": one press of the mod's key ran
+/// `toggle_stats_box` twice. One press of the mod's key, and one press of the game's Stat Window key, flips the box exactly once,
+/// also after the mod was rebuilt (reloaded, disabled and enabled again) as entering the world or loading a profile does it.
+#[test]
+fn owner1127a_one_press_flips_the_stats_box_once_also_after_the_mod_was_rebuilt() {
+    big_stack(owner1127a_one_press_body)
+}
+fn owner1127a_one_press_body() {
+    for pc in [true, false] {
+        super::super::options::reset_in_memory();
+        crate::fork_ext::bindpage::reset_in_memory();
+        let Some(mut rm) = Rm::with(|p| p == "eqoa_stats_box", 0) else { return };
+        crate::settings::set_ui_mode(pc).unwrap();
+        rm.frames(6);
+        let note = if pc { "PC interface" } else { "controller interface" };
+        let mut probe = KeyProbe::default();
+        let mod_row = crate::binds::ROWS.len();
+        let mut capture = Some(crate::bindpage::Column::Keyboard);
+        let (mut n, mut cues) = (None, Vec::new());
+        assert!(crate::fork_ext::bindpage::capture_key(&mut capture, &mut n, mod_row, "f1", &mut cues), "{note}: the mod's key is F1");
+        let said = |rm: &Rm| rm.manager.diagnostics().len();
+        let _ = said;
+        for round in 0..4 {
+            // the mod's key, then the game's Stat Window key (F4): each flips the box once
+            assert_eq!(probe.press(&mut rm, "f1", pc).mod_box, true, "{note}: round {round}: one press of F1 changes the box once");
+            assert_eq!(probe.press(&mut rm, "f4", pc).mod_box, true, "{note}: round {round}: one press of F4 changes the box once");
+            // the mod rebuilt: reloaded, or turned off and on
+            if round % 2 == 0 {
+                rm.manager.queue(Command::Reload("eqoa_stats_box".into()));
+            } else {
+                rm.manager.queue(Command::Enable("eqoa_stats_box".into(), false));
+                rm.frames(3);
+                rm.manager.queue(Command::Enable("eqoa_stats_box".into(), true));
+            }
+            rm.frames(8);
+        }
+        rm.manager.shutdown();
+    }
+    crate::settings::testing::reset(false);
+}

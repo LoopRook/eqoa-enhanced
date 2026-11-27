@@ -24,6 +24,7 @@
     "eqoa.options.toggle",
     "eqoa.options.get",
     "eqoa.windows.open",
+    "eqoa.log.write",
     "eqoa.events.on",
     "eqoa.imgui"
   ]

@@ -52,19 +52,31 @@ local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == 
 -- what the mod last worked out; read by its tests
 stats_box = { standing_down = false }
 
+-- With the box on and nothing on screen the player cannot tell why, so the reason is written to the log, once each time it changes.
+local told
+local function why_not(reason)
+    if told == reason then return end
+    told = reason
+    if reason then eqoa.log.write("info", "Stats Box is on but not drawn: " .. reason) end
+end
+
 eqoa.events.on("render", function()
     hold_stat_window(true)
     -- With "Use the game's windows" on, the game's Stat Window and its key are the player's again (the window reads as visible
     -- here although this mod still holds its claim): the box stands down, draws nothing and takes no click, and comes back as
     -- it was (the option is left alone) when the switch goes off. The other replacing mods end their windows the same way.
     stats_box.standing_down = eqoa.hud.visible("stat_window") == true
-    if stats_box.standing_down then return end
+    local on = eqoa.options.get("stats_box") == true
+    if stats_box.standing_down then
+        if on then why_not("the game's own Stat Window is showing (\"Use the game's windows\" is on, or the HUD is not up yet)") end
+        return
+    end
     if map_up() then return end
-    if not eqoa.options.get("stats_box") then return end
-    if not eqoa.hud.visible("stats_box") then return end
+    if not on then why_not(nil) return end
+    if not eqoa.hud.visible("stats_box") then why_not("the HUD is hidden or not in plain play") return end
     if dirty then
         local s = eqoa.player.stats()
-        if not s or not s.rows or #s.rows == 0 then return end
+        if not s or not s.rows or #s.rows == 0 then why_not("the server has sent no stat figures yet") return end
         rows = {}
         for i = 1, math.min(16, #s.rows) do
             local r = s.rows[i]
@@ -82,6 +94,7 @@ eqoa.events.on("render", function()
         dirty = false
     end
     if not rows then return end
+    why_not(nil)
     hud_panel(panel_spec)
     for i = 1, #rows do
         local r = rows[i]
