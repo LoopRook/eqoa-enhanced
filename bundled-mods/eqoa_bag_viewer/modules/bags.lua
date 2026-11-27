@@ -20,6 +20,9 @@ local M = {
     corpse_tab_kept = false,
     action_hits = {},
     icon_req = {}, has_pending_icons = false,
+    -- a merchant or banker the mod's own helpers talked to (open_talk_npc, until their release): not a visit the player made
+    -- (modules/trade.lua shows a visit as the Merchant tab or the Bank tab's two panels)
+    helper_hold = {},
 }
 
 local JUNK_FILE = "junk.cfg"
@@ -244,8 +247,12 @@ end
 local function release_takeover(kind)
     -- a listing's form, question or run holds the bank until it is done
     if kind == "bank" and M.auction_list and M.auction_list.busy() then return end
+    -- the merchant the player is shopping at in the Merchant tab is theirs to leave, not a helper's to let go
+    if M.trade and M.trade.keeps(kind) then return end
+    if kind then M.helper_hold[kind] = nil end
     if kind and eqoa.windows and eqoa.windows.release then
         eqoa.windows.release(kind)
+        if M.trade then M.trade.after_release(kind) end
     end
 end
 M.release_takeover = release_takeover
@@ -268,6 +275,7 @@ end
 
 function M.clear_corpse_hold()
     M.corpse_tab_kept = false
+    M.helper_hold = {}
     M.pending_open = nil
     M.held_for_req = nil
     M.eligible_corpses = {}
@@ -324,6 +332,9 @@ function M.visible_tabs()
         local t = M.CORPSE_TAB
         tabs[#tabs + 1] = {key = t.key, label = t.label, idx = 7}
     end
+    if M.trade and M.trade.visit_merchant() then
+        tabs[#tabs + 1] = {key = "merchant", label = M.trade.TAB_LABEL, idx = M.trade.TAB}
+    end
     for i, t in ipairs(tabs) do
         tabs[i] = {key = t.key, label = t.label, idx = t.idx or i}
     end
@@ -371,6 +382,16 @@ local function fetch_entry_icon(entry)
     end
 end
 
+-- The icons of a list drawn beside the grid (the Merchant tab's wares, the bank's rows): the entries given, now.
+function M.fetch_icons(entries)
+    clear_pass_cache()
+    for i = 1, #entries do
+        local entry = entries[i]
+        if entry.texture == nil and entry.item and entry.item.icon then fetch_entry_icon(entry) end
+    end
+    clear_pass_cache()
+end
+
 function M.sync_visible_icons(first_slot, last_slot)
     local grid = M.grid
     if not grid then return end
@@ -412,6 +433,8 @@ end
 
 local function active_key_and_container()
     local key
+    -- the Merchant tab, and the Bank tab while the bank is open here: the grid is the pack, the other panel is the NPC's
+    if M.trade and M.trade.mode() then return "all", eqoa.inventory.get() end
     if M.tab == 7 then
         key = "corpse"
     elseif M.TABS[M.tab] then
@@ -508,10 +531,11 @@ end
 
 function M.select(tab)
     if M.multi and tab ~= M.tab then M.multi.clear() end -- multi-select: a selection belongs to the tab it was made on
+    if M.trade and tab ~= M.tab then M.trade.leaving(M.tab) end -- the Merchant tab left: the visit ends
     if tab == 7 and (eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse() ~= nil) and M.tab ~= 7 then
         if M.tab == 6 then release_takeover("bank") end
         M.tab = 7; M.scroll = 0; M.grid_scroll = 0; M.grid = nil; M.menu = nil
-    elseif tab ~= M.tab and M.TABS[tab] then
+    elseif tab ~= M.tab and (M.TABS[tab] or (M.trade and tab == M.trade.TAB and M.trade.visit_merchant())) then
         if M.tab == 7 then
             M.note_player_closed("the Loot tab was left")
             release_takeover("loot")
@@ -872,6 +896,7 @@ function M.open_talk_npc(talk_kind, verb, after_fn)
     local dist = M.npc_distance(talk_kind, true)
     if M.far_gate(talk_kind, verb) then return nil, {message = TOO_FAR[talk_kind]} end
     if not M.ensure_takeover(talk_kind) then return nil, {message = "window busy"} end
+    M.helper_hold[talk_kind] = true
     local req, err = eqoa.actions.talk(nil, {kind = talk_kind})
     if not req then
         release_takeover(talk_kind)
@@ -891,8 +916,9 @@ end
 function M.drop_pending_npc_open()
     local p = M.pending_open
     if not p or p.kind == "loot" then return end
+    -- the step is forgotten, the request is not: its answer must still find the claim held (`leave_npcs`), or the game's
+    -- own window would open for it
     M.pending_open = nil
-    if p.req then pcall(eqoa.actions.cancel, p.req) end
 end
 
 function M.start_loot_button()
@@ -1046,6 +1072,49 @@ function M.stop_batch()
     local stopped = eqoa.actions.stop_batch(M.batch_id)
     if stopped then
         M.result = {text = "Stopping batch...", ok = nil}
+    end
+end
+
+-- Is something of this mod still waiting on a merchant's or banker's server (an unanswered talk, a sale, a purchase, a bank
+-- move, a batch)? Its answer, the merchant's list again, comes whether or not the window is still there.
+function M.npc_waiting()
+    return M.pending_open ~= nil and M.pending_open.kind ~= "loot" or M.batch_id ~= nil or M.last_req ~= nil
+        or M.sell_req ~= nil or (M.multi ~= nil and M.multi.run ~= nil)
+end
+
+M.LEAVE_GRACE, M.LEAVE_MAX = 3.0, 15.0
+
+-- The window closed (Esc, its key, walking away). With nothing waiting the merchant and bank are let go at once, quietly.
+-- With something waiting the claims stay (a list the server sends after its answer is then still hidden, never the game's
+-- own window), a running batch is told to stop after the step in flight, and `tick_leaving` lets go once what waited has
+-- been answered and a grace has passed (at the latest LEAVE_MAX seconds on).
+function M.leave_npcs()
+    if not M.npc_waiting() then
+        M.release_npcs()
+        return
+    end
+    if M.batch_id and M.batch_id ~= M.SELL_MANY then pcall(eqoa.actions.stop_batch, M.batch_id) end
+    M.leaving = {since = os.clock(), quiet_since = nil}
+end
+
+function M.release_npcs()
+    M.leaving = nil
+    eqoa.windows.release("merchant")
+    eqoa.windows.release("bank")
+end
+
+function M.tick_leaving()
+    local l = M.leaving
+    if not l then return end
+    local now = os.clock()
+    if M.npc_waiting() and now - l.since < M.LEAVE_MAX then
+        l.quiet_since = nil
+        return
+    end
+    l.quiet_since = l.quiet_since or now
+    if now - l.quiet_since >= M.LEAVE_GRACE or now - l.since >= M.LEAVE_MAX then
+        M.release_npcs()
+        if M.trade then M.trade.after_close() end
     end
 end
 

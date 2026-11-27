@@ -349,8 +349,15 @@ function X.build_menu(fx, fy)
             or ((not merch_open and not near_merch) and "no merchant nearby") or sell_far or nil
         -- the client asks the player ONE question for the whole sale where the game's merchant window would ask
         -- (`eqoa.actions.sell_many`), so this row asks none of its own
-        row(string.format("Sell (%d)", #usable), sell_deny == nil, sell_deny,
-            function() X.start("sell", usable, worn) end,
+        local sell_items, sell_marked = usable, {}
+        if B.trade and B.trade.mode() == "merchant" then
+            sell_items = {}
+            for _, it in ipairs(usable) do
+                if X.protected(it) then sell_marked[#sell_marked + 1] = it else sell_items[#sell_items + 1] = it end
+            end
+        end
+        row(string.format("Sell (%d)", #sell_items), sell_deny == nil, sell_deny,
+            function() X.start("sell", sell_items, worn, #sell_marked) end,
             {far_kind = (#usable > 0 and sell_far) and "merchant" or nil})
         local near_bank = B.nearby_npc("bank") ~= nil
         local dep_far = not bank_open and near_bank and B.too_far("bank") or nil
@@ -368,6 +375,34 @@ function X.build_menu(fx, fy)
     B.menu = {title = string.format("%d %s selected", n, plural(n, "item", "items")), rows = rows, fx = fx or 8, fy = fy or 46,
         group = true}
     return B.menu
+end
+
+-- An item the player set aside for a helper (marked to bank, or kept up to a number for Restock): selling it is for the
+-- player to say, not for a selection to do.
+function X.protected(it)
+    local H = B.helpers
+    return H ~= nil and (H.is_banked(it) or H.keep_of(it) ~= nil)
+end
+
+-- The selected stacks the merchant can take (worn and marked ones left out), the worn ones, and the marked ones: the
+-- Merchant tab's Sell (N) button.
+function X.sellable()
+    local usable, worn = split_worn((X.current()))
+    local ok, marked = {}, {}
+    for _, it in ipairs(usable) do
+        if X.protected(it) then marked[#marked + 1] = it else ok[#ok + 1] = it end
+    end
+    return ok, worn, marked
+end
+
+-- Sell (N) of the Merchant tab: the same run as the group menu's row.
+function X.sell_selected()
+    local usable, worn, marked = X.sellable()
+    if #usable == 0 then
+        B.result = {text = #marked > 0 and "Sell: the selected items are marked to bank or keep" or "Sell: all selected items are worn", ok = false}
+        return false
+    end
+    return X.start("sell", usable, worn, #marked)
 end
 
 function X.open_menu(h)
@@ -431,6 +466,9 @@ function X.finish(why)
     if why and untried > 0 then parts[#parts + 1] = tostring(why) end
     if #parts > 0 then text = text .. ": " .. table.concat(parts, "; ") end
     text = text .. worn_line(run.worn or {})
+    if (run.marked or 0) > 0 then
+        text = text .. string.format("; %d marked to bank or keep kept", run.marked)
+    end
     B.result = {text = text, ok = run.done == run.total and #run.failed == 0 and #run.skipped == 0}
     say_log(text)
     release_for(run)
@@ -504,13 +542,14 @@ function X.busy()
     return X.run ~= nil or B.batch_id ~= nil or B.pending_open ~= nil or X.destroy_note ~= nil
 end
 
-function X.start(kind, items, worn)
+function X.start(kind, items, worn, marked)
     if X.busy() then
         B.result = {text = KINDS[kind].label .. ": another action is still running", ok = false}
         B.dirty()
         return false
     end
-    local run = {kind = kind, items = {}, total = #items, done = 0, failed = {}, skipped = {}, worn = worn, next = 1}
+    local run = {kind = kind, items = {}, total = #items, done = 0, failed = {}, skipped = {}, worn = worn, next = 1,
+        marked = marked or 0}
     for _, it in ipairs(items) do
         -- how many the player selected: a stack that grew since is not sold or moved whole
         local picked = X.sel[key_of(it)]

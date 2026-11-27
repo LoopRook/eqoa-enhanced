@@ -692,17 +692,17 @@ fn fix2_item2b_restock_and_bank_marked_during_another_batch_never_talk_or_open_a
 #[test]
 fn fix2_item2c_closing_the_bag_viewer_forgets_a_pending_talk_so_a_late_reply_does_nothing() {
     let main = source("eqoa_bag_viewer/main.lua");
+    let leave_at = main.find("B.leave_npcs()").expect("close() asks the NPCs to be left");
     let drop_at = main.find("B.drop_pending_npc_open()").expect("close() drops the pending talk");
-    let release_at = main.find("eqoa.windows.release(\"merchant\")").unwrap();
-    assert!(drop_at < release_at, "the pending talk is cleared before the sessions are released");
+    assert!(leave_at < drop_at, "what still waits on the server is read before the pending talk is forgotten");
     let flow = r#"
         set_pack({item(10, "Healing Potion", {q = 5}), item(20, "Moonstone")})
         H.keep["10"] = 20
         put_npcs(3.0, nil)
         H.start_restock()                    -- talk sent, the reply not here yet
         PENDING_BEFORE = B.pending_open ~= nil
-        B.drop_pending_npc_open()            -- what close() does first
-        eqoa.windows.release("merchant")
+        B.leave_npcs()                       -- what close() does first
+        B.drop_pending_npc_open()
         open_merchant({ware(10, "Healing Potion", 20)}) -- the late reply
     "#;
     let lua = world();
@@ -710,10 +710,17 @@ fn fix2_item2c_closing_the_bag_viewer_forgets_a_pending_talk_so_a_late_reply_doe
     assert!(boolean(&lua, "PENDING_BEFORE"));
     assert!(boolean(&lua, "B.pending_open == nil"));
     assert_eq!(int(&lua, "#BATCHES"), 0, "the late reply does not run the restock step");
+    // the claim is kept while the talk is unanswered, so the late list stays hidden (the game's own window never opens)
+    assert!(boolean(&lua, "not (function() for _, k in ipairs(RELEASED) do if k == 'merchant' then return true end end end)()"), "the merchant claim is still held");
+    assert!(boolean(&lua, "B.leaving ~= nil"), "and the mod is leaving, to let go once the answer has been through");
     // negative control: without the clearing the late reply runs the step
     let bad = mutated(&[("if not p or p.kind == \"loot\" then return end", "do return end")]);
     run(&bad, flow);
     assert_eq!(int(&bad, "#BATCHES"), 1, "negative control: the step runs after the window was closed");
+    // negative control: with nothing counted as waiting the claim is let go at once (the old close())
+    let bad = mutated(&[("return M.pending_open ~= nil and M.pending_open.kind ~= \"loot\" or M.batch_id ~= nil or M.last_req ~= nil", "return false and M.batch_id ~= nil or M.last_req ~= nil")]);
+    run(&bad, flow);
+    assert!(boolean(&bad, "(function() for _, k in ipairs(RELEASED) do if k == 'merchant' then return true end end end)()"), "negative control: the claim went at once");
 }
 
 #[test]

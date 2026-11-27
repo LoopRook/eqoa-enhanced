@@ -4,12 +4,15 @@ local ui = eqoa.imgui
 local B = require("bags")
 local HP = require("helpers")
 local X = require("multi") -- multi-select (Ctrl+click, Shift+click): one menu for several items
+local T = require("trade") -- merchants and bankers in this window (the option "Open merchants and bankers in Bag Viewer")
 local AL = require("auction_list") -- listing a bank item at the auction (the bank item menu, the group menu)
 B.auction_list = AL
 AL.sell_action = function(args) return eqoa.actions.auction_sell(args) end
 
 -- Sizes are in HUD frame pixels (640x448), scaled as the HUD is.
 local W, PAD, SLOT, GAP, LINE = 318, 8, 36, 2, 12
+-- the pack grid's left edge: the window has a second panel to its left while the Merchant tab or the open bank is shown
+local grid_x = PAD
 -- The loot log shows LOG_LINES lines (the wheel scrolls the rest); LOG_LINES_HELPERS while the Restock / Bank marked row is
 -- up, so the window still fits the 448-pixel HUD frame with the helper rows (the game's frame is the limit, not the screen).
 local LOG_LINES, LOG_LINES_HELPERS = 3, 2
@@ -20,6 +23,7 @@ local wmemo, wmemo_k, wmemo_n = {}, nil, 0
 local session
 local pad = {on = false, idx = 1, msel = 1}
 local tokens, escape, tab_hits, slot_hits, menu_hits, action_hits, log_rect, grid_rect = {}, nil, {}, {}, {}, {}, nil, nil
+B.tab_hits, B.slot_hits, B.menu_hits, B.action_hits = tab_hits, slot_hits, menu_hits, action_hits -- (no draw has run yet)
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
@@ -102,6 +106,7 @@ local function listen(name, fn)
             if map_up() then
                 if name == "render" and (AL.enter or (AL.form and AL.form.field)) then AL.stop_typing() end -- a price being typed lets go of the keyboard at once
                 if name == "render" and BM.field then bm_stop() end -- so does an amount
+                if name == "render" and T.typing() then T.cancel_prompt() end -- and so does a count
                 return
             end
             return fn(e)
@@ -121,15 +126,15 @@ local function close(from_client)
     AL.close()
     bm_stop()
     if escape then eqoa.input.release(escape); escape = nil end
+    B.leave_npcs() -- (before the pending talk is forgotten: what still waits on the server decides)
     B.drop_pending_npc_open()
     if eqoa.windows and eqoa.windows.release then
-        eqoa.windows.release("merchant")
-        eqoa.windows.release("bank")
         if not (B.pending_open and B.pending_open.kind == "loot")
             and not (B.batch_id and B.batch_kind == "loot")
         then
             eqoa.windows.release("loot")
         end
+        T.after_close() -- the visit is over with the window; the claim on the two windows is taken again
     end
     B.clear_corpse_hold()
     B.open, B.hover, B.menu, B.menu_rect, B.grid_scroll = false, nil, nil, nil, 0
@@ -153,6 +158,7 @@ local function pad_key(key)
         elseif key == "back" or key == "left" then B.menu, B.menu_rect = nil, nil end
         return
     end
+    if T.pad_key(key, ((pad.idx - 1) % B.COLUMNS) == 0) then return end
     if key == "back" then close(); return end
     if not grid then return end
     local cols, rows = B.COLUMNS, grid.rows
@@ -166,7 +172,7 @@ local function pad_key(key)
     elseif key == "confirm" then
         local entry = grid.items[B.grid_scroll * cols + pad.idx]
         if entry then
-            B.build_menu(entry.item, PAD + col * (SLOT + GAP), 46 + row * (SLOT + GAP))
+            B.build_menu(entry.item, grid_x + col * (SLOT + GAP), 46 + row * (SLOT + GAP))
             pad.msel = 1
         end
         return
@@ -214,7 +220,7 @@ local function open()
         if session and d.ref == session.ref and d.down then pad_key(d.key) end
     end)
     listen("input.key", function(e)
-        if AL.on_key(e.data) or BM.on_key(e.data) then return end
+        if AL.on_key(e.data) or BM.on_key(e.data) or T.on_key(e.data) then return end
         if e.data.down and not e.data["repeat"] and e.data.key:lower() == "escape" then
             if B.menu then B.menu, B.menu_rect = nil, nil else close() end
         end
@@ -224,6 +230,7 @@ local function open()
         if AL.on_pointer(d) then return end
         -- a press anywhere but the amount box (or the other button) ends the typing
         if BM.field and not (d.button == "left" and inside(d.x, d.y, BM.rect)) then bm_stop() end
+        if T.on_pointer(d) then return end
         if B.menu then
             if d.button == "right" then B.menu, B.menu_rect = nil, nil; return end
             if d.button == "left" then
@@ -265,6 +272,7 @@ local function open()
     end)
     listen("pointer.wheel", function(e)
         local d, steps = e.data, e.data.steps or 0
+        if T.on_wheel(d) then return end
         if steps ~= 0 then
             local delta = steps > 0 and -1 or 1
             if inside(d.x, d.y, log_rect) then
@@ -278,6 +286,9 @@ local function open()
     escape = eqoa.input.claim("Escape", true)
 end
 
+T.open_viewer = open
+T.close_viewer = function() close() end
+T.poll(true)
 eqoa.input.bind({id = "open", label = "Bag viewer", default_key = "shift+b"}, function()
     if B.open then close() else open() end
 end)
@@ -330,22 +341,40 @@ HP.on_auto_change = helper_listeners
 B.on_character = helper_listeners
 helper_listeners()
 -- a merchant or bank the player opened by hand is a real answer from where they stand: the mod learns the reach
+-- An always-on listener that fails ends, and with it the one that would have opened the window for an NPC: the claims are
+-- let go first (`T.fail`), so the game's own windows are back rather than every NPC hidden with no window.
+local function failed(ok, err)
+    if not ok then
+        T.fail(err)
+        error(err, 0)
+    end
+end
 eqoa.events.on("merchant.changed", function(e)
-    if e.data and e.data.cause == "open" and eqoa.merchant.get() ~= nil then B.learn_native_open("merchant") end
+    failed(pcall(function()
+        B.tick_leaving()
+        T.on_merchant(e.data) -- before the window's own listener: a helper's talk is still pending then
+        if e.data and e.data.cause == "open" and eqoa.merchant.get() ~= nil then B.learn_native_open("merchant") end
+    end))
 end)
 eqoa.events.on("bank.changed", function(e)
-    HP.on_bank_changed(e.data) -- an item taken out of the bank is no longer marked to bank
-    local b = eqoa.bank.get()
-    if e.data and e.data.cause == "open" and b and b.open then B.learn_native_open("bank") end
+    failed(pcall(function()
+        B.tick_leaving()
+        T.on_bank(e.data)
+        HP.on_bank_changed(e.data) -- an item taken out of the bank is no longer marked to bank
+        local b = eqoa.bank.get()
+        if e.data and e.data.cause == "open" and b and b.open then B.learn_native_open("bank") end
+    end))
 end)
 eqoa.events.on("action.result", function(e)
     if not B.open then B.on_action_result(e.data) end
+    B.tick_leaving()
 end)
 eqoa.events.on("batch.progress", function(e)
     if not B.open then B.on_batch_progress(e.data) end
 end)
 eqoa.events.on("batch.result", function(e)
     if not B.open then B.on_batch_result(e.data) end
+    B.tick_leaving()
 end)
 -- a helper's sale (Sell junk) ends with the client's `confirm.closed`, whether or not the window is open
 eqoa.events.on("confirm.closed", function(e)
@@ -354,16 +383,20 @@ end)
 eqoa.events.on("world.leaving", function(e)
     if e.data and e.data.reason == "disconnect" then B.on_disconnect() end
 end)
-eqoa.events.on("state.reset", function() AL.on_session({phase = "closed", ref = AL.session}); X.clear(); B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); HP.reset(); B.char_dirty = true; B.dirty() end)
+eqoa.events.on("state.reset", function() failed(pcall(function() B.leaving = nil; T.reset(); AL.on_session({phase = "closed", ref = AL.session}); X.clear(); B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); HP.reset(); B.char_dirty = true; B.dirty() end)) end)
 -- the character is read once the world is up (and again after a new world or login): the Auto-loot choice is per character
 eqoa.events.on("player.changed", function(e)
-    -- asked on a new world or login, when the update names another character, and once a second besides
-    local after = e.data and e.data.after
-    local now = os.clock()
-    if B.char_dirty or now - B.char_checked >= 1.0 or (after and after.name and after.name ~= B.character) then
-        B.char_checked = now
-        B.sync_character()
-    end
+    failed(pcall(function()
+        -- asked on a new world or login, when the update names another character, and once a second besides
+        T.poll() -- the claim on the merchant and bank windows follows the option (once a second)
+        B.tick_leaving()
+        local after = e.data and e.data.after
+        local now = os.clock()
+        if B.char_dirty or now - B.char_checked >= 1.0 or (after and after.name and after.name ~= B.character) then
+            B.char_checked = now
+            B.sync_character()
+        end
+    end))
 end)
 eqoa.events.on("disabling", function()
     auto_listeners(false)
@@ -380,6 +413,11 @@ function draw()
         return
     end
     AL.tick()
+    T.tick()
+    local mode = T.mode()
+    local GX = mode and (T.PANEL_W + PAD) or 0
+    grid_x = PAD + GX
+    local W = W + GX
     local grid = B.grid
     if grid == nil or B.is_grid_stale() then
         grid = B.rebuild()
@@ -503,17 +541,17 @@ function draw()
     slot_hits = {}
     B.slot_hits = slot_hits
     local gw = B.COLUMNS * SLOT + (B.COLUMNS - 1) * GAP
-    grid_rect = {x = x0 + PAD * k, y = y0 + gy * k, w = gw * k, h = gh * k}
+    grid_rect = {x = x0 + grid_x * k, y = y0 + gy * k, w = gw * k, h = gh * k}
     local row_offset = B.grid_scroll * B.COLUMNS
     for idx = 1, grid.rows * B.COLUMNS do
         local slot = row_offset + idx
         local col, row = (idx - 1) % B.COLUMNS, math.floor((idx - 1) / B.COLUMNS)
-        local sx, sy = PAD + col * (SLOT + GAP), gy + row * (SLOT + GAP)
+        local sx, sy = grid_x + col * (SLOT + GAP), gy + row * (SLOT + GAP)
         local p0, p1 = at(sx, sy), at(sx + SLOT, sy + SLOT)
         dl:AddRectFilled(p0, p1, c.raised)
         local entry = grid.items[slot]
         local border = c.border
-        if pad.on and not B.menu and idx == pad.idx then border = c.white end
+        if pad.on and not B.menu and not T.pad_list and idx == pad.idx then border = c.white end
         if entry then
             local it = entry.item
             if entry.texture then
@@ -555,7 +593,7 @@ function draw()
     end
     local total_rows = grid.total_rows or grid.rows
     if total_rows > grid.rows then
-        local sb_x = PAD + gw + 3
+        local sb_x = grid_x + gw + 3
         fill(sb_x, gy, 2, gh, c.border)
         local thumb_h = math.max(12, gh * grid.rows / total_rows)
         local max_scroll = total_rows - grid.rows
@@ -563,6 +601,13 @@ function draw()
         fill(sb_x, thumb_y, 2, thumb_h, c.muted)
     end
 
+    if mode then
+        T.draw({c = c, k = k, mode = mode, x = PAD, y = gy, h = gh, x0 = x0, y0 = y0, fill = fill, frame = frame, text = text,
+            tw = tw, dl = dl, at = at, pointer = p, pad_on = pad.on, icons = B.fetch_icons})
+        text(PAD, info_y, T.caption(mode), c.text, T.PANEL_W - 4)
+    else
+        T.hits, T.rect = {}, nil
+    end
     local money_label
     if grid.corpse then
         money_label = "Corpse items"
@@ -572,7 +617,7 @@ function draw()
     else
         money_label = "Tunar " .. B.tunar(grid.money)
     end
-    text(PAD, info_y, money_label, c.text, W - 2 * PAD - 40)
+    text(grid_x, info_y, money_label, c.text, W - grid_x - PAD - 40)
     local used = grid.used .. "/" .. (grid.capacity or "?")
     text(W - PAD - ui.CalcTextSize(used) / k, info_y, used, c.text)
 
@@ -580,7 +625,7 @@ function draw()
         local rcol = B.result.ok == true and c.worn or (B.result.ok == false and c.warn or c.text)
         text(PAD, res_y, B.result.text, rcol, W - 2 * PAD)
     else
-        text(PAD, res_y, X.hint() or "Click an item for actions", X.n > 0 and c.mark or c.muted, W - 2 * PAD)
+        text(PAD, res_y, X.hint() or (mode and T.hint(mode)) or "Click an item for actions", X.n > 0 and c.mark or c.muted, W - 2 * PAD)
     end
 
     fill(PAD, div_y, W - 2 * PAD, 1, c.border)
@@ -815,7 +860,7 @@ function draw()
     end
 
     if over then
-        local lines = B.card(over.item)
+        local lines = T.card(B.card(over.item), over.item, mode)
         local cw = 0
         for _, l in ipairs(lines) do cw = math.max(cw, ui.CalcTextSize(l[1])) end
         local cwk, chk = math.min(cw + 12 * k, 220 * k), (#lines * LINE + 8) * k

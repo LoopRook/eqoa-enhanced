@@ -249,6 +249,11 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/modules/repair.lua"),
     },
     BundledFile {
+        path: "eqoa_bag_viewer/modules/trade.lua",
+        package: "eqoa_bag_viewer",
+        data: include_bytes!("../../../../bundled-mods/eqoa_bag_viewer/modules/trade.lua"),
+    },
+    BundledFile {
         path: "eqoa_trade/mod.json",
         package: "eqoa_trade",
         data: include_bytes!("../../../../bundled-mods/eqoa_trade/mod.json"),

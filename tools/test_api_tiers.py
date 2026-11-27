@@ -473,9 +473,16 @@ class Reviewer(unittest.TestCase):
     ] + ["eqoa.windows.SessionData." + f for f in
          "available current id inventory list message open state target title".split()]
 
+    # Names a bundled mod really reads now (the Bag Viewer's Merchant tab, 2026-11-27: `eqoa.merchant.get().merchant.options`,
+    # `.pending` and `.entity_id`), so they are proven for a real use. They stay exempt only while that is so (checked below).
+    USED_SINCE_REVIEW = [
+        "eqoa.items.Container.merchant", "eqoa.items.MerchantState", "eqoa.items.MerchantState.options",
+        "eqoa.items.MerchantState.pending", "eqoa.items.MerchantState.entity_id",
+    ]
+
     def violations(self, provisional, frozen):
         families = [n for n in frozen if any(n == r or n.startswith(r + ".") for r in self.RECORDS)]
-        return [n for n in families + self.NAMES if n not in provisional]
+        return [n for n in families + self.NAMES if n not in provisional and n not in self.USED_SINCE_REVIEW]
 
     def test_every_reviewed_name_is_provisional_in_the_committed_file(self):
         doc = json.loads(T.TIERS.read_text(encoding="utf-8"))
@@ -484,6 +491,8 @@ class Reviewer(unittest.TestCase):
         self.assertEqual(self.violations(set(doc["provisional"]), frozen), [])
         # the names are real frozen names (the list does not rot)
         self.assertEqual([n for n in self.NAMES if n not in frozen], [])
+        # the exemption does not rot: each exempt name is proven now, by a real read
+        self.assertEqual([n for n in self.USED_SINCE_REVIEW if n in set(doc["provisional"])], [])
 
     def test_negative_control_a_reviewed_name_that_is_proven_is_caught(self):
         doc = json.loads(T.TIERS.read_text(encoding="utf-8"))

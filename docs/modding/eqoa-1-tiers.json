@@ -4,13 +4,13 @@
  "rule": "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
  "counts": {
   "total": 2604,
-  "proven": 883,
-  "provisional": 1354,
+  "proven": 893,
+  "provisional": 1344,
   "compat": 367,
   "by_kind": {
    "action": {
-    "proven": 86,
-    "provisional": 47,
+    "proven": 87,
+    "provisional": 46,
     "compat": 0
    },
    "compat": {
@@ -24,13 +24,13 @@
     "compat": 0
    },
    "field": {
-    "proven": 370,
-    "provisional": 943,
+    "proven": 377,
+    "provisional": 936,
     "compat": 0
    },
    "function": {
-    "proven": 260,
-    "provisional": 242,
+    "proven": 261,
+    "provisional": 241,
     "compat": 0
    },
    "module": {
@@ -39,8 +39,8 @@
     "compat": 0
    },
    "type": {
-    "proven": 76,
-    "provisional": 85,
+    "proven": 77,
+    "provisional": 84,
     "compat": 0
    }
   }
@@ -144,7 +144,6 @@
   "eqoa.actions.autorun",
   "eqoa.actions.batch_status",
   "eqoa.actions.blacksmith_close",
-  "eqoa.actions.buy",
   "eqoa.actions.camera",
   "eqoa.actions.chat",
   "eqoa.actions.cycle_target",
@@ -570,8 +569,6 @@
   "eqoa.events.merc.changed",
   "eqoa.events.merc.changed.data.open",
   "eqoa.events.merc.changed.data.revision",
-  "eqoa.events.merchant.changed.data.after",
-  "eqoa.events.merchant.changed.data.before",
   "eqoa.events.merchant.changed.data.changed",
   "eqoa.events.once",
   "eqoa.events.player.changed.data.before",
@@ -848,7 +845,6 @@
   "eqoa.items.Container.full",
   "eqoa.items.Container.kind",
   "eqoa.items.Container.master_loot",
-  "eqoa.items.Container.merchant",
   "eqoa.items.Container.view",
   "eqoa.items.ContainerView",
   "eqoa.items.ContainerView.rows",
@@ -869,7 +865,6 @@
   "eqoa.items.Item.equippable",
   "eqoa.items.Item.equipped_slot",
   "eqoa.items.Item.icon",
-  "eqoa.items.Item.id",
   "eqoa.items.Item.index",
   "eqoa.items.Item.level_required",
   "eqoa.items.Item.list",
@@ -900,14 +895,10 @@
   "eqoa.items.MerchantOption.key",
   "eqoa.items.MerchantOption.label",
   "eqoa.items.MerchantOption.selected",
-  "eqoa.items.MerchantState",
   "eqoa.items.MerchantState.button_hint",
   "eqoa.items.MerchantState.buy_rate",
-  "eqoa.items.MerchantState.entity_id",
   "eqoa.items.MerchantState.greeting",
   "eqoa.items.MerchantState.mode",
-  "eqoa.items.MerchantState.options",
-  "eqoa.items.MerchantState.pending",
   "eqoa.items.MerchantState.selected_option",
   "eqoa.items.MerchantState.sell_rate",
   "eqoa.items.SlotInfo.id",
@@ -929,7 +920,6 @@
   "eqoa.items.attack_types.two_hand_crossbow",
   "eqoa.items.attack_types.two_hand_pierce",
   "eqoa.items.attack_types.two_hand_slash",
-  "eqoa.items.get",
   "eqoa.items.slots",
   "eqoa.items.slots.alchemy",
   "eqoa.items.slots.armor_craft",
