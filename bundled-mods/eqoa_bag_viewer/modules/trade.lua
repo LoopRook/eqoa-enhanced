@@ -250,8 +250,16 @@ end
 
 local VERBS = {buy = "Buy", sell = "Sell", withdraw = "Take out", deposit = "Put in bank"}
 
+local function merchant_id()
+    local m = eqoa.merchant.get()
+    return m and m.merchant and m.merchant.entity_id
+end
+
+-- The question remembers what it showed: the stack (its handle), what it is, the merchant and the price of one.
 local function open_prompt(kind, it, max, default)
-    T.prompt = {kind = kind, list = it.list, key = it.inventory_key, name = it.name, max = max, qty = default, text = nil}
+    local priced = kind == "buy" or kind == "sell"
+    T.prompt = {kind = kind, list = it.list, key = it.inventory_key, ref = it.ref, id = it.id, name = it.name, max = max,
+        qty = default, text = nil, entity = priced and merchant_id() or nil, unit = priced and price(it, kind, 1) or nil}
     B.result = nil
     if not T.enter then T.enter = eqoa.input.claim("Enter", true) end
     B.dirty()
@@ -332,15 +340,28 @@ local function prompt_qty(p, n)
     p.text = nil
 end
 
+-- What was typed, kept to what can be used (a number past the cap shows the number that will be bought).
+local function prompt_text(p, text)
+    local n = tonumber(text) or 0
+    if n > p.max then n, text = p.max, tostring(p.max) end
+    p.qty, p.text = n, text
+end
+
 function T.confirm_prompt()
     local p = T.prompt
     if not p then return end
-    local it = find(p.list, p.key)
     local n = math.floor(p.qty)
     T.cancel_prompt()
     if n < 1 then return end
-    if not it then
-        B.result = {text = VERBS[p.kind] .. " " .. p.name .. ": it is gone", ok = false}
+    -- the same stack (the handle goes stale when it changes), the same merchant at the same price as the question showed
+    local it = eqoa.items.get(p.ref)
+    local why
+    if not it then why = "the item changed"
+    elseif it.id ~= p.id then why = "it is another item now"
+    elseif p.entity ~= nil and merchant_id() ~= p.entity then why = "it is another merchant now"
+    elseif p.unit ~= nil and price(it, p.kind, 1) ~= p.unit then why = "the price changed" end
+    if why then
+        B.result = {text = VERBS[p.kind] .. " " .. p.name .. ": " .. why .. ", nothing done", ok = false}
         B.dirty()
         return
     end
@@ -357,15 +378,11 @@ function T.on_key(d)
     if key == "escape" then T.cancel_prompt()
     elseif key == "enter" or key == "return" then T.confirm_prompt()
     elseif key == "backspace" then
-        local text = (p.text or tostring(math.floor(p.qty))):sub(1, -2)
-        p.text = text
-        p.qty = math.min(p.max, tonumber(text) or 0)
+        prompt_text(p, (p.text or tostring(math.floor(p.qty))):sub(1, -2))
     elseif d.text and #d.text > 0 then
         local digits = d.text:gsub("%D", "")
         if digits ~= "" then
-            local text = ((p.text or "") .. digits):sub(1, 4)
-            p.text = text
-            p.qty = math.min(p.max, tonumber(text) or 0)
+            prompt_text(p, ((p.text or "") .. digits):sub(1, 4))
         end
     end
     return true

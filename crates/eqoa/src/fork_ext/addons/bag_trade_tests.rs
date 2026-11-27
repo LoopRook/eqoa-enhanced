@@ -598,3 +598,52 @@ fn review5_the_controller_keeps_its_row_on_screen_and_a_new_visit_starts_at_the_
         int(&lua, "T.scroll")
     );
 }
+
+#[test]
+fn review6_the_answer_acts_on_the_same_stack_merchant_and_price_the_question_showed() {
+    let setup = r#"
+        MONEY = 1000
+        BUYP.w2 = 12
+        set_pack({})
+        talk_merchant({ware_(1, "Bread"), ware_(2, "Healing Potion", 20)})
+        T.click_ware(WARES[2])
+        type_digits('3')
+    "#;
+    // the stack at that place is another stack by the time of the answer (a new handle)
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, setup);
+    run(&lua, "local w = ware_(2, 'Healing Potion', 20); w.ref = 'w2-later'; WARES[2] = w; MERCH.items = WARES; MERCH.revision = MERCH.revision + 1; key('Enter')");
+    assert_eq!(int(&lua, "#BUYS"), 0, "the handle the question showed is stale: nothing is bought");
+    assert!(string(&lua, "B.result.text").contains("changed"), "the player is told: {}", string(&lua, "B.result.text"));
+    // another item at the same place
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, setup);
+    run(&lua, "WARES[2].id = 999; key('Enter')");
+    assert_eq!(int(&lua, "#BUYS"), 0, "another item: nothing is bought");
+    // the price moved while the question was up
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, setup);
+    run(&lua, "BUYP.w2 = 99; key('Enter')");
+    assert_eq!(int(&lua, "#BUYS"), 0, "the price changed: nothing is bought");
+    assert!(string(&lua, "B.result.text").contains("price"), "{}", string(&lua, "B.result.text"));
+    // another merchant
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, setup);
+    run(&lua, "MERCH.merchant.entity_id = 777; key('Enter')");
+    assert_eq!(int(&lua, "#BUYS"), 0, "another merchant: nothing is bought");
+    // control: nothing moved, the three are bought
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, setup);
+    run(&lua, "key('Enter')");
+    assert_eq!(string(&lua, "#BUYS .. ':' .. BUYS[1].ref .. ':' .. BUYS[1].n"), "1:w2:3");
+    // a typed number past the cap shows the number that will be used
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, "MONEY = 100; BUYP.w2 = 12; talk_merchant({ware_(2, 'Healing Potion', 20)}); T.click_ware(WARES[1]); type_digits('50')");
+    assert_eq!(string(&lua, "T.prompt.text .. ':' .. T.prompt.qty"), "8:8", "the box shows the 8 that Enter buys, not the 50 typed");
+}
