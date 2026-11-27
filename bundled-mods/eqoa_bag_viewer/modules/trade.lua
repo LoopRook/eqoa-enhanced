@@ -167,6 +167,9 @@ end
 local function opened(kind)
     T.refresh()
     if not T.held[kind] then return end
+    -- the window was just closed with something still waiting: this is its late answer, not a new talk
+    if B.leaving then B.tick_leaving() end
+    if B.leaving then return end
     if not T.on then T.hand_over(kind); return end
     begin_visit(kind)
 end

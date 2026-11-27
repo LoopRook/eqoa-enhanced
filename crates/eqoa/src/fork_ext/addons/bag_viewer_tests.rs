@@ -5831,6 +5831,200 @@ fn trade_window_bank_body() {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// The owner's log findings (2026-11-27, `eqoa-audit-owner-logs-2026-11-27.md` M2): the game's own merchant window opened
+// three times with no claim held, right after declining the junk sale and twice right after Escape. One press of Esc
+// leaves the mod's window and nothing else opens; the merchant's late list is never the game's window.
+
+/// A merchant 6 units away, a junk-marked quick-slotted potion (the client asks before it is sold), and the viewer.
+fn owner_setup(name: &str, option_on: bool) -> Option<Bv> {
+    let mut bv = trade_setup(name)?;
+    if option_on {
+        bv.trade_option(true);
+    }
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9002, "Merchant Kim", 0x80 | 1, 1, [6.0, 0.0, 0.0]);
+    bv.lua().load("local B = require('bags'); B.junk_ids['900002'] = true; B.scan_reset()").exec().unwrap();
+    bv.frames(2);
+    Some(bv)
+}
+
+/// "Sell junk" pressed, the merchant's list answers (hidden), the client's question comes up and the player answers No.
+fn owner_decline_junk_sale(bv: &mut Bv) {
+    let (x, y, _) = bv.action_hit("Sell junk").expect("the Sell junk button is there with a merchant near");
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    bv.play.bags_merchant_packet(9002);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    for _ in 0..4 {
+        if super::super::confirm::is_open() {
+            break;
+        }
+        bv.play.bags_broker_tick();
+        bv.frames(1);
+    }
+    assert!(super::super::confirm::is_open(), "the client's own question is up");
+    assert!(super::super::confirm::key(&winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape)), "Escape is the question's No");
+    bv.play.bags_broker_tick();
+    bv.play.bags_broker_tick();
+    bv.frames(2);
+}
+
+fn owner_no_native_merchant(bv: &Bv, why: &str) {
+    assert_eq!(bv.play.mode, 0, "{why}: the game's own merchant window (mode 10) must not open");
+}
+
+#[test]
+fn owner_log_declining_the_junk_sale_requests_nothing_more_and_opens_no_game_window_option_off_and_on() {
+    big_stack(owner_decline_body)
+}
+fn owner_decline_body() {
+    for option_on in [false, true] {
+        let Some(mut bv) = owner_setup("owner decline", option_on) else { return };
+        bv.open();
+        owner_decline_junk_sale(&mut bv);
+        // the client closes its session with the merchant once, quietly (one message); then it is settled
+        for _ in 0..4 {
+            bv.play.bags_broker_tick();
+            bv.frames(2);
+        }
+        let sends = bv.play.bags_sends_lost();
+        for _ in 0..4 {
+            bv.play.bags_broker_tick();
+            bv.frames(2);
+        }
+        // declining ends the conversation: the mod asks for nothing more, and no game window opens
+        assert_eq!(bv.play.bags_sends_lost(), sends, "declined the junk sale, option on = {option_on}: nothing more is requested");
+        assert!(!bv.merchant_open(), "the conversation with the merchant is over");
+        owner_no_native_merchant(&bv, &format!("declined the junk sale, option on = {option_on}"));
+        assert!(bv.is_open(), "declining the sale does not close the window");
+        bv.clean();
+        super::super::window_takeover::reset_all_for_test();
+        super::super::action_broker::reset_all_for_test();
+    }
+}
+
+#[test]
+fn owner_log_escape_while_the_mods_own_talk_is_unanswered_never_lets_the_games_merchant_window_open() {
+    big_stack(owner_escape_pending_body)
+}
+fn owner_escape_pending_body() {
+    for option_on in [false, true] {
+        let Some(mut bv) = owner_setup("owner escape pending", option_on) else { return };
+        bv.open();
+        // "Sell junk": the mod talks to the merchant; the answer has not come when Escape is pressed
+        let (x, y, _) = bv.action_hit("Sell junk").expect("the Sell junk button");
+        bv.click((x, y));
+        bv.play.bags_broker_tick();
+        bv.esc();
+        assert!(!bv.is_open(), "Escape closed the window");
+        bv.play.bags_broker_tick();
+        // the merchant's answer to the talk arrives after the window was closed
+        bv.play.bags_merchant_packet(9002);
+        bv.frames(3);
+        bv.play.bags_broker_tick();
+        owner_no_native_merchant(&bv, &format!("Escape with a talk unanswered, option on = {option_on}"));
+        assert!(!bv.is_open(), "and Bag Viewer does not reopen");
+        bv.clean();
+        super::super::window_takeover::reset_all_for_test();
+        super::super::action_broker::reset_all_for_test();
+    }
+}
+
+#[test]
+fn owner_log_escape_in_a_merchant_visit_with_a_purchase_in_flight_the_late_list_opens_nothing() {
+    big_stack(owner_escape_visit_body)
+}
+fn owner_escape_visit_body() {
+    let Some(mut bv) = owner_setup("owner escape visit", true) else { return };
+    bv.play.bags_merchant_wares_packet(9002, &trade_wares());
+    bv.frames(3);
+    assert!(bv.is_open() && bv.merchant_open(), "the visit is up");
+    // a purchase goes out, and Escape is pressed before the server has answered it
+    bv.click(bv.trade_hit(2));
+    bv.play.bags_broker_tick();
+    bv.esc();
+    assert!(!bv.is_open(), "Escape closed the window");
+    bv.play.bags_broker_tick();
+    // the server answers the purchase and lists the merchant again
+    bv.play.bags_buy_confirm(&serde_json::json!({"name":"Bread","id":910001,"key":51,"qty":1,"max_stack":1,"icon":4030}));
+    bv.play.bags_merchant_wares_packet(9002, &trade_wares());
+    bv.frames(3);
+    bv.play.bags_broker_tick();
+    owner_no_native_merchant(&bv, "Escape with a purchase in flight");
+    assert!(!bv.is_open(), "and the late list does not open Bag Viewer again");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn owner_log_escape_while_a_sale_waits_for_the_server_the_late_list_opens_nothing_option_off() {
+    big_stack(owner_escape_sale_body)
+}
+fn owner_escape_sale_body() {
+    let Some(mut bv) = owner_setup("owner escape sale", false) else { return };
+    bv.open();
+    // "Sell stack" of the three Rat Pelts through the item menu: the mod talks to the merchant, then the sale goes out
+    bv.click(bv.slot(7));
+    bv.frames(2);
+    let (x, y, enabled, _, _) = bv.menu_row("Sell stack").expect("Sell stack is offered with a merchant near");
+    assert!(enabled);
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    bv.play.bags_merchant_packet(9002);
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert!(bv.play.bags_shop_pending(), "the sale is out and waits for the server");
+    // Escape while it waits
+    bv.esc();
+    assert!(!bv.is_open());
+    bv.play.bags_broker_tick();
+    // the server answers the sale and lists the merchant again
+    bv.play.bags_sell_confirm(6, 3);
+    bv.play.bags_merchant_packet(9002);
+    bv.frames(3);
+    bv.play.bags_broker_tick();
+    owner_no_native_merchant(&bv, "Escape while a sale waits");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+#[test]
+fn owner_log_escape_during_bank_marked_the_batch_stops_and_no_game_window_opens() {
+    big_stack(owner_escape_bank_marked_body)
+}
+fn owner_escape_bank_marked_body() {
+    let Some(mut bv) = trade_setup("owner escape bank marked") else { return };
+    bv.play.bags_player_at([0.0, 0.0, 0.0]);
+    bv.play.bags_spawn_npc(9003, "Banker Bo", 0x80 | 2, 1, [6.0, 0.0, 0.0]);
+    bv.lua().load("local H = require('helpers'); H.bank['900007'] = true; H.bank['900003'] = true; require('bags').scan_reset()").exec().unwrap();
+    bv.open();
+    let (x, y, _) = bv.action_hit("Bank marked").expect("the Bank marked button with a banker near");
+    bv.click((x, y));
+    bv.play.bags_broker_tick();
+    bv.play.bags_bank_packet();
+    bv.frames(2);
+    bv.play.bags_broker_tick();
+    assert_eq!(bv.play.bags_bank_state(), 2, "the first deposit is out and waits for the server");
+    // Escape in the middle of the batch
+    bv.esc();
+    assert!(!bv.is_open());
+    // the server answers the first deposit; the batch must not send the second one after the player left
+    bv.play.bags_bank_deposit_confirm(17, 900007, "Rat Pelt", 3);
+    for _ in 0..4 {
+        bv.play.bags_broker_tick();
+        bv.frames(2);
+        assert_ne!(bv.play.bags_bank_state(), 2, "no second deposit is out after the player left");
+    }
+    assert_eq!(bv.play.mode, 0, "and the game's bank window did not open");
+    bv.clean();
+    super::super::window_takeover::reset_all_for_test();
+    super::super::action_broker::reset_all_for_test();
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Second check of the review fixes (run against the client, with a negative control each where the fault can be shown).
 
 /// The option goes off between two polls and an NPC is talked to: the game's own window opens for real, the NPC's session
@@ -5926,8 +6120,8 @@ fn trade_phase_listener_error(broken: bool, unguarded: bool) -> bool {
         BV_MUTATION.with(|m| m.borrow_mut().push(("function H.on_bank_changed(d)", "function H.on_bank_changed(d) error('boom')")));
     }
     if unguarded {
-        // the old always-on listener: an error ends it with the claims still held
-        BV_MUTATION.with(|m| m.borrow_mut().push(("local ok, err = pcall(fn, e)", "local ok, err = true, nil; fn(e)")));
+        // the old always-on listener: an error ends it with the claims still held (it did not let them go)
+        BV_MUTATION.with(|m| m.borrow_mut().push(("        T.fail(err)", "        local _ = err")));
     }
     let Some(mut bv) = trade_setup("trade listener error") else {
         BV_MUTATION.with(|m| m.borrow_mut().clear());

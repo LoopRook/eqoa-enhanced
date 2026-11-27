@@ -916,8 +916,9 @@ end
 function M.drop_pending_npc_open()
     local p = M.pending_open
     if not p or p.kind == "loot" then return end
+    -- the step is forgotten, the request is not: its answer must still find the claim held (`leave_npcs`), or the game's
+    -- own window would open for it
     M.pending_open = nil
-    if p.req then pcall(eqoa.actions.cancel, p.req) end
 end
 
 function M.start_loot_button()
@@ -1071,6 +1072,49 @@ function M.stop_batch()
     local stopped = eqoa.actions.stop_batch(M.batch_id)
     if stopped then
         M.result = {text = "Stopping batch...", ok = nil}
+    end
+end
+
+-- Is something of this mod still waiting on a merchant's or banker's server (an unanswered talk, a sale, a purchase, a bank
+-- move, a batch)? Its answer, the merchant's list again, comes whether or not the window is still there.
+function M.npc_waiting()
+    return M.pending_open ~= nil and M.pending_open.kind ~= "loot" or M.batch_id ~= nil or M.last_req ~= nil
+        or M.sell_req ~= nil or (M.multi ~= nil and M.multi.run ~= nil)
+end
+
+M.LEAVE_GRACE, M.LEAVE_MAX = 3.0, 15.0
+
+-- The window closed (Esc, its key, walking away). With nothing waiting the merchant and bank are let go at once, quietly.
+-- With something waiting the claims stay (a list the server sends after its answer is then still hidden, never the game's
+-- own window), a running batch is told to stop after the step in flight, and `tick_leaving` lets go once what waited has
+-- been answered and a grace has passed (at the latest LEAVE_MAX seconds on).
+function M.leave_npcs()
+    if not M.npc_waiting() then
+        M.release_npcs()
+        return
+    end
+    if M.batch_id and M.batch_id ~= M.SELL_MANY then pcall(eqoa.actions.stop_batch, M.batch_id) end
+    M.leaving = {since = os.clock(), quiet_since = nil}
+end
+
+function M.release_npcs()
+    M.leaving = nil
+    eqoa.windows.release("merchant")
+    eqoa.windows.release("bank")
+end
+
+function M.tick_leaving()
+    local l = M.leaving
+    if not l then return end
+    local now = os.clock()
+    if M.npc_waiting() and now - l.since < M.LEAVE_MAX then
+        l.quiet_since = nil
+        return
+    end
+    l.quiet_since = l.quiet_since or now
+    if now - l.quiet_since >= M.LEAVE_GRACE or now - l.since >= M.LEAVE_MAX then
+        M.release_npcs()
+        if M.trade then M.trade.after_close() end
     end
 end
 
