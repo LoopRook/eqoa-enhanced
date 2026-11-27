@@ -656,7 +656,7 @@ local function ensure_font(want)
 end
 
 -- the small window for the two sizes (a row in Mods & Addons opens it)
-eqoa.options.button({ id = "sizes", label = "World Map: text and marker size..." }, function() state.show_sizes = not state.show_sizes end)
+eqoa.options.button({ id = "sizes", label = "World Map sizes..." }, function() state.show_sizes = not state.show_sizes end)
 local function sizes_window()
     if not state.show_sizes then return end
     ui.SetNextWindowPos(80, 80, 4)

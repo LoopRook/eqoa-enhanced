@@ -23,7 +23,7 @@ Mods & Addons.
 - Text size follows the Size option (the text is sized by the window, so it needs no font).
 
 ## Options
-Mods & Addons, **Name Plates: settings...** opens a small window: show **Players**, **NPCs** and
+Mods & Addons, **Name Plate settings...** opens a small window: show **Players**, **NPCs** and
 **Creatures**, a **Distance** (plates farther than this are not drawn or worked out) and a **Size**. **Hide the
 game's target rings** also hides the rings round your target (they stay by default).
 

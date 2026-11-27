@@ -571,4 +571,90 @@ quest_tracker=off
         assert!(!change(&mut c, 41));
         assert!(!change(&mut c, 9999));
     }
+
+    use vi::ui::{Raster, Window};
+
+    /// The game's font for the measure: ARIALUI.CSF off the disc (`$EQOA_ISO`, else `run/eqoa.iso`), as the options page draws
+    /// with it. With no disc (the CI runners have none) glyphs are 9.5 a character: the disc's font draws the longer labels at
+    /// about 9 (a capital-heavy short one at 10), so this is an estimate that keeps labels near the limit honest; the run with
+    /// the disc is the exact one.
+    struct GameFont(Option<esf::font::Font>);
+    impl crate::ui::Layout for GameFont {}
+    impl Raster for GameFont {
+        fn blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+        fn stretch_blit(&mut self, _: u32, _: u32, _: [i32; 2], _: [i32; 2], _: [i32; 2], _: [i32; 2], _: i32, _: f32) {}
+        fn fill_fan(&mut self, _: [f32; 4], _: [[i32; 2]; 4]) {}
+        fn blit_full(&mut self, _: u32, _: u32, _: [i32; 2], _: i32, _: f32) {}
+        fn draw_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16]) {}
+        fn draw_centered_string(&mut self, _: [i32; 2], _: [f32; 4], _: &[u16], _: u32) {}
+        fn string_width(&self, s: &[u16]) -> i32 {
+            match &self.0 {
+                Some(f) => s.iter().map(|&c| f.glyph(c).or_else(|| f.glyph(b'?' as u16)).map_or(0, |g| g.width as i32 + 1)).sum(),
+                None => s.len() as i32 * 19 / 2,
+            }
+        }
+        fn point_size(&self) -> i32 {
+            self.0.as_ref().map_or(21, |f| f.height as i32)
+        }
+        fn viewport(&self) -> [i32; 4] {
+            [0, 0, 639, 447]
+        }
+        fn set_viewport(&mut self, _: [i32; 4]) {}
+    }
+    fn game_font() -> GameFont {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let path = std::env::var_os("EQOA_ISO").map(std::path::PathBuf::from).unwrap_or_else(|| root.join("run/eqoa.iso"));
+        let font = iso::Iso::open(&path).ok().and_then(|mut d| d.read("ARIALUI.CSF").ok()).and_then(|b| esf::Container::open(b).ok()).and_then(|c| {
+            (0..c.nodes.len()).filter(|&i| c.nodes[i].ty == 0x7000).find_map(|i| esf::font::read(&c, i).filter(|f| f.id == vi::ui::font_id() as i32))
+        });
+        GameFont(font)
+    }
+
+    /// Every label the fork puts on the Enhanced page: its own rows and the labels of the bundled mods' option rows
+    /// (`eqoa.options.toggle` / `button` / ... in each `main.lua`), the rows that page lists when those mods are on.
+    fn fork_row_labels() -> Vec<String> {
+        let mut labels: Vec<String> = ITEMS.iter().map(|(_, l)| l.to_string()).collect();
+        for file in crate::fork_ext::bundled::EMBEDDED_FILES.iter().filter(|f| f.path.ends_with("/main.lua")) {
+            let text = String::from_utf8_lossy(file.data);
+            for line in text.lines().filter(|l| l.contains("eqoa.options.") && l.contains("label")) {
+                let Some(at) = line.find("label") else { continue };
+                let rest = &line[at + 5..];
+                let Some(open) = rest.find('"') else { continue };
+                let Some(close) = rest[open + 1..].find('"') else { continue };
+                labels.push(rest[open + 1..open + 1 + close].to_string());
+            }
+        }
+        labels
+    }
+
+    /// The label column of an options page, as `WndOptions::draw_rows_painted` lays it out: the labels start at x 40 and the
+    /// value box is at `width - 176`, `width` being the page window's own (440 for every page, `page_window`), and the game's
+    /// own label hit area stops 8 short of the box (`width - 176 - 48` wide). A label wider than that is drawn under the box.
+    fn label_column(r: &dyn Raster) -> i32 {
+        let vui = vi::ui::Vui::new(Default::default(), Default::default(), Vec::new());
+        let mut w = Window::default();
+        for rows in [9, 12] {
+            w.init(&vui, r, [320, 246], 440, rows, 0);
+            assert_eq!(w.size[0], 440, "the page's window width");
+        }
+        (w.size[0] - 176) - 40 - 8
+    }
+
+    /// Owner's test 2026-11-27: three labels ran under the On/Off box. Every label of the fork's pages fits the column in the
+    /// game's font. Negative control: the labels before the shortening ("Show invitations, summons and resurrection offers",
+    /// "Answer quest hand-ins automatically", "World Map: text and marker size...") do not (asserted below).
+    #[test]
+    fn every_fork_row_label_fits_its_column_in_the_games_font() {
+        let font = game_font();
+        let column = label_column(&font);
+        let vui = vi::ui::Vui::new(Default::default(), Default::default(), Vec::new());
+        let measure = |label: &str| Window::default().text_width(&vui, &font, &wide(label));
+        let labels = fork_row_labels();
+        assert!(labels.len() >= 17, "the scan found the fork's rows and the bundled mods' rows: {labels:?}");
+        let too_wide: Vec<String> = labels.iter().filter(|l| measure(l) > column).map(|l| format!("{l:?} is {} wide, the column {column}", measure(l))).collect();
+        assert!(too_wide.is_empty(), "labels that run under the value box: {too_wide:#?}");
+        for old in ["Show invitations, summons and resurrection offers", "Answer quest hand-ins automatically", "World Map: text and marker size..."] {
+            assert!(measure(old) > column, "control: {old:?} ({}) does not fit {column}", measure(old));
+        }
+    }
 }

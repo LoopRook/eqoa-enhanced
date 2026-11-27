@@ -12,6 +12,24 @@
 local ui = eqoa.imgui
 -- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
 local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
+-- Plates belong to the world: they are not drawn over a game window that fills the screen (Options, the Start menu and its
+-- pages, the Abilities, Character Summary, quest log and the like). `eqoa.windows.get()` names what has the game's controls
+-- (`mode`) and what is up (`windows`); the small windows over the world (loot, a merchant, a dialog) leave the plates alone.
+local FULL_SCREEN = {
+    options = true, start_menu = true, inventory = true, map = true, spellbook = true, recipe_book = true, trainer = true,
+    quest_log = true, mastery = true, factions = true, who = true, guild = true, buddy_list = true, ignore_list = true,
+    mail_compose = true, mail_inbox = true, mail_tell = true, mail_reply = true, support_request = true, support_inbox = true,
+    chat_history = true, auction_search = true, experiment = true, group_search = true, combat_record = true,
+}
+local function game_page_up()
+    local w = eqoa.windows.get()
+    if not w then return false end
+    if w.start_menu_open == true or FULL_SCREEN[w.mode] then return true end
+    for _, win in ipairs(w.windows or {}) do
+        if FULL_SCREEN[win.kind] then return true end
+    end
+    return false
+end
 
 local DEFAULTS = {
     players = true, npcs = true, creatures = true,
@@ -39,7 +57,7 @@ eqoa.settings.on_load(function(saved)
     if type(saved.size) == "number" then S.size = math.max(60, math.min(200, saved.size)) end
 end)
 
-eqoa.options.button({ id = "settings", label = "Name Plates: settings..." }, function()
+eqoa.options.button({ id = "settings", label = "Name Plate settings..." }, function()
     show_window = not show_window
 end)
 
@@ -447,6 +465,8 @@ eqoa.events.on("render", function()
     now_time = ui.GetTime()
     -- under the game's full map: no plates, numbers or settings window (the game's own are still hidden by the claims)
     if map_up() then return end
-    draw_layer(player)
+    -- over a full-screen game page (Options, the Start menu's pages) no plates or numbers either; the settings window is
+    -- opened from the Options page, so it stays
+    if not game_page_up() then draw_layer(player) end
     settings_window()
 end)

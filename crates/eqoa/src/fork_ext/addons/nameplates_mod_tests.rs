@@ -741,3 +741,52 @@ fn hide_under_map_nameplates_draws_nothing_while_the_game_map_is_up() {
     assert!(!frame(&host, &bridge, &mut context).is_empty(), "map closed: the plate is back");
     assert!(host.drain_logs().unwrap().is_empty());
 }
+
+/// Owner's test 2026-11-27: the plates were drawn over the game's Options window. With a full-screen game page up (Options,
+/// the Start menu and its pages) the plates and numbers are not drawn; a small window over the world (loot, a merchant, a
+/// dialog) leaves them; the page closed, they are back. The mod's own settings window (opened from Options) stays.
+/// Control: the same frame with no window up draws the plate (the negative control is this test against the mod before
+/// the fix: the Options frame drew the plate).
+#[test]
+fn nameplates_are_not_drawn_over_a_full_screen_game_page() {
+    world(vec![entity(7001, "Gnoll Pup", "npc", [1.0, 0.0, -10.0])]);
+    let windows = |mode: &str, native: i64, kinds: &[&str], start_menu: bool| {
+        let list: Vec<Json> = kinds.iter().map(|k| json!({"kind": k, "visible": true, "focused": true})).collect();
+        CORE.with(|c| {
+            c.borrow_mut().view.windows_state = json!({
+                "mode": mode, "native_mode": native, "busy": mode != "normal", "start_menu_open": start_menu,
+                "any_window_open": !list.is_empty(), "windows": list,
+            })
+        });
+    };
+    let mut context = context();
+    let host = Host::for_addon(&addon()).unwrap();
+    let bridge = Bridge::install(&host).unwrap();
+    host.run_addon(&addon()).unwrap();
+    let drawn = |host: &Host, bridge: &Bridge, context: &mut Context| {
+        frame(host, bridge, context);
+        !frame(host, bridge, context).is_empty()
+    };
+    windows("normal", 0, &[], false);
+    assert!(drawn(&host, &bridge, &mut context), "control: the plate is drawn with no window up");
+    for (mode, native, kinds, start) in [
+        ("options", 34, &["options"][..], false),
+        ("start_menu", 13, &["start_menu"][..], true),
+        ("normal", 0, &["inventory"][..], false),
+        ("trainer", 12, &["trainer"][..], false),
+        ("quest_log", 22, &["quest_log"][..], false),
+        ("spellbook", 5, &["spellbook"][..], false),
+    ] {
+        windows(mode, native, kinds, start);
+        assert!(!drawn(&host, &bridge, &mut context), "{mode}: a full-screen game page is up: no plate");
+    }
+    for (mode, native, kinds) in [("loot", 1, &["loot"][..]), ("merchant", 10, &["merchant"][..]), ("response_dialog", 7, &["response_dialog"][..]), ("normal", 0, &["typing"][..])] {
+        windows(mode, native, kinds, false);
+        assert!(drawn(&host, &bridge, &mut context), "{mode}: a small window over the world leaves the plates");
+    }
+    windows("options", 34, &["options"], false);
+    assert!(!drawn(&host, &bridge, &mut context));
+    windows("normal", 0, &[], false);
+    assert!(drawn(&host, &bridge, &mut context), "the page closed: the plate is back");
+    assert!(host.drain_logs().unwrap().is_empty());
+}

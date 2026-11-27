@@ -4,13 +4,13 @@
  "rule": "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
  "counts": {
   "total": 2601,
-  "proven": 872,
-  "provisional": 1362,
+  "proven": 877,
+  "provisional": 1357,
   "compat": 367,
   "by_kind": {
    "action": {
-    "proven": 84,
-    "provisional": 48,
+    "proven": 85,
+    "provisional": 47,
     "compat": 0
    },
    "compat": {
@@ -24,8 +24,8 @@
     "compat": 0
    },
    "field": {
-    "proven": 363,
-    "provisional": 948,
+    "proven": 366,
+    "provisional": 945,
     "compat": 0
    },
    "function": {
@@ -39,8 +39,8 @@
     "compat": 0
    },
    "type": {
-    "proven": 75,
-    "provisional": 86,
+    "proven": 76,
+    "provisional": 85,
     "compat": 0
    }
   }
@@ -147,7 +147,6 @@
   "eqoa.actions.buy",
   "eqoa.actions.camera",
   "eqoa.actions.chat",
-  "eqoa.actions.close_window",
   "eqoa.actions.cycle_target",
   "eqoa.actions.dye_cancel",
   "eqoa.actions.dye_no_dye",
@@ -1387,11 +1386,9 @@
   "eqoa.windows.StartEntry.native",
   "eqoa.windows.StartEntry.text",
   "eqoa.windows.TalkedTo.id",
-  "eqoa.windows.Window",
   "eqoa.windows.Window.dialog",
   "eqoa.windows.Window.focused",
   "eqoa.windows.Window.hints",
-  "eqoa.windows.Window.kind",
   "eqoa.windows.Window.ref",
   "eqoa.windows.Window.rows",
   "eqoa.windows.Window.scroll_top",
@@ -1401,8 +1398,6 @@
   "eqoa.windows.Window.title",
   "eqoa.windows.Window.visible",
   "eqoa.windows.Windows.active",
-  "eqoa.windows.Windows.mode",
-  "eqoa.windows.Windows.windows",
   "eqoa.windows.find",
   "eqoa.windows.format_hint",
   "eqoa.windows.get_window",

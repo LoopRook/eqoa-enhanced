@@ -1,5 +1,7 @@
 -- Dialog window: NPC dialogs (and, if you like, group invitations, summons and resurrection offers) in a window of
--- the mod's own, in place of the game's. Pressing Escape or the x gives the dialog back to the game's own window.
+-- the mod's own, in place of the game's. Pressing Escape or the x leaves the conversation, as the game's own Escape does
+-- (an invitation, summons or resurrection offer has to be answered: Escape does nothing there); the "Game window" button hands
+-- the dialog to the game's own window instead.
 -- An answer that names a quest in your journal is marked and has a Hand in button; with the option on, a dialog whose
 -- only real answer is such a hand-in is answered by itself.
 -- SPDX-License-Identifier: AGPL-3.0-or-later
@@ -7,6 +9,22 @@ local ui = eqoa.imgui
 -- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
 local function map_up() local m = eqoa.map.get(); return m ~= nil and m.open == true end
 local match = require("match")
+
+-- The minimap is never covered: a box that would lie over it (window pixels, from `eqoa.hud.layout`, so wherever the player
+-- moved it) goes to its left, or below it where there is no room on the left. Nothing moves with the minimap off.
+local function clear_of_minimap(x, y, w, h, dw, dh, gap)
+    local m = eqoa.map.get()
+    if not (m and m.minimap == true) then return x, y end
+    local layout = eqoa.hud.layout()
+    local r = layout and layout.minimap
+    if not (r and r.width and r.width > 0) then return x, y end
+    if x + w <= r.x or x >= r.x + r.width or y + h <= r.y or y >= r.y + r.height then return x, y end
+    local left = r.x - gap - w
+    if left >= 0 then return left, y end
+    local below = r.y + r.height + gap
+    if below + h <= dh then return x, below end
+    return x, y
+end
 
 local DIALOG_KINDS = { "response_dialog", "text_dialog" }
 local OFFER_KINDS = { "group_invite", "summon_offer", "revive_offer" }
@@ -16,9 +34,9 @@ local OFFER_W = 300
 local RECLAIM_FRAMES, RETRY_FRAMES = 120, 30
 local DIGITS = { "1", "2", "3", "4", "5", "6", "7", "8", "9" }
 
-eqoa.options.toggle({ id = "offers", label = "Show invitations, summons and resurrection offers", default = true })
-eqoa.options.toggle({ id = "highlight", label = "Highlight quest hand-ins", default = true })
-eqoa.options.toggle({ id = "auto_answer", label = "Answer quest hand-ins automatically", default = false })
+eqoa.options.toggle({ id = "offers", label = "Invitations and offers", default = true })
+eqoa.options.toggle({ id = "highlight", label = "Highlight hand-ins", default = true })
+eqoa.options.toggle({ id = "auto_answer", label = "Auto-answer hand-ins", default = false })
 
 -- Never a real answer: the game's own paging entries, and a plain farewell (leaving is not a choice to make for the
 -- player, so a hand-in offered beside Goodbye is still the dialog's only real answer).
@@ -79,6 +97,18 @@ local function answer(ref, option, label)
         return
     end
     say(label .. " sent", nil)
+    return request
+end
+
+-- Escape and the x: leave. The game's own "no choice" (Done on a plain message, the Escape of an answers dialog), sent through
+-- `eqoa.actions.close_window`; the game's own window does not open. Never used on an offer (its close is a No, an answer).
+local function leave(ref)
+    local request, err = eqoa.actions.close_window(ref)
+    if err then
+        say(err.message or err.code or "Refused", false)
+        note("warn", "leaving was refused: " .. tostring(err.code))
+        return
+    end
     return request
 end
 
@@ -144,7 +174,7 @@ local function wrap(text, maxw, k)
     return lines
 end
 
--- What the player's keys do while a window is up: Escape gives the dialog back to the game; 1 to 9 pick an answer.
+-- What the player's keys do while a window is up: Escape leaves the conversation; 1 to 9 pick an answer.
 local function press(key)
     local run = state.keys[key]
     if run then run() end
@@ -257,23 +287,24 @@ local function draw_dialog(s, f, k, dw, dh)
     local rows = response and (last - first) or 1
     local more, back = state.page < pages - 1, state.page > 0
     rows = rows + (more and 1 or 0) + (back and 1 or 0)
-    local H = 24 + #lines * LINE + 8 + rows * 20 + PAD + 14
+    local H = 24 + #lines * LINE + 8 + rows * 20 + PAD + 18
     local x0 = math.max(0, math.min(dw - W * k, f.offset_x + (640 - W) / 2 * f.scale_x))
     local y0 = math.max(0, math.min(dh - H * k, f.offset_y + 40 * f.scale_y))
+    x0, y0 = clear_of_minimap(x0, y0, W * k, H * k, dw, dh, 6 * k)
     local t = kit(f, k, dw, dh, x0, y0)
     local col = t.col
     t.fill(0, 0, W, H, col.surface)
     t.frame(0, 0, W, H, col.border)
     local title = (data.talked_to and data.talked_to.name and data.talked_to.name ~= "") and data.talked_to.name or "Dialog"
     t.text(PAD, 6, title, col.white, W - 60)
-    -- the x and Escape both hand the dialog back to the game's own window
+    -- the x and Escape both leave the conversation
     t.fill(W - 18, 4, 12, 12, col.raised)
     t.frame(W - 18, 4, 12, 12, col.border)
     t.text(W - 15, 4, "x", col.text)
-    t.hit(W - 18, 4, 12, 12, function() pass(s.ref) end)
+    t.hit(W - 18, 4, 12, 12, function() leave(s.ref) end)
     for i, line in ipairs(lines) do t.text(PAD, 22 + (i - 1) * LINE, line, col.text, W - 2 * PAD) end
     local y = 22 + #lines * LINE + 8
-    local keys = { escape = function() pass(s.ref) end }
+    local keys = { escape = function() leave(s.ref) end }
     if response then
         -- Enter is this window's while a dialog is up, so it never reaches the game (it would open the chat line);
         -- on answers it does nothing: the number keys and clicks answer
@@ -311,9 +342,10 @@ local function draw_dialog(s, f, k, dw, dh)
         t.button(PAD, y, 80, "Done", run, true)
         keys["enter"], keys["1"] = run, run
     end
-    t.text(PAD, H - 14, "Esc: the game's own window", col.muted, W - 2 * PAD)
+    t.text(PAD, H - 16, "Esc: leave", col.muted, 70)
+    t.button(W - PAD - 92, H - 20, 92, "Game window", function() pass(s.ref) end)
     if state.result and state.frame - state.result.at < 300 then
-        t.text(W - PAD - 150, H - 14, state.result.text, state.result.ok == false and col.warn or col.muted, 150)
+        t.text(PAD + 74, H - 16, state.result.text, state.result.ok == false and col.warn or col.muted, W - 2 * PAD - 74 - 96)
     end
     eqoa.input.claim_pointer({ x = x0, y = y0, width = W * k, height = H * k })
     return keys, y0 + H * k
@@ -324,9 +356,10 @@ end
 local function draw_offer(s, f, k, dw, dh, below)
     local data = s.data or {}
     local lines = wrap(data.text or "", OFFER_W - 2 * PAD, k)
-    local H = 24 + #lines * LINE + 8 + 17 + PAD
+    local H = 24 + #lines * LINE + 8 + 17 + PAD + 12
     local x0 = math.max(0, math.min(dw - OFFER_W * k, f.offset_x + (640 - OFFER_W) / 2 * f.scale_x))
     local y0 = math.max(0, math.min(dh - H * k, math.max(below + 6 * k, f.offset_y + 60 * f.scale_y)))
+    x0, y0 = clear_of_minimap(x0, y0, OFFER_W * k, H * k, dw, dh, 6 * k)
     local t = kit(f, k, dw, dh, x0, y0)
     local col = t.col
     t.fill(0, 0, OFFER_W, H, col.surface)
@@ -342,8 +375,10 @@ local function draw_offer(s, f, k, dw, dh, below)
     t.button(PAD + 176, y, 110, "Game window", function() pass(s.ref) end)
     if state.result and state.frame - state.result.at < 300 then
         t.text(PAD, y + 19, state.result.text, state.result.ok == false and col.warn or col.muted, OFFER_W - 2 * PAD)
+    else
+        t.text(PAD, y + 19, "Esc does nothing here: Accept or Decline", col.muted, OFFER_W - 2 * PAD)
     end
-    eqoa.input.claim_pointer({ x = x0, y = y0, width = OFFER_W * k, height = (H + 12) * k })
+    eqoa.input.claim_pointer({ x = x0, y = y0, width = OFFER_W * k, height = H * k })
     return {}
 end
 
@@ -386,7 +421,7 @@ eqoa.events.on("render", function()
         local keys = draw_offer(offer, f, k, dw, dh, below)
         if not dialog then
             state.keys = keys
-            state.keys.escape = function() pass(offer.ref) end
+            state.keys.escape = function() end -- an offer is answered, never left: Escape is held and does nothing
         end
     end
     local want = {}
