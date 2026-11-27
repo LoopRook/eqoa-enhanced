@@ -327,12 +327,23 @@ end
 
 -- Right-click on a pack item at a merchant: a single item is offered at once, a stack asks how many (the whole stack
 -- is what it starts on).
-function T.sell_item(it)
+-- A right-click on an item the player marked to bank or keep asks first (the page the mod uses for junk marks).
+local function ask_sell(it, at)
+    local why = (B.helpers and B.helpers.is_banked(it)) and "marked to bank" or "kept for Restock"
+    local yes = {label = "Yes", text = "Yes, sell it", enabled = true, local_only = true, confirmed = true,
+        run = function() T.sell_item(it, at, true) end}
+    local no = {label = "No", text = "No, keep it", enabled = true, local_only = true, run = function() end}
+    B.menu = {title = "Sell " .. it.name .. "? It is " .. why, rows = {yes, no}, fx = at and at.fx or 8, fy = at and at.fy or 46,
+        asking = true}
+end
+
+function T.sell_item(it, at, confirmed)
     if it.equipped then
         B.result = {text = it.name .. ": cannot sell an equipped item", ok = false}
         B.dirty()
         return
     end
+    if not confirmed and X.protected(it) then ask_sell(it, at); return end
     local q = it.quantity or 1
     if q > 1 then open_prompt("sell", it, q, q) else T.sell(it, 1) end
 end
@@ -545,7 +556,7 @@ function T.on_pointer(d)
     elseif d.button == "right" and mode == "merchant" then
         for _, h in ipairs(B.slot_hits or {}) do
             -- a selected item's right-click is the group menu's (Sell (N))
-            if inside(d.x, d.y, h) and not X.is_selected(h.item) then T.sell_item(h.item); return true end
+            if inside(d.x, d.y, h) and not X.is_selected(h.item) then T.sell_item(h.item, h); return true end
         end
     end
     return false

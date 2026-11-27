@@ -662,3 +662,38 @@ fn review7_the_two_panel_bank_tab_is_only_for_a_bank_the_player_talked_to() {
     run(&lua, "T.held.bank = false");
     assert_eq!(string(&lua, "T.mode()"), "nil");
 }
+
+#[test]
+fn review8_items_marked_to_bank_or_keep_are_not_sold_by_sell_n_and_a_right_click_asks_first() {
+    let setup = r#"
+        set_pack({it_(1, "Rat Pelt", {q = 3}), it_(2, "Moonstone"), it_(3, "Arrows", {q = 10}), it_(4, "Spider Silk", {q = 2})})
+        H.bank["2"] = true            -- marked to bank (B)
+        H.keep["3"] = 20              -- kept up to 20 for Restock (R)
+        talk_merchant({ware_(1, "Bread")})
+        B.rebuild()
+        for i = 1, 4 do X.click({item = INV_ITEMS[i]}, {ctrl = true}) end
+    "#;
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, setup);
+    assert_eq!(string(&lua, "#X.sellable()"), "2", "only the two unmarked stacks");
+    run(&lua, "X.sell_selected()");
+    assert_eq!(string(&lua, "#steps_of(1) .. ':' .. steps_of(1)[1].item .. ':' .. steps_of(1)[2].item"), "2:ref1:ref4", "the marked stacks stay");
+    run(&lua, "batch_ends(2)");
+    assert!(string(&lua, "B.result.text").contains("2 marked"), "the line says what was kept: {}", string(&lua, "B.result.text"));
+    // a right-click on a marked item asks first; nothing is sold until Yes
+    let lua = world();
+    viewer_closed(&lua);
+    run(&lua, setup);
+    run(&lua, "X.clear(); T.sell_item(INV_ITEMS[2], {fx = 8, fy = 46})");
+    assert_eq!(int(&lua, "#SELLS"), 0, "not sold by the right-click");
+    assert!(boolean(&lua, "B.menu ~= nil and B.menu.asking == true"), "a question is up");
+    assert!(string(&lua, "B.menu.title").contains("Moonstone"));
+    run(&lua, "B.trigger_menu(B.menu.rows[2])");
+    assert_eq!(int(&lua, "#SELLS"), 0, "No keeps it");
+    run(&lua, "T.sell_item(INV_ITEMS[2], {fx = 8, fy = 46}); B.trigger_menu(B.menu.rows[1])");
+    assert_eq!(string(&lua, "#SELLS .. ':' .. SELLS[1].ref"), "1:ref2", "Yes sells it");
+    // an unmarked stack asks how many, not whether
+    run(&lua, "B.last_req = nil; T.sell_item(INV_ITEMS[1], {fx = 8, fy = 46})");
+    assert_eq!(string(&lua, "T.prompt.kind"), "sell");
+}
