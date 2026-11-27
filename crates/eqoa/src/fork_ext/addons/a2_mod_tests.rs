@@ -275,7 +275,7 @@ fn speed_hand_ins_steps_through_a_talk_and_stops_at_the_first_real_choice() {
     let mut r = speed_rig(true);
     r.say_text(Some(NPC), "Greetings, friend.");
     r.frames(2);
-    assert_eq!(answers_sent(), 1, "Done is pressed");
+    assert_eq!(answers_sent(), 1, "Done is pressed: {:?}", r.host.drain_logs());
     r.answered();
     r.say_text(Some(NPC), "I have a task for you.");
     r.frames(2);

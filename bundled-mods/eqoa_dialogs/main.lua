@@ -203,6 +203,7 @@ local function consider(s)
     if state.judged == s.ref then return end
     state.judged = s.ref
     if s.kind ~= "response_dialog" and s.kind ~= "text_dialog" then return end
+    note("debug", "speed-through: judging " .. tostring(s.kind) .. " option=" .. tostring(eqoa.options.get("speed_hand_ins")))
     if eqoa.options.get("speed_hand_ins") ~= true then
         end_run()
         return
@@ -213,7 +214,9 @@ local function consider(s)
     local run = state.run
     if run and who ~= "" and run.npc ~= who then end_run(); run = nil end
     if not run then
-        if who == "" or not sent_to(name) then return end
+        local sent = who ~= "" and sent_to(name)
+        note("debug", "speed-through: " .. tostring(name) .. (sent and " has a step mark" or " has no step mark"))
+        if not sent then return end
         run = { npc = who, steps = 0, active = true, record = {} }
         state.run = run
         note("info", "speeding through the talk with " .. tostring(name))
