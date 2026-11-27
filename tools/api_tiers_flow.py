@@ -387,6 +387,9 @@ class Flow:
             key = f"{record}.{name}"
             if key in self.frozen:
                 self.reads.setdefault(("rec", record, name), f"{self.note(line)}: .{name} of {why}")
+            if len(value) > 3 and f"eqoa.events.{value[3]}.data.{name}" in self.frozen:
+                # the data of an event that is itself a record (chat.message, combat.hit, ...)
+                self.reads.setdefault(("ev", value[3], name), f"{self.note(line)}: .{name} of {why}")
             child = self.nested.get((record, name)) or self.nested.get(("_", name))
             if child:
                 self.receive(child, f"{why}.{name}", line)
@@ -401,7 +404,7 @@ class Flow:
                 record = event_data_record(event)
                 if record:
                     self.receive(record, f"data of {why}", line)
-                    return ("t", record, f"data of {why}")
+                    return ("t", record, f"data of {why}", event)
                 return ("ed", event, f"data of {why}")
             return None
         if kind == "ed":
@@ -852,14 +855,14 @@ def analyze_mod(files, frozen, nested, wrappers, stems):
         new_ret = {}
         for key, seen in flow.ret_obs.items():
             if defs.get(key[1], {}).get(key[0]) == 1 and key[1] not in flow.escaped \
-                    and all(v is not None and v[0] == "t" for v in seen) and len({v[1] for v in seen}) == 1:
+                    and all(v is not None and v[0] == "t" for v in seen)                     and len({(v[1], v[3] if len(v) > 3 else None) for v in seen}) == 1:
                 new_ret[key] = seen[0]
         new = {}
         for (path, name, idx), seen in flow.obs.items():
             if defs.get(name, {}).get(path) != 1 or name in flow.escaped:
                 continue
             if all(v is not None and v[0] in ("t", "ev", "ed", "dl") for v in seen):
-                kinds = {(v[0], v[1]) for v in seen}
+                kinds = {(v[0], v[1], v[3] if len(v) > 3 else None) for v in seen}
                 if len(kinds) == 1:
                     new[(path, name, idx)] = seen[0]
         escaped = flow.escaped

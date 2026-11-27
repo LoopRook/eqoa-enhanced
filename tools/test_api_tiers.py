@@ -208,6 +208,8 @@ FIELDS = FROZEN + [
     "eqoa.events.bank.changed", "eqoa.events.bank.changed.data.after",
     "eqoa.entities.list", "eqoa.entities.Entity", "eqoa.entities.Entity.name", "eqoa.entities.Entity.kind",
     "eqoa.Error", "eqoa.Error.message",
+    "eqoa.events.chat.message", "eqoa.events.chat.message.data.text", "eqoa.chat.ChatMessage",
+    "eqoa.chat.ChatMessage.text",
 ]
 
 
@@ -428,6 +430,17 @@ class EventData(unittest.TestCase):
         # `.name` on a variable that is not an event
         tier = self.check('eqoa.events.on("bank.changed", function(e) end)\nlocal t = {}\nlocal n = t.name\n')
         self.assertEqual(tier["eqoa.events.Event.name"], "provisional")
+
+    def test_event_whose_data_is_a_record_proves_both_names(self):
+        src = 'eqoa.events.on("chat.message", function(e) local t = e.data.text end)'+chr(10)
+        tier = self.check(src)
+        self.assertEqual(tier["eqoa.events.chat.message.data.text"], "proven")
+        self.assertEqual(tier["eqoa.chat.ChatMessage.text"], "proven")
+        # negative control: the same read in the handler of another event
+        src = 'eqoa.events.on("state.reset", function(e) local t = e.data.text end)'+chr(10)
+        tier = self.check(src)
+        self.assertEqual(tier["eqoa.events.chat.message.data.text"], "provisional")
+        self.assertEqual(tier["eqoa.chat.ChatMessage.text"], "provisional")
 
     def test_the_handler_parameter_is_scoped_to_its_function(self):
         src = ('eqoa.events.on("state.reset", function(e) return 1 end)\n'
