@@ -5,6 +5,178 @@ in the same push as the changes it describes. The dev release's page shows them
 (`release/notes.sh`, from `.github/workflows/dev.yml`); an edit to this file alone
 is put on the page by `.github/workflows/notes.yml`.
 
+## 2026-11-26 · Bank pages from the bank window
+
+- At the banker, on the **Items** page, you can now turn your bank's page without typing **/bank next**: press **R1** for the next page and **L1** for the one before (**Page Down** and **Page Up** on the keyboard). With **Inventory Style** set to **Bags** there are **Page** buttons under the bank's grid too, to click or tap. The chat says which page you are on, and the bank's side starts again from its top.
+- On a server whose bank has no pages, the server just tells you so.
+
+## 2026-11-26 · A creature's details and loot chart
+
+- **Right-click a creature** to see its details in a window at the top of the screen: its level, class, how it cons to you and its hit points, then what it can drop, grouped as what it carries, its loot tables, its region's drops and quest items, each with its chance a kill (**every kill**, **common**, **uncommon** or **rare**, and the percent). The chances are read from the same tables its corpse rolls with, so the chart shows what *can* drop, not what will. Your own quest's items say so.
+- The mouse wheel scrolls a long chart; click its **x**, or press **Escape** or **△**, to close it. Townspeople, players, pets and corpses are right-clicked as before.
+- Only on servers that offer it (eqoaclassic's Heirloom); elsewhere a right-click is as it was.
+
+## 2026-11-26 · A kappa's shell over its robe
+
+- A **Kappa**'s shell stays its own: a robe, a tunic or a breastplate goes on its front, sides and arms, under the shell, instead of being stretched across the shell's back.
+
+## 2026-11-26 · A Wisp in its raiment shows no skin
+
+- A **Wisp** wearing its gear (Wisp's Raiment) no longer shows a human's skin through its armour or robe: where a robe or a tunic is cut open (a female Wisp's robe at the chest, a tunic's bare arms) there is nothing, as everywhere else on a Wisp.
+
+## 2026-11-26 · Surnames on name plates
+
+- On a server that has them, players can take a **surname** with `/surname <name>` from level 20. The client now shows it after the player's first name **over their head** and in the **details box** (□ on a player), for example *Cora Stoneheart*. Pets and mercenaries are unchanged. On a server without surnames nothing changes.
+
+## 2026-11-26 · See each merc on the DPS meter
+
+- New option **Mercs as Own Rows** under **Options → Extended → UI → DPS Meter** (off unless you turn it on). On, each mercenary gets its **own row** on the DPS meter again, for example *Kel (Dab's merc)*, in the mercs' purple, ranked with the players by damage, healing or power, and its figures are no longer counted in its owner's row. Off, mercs stay part of their owner's row as now. **Hide mercs** still hides them all.
+- It works in **Fight** and **Overall**. It needs the server's new update; on a server without it the row says so and the meter is as before.
+
+## 2026-11-26 · Feed your merc from its inventory
+
+- Food and drink you have given your **mercenary** now have a **Use** option in its inventory window (the **Carried** tab): the merc eats or drinks it right away, and gets the same health or power over time it would get eating or drinking on its own. A new meal replaces the one it is eating; a drink replaces the one it is drinking. Mercs with no power will not take a drink.
+- Typing works too: `/merc use <item>` (for example `/merc use elven wine`, or `/merc Kel use jerky` with several mercs). It needs the server's new update.
+
+## 2026-11-26 · M in a town opens the town's map
+
+- Pressing **M** while you are in a town or city (Freeport, Qeynos, Neriak, Halas, Oggok and the others the map knows) now opens the map zoomed in on that town, like picking it from **Places**. Press **M** again (✕ on a controller) for the world map as you left it, and **M** once more to close. Outside towns, M opens the world map as before.
+- Turn it off under **Options → Extended → UI → Map → Town Map First** if you would rather M always opened the world map.
+
+## 2026-11-26 · The compare box no longer covers your bags
+
+- With **Inventory Style** at **Bags**, the **Compare Gear** box now sits in the column to the right of the grid, at the bottom, instead of under the item you are on: it never covers the bag slots, so you can always see where you are in the row. In the Retail List it stays beside the list as before.
+
+## 2026-11-26 · Save and load the HUD layout from Options
+
+- **Options → Extended → UI → HUD Layout** now has **Save HUD Layout** and **Load HUD Layout**, beside **Move HUD** and **Reset HUD**, so you no longer need to type `/hud save` or `/hud load`.
+- **Save HUD Layout**: shows **New Layout** (saved as *Layout 1*, *Layout 2* and so on) or, with left and right, one of your saved layouts to save over. Press ✕ (or click) to keep the HUD as it is now; the page says what it was saved as.
+- **Load HUD Layout**: left and right pick a saved layout, ✕ puts it on the HUD. (It was called *HUD Layouts* under HUD Extras.) `/hud save`, `/hud load`, `/hud delete` and `/hud list` still work.
+
+## 2026-11-26 · Bank as bags, with a filter
+
+- With **Inventory Style** set to **Bags** (**Options → Extended → UI → Inventory**), the bank's **Items** page now shows your pack and your bank the same way: as grids of the items' icons, with stack counts, worn items framed in gold and what you cannot wear washed red, in your **Bag Sort** order. The selected item's description stays in the middle.
+- New **Filter** under the description: **All**, **Equipment**, **Gems**, **Crafting** or **Consumables**, on both sides at once. Press □ (or click the button) to change it.
+- Move around with the d-pad or arrows (right from your pack's last column goes to the bank, left from the bank's first column back), and ✕ or a click on the selected item moves it, the same as before. With **Retail List** the bank is unchanged.
+
+## 2026-11-26 · Quieter sound
+
+- The **Fx Volume** and **Music Volume** sliders under **Options → Sound** now go lower than before: below the old lowest step they go down in finer steps (half, a fifth, a tenth of it) before silence, so the game can be very quiet without being muted. Your saved volumes are kept as they were.
+- New **Master Volume** under **Options → Extended → Other → Sound**: turns the whole game's sound down (music, effects, ambience and the menus' sounds together), from 100% (as before) down to 1% and off, with finer steps near the bottom.
+
+## 2026-11-26 · Bestiary
+
+- New **Character → Bestiary** (on servers that keep one): every kind of creature you have fought, listed by the zone it comes from, with how many you have killed and the day you first met it. Creatures in a heroic dungeon are listed under that dungeon. Turn the pages with **←** and **→** (or click the ends of the page line), and leave with **△** (Escape). It starts counting from the server's update, so creatures you fought before are not in it yet.
+
+## 2026-11-26 · Drag the scroll bar's blue knob
+
+- In the **chat box**, with its history up (scrolled back), **press the blue knob on the scroll bar and drag it**: the history goes with the mouse (or your finger), from the oldest lines at the top of the bar to the newest at its foot, so a long history is a quick drag away. Let go at the foot and the chat is live again. A click on the bar **above or below the knob** pages the history older or newer.
+- In the game's **windows with a scroll bar** (the PS2-style windows, with the PC interface off), the same drag: hold the knob and move, and the list follows the pointer a row at a time.
+- The bars look as ever.
+
+## 2026-11-26 · No map on Night 4
+
+- On the Plane of Sky's **Night Chain 4**, the isle whose floor has squares that are not really there, the **minimap** no longer shows the floor: standing on the isle it is blank and says *The sky hides the way*. The **map** (M) shows the isle as a plain square, so neither gives away which squares are false. Everywhere else both are as before.
+
+## 2026-11-26 · Lore items at the auction house
+
+- **Lore** items can now be put up for auction at a banker, like any other item: they are no longer greyed out in the sell list. **No Trade** and **No Rent** items still cannot be sold there.
+- You still can only hold one of a Lore item: the auction house will not let you bid on or buy one while you already have one (in your pack, worn or in your bank), and tells you so.
+
+## 2026-11-26 · Track a faction on screen
+
+- New **Faction Tracker**: keep one faction's standing on screen while you play, without opening the faction window. It shows the faction's name and its standing as a **number** (red when negative, blue when positive), a **bar** (the faction window's own bar: red to the left, blue to the right), or **both**.
+- To pick a faction, open **Factions**, press **✕** on a faction to see its standing, then **✕ Track** (or click it). Press **✕** on the tracked faction again to stop. You can also type `/track faction <name>` (part of the name works, for example `/track faction militia`) and `/track off`.
+- The standing updates as it changes: kills, quests, everything that moves it. Your choice is kept for each character and is still there the next time you log in.
+- Settings are under **Options → Extended → UI → Faction Tracker**: **Faction Tracker** (off until you pick a faction) and **Faction Tracker Shows** (**Number**, **Bar** or **Both**). The tracker sits above the DPS meter on the right, and you can move it with **Move HUD**. It needs the server's new update; on a server without it nothing is shown.
+
+## 2026-11-26 · Click the Focus Target window to target it
+
+- A **left click** (or a tap) on the **Focus Target** window now makes your focus your current target, the same as the Target Focus key. A focus that has left your view or died is let go of already, so its window is not there to click. There is no new controller button: bind **Target Focus** to one under Controls if you want it on a pad.
+
+## 2026-11-26 · More foliage, and foliage that moves
+
+- New **Foliage** page under **Options → Extended → Graphics**, both off unless you choose them:
+- **Foliage Density**: **Retail** (the game's grass and plants, exactly as before), **2x** or **3x**. More plants grow on the same ground the game plants on, in the same mix, and the same ones every time you come back. The game's own plants are all still there; the extra ones are added among them. 3x costs the most on slower computers and phones.
+- **Foliage Reacts**: **On** makes the grass and plants lean away from you and from the players and creatures walking through them, and spring back slowly once they have passed.
+
+## 2026-11-26 · Yellow quest marks in the coach list
+
+- In a coachman's list of stops, the **?** that marks a stop on a quest you are doing is now drawn **yellow**, like the quest marks over NPCs' heads, and sits at the end of the line after the period (for example *Get me a horse to Aviak Village.* **?**). It follows **Quest Markers** under **Options → Extended → UI → Name Plates**: turned off, it stays white.
+
+## 2026-11-26 · Click a name in chat to send them a tell
+
+- On the **PC interface**, the name at the start of someone's chat line (a say, shout, tell, whisper, group, raid or guild line) lights up under the mouse: **click it** and the chat line opens with `/tell <Name> ` already typed, ready for your message. Tags such as **[GM]**, **[OG]**, **[HC]** or **[AFK]** and a raid's **[L]**/**[H]** are left out, so the tell reaches them. NPCs' lines and the server's notices are not clickable.
+
+## 2026-11-26 · Auto-cast takes the vampires' Feed
+
+- A vampire's **Feed** can now be marked for **auto-cast** with a right click, a long press or ○/E held on its quick slot, like any attack: it fires off its timer in a fight, at your target. Before, auto-cast said it could not tell when to use Feed.
+
+## 2026-11-26 · Guild roster rows and the minimap's name box
+
+- The **guild roster** no longer draws one member's name on top of the next: a member of a race the game has no short name for (a froglok) used to leave the rest of the list one line short. Each member now has a row of their own.
+- The box that names what is under the mouse on the **minimap** (an NPC's name, a camp, a coach) now always sits beside the minimap, never over it: to its left as before, or to its right when the minimap has been moved to the left of the screen.
+
+## 2026-11-25 · Hide mercs on the DPS meter
+
+- The **DPS meter** combines mercenary contributions with their owner's totals. The purple part of each bar shows the mercenary share. Turn on **Hide mercs** on the meter or under **Options → Extended → UI → DPS Meter** to exclude those contributions from Fight and Overall. The updated server sends the full breakdown for raids.
+
+## 2026-11-25 · Self-only spell targeting
+
+- Spells marked **Self** cast on you even when you have someone else selected. Casting keeps your current target selected.
+
+## 2026-11-25 · Target of Target health bar
+
+- Enable **Target of Target** under **Options → Extended → UI → HUD Extras**
+  to see the name and health of your current target's target in a smaller
+  version of the target bar. It starts off.
+  Use **Move HUD** to drag it into place or resize it from a corner in either
+  interface.
+
+## 2026-11-25 · Mercs on their own DPS meter lines
+
+- The **DPS meter** now gives each mercenary its own line, by its name and its owner's (for example *Kellasis (Cucumber's merc)*), with its own damage, healing and power given, ranked with the players by whatever the meter is sorted by. Merc lines are drawn a shade dimmer, with a fainter bar. Your own merc's line is tinted like your own. The pet row under your line now shows only your summoned or charmed pet. Overall keeps each merc apart, even if a player or another player's merc has the same name. This needs the server's new meter; on an older server the meter works as before.
+
+## 2026-11-25 · Bags inventory and Compare Gear
+
+- New **Inventory Style** under **Options → Extended → UI → Inventory**: **Retail List** (the game's tabbed list, as before) or **Bags**, which shows your whole pack as a grid of item icons, like the bags in EQ and most MMOs. Stacks show their count on the icon, worn items have a gold frame and a **W**, and gear your class cannot wear is tinted red. The grid shows how full your pack is (for example **16/40**).
+- In the bags, move with the d-pad or click an item, then press **X** (or click it again) for the same choices the list gives: equip or use, inspect, quick slot, move, destroy (and Link Item, Give to Merc and Hide Look where they apply). **Move** picks the item up: put it down on another slot with **X**. The mouse wheel scrolls a pack bigger than the grid.
+- **Bag Sort** lays the bags out by **Pack Order**, **Slot**, **Type** or **Name**: press **□** (Square) or click the Sort button over the grid to change it.
+- New **Compare Gear**: select or hover over a piece of gear you are not wearing and a box shows its stats next to what you are wearing in that slot, with the difference in **green** (better) or **red** (worse). It compares with exactly what wearing it would take off: a two-handed weapon against your weapon and shield, a ring against a free finger (nothing) or the ring it would replace. **Bags Only** (the default) shows it in the bags; **Always** in the Retail List too; or **Off**.
+
+## 2026-11-25 · Resize the minimap on the Controller interface
+
+- The **Controller interface's minimap** can now be made bigger or smaller, the way the PC interface's HUD pieces are: turn on **Move HUD** (**Options → Extended → UI → HUD Layout**, or type `/hud`), then drag the small grip at a corner of the minimap. Its size is kept for the Controller interface (the PC interface keeps its own), and **Reset HUD** puts it back.
+
+## 2026-11-25 · The web page starts again on older Edge and Chrome
+
+- On Edge or Chrome version 131 (and other browsers whose WebGPU is that age), the page stopped with "Cannot read properties of undefined (reading 'description')" as the game loaded. It now starts and plays; updating the browser is no longer needed for it.
+
+## 2026-11-25 · Wing beats stop with their creature
+
+- A flying creature's wing beat (bats, the winged fiends, the forest qex and others) no longer keeps flapping in your ears after the creature is gone: it stops when the creature leaves, when you port, coach or zone away, and when it flies out of earshot.
+
+## 2026-11-25 · Damage Taken colour, your own name plate, coach talk, minimap colours, faster sidestep
+
+- **Options → Extended → UI → Number Colors** has a new row, **Damage Taken**: the colour of the numbers when a creature (or anyone else) hits you. Default keeps the game's yellow.
+- **Options → Extended → UI → Name Plates → Own Name Plate**: turn it on to see your own name over your character, drawn like everyone else's. Off by default.
+- **Options → Extended → Other → Movement → Coach Talk on Arrival** (off by default): when a coach sets you down, you talk to the coachman there at once, his travel list open.
+- **Options → Extended → UI → Minimap Colors**: friendly NPCs' squares on the minimap are coloured by what they do: spell merchants, smiths, merchants, bankers, trainers, coachmen and quest givers, each with its own colour you can change (Default keeps the old colour). **Spell Merchants Shown → My Class** colours only the spell merchants who sell your class's spells. With a mouse, point at a square to see the NPC's name and what they do.
+- **Options → Extended → Other → Movement → Strafe Speed**: **Match Forward** makes sidestepping as fast as running forward. **Retail** (the default) keeps the game's slow sidestep.
+
+## 2026-11-25 · Untracked quests stay readable, flight sticks no longer turn you
+
+- A quest you take off the quest tracker now stays plainly listed in the **Quest Journal**, in dark grey: the light grey it was drawn in before matched the journal's background, so the quest looked gone.
+- A controller axis that sits off its middle from the moment it connects (a flight stick's throttle or slider, a wheel's pedal) no longer turns or moves your character on its own: it is ignored until you bring it back to its middle once. Ordinary gamepads work as before.
+
+## 2026-11-25 · Optional FPS display
+
+- The browser client hides its FPS counter by default. Toggle **Show FPS** under **Options → Extended → Graphics → Video** and choose **Save Changes** to keep your choice.
+
+## 2026-11-25 · Controller chat on touch browsers
+
+- Opening chat with a physical controller on a touch browser shows EQOA’s letter grid. Use the D-pad to move, ✕ to pick a letter, and R2 to send. Tap the chat box to use your device’s keyboard.
+
 ## 2026-11-25 · Healing and power on the DPS meter
 
 - The **DPS meter** can now show **healing per second (HPS)** and **power given per second** beside the DPS, on a server that counts them. Pick **DPS Meter Columns** under **Options → Extended → UI → DPS Meter** (**DPS**, as before; **DPS + HPS**; or **DPS + HPS + Power**), and **DPS Meter Sort** to rank the list and draw its bars by damage, healing or power. Healing counts what your heals actually restored (no overhealing), your pet's and mercenary's heals included; power counts the power you gave others (Clarity, power songs and spells, a shared power tap), not your own.

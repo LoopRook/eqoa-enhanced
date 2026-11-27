@@ -27,6 +27,9 @@
 //!   `hud-<n>.opt`, `settings::hud_layout`; in a page the origin's storage),
 //!   and read at the next start. Reset HUD (Extended, the bar's Reset, `/hud
 //!   reset`) puts every piece back at once and keeps that.
+//! - Sized from a corner's grip while the HUD moves: every piece in the PC
+//!   interface, the minimap alone in the Controller's (Heirloom petition
+//!   3065), each interface's sizes in its own layout (`sizable`).
 
 use render::ui::{HudScale, SCREEN_H, SCREEN_W, Ui};
 use std::cell::RefCell;
@@ -42,12 +45,16 @@ pub enum Piece {
     Pet,
     /// the target's bar
     Target,
+    /// the health bar for the selected target's target
+    TargetOfTarget,
     /// the minimap (`map::mini`)
     Minimap,
     /// the quest tracker (`tracker`)
     Quests,
     /// the DPS meter (`dpsmeter`)
     Meter,
+    /// the faction tracker (`factiontrack`)
+    Faction,
     /// the player's effects (`influence`)
     Effects,
     /// the chat box (`chat`)
@@ -81,9 +88,9 @@ pub enum Piece {
 }
 
 /// Each piece, in `Piece`'s order.
-pub const PIECES: [Piece; 22] = [
-    Piece::Player, Piece::Group, Piece::Pet, Piece::Target, Piece::Minimap, Piece::Quests,
-    Piece::Meter, Piece::Effects, Piece::Chat, Piece::Chat1, Piece::Chat2, Piece::Chat3,
+pub const PIECES: [Piece; 24] = [
+    Piece::Player, Piece::Group, Piece::Pet, Piece::Target, Piece::TargetOfTarget, Piece::Minimap, Piece::Quests,
+    Piece::Meter, Piece::Faction, Piece::Effects, Piece::Chat, Piece::Chat1, Piece::Chat2, Piece::Chat3,
     Piece::Settings, Piece::Breath, Piece::QuickMenus, Piece::SpellBars, Piece::UtilityBars,
     Piece::EquipmentBar, Piece::TargetInfo, Piece::RaidPrompts, Piece::Stats, Piece::Focus,
 ];
@@ -152,9 +159,11 @@ impl Piece {
             Piece::Group => "group",
             Piece::Pet => "pet",
             Piece::Target => "target",
+            Piece::TargetOfTarget => "target-of-target",
             Piece::Minimap => "minimap",
             Piece::Quests => "quests",
             Piece::Meter => "dps",
+            Piece::Faction => "faction",
             Piece::Effects => "effects",
             Piece::Chat => "chat",
             Piece::Chat1 => "chat1",
@@ -180,9 +189,11 @@ impl Piece {
             Piece::Group => "Group",
             Piece::Pet => "Pet",
             Piece::Target => "Target",
+            Piece::TargetOfTarget => "Target of Target",
             Piece::Minimap => "Minimap",
             Piece::Quests => "Quest Tracker",
             Piece::Meter => "DPS Meter",
+            Piece::Faction => "Faction Tracker",
             Piece::Effects => "Effects",
             Piece::Chat => "Chat",
             Piece::Chat1 => "Chat Tab 1",
@@ -206,12 +217,12 @@ impl Piece {
     pub fn own(self) -> (Edge, Edge) {
         match self {
             Piece::Player | Piece::Group | Piece::Pet | Piece::Effects => (Edge::Start, Edge::Start),
-            Piece::Target | Piece::Focus => (Edge::Start, Edge::End),
+            Piece::Target | Piece::TargetOfTarget | Piece::Focus => (Edge::Start, Edge::End),
             Piece::Stats => (Edge::Start, Edge::Middle),
             Piece::TargetInfo => (Edge::End, Edge::Middle),
             Piece::RaidPrompts => (Edge::Middle, Edge::Middle),
             Piece::Chat | Piece::Chat1 | Piece::Chat2 | Piece::Chat3 | Piece::Settings | Piece::SpellBars | Piece::EquipmentBar => (Edge::End, Edge::End),
-            Piece::Minimap | Piece::Quests | Piece::Meter | Piece::Breath | Piece::QuickMenus => (Edge::End, Edge::Start),
+            Piece::Minimap | Piece::Quests | Piece::Meter | Piece::Faction | Piece::Breath | Piece::QuickMenus => (Edge::End, Edge::Start),
             // the side Utility Bar Layout draws them at (`Play::draw_hud`)
             Piece::UtilityBars => match crate::settings::utility_layout() {
                 crate::hudmenu::UtilityLayout::UpperLeft => (Edge::Start, Edge::Start),
@@ -482,9 +493,16 @@ pub fn unlocked() -> bool {
     with(|s| s.unlocked)
 }
 
-/// An individual PC piece's size relative to the player's global HUD scale.
+/// Every PC piece can be resized. In Controller mode, the minimap and the
+/// Target of Target bar can be resized. Each interface keeps its own layout.
+fn sizable(pc: bool, piece: Piece) -> bool {
+    pc || matches!(piece, Piece::Minimap | Piece::TargetOfTarget)
+}
+
+/// An individual piece's size relative to the player's global HUD scale
+/// (`sizable`; 100 for one that has none in this interface).
 pub fn piece_scale_percent(piece: Piece) -> u16 {
-    with(|s| if s.read_for.is_some_and(|(_, pc)| pc) { s.layout.percent[piece.index()] } else { 100 })
+    with(|s| if sizable(s.read_for.is_some_and(|(_, pc)| pc), piece) { s.layout.percent[piece.index()] } else { 100 })
 }
 
 /// Used by the Spell Bar Size option. Its center stays put across edits even
@@ -493,7 +511,7 @@ pub fn set_piece_scale_percent(piece: Piece, percent: u16) {
     let changed = with(|s| {
         let i = piece.index();
         let next = size_step(percent);
-        if !s.read_for.is_some_and(|(_, pc)| pc) || s.layout.percent[i] == next { return false; }
+        if !sizable(s.read_for.is_some_and(|(_, pc)| pc), piece) || s.layout.percent[i] == next { return false; }
         if piece == Piece::SpellBars && let Some(pos) = s.layout.places[i].as_mut() {
             let global = crate::settings::client().display_ui().hud_scale as f32 / 100.0;
             pos.dx += (SCREEN_W / 2.0) * global * (f32::from(next) - f32::from(s.layout.percent[i])) / 100.0;
@@ -633,6 +651,14 @@ fn pc_offset(piece: Piece, b: Beyond, layout: &Layout) -> Option<[f32; 2]> {
         Piece::Pet => [212.0 * k, 0.0],
         Piece::SpellBars => [-b.side - 320.0 * (1.0 - spell), -3.0],
         Piece::Target => [320.0 + b.side - 107.0 * factor(piece), 18.0 - SCREEN_H - 2.0 * b.top + 100.0 * factor(piece)],
+        Piece::TargetOfTarget => {
+            let [x, y] = crate::hud::TARGET_OF_TARGET_AT;
+            let center = x + crate::hud::TARGET_OF_TARGET_WIDTH / 2.0;
+            let below_target = y - crate::hud::TARGET_AT[1] as f32;
+            // Center below the PC target's default spot, allowing for its scale.
+            [320.0 + b.side - center * factor(piece),
+                18.0 - SCREEN_H - 2.0 * b.top + below_target * factor(Piece::Target) + (SCREEN_H - y) * factor(piece)]
+        }
         Piece::Chat => [left, main_y],
         Piece::Chat1 => {
             let [pane_width, rows] = c.chat_pane_sizes[0].unwrap_or([c.chat_width, c.chat_rows]);
@@ -1157,6 +1183,51 @@ pub fn picked() -> Option<String> {
     names.get(i).or(names.first()).cloned()
 }
 
+thread_local! {
+    /// What Extended's Save HUD Layout row saves over: 0 a new layout, else
+    /// the `profile_names` entry before it (Heirloom petition 3266).
+    static SAVE_PICK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Extended's Save HUD Layout row moved `d` round a new layout and the
+/// profiles' names.
+pub fn step_save_pick(d: i32) {
+    let n = profile_names().len() as i64 + 1;
+    SAVE_PICK.with(|p| p.set((p.get() as i64 + i64::from(d.signum())).rem_euclid(n) as usize));
+}
+
+/// The profile Save HUD Layout saves over: none for a new one.
+pub fn save_target() -> Option<String> {
+    let i = SAVE_PICK.with(|p| p.get());
+    profile_names().get(i.checked_sub(1)?).cloned()
+}
+
+/// A new profile's name: the first "Layout N" (from 1) no profile has.
+pub fn new_profile_name() -> String {
+    let list = profiles();
+    (1..).map(|n| format!("Layout {n}")).find(|n| find(&list, n).is_none()).unwrap_or_default()
+}
+
+/// Save HUD Layout's ✕ (Heirloom petition 3266: "save and load the HUD
+/// layout from the options menu instead of typing a chat command"): the HUD
+/// as it is now kept under the row's name (`save_target`, else
+/// `new_profile_name`), as `/hud save` keeps it; then both rows name it, so
+/// Load HUD Layout puts it back. Whether it was kept, and what to say.
+pub fn save_picked() -> (bool, String) {
+    let name = save_target().unwrap_or_else(new_profile_name);
+    let said = save_profile(&name);
+    // `save_profile`'s own words when it kept it
+    let kept = said.contains("\" saved");
+    match find(&profiles(), &name).filter(|_| kept) {
+        Some(i) => {
+            SAVE_PICK.with(|p| p.set(i + 1));
+            PICKED.with(|p| p.set(i));
+            (true, format!("Saved as {name}"))
+        }
+        None => (false, said),
+    }
+}
+
 /// The profiles' names in a line.
 fn list_profiles() -> String {
     let names = profile_names();
@@ -1177,7 +1248,7 @@ const BAR: [f32; 4] = [0.0, 0.0, 0.0, 0.7];
 const BUTTON: [f32; 4] = [0.35, 0.3, 0.12, 0.95];
 
 /// The bar's words.
-const BAR_TEXT: &str = "Move HUD: drag a piece to move it";
+const BAR_TEXT: &str = "Move HUD: drag a piece or use a corner grip";
 const PC_BAR_TEXT: &str = "Move HUD: drag a piece or resize from a corner";
 
 /// Diagonal grips face the screen's center and its opposite corner, so even a
@@ -1264,7 +1335,8 @@ pub fn draw_moving(r: &mut crate::ui::UiRaster) {
             x = right + 3.0;
         }
         words(ui, x, at[1] + 2.0, piece.label(), WORDS);
-        if pc {
+        // Draw corner grips for pieces that can be resized in this interface.
+        let resizable = if pc {
             let label = if pins[piece.index()] { "Unpin" } else { "Pin" };
             let w = width(ui, label) + 8.0;
             let left = (at[2] - w).max(x + width(ui, piece.label()) + 3.0).clamp(-b.side, SCREEN_W + b.side - w);
@@ -1273,25 +1345,28 @@ pub fn draw_moving(r: &mut crate::ui::UiRaster) {
             fill(ui, rect, BUTTON);
             words(ui, left + 4.0, top + 2.0, label, [1.0; 4]);
             buttons.push((rect, Button::Pin(piece)));
-            if !pins[piece.index()] {
-                for grip in grips(piece, at, b) {
-                    let [l, t, r, bottom] = grip.rect;
-                    let [dx, dy] = grip.direction;
-                    let (cx, cy) = ((l + r) * 0.5, (t + bottom) * 0.5);
-                    // On a short piece at the display edge, keep Pin and the
-                    // chat reflow grip exposed; the opposite corner still works.
-                    if buttons.iter().any(|(btn, _)| btn[0] <= cx && cx < btn[2] && btn[1] <= cy && cy < btn[3])
-                        || chat_grips.iter().any(|(_, btn, _)| btn[0] <= cx && cx < btn[2] && btn[1] <= cy && cy < btn[3]) { continue; }
-                    fill(ui, grip.rect, BUTTON);
-                    for step in [-2.5, -0.5, 1.5] {
-                        let (x, y) = (cx + dx * step, cy + dy * step);
-                        fill(ui, [x - 1., y - 1., x + 1., y + 1.], WORDS);
-                    }
-                    let (x, y) = (cx + dx * 3., cy + dy * 3.);
-                    fill(ui, [x.min(cx) - 0.8, y - 0.8, x.max(cx) + 0.8, y + 0.8], WORDS);
-                    fill(ui, [x - 0.8, y.min(cy) - 0.8, x + 0.8, y.max(cy) + 0.8], WORDS);
-                    scale_grips.push(grip);
+            !pins[piece.index()]
+        } else {
+            sizable(false, piece)
+        };
+        if resizable {
+            for grip in grips(piece, at, b) {
+                let [l, t, r, bottom] = grip.rect;
+                let [dx, dy] = grip.direction;
+                let (cx, cy) = ((l + r) * 0.5, (t + bottom) * 0.5);
+                // On a short piece at the display edge, keep Pin and the
+                // chat reflow grip exposed; the opposite corner still works.
+                if buttons.iter().any(|(btn, _)| btn[0] <= cx && cx < btn[2] && btn[1] <= cy && cy < btn[3])
+                    || chat_grips.iter().any(|(_, btn, _)| btn[0] <= cx && cx < btn[2] && btn[1] <= cy && cy < btn[3]) { continue; }
+                fill(ui, grip.rect, BUTTON);
+                for step in [-2.5, -0.5, 1.5] {
+                    let (x, y) = (cx + dx * step, cy + dy * step);
+                    fill(ui, [x - 1., y - 1., x + 1., y + 1.], WORDS);
                 }
+                let (x, y) = (cx + dx * 3., cy + dy * 3.);
+                fill(ui, [x.min(cx) - 0.8, y - 0.8, x.max(cx) + 0.8, y + 0.8], WORDS);
+                fill(ui, [x - 0.8, y.min(cy) - 0.8, x + 0.8, y.max(cy) + 0.8], WORDS);
+                scale_grips.push(grip);
             }
         }
     }
@@ -1369,6 +1444,48 @@ mod tests {
         reset();
         testing_reset();
         assert_eq!(layout(), Layout::default());
+    }
+
+    /// Heirloom petition 3065: the Controller interface's minimap is resized
+    /// from its corner as the PC's pieces are, kept in the Controller's own
+    /// layout; its other pieces keep their native sizes.
+    #[test]
+    fn controller_minimap_resizes_from_its_corner_and_keeps_its_size() {
+        testing_reset();
+        crate::settings::testing::reset(false);
+        crate::settings::set_ui_mode(false).unwrap();
+        set_unlocked(true);
+        assert!(sizable(false, Piece::Minimap) && !sizable(false, Piece::Target) && !sizable(false, Piece::Chat));
+        let piece = Piece::Minimap;
+        let rect = [230.0, 150.0, 330.0, 214.0];
+        with(|s| s.layout.set(piece, Some(Place::of(piece, [0.0; 2], rect, WIDE))));
+        frame_begin();
+        note(piece, rect, [0.0; 2]);
+        frame_end();
+        let grip = grips(piece, rect, WIDE)[0];
+        with(|s| s.scale_grips = vec![grip]);
+        let start = [(grip.rect[0] + grip.rect[2]) * 0.5, (grip.rect[1] + grip.rect[3]) * 0.5];
+        let far = std::array::from_fn(|a| rect[if grip.direction[a] > 0.0 { a } else { a + 2 }]);
+        let fixed = local_point(piece, far, WIDE);
+        assert_eq!(press(start, WIDE), Press::Piece(piece));
+        drag_to([start[0] + 25.0 * grip.direction[0], start[1] + 16.0 * grip.direction[1]], WIDE);
+        assert!(release());
+        assert_eq!(piece_scale_percent(piece), 125);
+        assert_eq!(scale(piece, WIDE).factor, crate::settings::client().display_ui().hud_scale as f32 / 100.0 * 1.25);
+        let after = frame_point(piece, fixed, WIDE);
+        assert!((far[0] - after[0]).abs() <= 0.51 && (far[1] - after[1]).abs() <= 0.51, "{far:?} -> {after:?}");
+        assert!(layout().to_text().contains("size minimap 125\n"));
+        // the Controller's other pieces keep the game's sizes
+        set_piece_scale_percent(Piece::Target, 150);
+        assert_eq!(piece_scale_percent(Piece::Target), 100);
+        // the PC's layout is its own, and the Controller's comes back with its size
+        crate::settings::set_ui_mode(true).unwrap();
+        assert_eq!(piece_scale_percent(piece), 100);
+        crate::settings::set_ui_mode(false).unwrap();
+        assert_eq!(piece_scale_percent(piece), 125);
+        reset();
+        assert_eq!(piece_scale_percent(piece), 100, "Reset HUD puts it back");
+        testing_reset();
     }
 
     #[test]
@@ -1849,5 +1966,48 @@ mod tests {
         assert!(command("save").starts_with("Name the layout"));
         assert!(command("save a|b").starts_with("Name the layout"));
         assert!(command("load").starts_with("Which layout"));
+    }
+
+    /// Save HUD Layout (petition 3266): a new layout by default, named the
+    /// first free "Layout N"; saved, both rows name it and Load puts it back;
+    /// stepped to a kept name, ✕ saves over it; the control: with 20 kept a
+    /// new one is refused and nothing changes.
+    #[test]
+    fn the_options_save_a_layout() {
+        testing_reset();
+        crate::settings::testing::reset(false);
+        SAVE_PICK.with(|p| p.set(0));
+        PICKED.with(|p| p.set(0));
+        assert_eq!(save_target(), None, "a new layout");
+        assert_eq!(new_profile_name(), "Layout 1");
+        let mut moved = Layout::default();
+        moved.set(Piece::Chat, Some(Place { h: Edge::Start, dx: 12.0, v: Edge::End, dy: 30.0 }));
+        with(|s| s.layout = moved);
+        assert_eq!(save_picked(), (true, "Saved as Layout 1".to_string()));
+        assert_eq!((save_target().as_deref(), picked().as_deref()), (Some("Layout 1"), Some("Layout 1")), "both rows name it");
+        with(|s| s.layout = Layout::default());
+        assert!(load_profile(&picked().unwrap()).contains("loaded"));
+        assert_eq!(layout(), moved, "Load puts it back");
+        // a second, new
+        step_save_pick(1);
+        assert_eq!(save_target(), None, "round to a new one");
+        assert_eq!(save_picked().1, "Saved as Layout 2");
+        assert_eq!(profile_names(), ["Layout 1", "Layout 2"]);
+        // over Layout 1: the row names Layout 2, just saved; one back
+        step_save_pick(-1);
+        assert_eq!(save_target().as_deref(), Some("Layout 1"));
+        with(|s| s.layout = Layout::default());
+        assert!(save_picked().0);
+        assert_eq!(profile_names().len(), 2, "saved over, not added");
+        assert!(load_profile("Layout 1").contains("loaded"));
+        assert_eq!(layout(), Layout::default());
+        // the control: the most kept, a new one refused
+        for n in 3..=PROFILES_MOST {
+            assert!(save_profile(&format!("Layout {n}")).contains("saved"));
+        }
+        SAVE_PICK.with(|p| p.set(0));
+        let (ok, said) = save_picked();
+        assert!(!ok && said.contains("already"), "{said}");
+        assert_eq!(profile_names().len(), PROFILES_MOST);
     }
 }

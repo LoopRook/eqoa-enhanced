@@ -97,7 +97,7 @@ impl Rm {
             .map(|e| ([e.actor_pos[0], e.actor_pos[2]], RM_DOT))
             .collect();
         let marks = crate::map::quests::mini_marks(&self.play.map.quests.marks);
-        crate::map::mini::MiniView { dots, target: None, marks }
+        crate::map::mini::MiniView { dots, target: None, marks, names: Vec::new() }
     }
     /// The target's pixel size: the window at the render scale.
     fn target_size(&self) -> (u32, u32) {

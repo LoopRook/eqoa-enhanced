@@ -23,6 +23,8 @@ const FIXTURE_SPELLS: [(&str, i64, i64, i64, i64, i64, i64, i64); 8] = [
 mod pc_window_test;
 #[path = "resized_hud_test.rs"]
 mod resized_hud_test;
+#[path = "bag_view_test.rs"]
+mod bag_view_test;
 
 struct Nowhere;
 impl net::session::Datagrams for Nowhere {
@@ -131,6 +133,32 @@ fn offline_pc_and_controller_hud_png() {
         crate::viewer::shot_with(&mut lib, &src, None, Some(script), size, path.to_str().unwrap(), Some(fixture_play())).expect("offline HUD capture");
         eprintln!("{} HUD screen {:?}, pieces {:?}", if pc { "PC" } else { "Controller" },
             crate::hudlayout::Beyond::of(size).screen(), crate::hudlayout::drawn_all());
+    }
+}
+
+/// The faction tracker (Heirloom petition 3216) in the Controller's HUD: a
+/// standing below zero (red, the bar to the left) and one above (blue, to the
+/// right), each in Both; Number and Bar alone once each.
+#[test]
+#[ignore = "manual offline GPU fixture: requires local disc and output directory"]
+fn offline_faction_tracker_png() {
+    let (mut lib, src, output) = offline_assets();
+    let script = crate::viewer::Script { ms: 1000, controls: Default::default() };
+    for (name, standing, style) in [
+        ("offline-faction-both-red.png", -480, crate::factiontrack::Style::Both),
+        ("offline-faction-both-blue.png", 820, crate::factiontrack::Style::Both),
+        ("offline-faction-number.png", -49, crate::factiontrack::Style::Number),
+        ("offline-faction-bar.png", 1500, crate::factiontrack::Style::Bar),
+    ] {
+        crate::settings::testing::reset(false);
+        crate::settings::set_client(crate::settings::ClientOptions { faction_track_style: style, ..crate::settings::client() });
+        let mut p = fixture_play();
+        p.session.faction_track_offer = true;
+        p.follow_faction("The Freeport Militia", true);
+        p.faction_track_heard(true, "The Freeport Militia".into(), standing);
+        let path = output.join(name);
+        crate::viewer::shot_with(&mut lib, &src, None, Some(script), (960, 540), path.to_str().unwrap(), Some(p)).expect("offline HUD capture");
+        eprintln!("{name}: pieces {:?}", crate::hudlayout::drawn_all());
     }
 }
 
@@ -298,4 +326,24 @@ fn offline_chat_move_resize_pin_reopen_and_hit_test() {
     assert!(crate::settings::client().chat_detached[0]);
     assert_eq!(crate::settings::client().chat_pane_sizes[0], Some([resized_main.0, resized_main.1]));
     eprintln!("independent chat moves, width/height grips, pin and profile reload verified; main {resized_main:?}, pane {resized_pane:?}; screen {:?}", beyond.screen());
+}
+
+/// The Quest Journal with one quest off the tracker (Heirloom petition 3064:
+/// an untracked quest must stay listed, only greyed): a PNG to look at.
+#[test]
+#[ignore = "manual offline GPU fixture: requires local disc and output directory"]
+fn offline_quest_journal_png() {
+    let (mut lib, src, output) = offline_assets();
+    crate::settings::testing::reset(false);
+    let mut p = fixture_play();
+    let names = ["The Orc Pawn", "Gnoll Fangs for the Guard", "A Letter to Freeport"];
+    p.quests.titles = names.iter().map(|n| crate::ui::wide(&format!("{n}: speak to the guard"))).collect();
+    p.session.quest_progress = names.iter().map(|n| net::session::TrackedQuest { name: (*n).into(), goals: Vec::new(), ability: false }).collect();
+    p.quests.untracked.character(p.player.server_id, &p.dump.player.name);
+    assert!(!p.quests.untracked.toggle(names[1]));
+    p.mode = 22;
+    p.quest_open = true;
+    let script = crate::viewer::Script { ms: 1000, controls: Default::default() };
+    let path = output.join("offline-quest-journal.png");
+    crate::viewer::shot_with(&mut lib, &src, None, Some(script), (960, 540), path.to_str().unwrap(), Some(p)).expect("journal capture");
 }

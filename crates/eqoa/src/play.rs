@@ -26,6 +26,8 @@ mod liveplay;
 mod duelplay;
 #[path = "recordplay.rs"]
 mod recordplay;
+#[path = "bestiaryplay.rs"]
+mod bestiaryplay;
 #[path = "raidplay.rs"]
 mod raidplay;
 #[path = "mapsuggest.rs"]
@@ -461,13 +463,16 @@ pub struct Play {
     info_window: vi::ui::Window,
     /// Chat lines waiting for the chat box, with when they came and their item
     /// links (`itemlink`).
-    chat_pending: Vec<(String, [f32; 4], u32, Vec<net::itemlink::ChatLink>)>,
+    chat_pending: Vec<(String, [f32; 4], u32, Vec<net::itemlink::ChatLink>, Option<(u16, u16)>)>,
     /// Item links (`itemlink`): the windows open; the chat line kept with its
     /// links (cancelled with a link in it: until it is sent or emptied); the
     /// events read this frame counted, and the links of the line the next one
     /// carries (`Event::ChatLinks`, by the event it came as); Shift held (a
     /// click on an item links it).
     pub links: crate::itemlink::Links,
+    /// A creature's details and loot chart (`mobwnd`, Heirloom petition 3163):
+    /// the window open, on a server that offered them.
+    pub mobwnd: crate::mobwnd::MobWnd,
     /// The buff window (`buffwnd`, petition 1761): its light, its d-pad, where
     /// it drew.
     pub buffs: crate::buffwnd::BuffWnd,
@@ -520,6 +525,13 @@ pub struct Play {
     /// can name the friend under it (`mouseover_target`).
     pub pointer: Option<(f64, f64)>,
     pub pointer_view: Option<(glam::Mat4, (u32, u32))>,
+    /// Coach Talk on Arrival (Heirloom petition 3091): a coach's ride under
+    /// way, until when the coachman where it sets down is looked for and
+    /// talked to, and the coachman who sent it (`coach_talk_frame`).
+    coach_talk: Option<(i64, u32)>,
+    /// The player's own name node this frame, where Own Name Plate is drawn
+    /// (petition 3081): none without a body.
+    self_name_at: Option<[f32; 3]>,
     /// `VIWndMBox` (mode 14).
     mbox: crate::dialog::MBox,
     /// The player's death camera (`m_pC1B0`) and the screen's fade; the
@@ -644,6 +656,11 @@ pub struct Play {
     faction_wnd: crate::faction::FactionWnd,
     faction_open: bool,
     faction_keys: Vec<(i32, bool)>,
+    /// The faction followed on the HUD (`factiontrack`, petition 3216), kept
+    /// by name a character, and its standing last heard (the server's
+    /// tracker, or the window's page).
+    faction_follow: crate::factiontrack::Followed,
+    faction_heard: Option<crate::factiontrack::Heard>,
     who_tell: Option<String>,
     /// `VIGameOptions` and the Options window (mode 34); what it asked of
     /// the sound device, done in the next frame; a camera style to apply
@@ -722,6 +739,8 @@ pub struct Play {
     duel: duelplay::Duel,
     /// the combat record and its window (`recordplay`)
     record: recordplay::CombatRecord,
+    /// the bestiary and its window (`bestiaryplay`)
+    bestiary: bestiaryplay::Bestiary,
     /// a raid's state and its loot rolls' pop-up (`raidplay`)
     raid: raidplay::RaidPlay,
     /// the GM's channel, its TEST menu and windows (`adminplay`)
@@ -730,6 +749,10 @@ pub struct Play {
     live: liveplay::LivePlay,
     /// The button glyphs the last HUD frame drew, where (`pointer`).
     glyphs: crate::pointer::Glyphs,
+    /// The scroll bars the last frame's windows drew, and the knob of one the
+    /// pointer holds (`scrollbar`).
+    bars: Vec<vi::ui::VBar>,
+    bar_follow: Option<crate::scrollbar::Follow>,
     /// The wheel's lines not yet turned into a window's up or down.
     wheel: f32,
     /// A pointer's keys for the window up, and the one held (`press`).
@@ -795,6 +818,40 @@ fn number_rgb(patch: bool, rest: &[u8], tags: bool, choices: &[crate::numcolor::
         return (rest.len() >= 3).then(|| [rest[0], rest[1], rest[2]]);
     }
     crate::numcolor::rgb(net::session::number_tag(rest, tags), choices)
+}
+
+/// A friendly NPC's role as the minimap's tooltip says it under its name:
+/// "Spell Merchant (Wizard)" with the class the server named, else the role.
+fn mini_role_line(r: crate::minimapcolor::Role, spell_class: Option<u8>) -> String {
+    match (r, spell_class.and_then(crate::minimapcolor::class_name)) {
+        (crate::minimapcolor::Role::Spells, Some(class)) => format!("{} ({class})", r.label()),
+        _ => r.label().to_string(),
+    }
+}
+
+/// A coachman's name, as go-eqoa-server's `IsCoachman` reads it.
+fn is_coachman(name: &str) -> bool {
+    name.starts_with("Coachman ") || name.starts_with("Coachwoman ")
+}
+
+/// How long after a coach's ride Coach Talk on Arrival looks for the coachman
+/// (the world's load and his entity's coming into view), and how near the
+/// player he stands (a coach sets its rider down 5 in front of him).
+const COACH_TALK_MS: i64 = 20_000;
+const COACH_TALK_REACH: f32 = 12.0;
+
+/// The coachman nearest `at` within `COACH_TALK_REACH` (x, z and y), alive,
+/// not `from` (the one the ride left).
+fn coachman_near(entities: &Entities, at: [f32; 3], from: u32) -> Option<u32> {
+    entities
+        .slots
+        .iter()
+        .flatten()
+        .filter(|e| e.id != from && e.p18 & 2 == 0 && e.creature.as_ref().is_some_and(|c| is_coachman(&c.name)))
+        .map(|e| (e.id, (0..3).map(|i| (e.pos[i] - at[i]).powi(2)).sum::<f32>().sqrt()))
+        .filter(|(_, d)| *d <= COACH_TALK_REACH)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(id, _)| id)
 }
 
 /// The quest marks for the map and the minimap: the guide's while it is on
@@ -1840,11 +1897,13 @@ fn apply(lib: &Library, g: &mut Gpu, p: &mut Option<Puppet>, e: &net::entity::En
     }
 }
 
-/// A creature's puppet goes or is made anew: its continuous sound stopped
-/// and its sounds let go, as `VICSprite::Release` does (`Sound::let_go`).
-fn let_go(s: &mut crate::sound::Sound, p: &Option<Puppet>) {
-    let Some(cs) = p.as_ref().and_then(|p| p.sprite.as_ref()) else { return };
-    s.let_go(&cs.sounds(), cs.snd.channel);
+/// A creature's puppet goes or is made anew: what it has playing stopped
+/// (its continuous sound and its trigger sounds, a wing beat's loop among
+/// them) and its sounds let go, as `VICSprite::Release` does
+/// (`Sound::let_go`).
+fn let_go(s: &mut crate::sound::Sound, p: &mut Option<Puppet>) {
+    let Some(cs) = p.as_mut().and_then(|p| p.sprite.as_mut()) else { return };
+    s.let_go(cs);
 }
 
 /// The creatures whose sounds are made this frame (`VICSprite::Process`'s
@@ -1890,15 +1949,16 @@ fn unrastered(world: &mut vi::world::World<Ee>, drawn: &[(usize, Option<usize>, 
     drawn.iter().filter(|(_, a, _)| !a.is_some_and(|a| rastered.contains(&a))).map(|&(slot, _, _)| slot).collect()
 }
 
-/// A creature not heard this frame (`heard_slots`): its loop stopped, as one
-/// out of earshot is (`VICSprite::Process` with a volume of 0), and its
-/// tripped sound triggers let go unplayed, as a creature in no slot trips
-/// none.
+/// A creature not heard this frame (`heard_slots`), or out of earshot (50
+/// units, where `CalcVolumeAndPan` gives it no volume): its loops stopped,
+/// as one out of earshot has its continuous sound stopped
+/// (`VICSprite::Process` with a volume of 0), its trigger sounds with it
+/// (`CSprite::stop_sounds`: a wing beat is a loop, which the console left
+/// playing at its last volume as its creature flew off, Heirloom petition
+/// 3108), and its tripped sound triggers let go unplayed, as a creature in
+/// no slot trips none.
 fn hush(cs: &mut CSprite<Ee>, s: &mut crate::sound::Sound) {
-    if cs.snd.channel != -1 {
-        s.dev.stop(cs.snd.channel);
-        cs.snd.channel = -1;
-    }
+    cs.stop_sounds(&mut s.sink());
     for i in 0..cs.h.triggers.len() {
         cs.h.reset_trigger(i);
     }
@@ -2500,7 +2560,8 @@ mod entity_actors {
         assert!(h[23] && !h[24], "the tie's lower slot");
     }
 
-    /// A creature past the 24 (`hush`): its loop stopped and its tripped
+    /// A creature past the 24 or out of earshot (`hush`): its loops stopped
+    /// (its continuous sound's and its trigger sound's) and its tripped
     /// triggers let go, unplayed. The control: before it, the loop plays and
     /// the trigger is tripped.
     #[test]
@@ -2526,11 +2587,15 @@ mod entity_actors {
         let mut link = s.audio().link();
         s.dev.flush(&mut link);
         let h = s.dev.play(w, 0, 0);
-        assert!(h >= 0 && s.dev.is_playing(h), "the control: the loop plays");
+        // and as a layer's trigger sound (a wing beat: petition 3108)
+        let t = s.dev.play(w, 0, 0);
+        assert!(h >= 0 && s.dev.is_playing(h) && t >= 0 && s.dev.is_playing(t), "the control: the loops play");
         cs.snd.channel = h;
+        cs.cur[0].flags = t;
         cs.h.triggers[0].tripped = 1;
         hush(&mut cs, &mut s);
         assert!(!s.dev.is_playing(h) && cs.snd.channel == -1, "the loop stopped");
+        assert!(!s.dev.is_playing(t) && cs.cur[0].flags == -1, "the trigger's loop stopped");
         assert!(cs.h.triggers.iter().all(|t| t.tripped == 0), "the trips let go");
     }
 
@@ -3829,7 +3894,7 @@ impl Play {
         crate::racelabel::clear();
         // Msg000D reads `m_speed` out of the dump
         let speed = dump.speed;
-        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, stood_sent: false, last_pos: [0.0; 3], send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), regional: Default::default(), regional_clock: web_time::Instant::now(), retail_weather: 0, weather_fog: None, abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), pc_gems: Default::default(), autocast: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), aloft_vy: vec![None; MAX_SLOTS], airs: vec![Default::default(); MAX_SLOTS], carried: vec![false; MAX_SLOTS], carry_buf: vec![Default::default(); MAX_SLOTS], actors: vec![None; MAX_SLOTS], actor_passes: vec![false; MAX_SLOTS], shortcuts: (false, false), self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, mob_info: None, talk_held: false, mob_shown_at: None, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), links: Default::default(), buffs: Default::default(), link_draft: None, event_no: 0, next_links: None, shift: false, wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, hc_fall: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), petart: Default::default(), pet_tops: Default::default(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_wait_since: None, cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, chat_unsent: 0, reopened: 0, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, pc_windows: Default::default(), panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, ride: None, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, touched: false, rumbles: Vec::new(), glyphs: Default::default(), wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default(), record: Default::default(), raid: Default::default(), meter: Default::default(), merc: Default::default(), dyepick: Default::default(), stat_panel: None, focus: None, pointer: None, pointer_view: None };
+        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, stood_sent: false, last_pos: [0.0; 3], send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), regional: Default::default(), regional_clock: web_time::Instant::now(), retail_weather: 0, weather_fog: None, abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), pc_gems: Default::default(), autocast: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), aloft_vy: vec![None; MAX_SLOTS], airs: vec![Default::default(); MAX_SLOTS], carried: vec![false; MAX_SLOTS], carry_buf: vec![Default::default(); MAX_SLOTS], actors: vec![None; MAX_SLOTS], actor_passes: vec![false; MAX_SLOTS], shortcuts: (false, false), self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, mob_info: None, talk_held: false, mob_shown_at: None, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), links: Default::default(), mobwnd: Default::default(), buffs: Default::default(), link_draft: None, event_no: 0, next_links: None, shift: false, wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, hc_fall: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), petart: Default::default(), pet_tops: Default::default(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_wait_since: None, cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), faction_follow: Default::default(), faction_heard: None, npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, chat_unsent: 0, reopened: 0, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, pc_windows: Default::default(), panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, ride: None, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, touched: false, rumbles: Vec::new(), glyphs: Default::default(), bars: Vec::new(), bar_follow: None, wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default(), record: Default::default(), bestiary: Default::default(), raid: Default::default(), meter: Default::default(), merc: Default::default(), dyepick: Default::default(), stat_panel: None, focus: None, pointer: None, pointer_view: None, coach_talk: None, self_name_at: None };
         p.take_abilities();
         p.npcw_world_entry();
         // world entry: LoadModels and StreamFillCache under the loading screen
@@ -3859,6 +3924,7 @@ impl Play {
         self.duel_menu_again();
         // and the combat record's, if its offer did
         self.record_menu_again();
+        self.bestiary_menu_again(); // and the bestiary's
         self.raid_menu_again();
         self.merc_menu_again();
     }
@@ -3962,6 +4028,7 @@ impl Play {
         // dump (`inventory::pack_cap`; CLIENT's 40 where none says)
         crate::inventory::set_caps(self.session.item_lists);
         self.server_ui();
+        self.coach_talk_frame(walker.cam.walk.phys.smooth_location().to_array(), now as i64);
         // a server's races' own options and the looks chosen (`raceopts`): the
         // creatures in a look made again in it (`apply`)
         crate::raceopts::set_options(self.session.race_options.as_ref());
@@ -4004,6 +4071,10 @@ impl Play {
                 // (`add_chat`; `itemlink`)
                 Event::ChatLinks(links) => self.next_links = Some((self.event_no, links)),
                 Event::ItemLinkRecord { id, item } => self.links.record(id, item.map(|b| *b)),
+                // a creature's details asked for by a right click (`mobwnd`)
+                Event::MobDetails(a) => {
+                    self.mobwnd.record(*a);
+                }
                 Event::TargetInfo { disposition, b, title, guild, .. } => {
                     self.target_info = Some(disposition);
                     self.rings.con = Some(b);
@@ -4068,6 +4139,8 @@ impl Play {
                     }
                     self.meter.take(m);
                 }
+                // the followed faction's standing (`factiontrack`)
+                Event::FactionTrack { known, name, standing } => self.faction_track_heard(known, name, standing),
                 Event::RaidState(st) => self.raid_state(st),
                 // a server's word on a monster with nothing to say
                 // (`world.mob_info`): its name and level, for the info window
@@ -4167,6 +4240,8 @@ impl Play {
                 Event::Opcode { op: net::session::OP_RACE_LABELS_DATA, data } => crate::racelabel::take(&data),
                 // the combat record (`recordplay`)
                 Event::Opcode { op: net::session::OP_COMBAT_RECORD_DATA, data } => self.record_data(&data),
+                // the bestiary's pages (`bestiaryplay`)
+                Event::Opcode { op: net::session::OP_BESTIARY_DATA, data } => self.bestiary_data(&data),
                 // the merc's windows (`mercplay`, `mercwnd`)
                 Event::Opcode { op: op @ (net::mercwin::OP_MERC_WINDOW_STATE | net::mercwin::OP_MERC_WINDOW_RESULT | net::mercwin::OP_MERC_SPELLS_STATE), data } => {
                     self.merc_win_opcode(op, &data);
@@ -4243,7 +4318,10 @@ impl Play {
                         self.guild_out(o);
                     }
                 }
-                Event::Opcode { op: 0x07E2, data } => self.factions.recv(&data),
+                Event::Opcode { op: 0x07E2, data } => {
+                    self.factions.recv(&data);
+                    self.faction_page_heard();
+                }
                 // the training points as they now are (a level's, a refund's)
                 Event::Opcode { op: 0x0036, data } => self.msg_0036(&data, &mut walker.cam, &mut walker.scene),
                 Event::Opcode { op: 0x001C, data } => self.msg_001c(&data),
@@ -4722,9 +4800,11 @@ impl Play {
         self.session.agree_head_marks(crate::settings::head_marks());
         self.agree_number_tags();
         self.agree_dps_meter();
+        self.agree_faction_track();
         self.agree_quests();
         self.guide_wait(now);
         self.record_menu(); // Character > Combat Record once the server offers it
+        self.bestiary_menu(); // Character > Bestiary once the server offers it
         self.agree_raid();
         self.raid_menu(); // Community > Group > Raid once the server offers it
         self.merc_menu(); // Community > Group > Dismiss Mercenary while one's merc is out
@@ -4894,17 +4974,17 @@ impl Play {
             let sounds_of = |p: &Option<Puppet>| p.as_ref().and_then(|p| p.sprite.as_ref()).map(|cs| cs.sounds()).unwrap_or_default();
             let Some(e) = want else {
                 if let Some(s) = sound.as_deref_mut() {
-                    let_go(s, &self.puppets[slot]);
+                    let_go(s, &mut self.puppets[slot]);
                 }
                 self.puppets[slot] = None;
                 continue;
             };
             let look = e.creature.as_ref().map(look_of);
-            if let Some(old) = apply(lib, &mut g, &mut self.puppets[slot], e, look, slot, game_ms, self.session.creation.as_ref(), self.session.mercs.as_ref(), self.session.jumps)
+            if let Some(mut old) = apply(lib, &mut g, &mut self.puppets[slot], e, look, slot, game_ms, self.session.creation.as_ref(), self.session.mercs.as_ref(), self.session.jumps)
                 && let Some(s) = sound.as_deref_mut()
             {
                 s.share_sounds(lib, &sounds_of(&self.puppets[slot]));
-                let_go(s, &old);
+                let_go(s, &mut old);
             }
             let Some(p) = self.puppets[slot].as_mut() else { continue };
             wear_cape(lib, &mut g, p, cape_of(&self.session, e));
@@ -4988,14 +5068,16 @@ impl Play {
                         }
                     }
                     // VICSprite::Process: the sounds its triggers fired, for the
-                    // 24 heard (`heard_slots`); past them it is quiet
+                    // 24 heard (`heard_slots`) within earshot; past them it is
+                    // quiet, its loops stopped (`hush`)
                     if let Some(s) = sound.as_deref_mut() {
-                        if heard[slot] && p.wisp {
+                        let heard = heard[slot] && CSprite::calc_volume_and_pan(&walker.eye.position, &walker.eye.direction, &at).0 > F::ZERO;
+                        if heard && p.wisp {
                             // a Wisp's moving makes no sound (`wisp::Hushed`)
                             let quiet = crate::wisp::step_sounds(cs);
                             let mut sink = s.sink();
                             cs.process_sounds(&walker.eye.position, &walker.eye.direction, &at, Some(&mut crate::wisp::Hushed { inner: &mut sink, quiet }));
-                        } else if heard[slot] {
+                        } else if heard {
                             cs.process_sounds(&walker.eye.position, &walker.eye.direction, &at, Some(&mut s.sink()));
                         } else {
                             hush(cs, s);
@@ -5082,8 +5164,11 @@ impl Play {
             let centre = cs.h.calc_trans_about_center(&actor, &walker.anims);
             crate::trails::process(&mut self.trails, &mut p.trail, cs, &p.weapons, &centre, game_ms);
             self.self_at = Some((walker.cam.walk.phys.smooth_location().to_array(), slot_point(cs, 4, &centre)));
+            // its name node, as another's (Own Name Plate, `plates`)
+            self.self_name_at = cs.h.nodes.get(cs.node_ids[3].max(0) as usize).filter(|_| cs.node_ids[3] >= 0).map(|n| Matrix44::mul(&n.world, &centre).mul_point(&Vect3::of(0.0, 0.6, 0.0)).to_array());
         } else {
             self.self_at = None;
+            self.self_name_at = None;
         }
         self.trail_strips = crate::trails::render(&mut self.trails, game_ms);
         // The camera style: the first entry's ToggleCameraStyle; the start
@@ -5491,9 +5576,40 @@ impl Play {
             // while Extended's Debuff Icons says Name Plate (petitions 2997,
             // 3020; Target Window's go in the target box, `target_effects`)
             let debuffs = if crate::settings::debuff_icons() == crate::settings::DebuffIcons::Plate { self.session.npc_debuffs_left(e.id, self.session.now()) } else { Vec::new() };
-            out.push(Plate { at, color: self.name_color(c), name: c.name.clone(), tag: self.merc_tag(c), mark, debuffs });
+            out.push(Plate { at, color: self.name_color(c), name: self.plate_name(c), tag: self.merc_tag(c), mark, debuffs });
+        }
+        // Own Name Plate (Heirloom petition 3081): the player's own, drawn as
+        // the others' are, while its body is drawn (not from inside it, a
+        // first person camera's); the game draws none
+        if let Some(p) = self.own_plate() {
+            out.push(p);
         }
         out
+    }
+
+    /// The player's own plate while Own Name Plate is on and its body drawn
+    /// (`self_shown`): its name in its name's colour at its name node.
+    fn own_plate(&self) -> Option<Plate> {
+        if !crate::settings::own_plate() || !self.self_shown {
+            return None;
+        }
+        let at = self.self_name_at?;
+        let me = self.self_id32()?;
+        let c = self.entities.slots.iter().flatten().find(|e| e.id == me)?.creature.as_ref()?;
+        (!c.name.is_empty()).then(|| Plate { at, color: self.name_color(c), name: self.plate_name(c), tag: None, mark: None, debuffs: Vec::new() })
+    }
+
+    /// A creature's name as its plate and its details box show it: a
+    /// player's with its surname after it (go-eqoa-server's `/surname`, Live
+    /// petition 5648: `OP_SURNAMES`, by its name without the tags before it),
+    /// anyone else's as it is.
+    fn plate_name(&self, c: &net::entity::Creature) -> String {
+        if c.p256 == 2
+            && let Some(s) = self.session.surname(crate::chat::plain_name(&c.name))
+        {
+            return format!("{} {s}", c.name);
+        }
+        c.name.clone()
     }
 
     /// Debuff Icons (petition 2997) for this frame's kept plates (`debuff_marks`),
@@ -6026,6 +6142,7 @@ impl Play {
     fn msg_00b2(&mut self, walker: &mut Walker, world: u8, pos: [f32; 3], hpr: [f32; 3], token: u32, now: i64) {
         // a move of the server's puts the player where it says: off any ride
         self.ride = None;
+        self.arm_coach_talk(now);
         walker.cam.effect.reset();
         walker.cam.effect.end_manual(F::ZERO);
         if self.session.self_id.is_some() {
@@ -6327,6 +6444,42 @@ impl Play {
         self.session.send(&w.data);
     }
 
+    /// Coach Talk on Arrival (Heirloom petition 3091): once a coach's ride has
+    /// set the player down (the move answered, the world in, no loading
+    /// screen), the coachman within `COACH_TALK_REACH` of `at` (not the one who
+    /// sent it) targeted and talked to (0x0004, as `InteractWithTarget` talks):
+    /// the server opens his menu. Given up `COACH_TALK_MS` after the ride, or
+    /// when the option is turned off.
+    fn coach_talk_frame(&mut self, at: [f32; 3], now: i64) {
+        let Some((until, from)) = self.coach_talk else { return };
+        if now > until || !crate::settings::coach_talk() {
+            self.coach_talk = None;
+            return;
+        }
+        if self.loading.up() || self.world_change.is_some() || !self.arrival.is_empty() {
+            return;
+        }
+        let Some(id) = coachman_near(&self.entities, at, from) else { return };
+        self.coach_talk = None;
+        eprintln!("play: Coach Talk on Arrival: talking to {id:08x}");
+        self.target_id(id);
+        let mut w = net::stream::Writer::op(0x0004);
+        w.u32(id);
+        self.session.send(&w.data);
+    }
+
+    /// A server's move (0x00B2) while the coachman talked to is the target: a
+    /// coach's ride, so Coach Talk on Arrival looks for the coachman where it
+    /// sets down (`coach_talk_frame`); any other move ends a look under way.
+    fn arm_coach_talk(&mut self, now: i64) {
+        self.coach_talk = (crate::settings::coach_talk() && self.creature_name(self.target).is_some_and(is_coachman)).then_some((now + COACH_TALK_MS, self.target));
+    }
+
+    /// An entity's creature's name, none for an entity not in view.
+    fn creature_name(&self, id: u32) -> Option<&str> {
+        self.entities.slots.iter().flatten().find(|e| e.id == id)?.creature.as_ref().map(|c| c.name.as_str())
+    }
+
     /// `id` targeted, as `CycleTarget` leaves a choice: the attack off, the
     /// target's details asked again, 0x0010 with the token.
     pub fn target_id(&mut self, id: u32) {
@@ -6494,6 +6647,19 @@ impl Play {
         // the Stat Window (`statwnd`): a click on its X closes it, anywhere
         // on it is its own
         if matches!(self.mode, 0 | 33 | 38) && !self.search.open && !crate::hideui::hidden() && self.stat_point(local(Piece::Stats)) {
+            return true;
+        }
+        // a creature's details window (`mobwnd`): a click on it is its, on its
+        // X it closes
+        if matches!(self.mode, 0 | 33 | 38) && !self.search.open && !crate::hideui::hidden() && self.mobwnd.covers(f) {
+            if self.mobwnd.point(f) {
+                self.cues.push(crate::sound::Cue::Ui(8));
+            }
+            return true;
+        }
+        // the focus target's window (`focus`, petition 3228): a left click or
+        // tap on it targets the focus, as Target Focus does
+        if matches!(c, Click::Target(..)) && matches!(self.mode, 0 | 33 | 38) && !self.search.open && !crate::hideui::hidden() && self.focus_point(local(Piece::Focus)) {
             return true;
         }
         // the item links' windows (`itemlink`): a click on one is theirs, on
@@ -6733,6 +6899,11 @@ impl Play {
 
     pub fn spell_hover(&mut self, at: Option<[f32; 2]>, size: (u32, u32)) {
         self.gem_pointer(at, size);
+        // the item menu's item under the mouse described and compared
+        // (`itemmenu::hover`, petition 3118)
+        let items_at = at.filter(|_| self.mode == 13 && self.items.visible && !self.map.open)
+            .and_then(|at| self.pc_windows.input(self.pc_window().map(|(id, _)| id), render::ui::frame_from_window(size, at)));
+        self.items.hover(items_at);
         // the buff window's names under the mouse (`buffwnd`, petition 2924)
         self.buff_hover(at.map(|at| crate::hudlayout::local_point(crate::hudlayout::Piece::Effects, render::ui::frame_from_window(size, at), crate::hudlayout::Beyond::of(size))));
         // a group member's tiny icon under the mouse named (petition 2962),
@@ -6768,7 +6939,23 @@ impl Play {
             self.open_link(*id, name);
             return crate::chat::Let::Done;
         }
+        // a click on a speaker's name opens the line to a tell to them, as
+        // the Reply key does (Heirloom 3140)
+        if let crate::chat::Let::Name(name) = &got {
+            self.tell_to(name);
+            return crate::chat::Let::Done;
+        }
         got
+    }
+
+    /// The chat line opened with "/tell <name> " in it (a speaker's name
+    /// clicked, `chat::Let::Name`), in the world with the HUD up.
+    pub fn tell_to(&mut self, name: &str) {
+        let name = crate::chat::plain_name(name);
+        if self.mode != 0 || !self.hud_ready() || name.is_empty() {
+            return;
+        }
+        self.keyboard_chat_key(&format!("/tell {name} "));
     }
 
     /// A press of the chat box's that is down (the other button's are nothing
@@ -6806,6 +6993,10 @@ impl Play {
         // over an item link's window, its description (petition 2961)
         if matches!(self.mode, 0 | 33 | 38) && !self.search.open && !crate::hideui::hidden() && self.links.covers(f) {
             self.links.wheel(f, lines);
+            return true;
+        }
+        // over a creature's details, its text (`mobwnd`)
+        if matches!(self.mode, 0 | 33 | 38) && !self.search.open && !crate::hideui::hidden() && self.mobwnd.wheel(f, lines) {
             return true;
         }
         if !crate::hud::fork_hud::chat_window_visible() { return false; } // a mod hid the stock chat and its panes
@@ -6904,6 +7095,9 @@ impl Play {
         if self.record_owns() {
             return self.record_point(f);
         }
+        if self.bestiary_owns() {
+            return self.bestiary_point(f);
+        }
         if self.merc_win_owns() {
             return self.merc_win_point(f);
         }
@@ -6992,6 +7186,32 @@ impl Play {
     /// A click on a creature (or on nothing, which keeps the target): it is
     /// targeted, and with `interact` talked to, or its corpse opened (the
     /// attack button's loot request on a corpse).
+    /// A right click on creature `id` (`mobwnd`, Heirloom petition 3163): on a
+    /// server that offered a creature's details, a monster (no player, pet,
+    /// townsperson or corpse) is targeted, asked about and its window opened,
+    /// and the click is that (true); anything else, or no offer, false: the
+    /// click is what it was.
+    pub fn mob_details_click(&mut self, id: Option<u32>) -> bool {
+        let Some(id) = id else { return false };
+        if self.mode != 0 || !self.session.mob_details_offer {
+            return false;
+        }
+        let Some(e) = self.entities.slots.iter().flatten().find(|e| e.id == id) else { return false };
+        let Some(c) = &e.creature else { return false };
+        if e.p18 & 2 != 0 || c.npc_flags & 0x80 != 0 || c.p256 == 2 || c.p256 == 3 || id == self.pet_id {
+            return false;
+        }
+        let name = c.name.clone();
+        if id != self.target {
+            self.target_id(id);
+        }
+        if self.session.ask_mob_details(id) {
+            self.mobwnd.open(id, &name);
+            self.cues.push(crate::sound::Cue::Ui(13));
+        }
+        true
+    }
+
     pub fn click(&mut self, id: Option<u32>, interact: bool) {
         let Some(id) = id else { return };
         if self.mode != 0 {
@@ -7141,6 +7361,8 @@ impl Play {
             "/alarm" => self.alarm_command(&rest),
             // the DPS meter's (`dpsmeter`), the client's own
             "/dps" => self.dps_command(&rest),
+            // the faction tracker's (`factiontrack`, petition 3216), the client's own
+            "/track" => self.track_command(&rest),
             // the Stat Window's (`statwnd`, petition 2925), the client's own
             "/stats" => self.stats_command(&rest),
             // the focus target's (`focus`, Heirloom petition 3038), the client's own
@@ -7281,6 +7503,24 @@ impl Play {
         self.add_chat(text, color);
     }
 
+    /// A line's speaker, a player's name a click opens a tell to
+    /// (`chat::speaker`, Heirloom 3140): not the player's own, nor a creature in
+    /// view not a player's of that name (an NPC's say reads as a player's).
+    fn speaker_of(&self, text: &str, color: [f32; 4]) -> Option<(u16, u16)> {
+        let (a, n) = crate::chat::speaker(text, color)?;
+        let wide: Vec<u16> = text.encode_utf16().collect();
+        let name = String::from_utf16_lossy(wide.get(a as usize..a as usize + n as usize)?);
+        let same = |other: &str| crate::chat::plain_name(other).eq_ignore_ascii_case(&name);
+        if same(&self.player.name) || (!self.pet_name.is_empty() && same(&self.pet_name)) {
+            return None;
+        }
+        let creatures = || self.entities.slots.iter().flatten().filter(|e| e.creature.as_ref().is_some_and(|c| same(&c.name)));
+        if creatures().any(|e| !a_player(e)) && !creatures().any(a_player) {
+            return None;
+        }
+        Some((a, n))
+    }
+
     /// `VIWndGame::AddText`: a line for the chat box (queued with its time
     /// until the box, which measures with the font, takes it), and for the
     /// plain log shown when there is no HUD.
@@ -7303,7 +7543,8 @@ impl Play {
                 eprintln!("chat: link {} {:?}", l.id, String::from_utf16_lossy(&w[a..b]));
             }
         }
-        self.chat_pending.push((text.clone(), color, self.session.now(), links));
+        let name = self.speaker_of(&text, color);
+        self.chat_pending.push((text.clone(), color, self.session.now(), links, name));
         self.chat.push_back((text, color));
         while self.chat.len() > 8 {
             self.chat.pop_front();
@@ -7767,6 +8008,10 @@ impl Play {
         }
         if self.record_owns() {
             self.record_key(key, down);
+            return true;
+        }
+        if self.bestiary_owns() {
+            self.bestiary_key(key, down);
             return true;
         }
         if self.merc_win_owns() {
@@ -8326,6 +8571,8 @@ impl Play {
         let built = crate::mercwnd::with_give(built, inv, give_on);
         self.items.set_built(crate::hidelook::with_rows(built, inv, &self.session.hide_look));
         self.items.set_gear(self.gear.view(inv, &vui.words, vui.language));
+        // Compare Gear's (`compare`): who would wear it
+        self.items.set_player(pl.class, pl.race, pl.level);
         let info = crate::infotext::Info {
             words: &vui.words,
             inv,
@@ -8524,7 +8771,15 @@ impl Play {
             return;
         }
         let rest = &r.data[r.pos..];
-        let rgb = number_rgb(crate::s2::get().damage_rgb, rest, tags, &crate::settings::number_colors());
+        let patch = crate::s2::get().damage_rgb;
+        let choices = crate::settings::number_colors();
+        let mut rgb = number_rgb(patch, rest, tags, &choices);
+        // Damage Taken (Heirloom petition 3081): a hit another made on the
+        // player, in its row's colour (no tag says it; never while a patch
+        // colours the numbers)
+        if !patch && rgb.is_none() && amount < 0 && Some(defender) == self.self_id32() && Some(attacker) != self.self_id32() {
+            rgb = crate::numcolor::taken_rgb(&choices);
+        }
         // `EQOA_DAMAGE_TRACE`: each one as read, what followed its body and the
         // colour it is drawn in (none: the game's), on stderr
         if std::env::var_os("EQOA_DAMAGE_TRACE").is_some() {
@@ -8706,6 +8961,7 @@ impl Play {
             ups.extend(self.faction_wnd.key(&mut self.factions, k, down, &mut cues));
         }
         if self.mode == 41 {
+            self.faction_wnd.tracked = self.faction_follow.name().to_string();
             self.faction_wnd.draw(vui, r, &self.factions, now, &mut cues);
         }
         self.cues.extend(cues.into_iter().map(crate::sound::Cue::Ui));
@@ -8718,6 +8974,8 @@ impl Play {
                     self.open_start_menu(false);
                 }
                 crate::faction::FactionUp::Send(m) => self.session.send(&m),
+                // the client's own: the faction followed on the HUD
+                crate::faction::FactionUp::Track(name) => self.follow_faction(&name, true),
             }
         }
     }
@@ -9157,6 +9415,28 @@ impl Play {
         self.mode == 2 && self.edit.inline_chat
     }
 
+    /// A physical controller opened a chat editor in a browser with a touch keyboard.
+    #[cfg(target_arch = "wasm32")]
+    pub fn note_controller_chat(&mut self) -> bool {
+        if self.mode != 2 || self.edit.purpose != 0x0B0F_0000 || !crate::web::has_touch_keyboard() {
+            return false;
+        }
+        self.edit.controller_chat = true;
+        self.edit.inline_chat = false;
+        true
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn controller_chat(&self) -> bool {
+        self.mode == 2 && self.edit.controller_chat
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn controller_chat_text_at(&self, at: [f32; 2]) -> bool {
+        self.controller_chat()
+            && self.pc_windows.input(self.pc_window().map(|(id, _)| id), at).is_some_and(|point| self.edit.text_contains(point))
+    }
+
     /// A key for the edit box (the game's codes), handled with the next HUD
     /// frame.
     pub fn edit_key(&mut self, key: i32, down: bool) {
@@ -9311,6 +9591,10 @@ impl Play {
         }
         // Character > Combat Record (`recordplay`)
         if self.record_action(id) {
+            return;
+        }
+        // Character > Bestiary (`bestiaryplay`)
+        if self.bestiary_action(id) {
             return;
         }
         // Community > Group > Raid (`raidplay`)
@@ -9637,12 +9921,16 @@ impl Play {
         if self.carried_gem() == Some(id) {
             return;
         }
-        let Some(slot) = self.abilities.get(&id).map(|a| a.slot) else { return };
-        eprintln!("play: use slot {slot} ({:?})", self.abilities.get(&id).map_or("", |a| a.name.as_str()));
-        // Mouseover Casting (petition 2960): a friend's heal or buff at the
-        // one under the mouse, the target kept (0x0032 names its own target,
-        // which the server casts at)
-        let at = self.abilities.get(&id).and_then(|a| self.mouseover_target(a)).unwrap_or(self.target);
+        let Some(ability) = self.abilities.get(&id) else { return };
+        let slot = ability.slot;
+        eprintln!("play: use slot {slot} ({:?})", ability.name);
+        // The cast request has its own target. Self-only abilities name the
+        // caster, and Mouseover Casting can redirect a targeted heal or buff.
+        let at = if ability.scope == 0 {
+            self.self_id32().unwrap_or(u32::MAX)
+        } else {
+            self.mouseover_target(ability).unwrap_or(self.target)
+        };
         // Attack With Abilities (petition 3015): an attack ability at a
         // hostile target, its start of the auto-attack waiting on the
         // server's lockout for it
@@ -10995,9 +11283,18 @@ impl Play {
     /// the scene but the player and the group (the minimap draws those as
     /// the map does) and corpses, in its name's colour (`plates`), and the
     /// target.
+    ///
+    /// A friendly NPC's square is its role's colour (Minimap Colors, Heirloom
+    /// petition 3092: `minimapcolor::role`, from its name, its flags, the
+    /// server's spell merchants and its quest mark), Default its name's; and
+    /// its name and role are the minimap's tooltip under the mouse's pointer
+    /// (petition 3093).
     fn mini_view(&self) -> crate::map::mini::MiniView {
         let me = self.self_id32();
         let group: Vec<u32> = self.group.members[..self.group.count()].iter().map(|m| m.id).collect();
+        let (colors, mine) = crate::settings::minimap_colors();
+        let mine = mine.then_some(self.dump.player.class as u8);
+        let mut names = Vec::new();
         let dots = self
             .entities
             .slots
@@ -11006,11 +11303,23 @@ impl Play {
             .filter(|e| Some(e.id) != me && !group.contains(&e.id) && e.p18 & 2 == 0 && self.in_scene(e))
             .filter_map(|e| {
                 let c = e.creature.as_ref()?;
-                Some(([e.actor_pos[0], e.actor_pos[2]], self.name_color(c)))
+                let at = [e.actor_pos[0], e.actor_pos[2]];
+                let npc = crate::minimapcolor::Npc {
+                    name: &c.name,
+                    npc_flags: c.npc_flags,
+                    p256: c.p256,
+                    spell_class: self.session.spell_merchants.get(&c.name).copied(),
+                    quest_mark: self.session.head_mark(e.id).is_some(),
+                };
+                let role = crate::minimapcolor::role(&npc, mine);
+                if c.npc_flags & 0x80 != 0 && c.p256 < 2 && !c.name.is_empty() {
+                    names.push((at, c.name.clone(), role.map_or(String::new(), |r| mini_role_line(r, npc.spell_class))));
+                }
+                Some((at, role.and_then(|r| crate::minimapcolor::rgba(r, &colors)).unwrap_or_else(|| self.name_color(c))))
             })
             .collect();
         let target = self.actor_pos(self.target).filter(|_| Some(self.target) != me).map(|p| [p[0], p[2]]);
-        crate::map::mini::MiniView { dots, target, marks: self.mini_marks() }
+        crate::map::mini::MiniView { dots, target, marks: self.mini_marks(), names }
     }
 
     /// The marks on the minimap (`map::mini::Mark`: a kind, a world, a place
@@ -11137,6 +11446,7 @@ impl Play {
     fn draw_hud(&mut self, ui: &mut render::ui::Ui, walker: &Walker, time_ms: i64, view_proj: glam::Mat4, size: (u32, u32)) {
         ui.begin(size);
         if self.pc_window().is_none() { self.pc_windows.clear(); }
+        self.bar_follow_tick();
         // the pieces this frame draws, where (`hudlayout`)
         crate::hudlayout::frame_begin();
         // LoadingProgress in place of the game's frame: no HUD, no windows
@@ -11157,7 +11467,10 @@ impl Play {
         let reticle = (self.mode == 38 && walker.cam.effect.manual_terp == F::ONE).then(|| self.target_centre(walker, view_proj));
         // VIWndEdit::OnDrawSelf's `sPadOnly`: a keyboard in use and the
         // options' Soft Keyboard on show the compact face
-        crate::editbox::set_pad_only(crate::editbox::compact_face(self.keyboard, self.options.compact != 0));
+        let compact = crate::editbox::compact_face(self.keyboard, self.options.compact != 0);
+        #[cfg(target_arch = "wasm32")]
+        let compact = compact && !self.controller_chat();
+        crate::editbox::set_pad_only(compact);
         let under_liquid = walker.cam.walk.is_under_liquid();
         let (start_stats, start_loc) = self.start_view(walker);
         let pc = crate::settings::pc_mode();
@@ -11219,7 +11532,7 @@ impl Play {
                 .map(|(index, m)| {
                     // the entity's actor while it has one, else channel 0x40's place in this world
                     let actor = if Some(m.id) == me { self.self_at.map(|a| a.0) } else { self.actor_pos(m.id) };
-                    let pos = actor.or_else(|| (m.x == self.world_id()).then_some(m.pos));
+                    let pos = actor.or_else(|| (m.active && m.x == self.world_id()).then_some(m.pos));
                     crate::hud::PatchMember { index, id: m.id, pos }
                 })
                 .collect(),
@@ -11235,6 +11548,7 @@ impl Play {
             minimap: self.minimap_up(),
             tracker: self.tracker_quests(),
             meter: self.meter_shown(),
+            faction: self.faction_shown(),
         };
         let now = self.session.now();
         let dt = ((time_ms - self.hud_last).clamp(0, 250)) as f32 / 1000.0;
@@ -11293,6 +11607,13 @@ impl Play {
                 vui.blit_bar(&mut r, &text, [0.8, 0.8, 0.8, a], [320 - ((w + 50) >> 1), 229], 33, 34, w + 50, 3, a, 0, true);
             }
             hud.draw(vui, &mut r, &state);
+            if crate::settings::target_of_target_bar() {
+                let moving = self.hud_moving();
+                let health = if moving { None } else { self.target_of_target(target) };
+                if moving || health.is_some() {
+                    crate::hud::draw_target_of_target(vui, &mut r, health);
+                }
+            }
             // a server's player search (`searchwnd`), drawn where S2 draws
             // it, in `VIWndGame::OnDrawSelf` before the windows it owns (the
             // effects, the chat box); while it is up the player and the
@@ -11351,6 +11672,8 @@ impl Play {
                 }
                 // item links drawn as links, or the line's plain words (`itemlink`)
                 c.show_links = crate::settings::item_links();
+                // a speaker's name a click's tell, in the PC interface (Heirloom 3140)
+                c.click_names = crate::settings::pc_mode();
                 // the chat tabs (ticket 1951), each line into its kind's
                 let opts = crate::settings::client().display_ui();
                 // The configured PC fade owns visibility while enabled: keep
@@ -11372,9 +11695,9 @@ impl Play {
                 for t in 1..=crate::chat::TABS {
                     c.set_detached(t, pc && opts.chat_detached[t - 1]);
                 }
-                for (text, color, at, links) in self.chat_pending.drain(..) {
+                for (text, color, at, links, name) in self.chat_pending.drain(..) {
                     let rr = &r;
-                    c.add_line(&text, color, at, |s| vi::ui::Raster::string_width(rr, s), &links);
+                    c.add_line_named(&text, color, at, |s| vi::ui::Raster::string_width(rr, s), &links, name);
                 }
                 let composing = self.mode == 2 && self.edit.purpose == 0x0B0F_0000;
                 let m = crate::hudlayout::begin(r.ui, crate::hudlayout::Piece::Chat);
@@ -11390,6 +11713,7 @@ impl Play {
                     if let Some(pane) = c.pane_mut(t) {
                         if !in_play { pane.clear_selection(false); }
                         pane.show_links = crate::settings::item_links();
+                        pane.click_names = crate::settings::pc_mode();
                         pane.opacity = opts.chat_opacity;
                         pane.resize(pane_size(t), |s| vi::ui::Raster::string_width(&r, s));
                         let m = crate::hudlayout::begin(r.ui, Self::chat_piece(t));
@@ -11413,6 +11737,10 @@ impl Play {
             // the item links' windows (`itemlink`), at the top middle
             let side = crate::ui::Layout::side(&r);
             self.run_links(vui, &mut r, side);
+            // a creature's details (`mobwnd`), over the item links' band
+            if self.mobwnd.is_open() && matches!(self.mode, 0 | 33 | 38) && !crate::hideui::hidden() {
+                self.mobwnd.draw(vui, &mut r, side);
+            }
             let window_layer = (!self.search.open && self.pc_window().is_some()).then(|| crate::pcwindows::begin(&mut r));
             if self.mode == 9 {
                 self.priv_chat.draw(vui, &mut r);
@@ -11432,6 +11760,7 @@ impl Play {
             self.run_class_mastery(vui, &mut r);
             self.run_factions(vui, &mut r);
             self.run_record(vui, &mut r);
+            self.run_bestiary(vui, &mut r);
             self.run_merc_windows(vui, &mut r);
             self.run_dyepick(vui, &mut r);
             self.run_npcw(vui, &mut r);
@@ -11666,6 +11995,7 @@ impl Play {
                 eprintln!("glyphs (mode {}): {}", self.mode, list.join(", "));
             }
             self.glyphs = std::mem::take(&mut r.glyphs);
+            self.bars = std::mem::take(&mut r.bars);
             // DrawFade, last, as `Process` draws it after every window: black
             // over the whole screen at the fade's alpha (the game's spans the
             // wide edges; here past the 4:3 frame's sides)
@@ -11689,6 +12019,7 @@ impl Play {
             self.hud = Some((vui_o, assets, hud_o));
         } else {
             crate::hudlayout::frame_end();
+            self.bars.clear();
         }
         self.start_actions(actions);
         self.quick_outs(quick_outs);
@@ -11846,6 +12177,109 @@ impl Play {
         if self.options_wnd.meter_heal_note.as_deref() != heal_note {
             self.options_wnd.meter_heal_note = heal_note.map(str::to_string);
         }
+        self.options_wnd.meter_merc_note = (self.session.dps_meter_offer && self.session.dps_meter_layout < net::session::DPS_METER_MERC_LINES)
+            .then_some("Mercenary breakdown requires a newer server");
+        self.options_wnd.meter_merc_rows_note = (self.session.dps_meter_offer && self.session.dps_meter_layout < net::session::DPS_METER_MERC_ROWS)
+            .then_some("Each merc's own row requires a newer server");
+    }
+
+    /// The Faction Tracker: the character's followed faction read, the server
+    /// told it (none while the row is off), and the page's note.
+    fn agree_faction_track(&mut self) {
+        self.faction_follow.character(self.player.server_id, &self.dump.player.name);
+        let (on, _) = crate::settings::faction_track();
+        let name = if on { self.faction_follow.name().to_string() } else { String::new() };
+        self.session.agree_faction_track(&name);
+        let note = if !self.session.faction_track_offer {
+            "This server keeps no faction tracker".to_string()
+        } else if self.faction_follow.name().is_empty() {
+            "Pick a faction in the faction window (Track), or /track faction <name>".to_string()
+        } else {
+            format!("Tracking {}", self.faction_follow.name())
+        };
+        if self.options_wnd.faction_note.as_deref() != Some(note.as_str()) {
+            self.options_wnd.faction_note = Some(note);
+        }
+    }
+
+    /// Follows `name` on the HUD ("" none), kept for the character; `on`
+    /// turns the Faction Tracker on with it. A line says so.
+    fn follow_faction(&mut self, name: &str, on: bool) {
+        self.faction_follow.character(self.player.server_id, &self.dump.player.name);
+        self.faction_follow.set(name);
+        self.faction_heard = None;
+        self.faction_page_heard();
+        let line = if name.trim().is_empty() {
+            "No faction is tracked.".to_string()
+        } else {
+            if on {
+                crate::settings::set_client(crate::settings::ClientOptions { faction_track: true, ..crate::settings::client() });
+            }
+            if self.session.faction_track_offer {
+                format!("Tracking faction: {}.", name.trim())
+            } else {
+                format!("Tracking faction: {} (this server keeps no faction tracker; it shows on servers that do).", name.trim())
+            }
+        };
+        self.add_chat(line, [1.0; 4]);
+    }
+
+    /// The server's word on the followed faction: its standing, by the
+    /// faction's own name (a part typed becomes the whole name, kept), or that
+    /// the words name no one faction.
+    fn faction_track_heard(&mut self, known: bool, name: String, standing: i32) {
+        let followed = self.faction_follow.name().to_string();
+        if followed.is_empty() {
+            return;
+        }
+        if known && !name.trim().is_empty() && !name.trim().eq_ignore_ascii_case(&followed) {
+            // `/track faction militia`: the faction it names, by its own name
+            self.faction_follow.set(&name);
+        } else if !known && !name.trim().eq_ignore_ascii_case(&followed) {
+            return; // an answer to words since changed
+        }
+        let name = if known { name } else { followed };
+        self.faction_heard = Some(crate::factiontrack::Heard { name, standing, known });
+    }
+
+    /// The faction window's page, when it lists the followed faction: its
+    /// standing heard.
+    fn faction_page_heard(&mut self) {
+        let followed = self.faction_follow.name();
+        if followed.is_empty() || !self.factions.ready {
+            return;
+        }
+        if let Some((n, v)) = self.factions.list.iter().find(|(n, _)| String::from_utf16_lossy(n).trim().eq_ignore_ascii_case(followed)) {
+            self.faction_heard = Some(crate::factiontrack::Heard { name: String::from_utf16_lossy(n).trim().to_string(), standing: *v, known: true });
+        }
+    }
+
+    /// What the faction tracker shows while it is up: the row on, a faction
+    /// followed and heard, a server that keeps a tracker, the HUD's right side
+    /// up.
+    fn faction_shown(&self) -> Option<crate::factiontrack::Shown> {
+        let (on, style) = crate::settings::faction_track();
+        let followed = self.faction_follow.name();
+        if !on || followed.is_empty() || !self.session.faction_track_offer || !self.right_hud_up() {
+            return None;
+        }
+        let heard = self.faction_heard.clone().filter(|h| h.is(followed))?;
+        Some(crate::factiontrack::Shown { heard, style })
+    }
+
+    /// `/track faction <name>`, `/track off`, `/track on`.
+    fn track_command(&mut self, arg: &str) {
+        use crate::factiontrack::Command;
+        match crate::factiontrack::command(arg) {
+            Command::Faction(name) => self.follow_faction(&name, true),
+            Command::Stop => self.follow_faction("", false),
+            Command::On => {
+                crate::settings::set_client(crate::settings::ClientOptions { faction_track: true, ..crate::settings::client() });
+                let line = if self.faction_follow.name().is_empty() { crate::factiontrack::HELP.to_string() } else { format!("Tracking faction: {}.", self.faction_follow.name()) };
+                self.add_chat(line, [1.0; 4]);
+            }
+            Command::Help => self.add_chat(crate::factiontrack::HELP.to_string(), [1.0; 4]),
+        }
     }
 
     /// Whether the HUD's pieces move now (`hudlayout`): Move HUD on, in play
@@ -11880,6 +12314,7 @@ impl Play {
             40 => "Class Mastery",
             41 => "Factions",
             recordplay::MODE => "Character Record",
+            bestiaryplay::MODE => "Bestiary",
             mercplay::ITEMS_MODE => "Mercenary Equipment",
             mercplay::SPELLS_MODE => "Mercenary Spells",
             dyeplay::MODE => "Dye",
@@ -11895,6 +12330,7 @@ impl Play {
         use crate::hudlayout::{Beyond, Button, Press};
         let f = render::ui::frame_from_window(size, at);
         if matches!(self.mode, 0 | 33 | 38) && !self.search.open && !crate::hideui::hidden() && self.links.press(f) { return true; }
+        if self.bar_press(at, size) { return true; }
         let key = self.pc_window().map(|(id, _)| id);
         if self.pc_windows.press(key, f) { return true; }
         // the dyers' colour picker up: every press is its (`dyeplay`)
@@ -11923,6 +12359,7 @@ impl Play {
     pub fn hud_drag(&mut self, at: [f32; 2], size: (u32, u32)) -> bool {
         let f = render::ui::frame_from_window(size, at);
         if self.links.drag(f) { return true; }
+        if self.bar_drag(at, size) { return true; }
         let key = self.pc_window().map(|(id, _)| id);
         if self.pc_windows.drag(key, f) { return true; }
         if self.dyepick_owns() && self.pc_windows.input(key, f).is_some_and(|p| self.dyepick_drag(p)) {
@@ -11935,9 +12372,109 @@ impl Play {
         true
     }
 
+    /// A press (the mouse's left button, a finger) at window pixels `at` on a
+    /// scroll bar's knob (`scrollbar`): the chat box's (and its panes') history
+    /// goes where the pointer holds the knob, a window's list follows by the
+    /// d-pad's steps (`bar_follow_tick`); a press on the chat's track pages it.
+    /// True when it was a bar's.
+    fn bar_press(&mut self, at: [f32; 2], size: (u32, u32)) -> bool {
+        use crate::scrollbar::{Follow, SLOP};
+        let f = render::ui::frame_from_window(size, at);
+        let pt = (at[0] as f64, at[1] as f64);
+        // the chat box, in play or in its history, as `chat_press` has it
+        let lines = ((self.mode == 0 && !self.search.open) || self.mode == 33) && !crate::hideui::hidden();
+        let lines = lines && crate::hud::fork_hud::chat_window_visible();
+        if lines && !self.links.covers(f) {
+            let now = self.session.now();
+            if let Some(c) = self.wnd_chat.as_mut() {
+                for t in (1..=crate::chat::TABS).rev() {
+                    let p = Self::chat_pane_point(pt, size, t);
+                    if let Some(pane) = c.pane_mut(t)
+                        && pane.bar_press(p)
+                    {
+                        pane.activity(now);
+                        return true;
+                    }
+                }
+                if c.bar_press(Self::chat_point(pt, size)) {
+                    c.activity(now);
+                    return true;
+                }
+            }
+        }
+        // a window's: its knob, as drawn (the chat's is not among them)
+        if !self.bars.is_empty() && self.mode != 0 {
+            let key = self.pc_window().map(|(id, _)| id);
+            if let Some(w) = self.pc_windows.input(key, f)
+                && let Some(g) = Follow::press(&self.bars, w, SLOP)
+            {
+                self.bar_follow = Some(g);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// The pointer at window pixels `at` while a knob is held: false with none.
+    fn bar_drag(&mut self, at: [f32; 2], size: (u32, u32)) -> bool {
+        let pt = (at[0] as f64, at[1] as f64);
+        let mut took = false;
+        if let Some(c) = self.wnd_chat.as_mut() {
+            for t in 1..=crate::chat::TABS {
+                let p = Self::chat_pane_point(pt, size, t);
+                if let Some(pane) = c.pane_mut(t).filter(|p| p.bar_dragging()) {
+                    took |= pane.bar_moved(p);
+                }
+            }
+            if c.bar_dragging() {
+                took |= c.bar_moved(Self::chat_point(pt, size));
+            }
+        }
+        if self.bar_follow.is_some() {
+            let key = self.pc_window().map(|(id, _)| id);
+            if let Some(w) = self.pc_windows.input(key, render::ui::frame_from_window(size, at))
+                && let Some(g) = self.bar_follow.as_mut()
+            {
+                g.moved(w);
+            }
+            took = true;
+        }
+        took
+    }
+
+    /// The knob let go. False with none held.
+    fn bar_release(&mut self) -> bool {
+        let mut took = self.bar_follow.take().is_some();
+        if let Some(c) = self.wnd_chat.as_mut() {
+            for t in 1..=crate::chat::TABS {
+                if let Some(pane) = c.pane_mut(t) {
+                    took |= pane.bar_release();
+                }
+            }
+            took |= c.bar_release();
+        }
+        took
+    }
+
+    /// A frame's start with a window's knob held: the key (Up or Down) that
+    /// brings its list a step to the pointer, as the d-pad would.
+    fn bar_follow_tick(&mut self) {
+        use crate::scrollbar::Step;
+        let Some(g) = self.bar_follow.as_mut() else { return };
+        // a key still being let go is the last step's: its answer is not drawn yet
+        if self.held.is_some() || !self.key_queue.is_empty() {
+            return;
+        }
+        match g.tick(&self.bars) {
+            Step::Key(k) => self.press(&[k]),
+            Step::Wait => {}
+            Step::Gone => self.bar_follow = None,
+        }
+    }
+
     /// The press let go: a dragged piece stays, kept. False with none.
     pub fn hud_release(&mut self) -> bool {
-        self.links.release() || self.pc_windows.release() || self.dyepick_release() || crate::hudlayout::release() || self.raid_drag_release()
+        self.bar_release() || self.links.release() || self.pc_windows.release() || self.dyepick_release() || crate::hudlayout::release() || self.raid_drag_release()
     }
 
     /// The meter cleared, and the server told to drop the fight under way.
@@ -11949,8 +12486,12 @@ impl Play {
     /// What the DPS meter's panel shows while it is up: the DPS Meter on, a
     /// server that keeps one, the HUD's right side up (`right_hud_up`).
     fn meter_shown(&self) -> Option<crate::dpsmeter::Shown> {
-        (crate::settings::dps_meter() && self.session.dps_meter_offer && self.right_hud_up())
-            .then(|| self.meter.shown_by(crate::settings::dps_view(), &self.pet_name, crate::settings::dps_columns(), crate::settings::dps_sort()))
+        let c = crate::settings::client();
+        (c.dps_meter && self.session.dps_meter_offer && self.right_hud_up()).then(|| {
+            let hide_mercs = (self.session.dps_meter_layout >= net::session::DPS_METER_MERC_LINES).then_some(c.dps_hide_mercenary);
+            let own_rows = self.session.dps_meter_layout >= net::session::DPS_METER_MERC_ROWS && c.dps_merc_rows;
+            self.meter.shown_with(c.dps_view, &self.pet_name, c.dps_columns, c.dps_sort, hide_mercs, own_rows)
+        })
     }
 
     /// The meter's other view (Fight or Overall), from its list's top.
@@ -11968,6 +12509,10 @@ impl Play {
         match hit {
             Hit::View => self.dps_toggle_view(),
             Hit::Reset => self.dps_reset(),
+            Hit::HideMercs => {
+                crate::settings::toggle_dps_hide_mercenary();
+                self.meter.first = 0;
+            }
             Hit::Rows => {
                 let first = self.meter.first;
                 self.meter.first = self.hud.as_ref().map_or(0, |h| h.2.meter_page(first));
@@ -12159,7 +12704,13 @@ impl Play {
     /// true when it took it.
     pub fn book_wheel(&mut self, at: (f64, f64), size: (u32, u32), lines: f32) -> bool {
         let f = render::ui::frame_from_window(size, [at.0 as f32, at.1 as f32]);
-        self.mode == 5 && self.pc_windows.input(self.pc_window().map(|(id, _)| id), f).is_some_and(|at| self.book.wheel(at, lines))
+        let at = self.pc_windows.input(self.pc_window().map(|(id, _)| id), f);
+        // the item menu's Bags grid (`bags`): its rows
+        if self.mode == 13 && self.items.visible {
+            let rows = if lines > 0.0 { lines.ceil() } else { lines.floor() } as i32;
+            return at.is_some_and(|at| self.items.wheel(at, rows));
+        }
+        self.mode == 5 && at.is_some_and(|at| self.book.wheel(at, lines))
     }
 
     pub fn raid_wheel(&mut self, at: (f64, f64), size: (u32, u32), lines: f32) -> bool {
@@ -12233,6 +12784,22 @@ impl Play {
         }
     }
 
+    /// A left click or tap at frame point `f` (the window's own place): on
+    /// the drawn focus window it targets the focus (`target_focus`) and is the
+    /// window's own. A focus out of view is already let go and its window not
+    /// drawn, so such a click is the world's, as a roster name's out of view.
+    fn focus_point(&mut self, f: [f32; 2]) -> bool {
+        if self.focus_shown().is_none() {
+            return false;
+        }
+        let r = crate::focus::rect();
+        if f[0] >= r[0] as f32 && f[0] < r[2] as f32 && f[1] >= r[1] as f32 && f[1] < r[3] as f32 {
+            self.target_focus();
+            return true;
+        }
+        false
+    }
+
     /// `/focus` (`focus::command`).
     fn focus_command(&mut self, rest: &str) {
         use crate::focus::Command;
@@ -12267,6 +12834,21 @@ impl Play {
             (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
         });
         Some(crate::focus::Shown { name: f.name.clone(), con: f.con, hp: e.p19, distance })
+    }
+
+    /// Follow the selected creature's target ID in this session's entity stream.
+    fn target_of_target(&self, target: Option<&net::entity::Entity>) -> Option<(&str, u8)> {
+        let target = target?;
+        if target.id == u32::MAX || target.p19 == 0 || target.p18 & 2 != 0 || i64::from(target.world) != self.player.world {
+            return None;
+        }
+        let id = target.creature.as_ref()?.target;
+        if matches!(id, 0 | u32::MAX) {
+            return None;
+        }
+        let entity = self.entities.slots.iter().flatten().find(|e| e.id == id && e.world == target.world)?;
+        let name = entity.creature.as_ref()?.name.as_str();
+        Some((name, entity.p19))
     }
 
     fn drop_dead_target_info(&mut self) {
@@ -12357,7 +12939,8 @@ impl Play {
             2 => {
                 let (guild, title) = if self.target_info.is_some() { (self.target_guild.as_str(), self.target_title.as_str()) } else { ("", "") };
                 let rank = if title.is_empty() { class.as_str() } else { title };
-                Some(if guild.is_empty() { format!("{}\n{race}\n{rank}\n{level}", c.name) } else { format!("{}\n{guild}\n{race}\n{rank}\n{level}", c.name) })
+                let name = self.plate_name(c);
+                Some(if guild.is_empty() { format!("{name}\n{race}\n{rank}\n{level}") } else { format!("{name}\n{guild}\n{race}\n{rank}\n{level}") })
             }
             // a merc's class (and a healer's mode) under its name, where the
             // server tells them (0x7E5B's layout 3: the owner's of 2026-11-12,
@@ -12612,6 +13195,32 @@ impl Play {
     /// `wisp`): its moving makes no sound (`wisp::Hushed`, the viewer's walker).
     pub fn self_wisp(&self) -> bool {
         self.self_puppet.as_ref().is_some_and(|p| p.wisp)
+    }
+
+    /// The bodies the radial flora leans from with Foliage Reacts on
+    /// (`flora::React`): the player where the walk has it, and every other
+    /// player and creature drawn, each by its feet and a reach off its
+    /// actor's bound (half its radius, 0.8 to 4: a rat's little, a giant's
+    /// wide). A Wisp's, which has no feet, none.
+    pub fn flora_movers(&self, walker: &Walker) -> Vec<crate::flora::Mover> {
+        let reach = |actor: Option<usize>| actor.and_then(|a| walker.scene.actors.get(a)).map_or(1.2, |a| (a.bound.r.0 * 0.5).clamp(0.8, 4.0));
+        let me = self.self_id32();
+        let mut out = Vec::new();
+        if self.self_shown && !self.self_puppet.as_ref().is_some_and(|p| p.wisp) {
+            let at = walker.cam.walk.phys.position;
+            out.push(crate::flora::Mover { at: [at.x.0, at.y.0, at.z.0], reach: reach(self.self_actor.map(|a| a.actor)) });
+        }
+        for (slot, e) in self.entities.slots.iter().enumerate() {
+            let Some(e) = e else { continue };
+            if Some(e.id) == me {
+                continue;
+            }
+            let Some(p) = self.puppets[slot].as_ref().filter(|p| p.shown && !p.wisp) else { continue };
+            let t = p.actor_m.m[3];
+            let actor = self.actors[slot].filter(|a| a.id == e.id).map(|a| a.actor);
+            out.push(crate::flora::Mover { at: [t.x.0, t.y.0, t.z.0], reach: reach(actor) });
+        }
+        out
     }
 
     pub fn shadow_casters(&self, walker: &mut Walker, lib: &Library) -> Vec<crate::shadows::Caster> {
@@ -14921,7 +15530,7 @@ mod commands {
         let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 5000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
         s.self_id = Some(0x100);
         let mut p = Play::new(s, Player::default(), Box::default());
-        p.abilities.insert(7, net::dump::Ability { slot: 1, name: "Sanctuary".into(), ..Default::default() });
+        p.abilities.insert(7, net::dump::Ability { slot: 1, scope: 1, name: "Minor Healing".into(), ..Default::default() });
         p.ability_token = 0x55;
         p.target = 0x4242;
         let used = |p: &mut Play, r: crate::s2::Rules| -> Vec<u8> {
@@ -14972,8 +15581,8 @@ mod commands {
             s.expansion = 2;
             let mut p = Play::new(s, Player::default(), Box::default());
             p.mode = 0;
-            for (id, slot, name) in [(1, 0, "Fire Bolt"), (2, 10, "Ice Comet"), (3, 19, "Lightning Strike"), (4, 7, "Gate")] {
-                p.abilities.insert(id, net::dump::Ability { id, valid: 1, slot, name: name.into(), icon_front: 100 + id, ..Default::default() });
+            for (id, slot, scope, name) in [(1, 0, 1, "Fire Bolt"), (2, 10, 1, "Ice Comet"), (3, 19, 1, "Lightning Strike"), (4, 7, 0, "Gate")] {
+                p.abilities.insert(id, net::dump::Ability { id, valid: 1, slot, scope, name: name.into(), icon_front: 100 + id, ..Default::default() });
             }
             p.ability_token = 0x55;
             p.target = 0x4242;
@@ -14991,7 +15600,12 @@ mod commands {
             guaranteed(&sent.borrow()).into_iter().find(|m| m.starts_with(&[0x32, 0x00]))
         };
         let retail = crate::s2::Rules::retail;
-        let used = |slot: u8| Some(vec![0x32, 0x00, 0x55, 0, 0, 0, slot, 0x42, 0x42, 0, 0]);
+        let used = |slot: u8| {
+            let target: u32 = if slot == 7 { 0x100 } else { 0x4242 };
+            let mut msg = vec![0x32, 0x00, 0x55, 0, 0, 0, slot];
+            msg.extend_from_slice(&target.to_le_bytes());
+            Some(msg)
+        };
 
         let mut p = fresh();
         p.hud_menus.menus[2].sel = 3;
@@ -15012,7 +15626,8 @@ mod commands {
         sent.borrow_mut().clear();
         clicked.hud_key(click);
         clicked.session.flush();
-        assert_eq!(guaranteed(&sent.borrow()).into_iter().find(|m| m.starts_with(&[0x32, 0x00])), used(7), "PC mouse slot reaches the same cast packet");
+        assert_eq!(guaranteed(&sent.borrow()).into_iter().find(|m| m.starts_with(&[0x32, 0x00])), used(7), "the self-only spell names the caster");
+        assert_eq!(clicked.target, 0x4242, "casting Gate keeps the selected target");
         assert_eq!(key(&mut p, 2, 0, retail()), used(10), "bar 3's first slot: slot 10");
         assert_eq!((p.hud_menus.menus[4].sel, p.hud_menus.menus[2].sel), (0, 3), "bar 3's menu selected, the items' left");
         assert_eq!(key(&mut p, 3, 4, retail()), used(19), "bar 4's fifth slot: slot 19");
@@ -15064,7 +15679,7 @@ mod commands {
         for slot in 20..40 {
             let mut pc = fresh();
             let (bar, cell) = (crate::hudmenu::PC_ACTION_BAR + (slot - 20) / 10, slot % 10);
-            pc.abilities.insert(120, net::dump::Ability { id: 120, display_index: 22, slot: -1, valid: 0, ..Default::default() });
+            pc.abilities.insert(120, net::dump::Ability { id: 120, display_index: 22, slot: -1, scope: 1, valid: 0, ..Default::default() });
             pc.book_actions(vec![crate::spellbook::Out::Send0033(22, slot as i64)]);
             pc.session.flush();
             assert_eq!(op(guaranteed(&sent.borrow()), 0x33), Some(vec![0x33, 0, 0x55, 0, 0, 0, 22, slot as u8]));
@@ -15073,7 +15688,7 @@ mod commands {
             assert_eq!(key(&mut pc, bar, cell, retail()), used(slot as u8), "acknowledged slot {}", slot + 1);
         }
         let mut limited = fresh();
-        limited.abilities.insert(120, net::dump::Ability { id: 120, slot: 39, valid: 1, ..Default::default() });
+        limited.abilities.insert(120, net::dump::Ability { id: 120, slot: 39, scope: 1, valid: 1, ..Default::default() });
         limited.session.expansion = 0;
         assert_eq!(limited.pc_slot_capacity(), Some(5));
         assert_eq!(key(&mut limited, crate::hudmenu::PC_ACTION_BAR + 1, 9, retail()), None);
@@ -15152,7 +15767,7 @@ mod commands {
             p.mode = 0;
             p.ability_token = 0x55;
             p.target = 0x4242;
-            p.abilities.insert(200, net::dump::Ability { id: 200, slot: slot as i64, valid: 1, icon_front: 101, ..Default::default() });
+            p.abilities.insert(200, net::dump::Ability { id: 200, slot: slot as i64, scope: 1, valid: 1, icon_front: 101, ..Default::default() });
             let bars = p.hud_bars();
             p.hud_menus.build(&p.abilities, &p.dump.inventory, &p.gear, bars);
             p.hud_menus.sync_pc_slots(&p.abilities, None);
@@ -15422,6 +16037,185 @@ mod commands {
         assert_eq!((s.len(), s[0].color), (1, [1.0; 4]));
     }
 
+    /// Own Name Plate (Heirloom petition 3081): off by default, no plate of
+    /// the player's own (the game's); on, its name at its name node in its
+    /// name's colour, while its body is drawn; not from a first person camera
+    /// (the body hidden) and not without a name node.
+    #[test]
+    fn own_name_plate_is_drawn_as_the_others() {
+        crate::settings::testing::reset(false);
+        let mut p = play();
+        // the world entry's loading screen down
+        assert!(p.loading.end(true, i64::MAX).is_some());
+        let me = p.self_id32().unwrap();
+        p.entities.slots[0] = Some(net::entity::Entity { id: me, kind: net::entity::TYPE_CREATURE, creature: Some(net::entity::Creature { name: "Dabtest".into(), p256: 2, ..Default::default() }), ..Default::default() });
+        p.self_name_at = Some([1.0, 2.5, 3.0]);
+        assert!(p.plates().iter().all(|pl| pl.name != "Dabtest"), "off: the game's, none");
+        let mut c = crate::settings::client();
+        c.own_plate = true;
+        crate::settings::set_client(c);
+        let mine: Vec<Plate> = p.plates().into_iter().filter(|pl| pl.name == "Dabtest").collect();
+        assert_eq!(mine.len(), 1, "on: the player's own");
+        assert_eq!((mine[0].at, mine[0].color, mine[0].tag.clone()), ([1.0, 2.5, 3.0], NAME_COLORS[1], None), "at its name node, a player's colour");
+        p.self_shown = false;
+        assert!(p.plates().iter().all(|pl| pl.name != "Dabtest"), "the body hidden (first person): none");
+        p.self_shown = true;
+        p.self_name_at = None;
+        assert!(p.plates().iter().all(|pl| pl.name != "Dabtest"), "no name node: none");
+        crate::settings::testing::reset(false);
+    }
+
+    /// A surname the server told (go-eqoa-server's `/surname`, Live petition
+    /// 5648) after a player's name on its plate and in its details box, its
+    /// tags before the name read past; none for a merc or a pet of the name,
+    /// none for a player without one (the control).
+    #[test]
+    fn a_surname_follows_a_players_name() {
+        let mut p = play();
+        let player = net::entity::Creature { p256: 2, name: "[OG] Cora".into(), ..Default::default() };
+        let bert = net::entity::Creature { p256: 2, name: "Bert".into(), ..Default::default() };
+        let pet = net::entity::Creature { p256: 3, name: "Cora".into(), ..Default::default() };
+        assert_eq!(p.plate_name(&player), "[OG] Cora", "the control: nothing told");
+        p.session.surnames.insert("cora".into(), "Stoneheart".into());
+        assert_eq!(p.plate_name(&player), "[OG] Cora Stoneheart");
+        assert_eq!(p.plate_name(&bert), "Bert");
+        assert_eq!(p.plate_name(&pet), "Cora", "a pet or a merc: its own name");
+    }
+
+    /// Coach Talk on Arrival (Heirloom petition 3091): a 0x00B2 while the
+    /// coachman talked to is the target arms it; once the ride is answered and
+    /// the world in, the coachman by the landing (not the one who sent it, not
+    /// one farther than the reach) is targeted and talked to, 0x0004 with his
+    /// id, once. The controls: off, or a move with another target, sends
+    /// nothing; armed, no coachman near sends nothing until one comes.
+    #[test]
+    fn coach_talk_on_arrival_talks_to_the_coachman_there() {
+        let npc = |id: u32, name: &str, at: [f32; 3]| net::entity::Entity { id, kind: net::entity::TYPE_CREATURE, pos: at, actor_pos: at, creature: Some(net::entity::Creature { name: name.into(), npc_flags: 0x180, ..Default::default() }), ..Default::default() };
+        let talks = |p: &mut Play| -> Vec<u32> {
+            p.session.record.take().unwrap_or_default().into_iter().map(|(_, m)| m).filter(|m| m[..2] == [0x04, 0x00]).map(|m| u32::from_le_bytes([m[2], m[3], m[4], m[5]])).collect()
+        };
+        let arm = |p: &mut Play, from: u32| {
+            p.target = from;
+            p.arm_coach_talk(1000);
+        };
+        crate::settings::testing::reset(false);
+        let mut p = play();
+        assert!(p.loading.end(true, i64::MAX).is_some(), "the world entry's loading screen down");
+        assert!(p.coach_talk.is_none() && p.arrival.is_empty() && p.world_change.is_none());
+        p.entities.slots[1] = Some(npc(0x51, "Coachman Ronks", [5000.0, 0.0, 5000.0]));
+        p.entities.slots[2] = Some(npc(0x52, "Coachman Doba", [100.0, 0.0, 105.0]));
+        p.entities.slots[3] = Some(npc(0x53, "Merchant Perry", [100.0, 0.0, 101.0]));
+        arm(&mut p, 0x51);
+        assert_eq!(p.coach_talk, None, "off by default: not armed");
+        let mut c = crate::settings::client();
+        c.coach_talk = true;
+        crate::settings::set_client(c);
+        arm(&mut p, 0x53);
+        assert_eq!(p.coach_talk, None, "another target (a merchant): not armed");
+        arm(&mut p, 0x51);
+        assert_eq!(p.coach_talk, Some((1000 + COACH_TALK_MS, 0x51)), "the coachman talked to: armed");
+        p.session.record = Some(Vec::new());
+        p.coach_talk_frame([100.0, 0.0, 100.0], 2000);
+        assert_eq!((talks(&mut p), p.target, p.coach_talk), (vec![0x52], 0x52, None), "the coachman by the landing, targeted and talked to");
+        p.session.record = Some(Vec::new());
+        p.coach_talk_frame([100.0, 0.0, 100.0], 2100);
+        assert!(talks(&mut p).is_empty(), "once");
+        // none near yet: waits, then gives up
+        arm(&mut p, 0x51);
+        p.session.record = Some(Vec::new());
+        p.coach_talk_frame([300.0, 0.0, 300.0], 2000);
+        assert!(talks(&mut p).is_empty() && p.coach_talk.is_some(), "no coachman within reach: waits");
+        p.coach_talk_frame([300.0, 0.0, 300.0], 1000 + COACH_TALK_MS + 1);
+        assert_eq!(p.coach_talk, None, "given up after its time");
+        // the ride's own coachman beside the landing is not the one
+        arm(&mut p, 0x52);
+        p.session.record = Some(Vec::new());
+        p.coach_talk_frame([100.0, 0.0, 100.0], 2000);
+        assert!(talks(&mut p).is_empty(), "the coachman who sent the ride: not him");
+        // locked with the automation (`qol::AUTO_CAST`)
+        crate::settings::qol::set_off(crate::settings::qol::AUTO_CAST);
+        arm(&mut p, 0x51);
+        assert_eq!(p.coach_talk, None, "the game's own UI: off");
+        crate::settings::qol::set_off(0);
+        crate::settings::testing::reset(false);
+    }
+
+    /// Minimap Colors (Heirloom petitions 3092, 3093): a friendly NPC's square
+    /// is its role's colour, a spell merchant known from the server's list,
+    /// Default its name's; its name and role go with it for the tooltip; a
+    /// creature's is its name's colour and nameless.
+    #[test]
+    fn minimap_squares_by_role_and_named() {
+        crate::settings::testing::reset(false);
+        let npc = |id: u32, name: &str, flags: u16, at: [f32; 3]| net::entity::Entity { id, kind: net::entity::TYPE_CREATURE, pos: at, actor_pos: at, creature: Some(net::entity::Creature { name: name.into(), npc_flags: flags, ..Default::default() }), ..Default::default() };
+        let mut p = play();
+        p.entities.slots[1] = Some(npc(0x61, "Merchant Timmerin", 0x81, [10.0, 0.0, 0.0]));
+        p.entities.slots[2] = Some(npc(0x62, "Banker Lars", 0x82, [20.0, 0.0, 0.0]));
+        p.entities.slots[3] = Some(npc(0x63, "orc pawn", 0, [30.0, 0.0, 0.0]));
+        p.session.spell_merchants.insert("Merchant Timmerin".into(), 13);
+        let mv = p.mini_view();
+        let colour = |x: f32| mv.dots.iter().find(|d| d.0 == [x, 0.0]).map(|d| d.1).unwrap();
+        let rgba = |k: &str| { let c = crate::numcolor::PALETTE.iter().find(|q| q.key == k).unwrap().rgb; [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0] };
+        assert_eq!(colour(10.0), rgba("purple"), "a spell merchant the server named: Spell Merchants' purple");
+        assert_eq!(colour(20.0), rgba("cyan"), "a banker: Bankers' cyan");
+        assert_eq!(colour(30.0), NAME_COLORS[0], "a creature: its name's colour");
+        assert_eq!(mv.names, vec![([10.0, 0.0], "Merchant Timmerin".to_string(), "Spell Merchant (Wizard)".to_string()), ([20.0, 0.0], "Banker Lars".to_string(), "Banker".to_string())]);
+        // the control: unnamed by the server, a merchant; Default, the name's colour
+        p.session.spell_merchants.clear();
+        let mut c = crate::settings::client();
+        c.minimap_colors[crate::minimapcolor::Role::Bankers as usize] = 0;
+        crate::settings::set_client(c);
+        let mv = p.mini_view();
+        assert_eq!(mv.dots.iter().find(|d| d.0 == [10.0, 0.0]).unwrap().1, rgba("yellow"), "a merchant: Merchants' yellow");
+        assert_eq!(mv.dots.iter().find(|d| d.0 == [20.0, 0.0]).unwrap().1, NAME_COLORS[0], "Bankers Default: the name's colour");
+        crate::settings::testing::reset(false);
+    }
+
+    /// Damage Taken (Heirloom petition 3081): a creature's hit on the player,
+    /// drawn over the player, in the row's colour; Default, the game's yellow.
+    /// Not a heal another gave, not the player's own hit, not a hit on another
+    /// (the controls), and not while a patch colours the numbers.
+    #[test]
+    fn damage_taken_is_its_rows_colour() {
+        let num = |attacker: u32, amount: i64, defender: u32| {
+            let mut w = net::stream::Writer::default();
+            w.u32(attacker).signed(amount).u32(defender);
+            w.data
+        };
+        let shown = |p: &mut Play, id: u32| p.damage.step(33, |e| (e == id).then_some(crate::damage::Target { pos: [0.0; 3], slot4: None }));
+        crate::settings::testing::reset(false);
+        let mut c = crate::settings::client();
+        c.number_colors[crate::numcolor::TAKEN] = crate::numcolor::from_key("cyan").unwrap();
+        crate::settings::set_client(c);
+        let cyan = [0.0, 240.0 / 255.0, 240.0 / 255.0, 1.0];
+        let yellow = [0.8, 0.8, 0.1, 1.0];
+        let mut p = play();
+        let me = p.self_id32().expect("the player's id");
+        p.damage_indication(&num(0x300, -40, me), 1);
+        let s = shown(&mut p, me);
+        assert_eq!((s.len(), s[0].color), (1, cyan), "a creature's hit on the player: Damage Taken's");
+        let mut p = play();
+        p.damage_indication(&num(0x300, 25, me), 1);
+        assert_eq!(shown(&mut p, me)[0].color, [0.0, 1.0, 0.0, 1.0], "the control: another's heal stays green");
+        let mut p = play();
+        p.damage_indication(&num(me, -40, 0x300), 1);
+        assert_eq!(shown(&mut p, 0x300)[0].color, [1.0; 4], "the control: the player's own hit stays white");
+        let mut p = play();
+        p.damage_indication(&num(0x300, -40, 0x301), 1);
+        assert_eq!(shown(&mut p, me)[0].color, yellow, "the control: a hit on another, the game's yellow");
+        let colored = crate::s2::Rules { damage_rgb: true, ..crate::s2::Rules::retail() };
+        let s = crate::s2::with_rules(colored, || {
+            let mut p = play();
+            p.damage_indication(&num(0x300, -40, me), 1);
+            shown(&mut p, me)
+        });
+        assert_eq!(s[0].color, yellow, "a patch colours the numbers: Damage Taken not read");
+        crate::settings::testing::reset(false);
+        let mut p = play();
+        p.damage_indication(&num(0x300, -40, me), 1);
+        assert_eq!(shown(&mut p, me)[0].color, yellow, "Default: the game's yellow");
+    }
+
     /// What colours a number (`number_rgb`): a patch's three bytes when it
     /// colours them, whatever else is chosen, and no tag read then (the reference server's
     /// path as it was); else a tag's row's colour from a server that offered
@@ -15588,6 +16382,87 @@ mod commands {
         crate::settings::testing::reset(false);
     }
 
+    /// The Faction Tracker (petition 3216): nothing asked before the offer
+    /// (the control) nor while no faction is picked; the faction window's
+    /// Track names it to the server (0x7E87, once), turns the row on and says
+    /// so; a part typed (`/track faction militia`) becomes the faction's own
+    /// name when the server answers with it; the choice is the character's,
+    /// read back by a new session (a re-login); the window's page sets the
+    /// standing too; `/track off` stops it (an empty name).
+    #[test]
+    fn the_faction_tracker_names_its_faction_and_keeps_it() {
+        struct Rec;
+        impl net::session::Datagrams for Rec {
+            fn send_to(&mut self, _: &[u8], _: [u8; 4], _: u16) {}
+            fn recv_from(&mut self) -> Option<(Vec<u8>, [u8; 4], u16)> {
+                None
+            }
+        }
+        crate::settings::testing::reset(false);
+        // what the game sent, as the session records it (DRDP's window holds
+        // a guaranteed message back once several are unacknowledged)
+        let new_play = || {
+            let mut s = Session::connect_with(Box::new(Rec), ([127, 0, 0, 1], 5000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+            s.self_id = Some(0x100);
+            s.record = Some(Vec::new());
+            let mut p = Play::new(s, Player { server_id: 42, ..Player::default() }, Box::default());
+            p.dump.player.name = "Cucumber".into();
+            p
+        };
+        let mut p = new_play();
+        let ours = |p: &mut Play| -> Vec<Vec<u8>> {
+            let r = p.session.record.replace(Vec::new()).unwrap_or_default();
+            r.into_iter().map(|(_, m)| m).filter(|m| m.len() >= 2 && m[1] == 0x7E && m[0] == 0x87).collect()
+        };
+        let answer = |name: &str| {
+            let mut w = net::stream::Writer::op(net::session::OP_FACTION_TRACK_ANSWER);
+            w.wide(name);
+            w.data
+        };
+        let said = |p: &Play| p.chat.back().map(|(t, _)| t.clone()).unwrap_or_default();
+        p.agree_faction_track();
+        assert!(ours(&mut p).is_empty(), "no offer: nothing asked");
+        assert_eq!(p.options_wnd.faction_note.as_deref(), Some("This server keeps no faction tracker"));
+        p.session.faction_track_offer = true;
+        p.agree_faction_track();
+        assert_eq!(ours(&mut p), vec![answer("")], "offered, off: none named");
+        assert!(!crate::settings::faction_track().0, "off by default");
+        // the window's Track
+        p.follow_faction("The Freeport Militia", true);
+        assert!(crate::settings::faction_track().0, "picking one turns it on");
+        assert_eq!(said(&p), "Tracking faction: The Freeport Militia.");
+        p.agree_faction_track();
+        p.agree_faction_track();
+        assert_eq!(ours(&mut p), vec![answer("The Freeport Militia")], "named once");
+        assert_eq!(p.options_wnd.faction_note.as_deref(), Some("Tracking The Freeport Militia"));
+        p.faction_track_heard(true, "The Freeport Militia".into(), -49);
+        assert_eq!(p.faction_heard.as_ref().map(|h| (h.name.as_str(), h.standing)), Some(("The Freeport Militia", -49)));
+        // a part typed: the server's name for it kept
+        p.chat_line("/track faction citizens of free");
+        p.agree_faction_track();
+        assert_eq!(ours(&mut p), vec![answer("citizens of free")]);
+        p.faction_track_heard(true, "Citizens of Freeport".into(), 120);
+        assert_eq!(p.faction_follow.name(), "Citizens of Freeport");
+        p.agree_faction_track();
+        assert_eq!(ours(&mut p), vec![answer("Citizens of Freeport")], "the whole name told");
+        // a re-login reads it back
+        let mut q = new_play();
+        q.session.faction_track_offer = true;
+        q.agree_faction_track();
+        assert_eq!(ours(&mut q), vec![answer("Citizens of Freeport")], "kept by name for the character");
+        // the window's page
+        q.factions.ready = true;
+        q.factions.list = vec![(vi::ui::wide("Citizens of Freeport"), 300)];
+        q.faction_page_heard();
+        assert_eq!(q.faction_heard.as_ref().map(|h| h.standing), Some(300));
+        // off
+        q.chat_line("/track off");
+        q.agree_faction_track();
+        assert_eq!((said(&q), ours(&mut q)), ("No faction is tracked.".to_string(), vec![answer("")]));
+        q.chat_line("/track what");
+        assert_eq!(said(&q), crate::factiontrack::HELP);
+    }
+
     /// The DPS Meter asks a server that offered a meter (0x7E3A) for it while
     /// the Extended row is on (0x7E3B 1, once) and stops it off (0, the fights
     /// kept forgotten); Extended's Reset and `/dps reset` clear it and tell the
@@ -15682,6 +16557,17 @@ mod commands {
             p.chat_line("/dps damage");
             assert_eq!(said(&p), "The DPS meter is ranked by damage.");
         }
+        assert_eq!(p.options_wnd.meter_merc_note, Some("Mercenary breakdown requires a newer server"));
+        p.session.dps_meter_layout = 4;
+        p.agree_dps_meter();
+        assert_eq!(p.options_wnd.meter_merc_note, None);
+        p.meter.first = 5;
+        p.meter_point(crate::dpsmeter::Hit::HideMercs);
+        assert!(crate::settings::client().dps_hide_mercenary);
+        assert_eq!(p.meter.first, 0);
+        assert!(ours(&mut p).is_empty(), "the filter is local to the client");
+        p.meter_point(crate::dpsmeter::Hit::HideMercs);
+        assert!(!crate::settings::client().dps_hide_mercenary);
         p.chat_line("/dps off");
         assert!(!crate::settings::dps_meter());
         p.meter.take(fight(7, false));
@@ -15980,6 +16866,36 @@ mod commands {
     /// the group is followed and steered to; gone from the scene, lost. The
     /// controls: an NPC, a pet or a merc (its plate not a player's) outside
     /// the group is word 1195.
+    /// A line's speaker (Heirloom 3140): a player's name a click opens a tell
+    /// to, "/tell <name> " in the chat line, its tags left out. The controls:
+    /// the player's own say; an NPC in view of that name (an NPC's say reads as
+    /// a player's), but a player of it there too; the tell out of the world.
+    #[test]
+    fn a_speakers_name_opens_a_tell() {
+        crate::settings::testing::reset(false);
+        let mut p = play();
+        p.player.name = "Dab".into();
+        let put = |p: &mut Play, k: usize, name: &str, p256: u8| {
+            p.entities.slots[k] = Some(net::entity::Entity { id: 0x400 + k as u32, creature: Some(net::entity::Creature { p256, name: name.into(), ..Default::default() }), ..Default::default() });
+        };
+        assert_eq!(p.speaker_of("Ann: hi", [1.0; 4]), Some((0, 3)), "out of view: a player's");
+        assert_eq!(p.speaker_of("Dab: hi", [1.0; 4]), None, "the player's own");
+        put(&mut p, 0, "Valrean", 0);
+        assert_eq!(p.speaker_of("Valrean: welcome, traveler", [1.0; 4]), None, "an NPC in view");
+        put(&mut p, 1, "[GM] Ann", 2);
+        assert_eq!(p.speaker_of("[GM] Ann: hi", [1.0; 4]), Some((5, 3)), "a player in view, tagged");
+        put(&mut p, 2, "Ann", 0);
+        assert_eq!(p.speaker_of("Ann: hi", [1.0; 4]), Some((0, 3)), "a player and an NPC of the name: the player's");
+        p.hud = Some((crate::ui::Vui::new(Default::default(), Default::default(), Vec::new()), crate::ui::UiAssets::default(), crate::hud::Hud::new()));
+        p.mode = 5;
+        p.tell_to("Ann");
+        assert_eq!(p.mode, 5, "out of the world: nothing");
+        p.mode = 0;
+        p.tell_to("[OG] Ann");
+        assert_eq!(p.mode, 2);
+        assert_eq!(String::from_utf16_lossy(&p.edit.text), "/tell Ann ");
+    }
+
     #[test]
     fn follow_takes_any_player_in_view() {
         let mut p = play();
@@ -16079,6 +16995,41 @@ mod commands {
         assert_eq!((p.target, last_line(&p)), (0x300, "(word 838)"));
     }
 
+    #[test]
+    fn target_of_target_follows_the_current_entity_and_health() {
+        use net::entity::{Creature, Entity, TYPE_CREATURE};
+
+        let mut p = play();
+        let world = p.player.world as i8;
+        let actor = |id, name: &str, hp, target| Entity {
+            id, kind: TYPE_CREATURE, world, p19: hp,
+            creature: Some(Creature { name: name.into(), target, ..Default::default() }),
+            ..Default::default()
+        };
+        p.entities.slots[0] = Some(actor(0x100, "Adventurer", 175, 0));
+        p.entities.slots[1] = Some(actor(0x300, "Guard", 128, 0));
+        let mut target = actor(0x200, "Attacker", 255, 0x100);
+        assert_eq!(p.target_of_target(None), None);
+        assert_eq!(p.target_of_target(Some(&target)), Some(("Adventurer", 175)));
+
+        target.creature.as_mut().unwrap().target = 0x300;
+        assert_eq!(p.target_of_target(Some(&target)), Some(("Guard", 128)));
+        p.entities.slots[1].as_mut().unwrap().p19 = 0;
+        assert_eq!(p.target_of_target(Some(&target)), Some(("Guard", 0)));
+        p.entities.slots[1].as_mut().unwrap().world = world.wrapping_add(1);
+        assert_eq!(p.target_of_target(Some(&target)), None);
+        p.entities.slots[1] = None;
+        assert_eq!(p.target_of_target(Some(&target)), None);
+
+        for id in [0, u32::MAX] {
+            target.creature.as_mut().unwrap().target = id;
+            assert_eq!(p.target_of_target(Some(&target)), None);
+        }
+        target.creature.as_mut().unwrap().target = 0x100;
+        target.p18 |= 2;
+        assert_eq!(p.target_of_target(Some(&target)), None);
+    }
+
     /// Focus Target (`focus`, Heirloom petition 3038): Set Focus takes the
     /// target with its con, Target Focus targets it again, the window shows
     /// its name, health and distance; it goes when its creature dies or
@@ -16130,6 +17081,32 @@ mod commands {
         assert!(p.focus.is_some(), "/focus is Set Focus");
         p.chat_line("/focus clear");
         assert!(p.focus.is_none());
+    }
+
+    /// A left click on the focus window targets the focus (Heirloom petition
+    /// 3228): on it, the window's own; off it, the world's; a focus gone,
+    /// the window is not there to click.
+    #[test]
+    fn a_click_on_the_focus_window_targets_the_focus() {
+        let mut p = play();
+        let world = p.player.world as i8;
+        let gnoll = net::entity::Entity { id: 0x500, kind: 130, p19: 200, world, actor_pos: [3.0, 0.0, 4.0], creature: Some(net::entity::Creature { name: "a gnoll".into(), ..Default::default() }), ..Default::default() };
+        p.entities.slots[4] = Some(gnoll);
+        p.target = 0x500;
+        p.focus_key();
+        p.target_id(0x600);
+        let r = crate::focus::rect();
+        let inside = [(r[0] + 10) as f32, (r[1] + 5) as f32];
+        assert!(!p.focus_point([(r[2] + 5) as f32, inside[1]]), "off it: the world's");
+        assert_eq!(p.target, 0x600);
+        assert!(p.focus_point(inside), "on it: its own");
+        assert_eq!(p.target, 0x500, "the focus is the target");
+        assert!(p.focus_point(inside), "again: still its own, nothing resent");
+        p.entities.slots[4] = None;
+        p.drop_lost_focus();
+        p.target_id(0x600);
+        assert!(!p.focus_point(inside), "gone: no window, the world's");
+        assert_eq!(p.target, 0x600);
     }
 
     /// Hide UI (`hideui`): a click on the quick menu's title bar turns to the

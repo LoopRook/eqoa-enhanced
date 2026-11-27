@@ -458,7 +458,8 @@ zero-conflict dry run and final post-commit release/package receipts.
 
 Merge 0d548415 plus follow-up 5dc2d440. Eight hand conflicts (hud, map/mini, options, play,
 settings, update, net session, .gitattributes), resolved by the Opus lead keeping upstream's code:
-upstream's Extended became five groups and the fork's Enhanced page joins the UI group
+upstream's Extended became five groups and the fork's Enhanced page joined the UI group (since sync 2026-11-26,
+when upstream's UI menu filled to 15, it is in the Other group: Options > Extended > Other > Enhanced)
 (`fork_options::pages()` feeds upstream's group lookups); upstream's new Power Bars (others' power,
 on by default, group and pet bars) replace the fork's duplicate request, and the Mana Bars mod
 keeps only the target's bar (plan decision of 2026-11-10); upstream's stacked spell bars and buff

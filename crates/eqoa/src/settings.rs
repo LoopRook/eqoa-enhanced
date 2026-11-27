@@ -1025,6 +1025,8 @@ pub struct ClientOptions {
     /// Frame Rate as chosen; `None` until it is, the platform's
     /// (`set_platform_rate`: 30 on a page's WebGL2, else the display's)
     pub frame_rate: Option<FrameRate>,
+    /// Show FPS in the browser client's status line.
+    pub show_fps: bool,
     /// Camera Distance: the follow orbit's ceiling, and the Follow camera's
     /// (the game options' 3rd Person Camera: Follow, petition 2909),
     /// `CAMERA_MIN` to `CAMERA_MAX`
@@ -1167,6 +1169,8 @@ pub struct ClientOptions {
     /// level after "Target" over its name in the target box; off, or on any
     /// other server, the box the game's. On by default.
     pub target_level: bool,
+    /// Target of Target (Extended > UI > HUD Extras), off by default.
+    pub target_of_target_bar: bool,
     /// Power Bars (Extended > UI > HUD; the server owner's of 2026-11-12, "lets
     /// add power bars to group/raid display"): a thin blue bar of each member's
     /// power under its health in the group's bars (a server's others' power,
@@ -1219,6 +1223,19 @@ pub struct ClientOptions {
     /// DPS Meter Sort: what the lines are ranked and the bars drawn by, one
     /// of the columns shown (damage by default).
     pub dps_sort: crate::dpsmeter::Metric,
+    pub dps_hide_mercenary: bool,
+    /// Mercs as Own Rows (Heirloom petition 3136): each merc a row of its own
+    /// on the DPS meter (a server of layout 5), not a share of its owner's.
+    /// Off by default.
+    pub dps_merc_rows: bool,
+    /// Faction Tracker (`factiontrack`, Heirloom petition 3216): one faction's
+    /// standing on the HUD, the one picked in the faction window or by `/track
+    /// faction` (kept by name a character, `factiontrack::FILE`), where the
+    /// server offers it. Off by default; picking a faction turns it on.
+    pub faction_track: bool,
+    /// Faction Tracker Shows: its standing as a number, a bar, or both (the
+    /// default).
+    pub faction_track_style: crate::factiontrack::Style,
     /// Item Links (`itemlink`; a GM's petition 1463: "This should be
     /// off by default for ps2 players and a toggle option. If toggled off for
     /// players, they should just see a plain text item name if linked"): links
@@ -1243,6 +1260,18 @@ pub struct ClientOptions {
     /// default (`Play::mouseover_target`). A server that turns auto-cast off
     /// (`qol::AUTO_CAST`) turns this off with it.
     pub mouseover_cast: MouseoverCast,
+    /// Inventory Style (Heirloom petition 3118, Mythilles: "The inventory
+    /// system is just awful. A huge list and you cannot compare gear. A bag
+    /// system more like EQ or a typical MMO would be preferred"): the game's
+    /// tabbed list (Retail List, the default) or the pack as a grid of its
+    /// icons (Bags, `bags`), with the same actions.
+    pub inventory_bags: bool,
+    /// Bag Sort: the order the Bags grid lays the pack out in (`bags::Sort`).
+    pub bag_sort: crate::bags::Sort,
+    /// Compare Gear (petition 3118): an equippable item beside what it would
+    /// replace (`compare`): in the Bags grid only (the default), with the
+    /// Retail List too, or never.
+    pub compare_gear: CompareGear,
     /// Weapon Swap Back (a GM, 2026-11-16, work board 1581): a weapon set
     /// used from the HUD asks the server to put back what it took off when
     /// pressed again (0x0022's swap-back byte, `gear::use_message`). Off by
@@ -1270,6 +1299,29 @@ pub struct ClientOptions {
     /// rows with the last lines in it, never sliding away (`chat::WndChat::
     /// always`). Off by default, the game's box.
     pub chat_always: bool,
+    /// Own Name Plate (Heirloom petition 3081: "see my own nameplate as an
+    /// on/off option"): the player's name over its own character, drawn as
+    /// the others' plates are (`Play::plates`). Off by default: the game
+    /// draws none.
+    pub own_plate: bool,
+    /// Coach Talk on Arrival (Heirloom petition 3091): set down by a coach,
+    /// the player talks to the coachman there at once, his menu open
+    /// (`Play::coach_talk_frame`). Off by default; the server's
+    /// `qol::AUTO_CAST` (the client's automation) turns it off.
+    pub coach_talk: bool,
+    /// Strafe Speed (Live petition 5633: "a way to increase strafe speed? It
+    /// is super slow"): Retail, the game's sidestep at the walk's pace unless
+    /// running forward too; Match Forward (true), a sidestep at the pace
+    /// forward would go (`walker::move_stick_matched`). Off by default; the
+    /// server's `qol::AUTO_CAST` turns it off with the automation.
+    pub strafe_match: bool,
+    /// Minimap Colors (Heirloom petition 3092, `minimapcolor`): each role's
+    /// square colour, `numcolor::PALETTE`'s place from 1, 0 the name's
+    /// colour; `minimapcolor::DEFAULTS` until chosen.
+    pub minimap_colors: [crate::numcolor::Choice; crate::minimapcolor::ROLES],
+    /// Spell Merchants Shown: All (false) or My Class (true), the others'
+    /// squares the Merchants' colour.
+    pub minimap_spells_mine: bool,
     /// Interface sizes and chat background opacity, in percent of the original
     /// sizes and of full opacity. Chat height is a count of visible rows.
     pub hud_scale: u8,
@@ -1425,6 +1477,11 @@ pub struct ClientOptions {
     /// map too", `map::markers`): the map's own key (T, Select) turns them,
     /// kept as Map Markers is; on by default.
     pub map_towns: bool,
+    /// Town Map First (Live petition 5650: "pressing M in a city should open
+    /// that city's map"): M inside a town (`map::places::town_at`) opens the
+    /// map close in on the town, the world's view a press of M (✕ on a pad)
+    /// away; on by default. Off, M opens the world's view as it did.
+    pub town_map: bool,
     /// Quest Helper (the user, 2026-11-09; on by default): the quest marks on
     /// the map and the minimap (a "!" at each giver of a quest the player may
     /// take, a "?" where a step is to be done) and the quest tracker on the
@@ -1492,6 +1549,19 @@ pub struct ClientOptions {
     /// game's. The weather itself (its sky, its sound, its lightning) is the
     /// server's as ever.
     pub weather: u8,
+    /// Foliage Density (Heirloom petition 3197, 2026-11-26): 1, Retail, the
+    /// radial flora as the game grows it; 2 or 3, the game's plants and as
+    /// many again a pass more, grown by the same rule off seeds of their own
+    /// (`vi::flora::System::density`), and that many more drawn.
+    pub foliage_density: u8,
+    /// Foliage Reacts (petition 3197): off, the game's still plants; on, the
+    /// plants round a player or a creature lean away from it and ease back
+    /// once it has passed (`flora::React`).
+    pub foliage_reacts: bool,
+    /// Master Volume (Heirloom petition 3261: "the game's sound is loud even
+    /// at the lowest setting"): the whole output, in percent of the game's,
+    /// one of `MASTER_VOLUMES` (`audio::set_master`); 100, the game's.
+    pub master_volume: u8,
     /// Ground Fog: PS2, the effect volumes' fog blended as the GS blends it
     /// into the PS2's 16-bit frame, dithered and cut to five bits a channel
     /// (`render::fog16`: a low, dim band, as the game shows it); Exact, blended
@@ -1758,6 +1828,7 @@ impl Default for ClientOptions {
             brightness: BRIGHTNESS_AS_DRAWN,
             fog: crate::fog::GAME,
             frame_rate: None,
+            show_fps: false,
             camera_distance: crate::camstyle::FOLLOW_MAX_DISTANCE as u8,
             camera_turn: TURN_GAME,
             screen_shake: true,
@@ -1782,6 +1853,7 @@ impl Default for ClientOptions {
             spell_cooldowns: true,
             head_marks: true,
             target_level: true,
+            target_of_target_bar: false,
             power_bars: true,
             health_numbers: false,
             raid_mercs: false,
@@ -1791,14 +1863,26 @@ impl Default for ClientOptions {
             dps_view: crate::dpsmeter::View::Fight,
             dps_columns: crate::dpsmeter::Columns::Dps,
             dps_sort: crate::dpsmeter::Metric::Damage,
+            dps_hide_mercenary: false,
+            dps_merc_rows: false,
+            faction_track: false,
+            faction_track_style: crate::factiontrack::Style::Both,
             item_links: true,
             auto_cast: true,
             auto_target: false,
             mouseover_cast: MouseoverCast::Off,
+            inventory_bags: false,
+            bag_sort: crate::bags::Sort::Pack,
+            compare_gear: CompareGear::Bags,
             weapon_swap_back: false,
             auto_loot: false,
             attack_abilities: false,
             chat_always: false,
+            own_plate: false,
+            coach_talk: false,
+            strafe_match: false,
+            minimap_colors: crate::minimapcolor::DEFAULTS,
+            minimap_spells_mine: false,
             hud_scale: 100,
             nameplate_scale: 100,
             controller_hud_scale: 100,
@@ -1831,6 +1915,7 @@ impl Default for ClientOptions {
             map_pointer: crate::map::Pointer::Facing,
             map_markers: true,
             map_towns: true,
+            town_map: true,
             quest_helper: true,
             quest_markers: true,
             quest_tracker: true,
@@ -1844,6 +1929,9 @@ impl Default for ClientOptions {
             shadows: true,
             environment: SHARE_FULL,
             weather: SHARE_FULL,
+            foliage_density: 1,
+            foliage_reacts: false,
+            master_volume: 100,
             ps2_fog: true,
             ps2_particles: true,
             ambient_occlusion: false,
@@ -1902,6 +1990,9 @@ impl ClientOptions {
         }
         if let Some(r) = self.frame_rate {
             s.push_str(&format!("frame_rate={}\n", r.key()));
+        }
+        if self.show_fps {
+            s.push_str("show_fps=on\n");
         }
         if self.camera_turn != TURN_GAME {
             s.push_str(&format!("camera_turn={}\n", self.camera_turn));
@@ -1979,6 +2070,9 @@ impl ClientOptions {
         if !self.target_level {
             s.push_str("target_level=off\n");
         }
+        if self.target_of_target_bar {
+            s.push_str("target_of_target_bar=on\n");
+        }
         if !self.power_bars {
             s.push_str("power_bars=off\n");
         }
@@ -2015,6 +2109,19 @@ impl ClientOptions {
         if self.dps_sort != crate::dpsmeter::Metric::Damage {
             s.push_str(&format!("dps_meter_sort={}\n", self.dps_sort.key()));
         }
+        if self.dps_merc_rows {
+            s.push_str("dps_merc_rows=on\n");
+        }
+        if self.dps_hide_mercenary {
+            s.push_str("dps_hide_mercenary=on\n");
+        }
+        // the Faction Tracker only when on, its style only when not Both
+        if self.faction_track {
+            s.push_str("faction_track=on\n");
+        }
+        if self.faction_track_style != crate::factiontrack::Style::Both {
+            s.push_str(&format!("faction_track_shows={}\n", self.faction_track_style.key()));
+        }
         // Item Links only when off
         // Auto-Cast only when off, Auto Target only when on
         if !self.auto_cast {
@@ -2024,6 +2131,18 @@ impl ClientOptions {
             MouseoverCast::Off => {}
             MouseoverCast::MouseoverFirst => s.push_str("mouseover_cast=mouseover\n"),
             MouseoverCast::TargetFirst => s.push_str("mouseover_cast=target\n"),
+        }
+        // Inventory Style, Bag Sort and Compare Gear only when not the default
+        if self.inventory_bags {
+            s.push_str("inventory_style=bags\n");
+        }
+        if self.bag_sort != crate::bags::Sort::Pack {
+            s.push_str(&format!("bag_sort={}\n", self.bag_sort.key()));
+        }
+        match self.compare_gear {
+            CompareGear::Bags => {}
+            CompareGear::Always => s.push_str("compare_gear=always\n"),
+            CompareGear::Off => s.push_str("compare_gear=off\n"),
         }
         if self.auto_target {
             s.push_str("auto_target=on\n");
@@ -2047,6 +2166,26 @@ impl ClientOptions {
         // Chat Always Shown and Stacked Spell Bars only when on
         if self.chat_always {
             s.push_str("chat_always=on\n");
+        }
+        // Own Name Plate, Coach Talk on Arrival, Strafe Speed's Match Forward
+        // and Spell Merchants Shown's My Class only when on; a Minimap Colors
+        // row only when not as it came
+        if self.own_plate {
+            s.push_str("own_name_plate=on\n");
+        }
+        if self.coach_talk {
+            s.push_str("coach_talk=on\n");
+        }
+        if self.strafe_match {
+            s.push_str("strafe_speed=forward\n");
+        }
+        if self.minimap_spells_mine {
+            s.push_str("minimap_spells=mine\n");
+        }
+        for ((key, &c), d) in crate::minimapcolor::KEYS.iter().zip(&self.minimap_colors).zip(crate::minimapcolor::DEFAULTS) {
+            if c != d {
+                s.push_str(&format!("minimap_color.{key}={}\n", crate::numcolor::paint(c).map_or("default", |p| p.key)));
+            }
         }
         if self.chat_fade_seconds != 0 {
             s.push_str(&format!("chat_fade_seconds={}\n", self.chat_fade_seconds));
@@ -2116,6 +2255,7 @@ impl ClientOptions {
             (self.minimap_scroll, "minimap_scroll"),
             (self.map_markers, "map_markers"),
             (self.map_towns, "map_towns"),
+            (self.town_map, "town_map"),
             (self.quest_helper, "quest_helper"),
             (self.quest_markers, "quest_markers"),
             (self.quest_tracker, "quest_tracker"),
@@ -2164,6 +2304,17 @@ impl ClientOptions {
         }
         if let Some(v) = share_text(self.environment) {
             s.push_str(&format!("environment={v}\n"));
+        }
+        // Foliage Density and Foliage Reacts only when not the game's
+        if self.foliage_density > 1 {
+            s.push_str(&format!("foliage_density={}\n", self.foliage_density.min(vi::flora::DENSITY_MOST)));
+        }
+        if self.foliage_reacts {
+            s.push_str("foliage_reacts=on\n");
+        }
+        // Master Volume only when turned down
+        if self.master_volume < 100 {
+            s.push_str(&format!("master_volume={}\n", self.master_volume));
         }
         if let Some(v) = share_text(self.weather) {
             s.push_str(&format!("weather={v}\n"));
@@ -2289,6 +2440,8 @@ impl ClientOptions {
                     }
                 }
                 ("frame_rate", v) => c.frame_rate = FrameRate::ALL.into_iter().find(|r| r.key() == v).or(c.frame_rate),
+                ("show_fps", "on") => c.show_fps = true,
+                ("show_fps", "off") => c.show_fps = false,
                 ("camera_distance", v) => {
                     if let Some(d) = v.parse::<u8>().ok().filter(|d| (CAMERA_MIN..=CAMERA_MAX).contains(d)) {
                         c.camera_distance = d;
@@ -2345,6 +2498,8 @@ impl ClientOptions {
                 ("head_marks", "off") => c.head_marks = false,
                 ("target_level", "on") => c.target_level = true,
                 ("target_level", "off") => c.target_level = false,
+                ("target_of_target_bar", "on") => c.target_of_target_bar = true,
+                ("target_of_target_bar", "off") => c.target_of_target_bar = false,
                 ("power_bars", "on") => c.power_bars = true,
                 ("power_bars", "off") => c.power_bars = false,
                 ("health_numbers", "on") => c.health_numbers = true,
@@ -2363,6 +2518,17 @@ impl ClientOptions {
                 ("dps_meter_sort", "dps") => c.dps_sort = crate::dpsmeter::Metric::Damage,
                 ("dps_meter_sort", "hps") => c.dps_sort = crate::dpsmeter::Metric::Healing,
                 ("dps_meter_sort", "power") => c.dps_sort = crate::dpsmeter::Metric::Power,
+                ("dps_hide_mercenary", "on") => c.dps_hide_mercenary = true,
+                ("dps_hide_mercenary", "off") => c.dps_hide_mercenary = false,
+                ("dps_merc_rows", "on") => c.dps_merc_rows = true,
+                ("dps_merc_rows", "off") => c.dps_merc_rows = false,
+                ("faction_track", "on") => c.faction_track = true,
+                ("faction_track", "off") => c.faction_track = false,
+                ("faction_track_shows", v) => {
+                    if let Some(st) = crate::factiontrack::Style::from_key(v) {
+                        c.faction_track_style = st;
+                    }
+                }
                 ("item_links", "on") => c.item_links = true,
                 ("item_links", "off") => c.item_links = false,
                 ("auto_cast", "on") => c.auto_cast = true,
@@ -2370,6 +2536,12 @@ impl ClientOptions {
                 ("mouseover_cast", "off") => c.mouseover_cast = MouseoverCast::Off,
                 ("mouseover_cast", "mouseover") => c.mouseover_cast = MouseoverCast::MouseoverFirst,
                 ("mouseover_cast", "target") => c.mouseover_cast = MouseoverCast::TargetFirst,
+                ("inventory_style", "bags") => c.inventory_bags = true,
+                ("inventory_style", "list") => c.inventory_bags = false,
+                ("bag_sort", v) if crate::bags::Sort::from_key(v).is_some() => c.bag_sort = crate::bags::Sort::from_key(v).unwrap_or_default(),
+                ("compare_gear", "bags") => c.compare_gear = CompareGear::Bags,
+                ("compare_gear", "always") => c.compare_gear = CompareGear::Always,
+                ("compare_gear", "off") => c.compare_gear = CompareGear::Off,
                 ("auto_target", "on") => c.auto_target = true,
                 ("auto_target", "off") => c.auto_target = false,
                 ("weapon_swap_back", "on") => c.weapon_swap_back = true,
@@ -2379,6 +2551,16 @@ impl ClientOptions {
                 ("attack_abilities", "on") => c.attack_abilities = true,
                 ("attack_abilities", "off") => c.attack_abilities = false,
                 ("chat_always", "on") => c.chat_always = true,
+                ("own_name_plate", v) => c.own_plate = v == "on",
+                ("coach_talk", v) => c.coach_talk = v == "on",
+                ("strafe_speed", v) => c.strafe_match = v == "forward",
+                ("minimap_spells", v) => c.minimap_spells_mine = v == "mine",
+                (k, v) if k.starts_with("minimap_color.") => {
+                    let row = crate::minimapcolor::KEYS.iter().position(|&r| r == &k["minimap_color.".len()..]);
+                    if let (Some(row), Some(choice)) = (row, crate::numcolor::from_key(v)) {
+                        c.minimap_colors[row] = choice;
+                    }
+                }
                 ("chat_fade_seconds", v) => {
                     if let Ok(n) = v.parse::<u8>() && n <= 120 { c.chat_fade_seconds = n; }
                 }
@@ -2465,6 +2647,8 @@ impl ClientOptions {
                 ("map_markers", "on") => c.map_markers = true,
                 ("map_markers", "off") => c.map_markers = false,
                 ("map_towns", "on") => c.map_towns = true,
+                ("town_map", "on") => c.town_map = true,
+                ("town_map", "off") => c.town_map = false,
                 ("map_towns", "off") => c.map_towns = false,
                 ("quest_helper", "on") => c.quest_helper = true,
                 ("quest_helper", "off") => c.quest_helper = false,
@@ -2483,6 +2667,18 @@ impl ClientOptions {
                         c.flora = v;
                     }
                 }
+                ("foliage_density", v) => {
+                    if let Ok(v @ 1..=vi::flora::DENSITY_MOST) = v.parse::<u8>() {
+                        c.foliage_density = v;
+                    }
+                }
+                ("foliage_reacts", "on") => c.foliage_reacts = true,
+                ("master_volume", v) => {
+                    if let Ok(v @ 0..=100) = v.parse::<u8>() {
+                        c.master_volume = v;
+                    }
+                }
+                ("foliage_reacts", "off") => c.foliage_reacts = false,
                 ("shadows", "on") => c.shadows = true,
                 ("shadows", "off") => c.shadows = false,
                 ("environment", v) => {
@@ -2854,7 +3050,7 @@ pub mod qol {
     /// The Quest Helper: the guide, the tracker, the map's and the minimap's
     /// quest marks and the marks over quest NPCs' heads.
     pub const QUEST_HELPER: u32 = 1 << 1;
-    /// A target's level in the target box (Target Level).
+    /// Extra target information (Target Level and Target of Target).
     pub const TARGET_LEVEL: u32 = 1 << 2;
     /// The DPS meter.
     pub const DPS_METER: u32 = 1 << 3;
@@ -2871,7 +3067,9 @@ pub mod qol {
     /// The pet's effects under its bar (Pet Effects).
     pub const PET_EFFECTS: u32 = 1 << 8;
     /// Auto-cast on the quick bars and Auto Target (and Mouseover Casting,
-    /// Auto Loot and Attack With Abilities, the client's other automation).
+    /// Auto Loot and Attack With Abilities, the client's other automation;
+    /// Coach Talk on Arrival, and Strafe Speed's Match Forward, a change to
+    /// the walk the game's own UI keeps out: Live petition 5633).
     pub const AUTO_CAST: u32 = 1 << 9;
     /// Item links in chat (Item Links) OFF BY DEFAULT, not locked: read from
     /// `item_links_here`, the player's to turn there (plain names until then).
@@ -2921,13 +3119,14 @@ pub mod qol {
     pub fn of_item(item: i32) -> Option<u32> {
         Some(match item {
             44 | 45 | 85 => QUEST_HELPER,
-            70..=72 | crate::options::DPS_COLUMNS | crate::options::DPS_SORT => DPS_METER,
-            64..=69 | 80 | 81 => NUMBER_COLORS,
+            crate::options::TARGET_OF_TARGET => TARGET_LEVEL,
+            70..=72 | crate::options::DPS_COLUMNS | crate::options::DPS_SORT | crate::options::DPS_HIDE_MERCS | crate::options::DPS_MERC_ROWS => DPS_METER,
+            64..=69 | 80 | 81 | crate::numcolor::TAKEN_ITEM => NUMBER_COLORS,
             86 | crate::options::HEALTH_NUMBERS => POWER_BARS,
             83 | crate::options::BUFF_TIMERS => BUFF_WINDOW,
             crate::options::STAT_WINDOW => STAT_CAPS,
             58 | crate::options::GROUP_EFFECTS | crate::options::NPC_DEBUFFS => PET_EFFECTS,
-            78 | 79 | crate::options::MOUSEOVER_CAST | crate::options::AUTO_LOOT | crate::options::ATTACK_ABILITIES => AUTO_CAST,
+            78 | 79 | crate::options::MOUSEOVER_CAST | crate::options::AUTO_LOOT | crate::options::ATTACK_ABILITIES | crate::options::COACH_TALK | crate::options::STRAFE_SPEED => AUTO_CAST,
             22 | 90 | crate::options::SPELL_BAR_LAYOUT | crate::options::UTILITY_LAYOUT | crate::options::SPELL_BAR_SIZE | crate::options::ITEM_ICONS | crate::options::SPELL_COOLDOWNS => SPELL_BARS,
             _ => return None,
         })
@@ -2948,6 +3147,10 @@ pub mod qol {
         if off(LOCKED) && ((off(MAP) && matches!(item, 41 | 42)) || (off(ITEM_LINKS) && item == 73)) {
             return true;
         }
+        // the Bags grid and Compare Gear: the game's list on an [OG] account
+        if off(LOCKED) && matches!(item, crate::options::INVENTORY_STYLE | crate::options::BAG_SORT | crate::options::COMPARE_GEAR) {
+            return true;
+        }
         of_item(item).is_some_and(off)
     }
 
@@ -2961,12 +3164,15 @@ pub mod qol {
         }
         if off(TARGET_LEVEL) {
             c.target_level = false;
+            c.target_of_target_bar = false;
         }
         if off(STAT_CAPS) {
             c.stat_window = false;
         }
         if off(DPS_METER) {
             c.dps_meter = false;
+            c.dps_hide_mercenary = false;
+            c.dps_merc_rows = false;
         }
         if off(NUMBER_COLORS) {
             c.number_colors = [0; crate::numcolor::ROWS];
@@ -2982,6 +3188,7 @@ pub mod qol {
         }
         if off(AUTO_CAST) {
             (c.auto_cast, c.auto_target, c.mouseover_cast, c.auto_loot, c.attack_abilities) = (false, false, super::MouseoverCast::Off, false, false);
+            (c.coach_talk, c.strafe_match) = (false, false);
         }
         if off(ITEM_LINKS) {
             c.item_links = c.item_links_here && !off(LOCKED);
@@ -3007,12 +3214,15 @@ pub mod qol {
         }
         if off(TARGET_LEVEL) {
             v.target_level = kept.target_level;
+            v.target_of_target_bar = kept.target_of_target_bar;
         }
         if off(STAT_CAPS) {
             v.stat_window = kept.stat_window;
         }
         if off(DPS_METER) {
             v.dps_meter = kept.dps_meter;
+            v.dps_hide_mercenary = kept.dps_hide_mercenary;
+            v.dps_merc_rows = kept.dps_merc_rows;
         }
         if off(NUMBER_COLORS) {
             v.number_colors = kept.number_colors;
@@ -3028,6 +3238,7 @@ pub mod qol {
         }
         if off(AUTO_CAST) {
             (v.auto_cast, v.auto_target, v.mouseover_cast, v.auto_loot, v.attack_abilities) = (kept.auto_cast, kept.auto_target, kept.mouseover_cast, kept.auto_loot, kept.attack_abilities);
+            (v.coach_talk, v.strafe_match) = (kept.coach_talk, kept.strafe_match);
         }
         if off(ITEM_LINKS) {
             v.item_links_here = if off(LOCKED) { kept.item_links_here } else { v.item_links };
@@ -3134,6 +3345,25 @@ pub fn capture() -> bool {
 }
 
 /// Sound in Background now: one setting for every window of the client.
+/// Master Volume's steps, in percent: finer near silence, where a step is
+/// heard most.
+pub const MASTER_VOLUMES: [u8; 16] = [0, 1, 2, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100];
+
+/// Master Volume a step down (`d` < 0) or up from `v`, stopping at the ends
+/// (a value kept off the steps goes to the next one its way).
+pub fn master_volume_step(v: u8, d: i32) -> u8 {
+    if d < 0 {
+        MASTER_VOLUMES.iter().rev().copied().find(|&s| s < v).unwrap_or(v)
+    } else {
+        MASTER_VOLUMES.iter().copied().find(|&s| s > v).unwrap_or(v)
+    }
+}
+
+/// Master Volume now, as a gain (1 the game's).
+pub fn master_gain() -> f32 {
+    client().master_volume.min(100) as f32 / 100.0
+}
+
 pub fn background_sound() -> bool {
     client().background_sound
 }
@@ -3239,6 +3469,64 @@ pub fn stat_window() -> bool {
     client().stat_window
 }
 
+/// Compare Gear (petition 3118, `compare`): where the comparison is drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CompareGear {
+    /// in the Bags grid only
+    #[default]
+    Bags,
+    /// in the Bags grid and the Retail List
+    Always,
+    Off,
+}
+
+impl CompareGear {
+    pub fn name(self) -> &'static str {
+        match self {
+            CompareGear::Bags => "Bags Only",
+            CompareGear::Always => "Always",
+            CompareGear::Off => "Off",
+        }
+    }
+
+    /// The next (`d` > 0) or the one before.
+    pub fn step(self, d: i32) -> Self {
+        let all = [CompareGear::Bags, CompareGear::Always, CompareGear::Off];
+        let i = all.iter().position(|&m| m == self).unwrap_or(0) as i32;
+        all[(i + d.signum()).rem_euclid(3) as usize]
+    }
+}
+
+/// Inventory Style at Bags: the pack as a grid (`bags`). An [OG] account's
+/// (`qol::LOCKED`, the owner's "opt-out of the QoL changes") is the game's
+/// list whatever is kept.
+pub fn inventory_bags() -> bool {
+    client().inventory_bags && !qol::off(qol::LOCKED)
+}
+
+/// Bag Sort now.
+pub fn bag_sort() -> crate::bags::Sort {
+    client().bag_sort
+}
+
+/// Bag Sort turned and kept (the Bags grid's own Sort button), as Save
+/// Changes keeps it.
+pub fn set_bag_sort(sort: crate::bags::Sort) -> Result<(), String> {
+    set_client(ClientOptions { bag_sort: sort, ..client() });
+    save_client()
+}
+
+/// Whether the comparison is drawn in the view shown (`bags` the grid's):
+/// never on an [OG] account's.
+pub fn compare_gear(bags: bool) -> bool {
+    !qol::off(qol::LOCKED)
+        && match client().compare_gear {
+            CompareGear::Bags => bags,
+            CompareGear::Always => true,
+            CompareGear::Off => false,
+        }
+}
+
 /// Mouseover Casting's order (petition 2960, `Play::mouseover_target`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MouseoverCast {
@@ -3310,6 +3598,10 @@ pub fn target_level() -> bool {
     client().target_level
 }
 
+pub fn target_of_target_bar() -> bool {
+    client().target_of_target_bar
+}
+
 /// Power Bars: others' power under their health in the group's bars, the
 /// pet's bar and the raid list (`hud`, `raidlist`).
 pub fn power_bars() -> bool {
@@ -3333,6 +3625,30 @@ pub fn loading_tips() -> bool {
     client().loading_tips
 }
 
+/// Own Name Plate now (petition 3081).
+pub fn own_plate() -> bool {
+    client().own_plate
+}
+
+/// Coach Talk on Arrival now (petition 3091): off where the server turns the
+/// automation off (`qol::AUTO_CAST`).
+pub fn coach_talk() -> bool {
+    client().coach_talk
+}
+
+/// Strafe Speed's Match Forward now (petition 5633): off where the server
+/// turns the automation off (`qol::AUTO_CAST`).
+pub fn strafe_match() -> bool {
+    client().strafe_match
+}
+
+/// Minimap Colors now (petition 3092): each role's choice, and Spell
+/// Merchants Shown's My Class.
+pub fn minimap_colors() -> ([crate::numcolor::Choice; crate::minimapcolor::ROLES], bool) {
+    let c = client();
+    (c.minimap_colors, c.minimap_spells_mine)
+}
+
 /// Number Colors now: each row's choice (`numcolor`).
 pub fn number_colors() -> [crate::numcolor::Choice; crate::numcolor::ROWS] {
     client().number_colors
@@ -3341,6 +3657,12 @@ pub fn number_colors() -> [crate::numcolor::Choice; crate::numcolor::ROWS] {
 /// The DPS Meter (`dpsmeter`).
 pub fn dps_meter() -> bool {
     client().dps_meter
+}
+
+/// The Faction Tracker (`factiontrack`): on, and how it shows the standing.
+pub fn faction_track() -> (bool, crate::factiontrack::Style) {
+    let c = client();
+    (c.faction_track, c.faction_track_style)
 }
 
 /// Item Links (`itemlink`).
@@ -3447,6 +3769,18 @@ pub fn dps_columns() -> crate::dpsmeter::Columns {
 pub fn dps_sort() -> crate::dpsmeter::Metric {
     let c = client();
     c.dps_sort.fit(c.dps_columns)
+}
+
+pub fn toggle_dps_hide_mercenary() {
+    let mut c = client();
+    c.dps_hide_mercenary = !c.dps_hide_mercenary;
+    set_client(c);
+}
+
+pub fn toggle_dps_merc_rows() {
+    let mut c = client();
+    c.dps_merc_rows = !c.dps_merc_rows;
+    set_client(c);
 }
 
 /// What the windows share as another window saved it (Capture Controller,
@@ -3556,6 +3890,11 @@ pub fn set_map_markers(on: bool) -> Result<(), String> {
 /// Whether the map names the towns.
 pub fn map_towns() -> bool {
     client().map_towns
+}
+
+/// Town Map First now (`ClientOptions::town_map`).
+pub fn town_map() -> bool {
+    client().town_map
 }
 
 /// The map's town names turned (its own key), and kept at once.
@@ -4248,6 +4587,7 @@ mod tests {
             ClientOptions::default(),
             ClientOptions { lod: false, brightness: 0, frame_rate: Some(FrameRate::Thirty), camera_distance: 8, ..Default::default() },
             ClientOptions { lod: true, brightness: 10, frame_rate: Some(FrameRate::Display), camera_distance: 50, ..Default::default() },
+            ClientOptions { show_fps: true, ..Default::default() },
             ClientOptions { camera_turn: TURN_MIN, ..Default::default() },
             ClientOptions { camera_turn: TURN_MAX, ..Default::default() },
             ClientOptions { controller: std::array::from_fn(|k| Focus::ALL[k % Focus::ALL.len()]), ..Default::default() },
@@ -4693,6 +5033,62 @@ mod tests {
         }
     }
 
+    /// The Faction Tracker: off and Both by default and then not written; kept
+    /// otherwise and read back; a style not known is the default.
+    #[test]
+    fn faction_tracker_kept_only_off_the_default() {
+        use crate::factiontrack::Style;
+        let d = ClientOptions::default();
+        assert_eq!((d.faction_track, d.faction_track_style), (false, Style::Both));
+        assert!(!d.to_text().contains("faction_track"), "nothing kept by default");
+        let c = ClientOptions { faction_track: true, faction_track_style: Style::Bar, ..Default::default() };
+        let t = c.to_text();
+        assert!(t.contains("faction_track=on\n") && t.contains("faction_track_shows=bar\n"), "{t}");
+        assert!(ClientOptions::from_text(&t) == c, "read back");
+        let c = ClientOptions::from_text("faction_track_shows=number");
+        assert_eq!((c.faction_track, c.faction_track_style), (false, Style::Number));
+        assert_eq!(ClientOptions::from_text("faction_track_shows=x").faction_track_style, Style::Both, "unknown: the default");
+    }
+
+    /// Master Volume (petition 3261): 100, the game's, by default and then not
+    /// written (a client.opt of before reads as the game's); turned down it is
+    /// kept and read back; a value past 100 or not a number is the game's.
+    #[test]
+    fn master_volume_kept_only_turned_down() {
+        let d = ClientOptions::default();
+        assert_eq!(d.master_volume, 100);
+        assert!(!d.to_text().contains("master_volume"), "nothing kept by default");
+        let c = ClientOptions { master_volume: 15, ..Default::default() };
+        let t = c.to_text();
+        assert!(t.contains("master_volume=15\n"), "{t}");
+        assert_eq!(ClientOptions::from_text(&t).master_volume, 15);
+        assert_eq!(ClientOptions::from_text("master_volume=0").master_volume, 0, "silence kept");
+        for bad in ["master_volume=101", "master_volume=x", "master_volume=-5"] {
+            assert_eq!(ClientOptions::from_text(bad).master_volume, 100, "{bad}: the game's");
+        }
+        assert_eq!(ClientOptions::from_text("foliage_reacts=on").master_volume, 100, "an older file: the game's");
+    }
+
+    /// Foliage Density (Retail, 2x, 3x) and Foliage Reacts (off): the game's
+    /// by default and then not written; kept otherwise and read back; a
+    /// density outside 1 to 3 is the default.
+    #[test]
+    fn foliage_kept_only_off_the_games() {
+        let d = ClientOptions::default();
+        assert_eq!((d.foliage_density, d.foliage_reacts), (1, false), "the game's");
+        assert!(!d.to_text().contains("foliage"), "nothing kept at the game's");
+        let c = ClientOptions { foliage_density: 3, foliage_reacts: true, ..Default::default() };
+        let t = c.to_text();
+        assert!(t.contains("foliage_density=3\n") && t.contains("foliage_reacts=on\n"), "{t}");
+        assert!(ClientOptions::from_text(&t) == c, "read back");
+        let c = ClientOptions::from_text("foliage_density=2");
+        assert_eq!((c.foliage_density, c.foliage_reacts, c.flora), (2, false, 100), "Density alone");
+        for bad in ["foliage_density=0", "foliage_density=4", "foliage_density=x", "foliage_reacts=yes"] {
+            let c = ClientOptions::from_text(bad);
+            assert_eq!((c.foliage_density, c.foliage_reacts), (1, false), "{bad}: the default");
+        }
+    }
+
     /// Render Scale, x1 by default, kept only above 1 and only as one of its
     /// steps; HUD, Nearest by default (since 2026-10-28; Sharp the day
     /// before), kept only when Sharp, and a file from the builds that wrote
@@ -4881,7 +5277,10 @@ mod tests {
     }
 
     /// The options kept by a build with the Stats Box, others' mana bars
-    /// and Target of Target (all gone) still load: their lines are left out
+    /// and the old Target of Target (all gone; Target of Target back on
+    /// 2026-11-26, the owner's call, as an opt-in under its own line,
+    /// `target_of_target_bar`, so an old `target_of_target=on` does not turn
+    /// it on) still load: their lines are left out
     /// and written back no more; the map's and the quests' beside them (gone
     /// on 2026-10-27, back on 2026-11-09) are read again. The control: the
     /// lines beside them are read.
@@ -5009,6 +5408,38 @@ mod tests {
         assert!(ClientOptions::from_text("item_icons=banner").item_icons, "the default");
     }
 
+    /// Inventory Style, Bag Sort and Compare Gear (petition 3118): the
+    /// game's list, Pack Order and Bags Only by default and not written;
+    /// each other value written and read back; an unknown value the default.
+    /// Compare Gear's place by the view; an [OG] account's (`qol::LOCKED`)
+    /// the game's list with no comparison, whatever is kept.
+    #[test]
+    fn the_inventory_rows_round_trip() {
+        let d = ClientOptions::default();
+        assert!(!d.inventory_bags && d.bag_sort == crate::bags::Sort::Pack && d.compare_gear == CompareGear::Bags);
+        let text = d.to_text();
+        assert!(!text.contains("inventory_style") && !text.contains("bag_sort") && !text.contains("compare_gear"));
+        for sort in crate::bags::Sort::ALL {
+            for compare in [CompareGear::Bags, CompareGear::Always, CompareGear::Off] {
+                let c = ClientOptions { inventory_bags: true, bag_sort: sort, compare_gear: compare, ..d };
+                let back = ClientOptions::from_text(&c.to_text());
+                assert_eq!((back.inventory_bags, back.bag_sort, back.compare_gear), (true, sort, compare));
+            }
+        }
+        let odd = ClientOptions::from_text("inventory_style=heap\nbag_sort=size\ncompare_gear=maybe\n");
+        assert!(!odd.inventory_bags && odd.bag_sort == crate::bags::Sort::Pack && odd.compare_gear == CompareGear::Bags);
+        assert_eq!(CompareGear::Off.step(1), CompareGear::Bags);
+        assert_eq!(CompareGear::Bags.step(-1), CompareGear::Off);
+        testing::reset(false);
+        set_client(ClientOptions { inventory_bags: true, ..ClientOptions::default() });
+        assert!(inventory_bags());
+        assert!(compare_gear(true) && !compare_gear(false), "Bags Only");
+        qol::set_off(qol::LOCKED);
+        assert!(!inventory_bags() && !compare_gear(true), "an [OG] account's");
+        assert!(qol::item_off(crate::options::INVENTORY_STYLE, -1) && qol::item_off(crate::options::COMPARE_GEAR, -1));
+        testing::reset(false);
+    }
+
     /// Stat Window (petition 2925): off by default and not written; on
     /// written and read back; an unknown value the default.
     #[test]
@@ -5085,6 +5516,26 @@ mod tests {
         assert!(ClientOptions::from_text("power_bars=on").power_bars);
         assert!(ClientOptions::from_text("power_bars=maybe").power_bars, "the default");
         assert!(ClientOptions::from_text("mana_bars=off").power_bars, "the control: the old Mana Bars' key is not this");
+    }
+
+    #[test]
+    fn target_of_target_bar_requires_an_explicit_opt_in() {
+        let default = ClientOptions::default();
+        assert!(!default.target_of_target_bar);
+        assert!(!default.to_text().contains("target_of_target_bar"));
+        let enabled = ClientOptions { target_of_target_bar: true, ..default };
+        let saved = enabled.to_text();
+        assert!(saved.contains("target_of_target_bar=on\n"));
+        assert_eq!(ClientOptions::from_text(&saved), enabled);
+        assert!(!ClientOptions::from_text("target_of_target=on").target_of_target_bar);
+
+        testing::reset(false);
+        set_client(enabled);
+        qol::set_off(qol::TARGET_LEVEL);
+        assert!(!target_of_target_bar());
+        set_client(ClientOptions { flora: 30, ..client() });
+        qol::set_off(0);
+        assert!(target_of_target_bar());
     }
 
     #[test]
@@ -5340,6 +5791,34 @@ mod tests {
         assert!(ClientOptions::from_text("item_links=maybe").item_links, "the default");
     }
 
+    /// Own Name Plate, Coach Talk on Arrival, Strafe Speed and Minimap Colors
+    /// (petitions 3081, 3091, 5633, 3092): off, Retail and the roles' colours
+    /// by default, nothing written as they came; each kept by its key and read
+    /// back; a key or colour not understood leaves it as it came.
+    #[test]
+    fn the_petition_rows_are_kept_only_when_chosen() {
+        let d = ClientOptions::default();
+        assert!(!d.own_plate && !d.coach_talk && !d.strafe_match && !d.minimap_spells_mine);
+        assert_eq!(d.minimap_colors, crate::minimapcolor::DEFAULTS);
+        let t = d.to_text();
+        assert!(!["own_name_plate", "coach_talk", "strafe_speed", "minimap_"].iter().any(|k| t.contains(k)), "{t}");
+        let mut c = d.clone();
+        (c.own_plate, c.coach_talk, c.strafe_match, c.minimap_spells_mine) = (true, true, true, true);
+        c.minimap_colors[1] = crate::numcolor::from_key("red").unwrap();
+        c.minimap_colors[6] = 0;
+        let t = c.to_text();
+        for line in ["own_name_plate=on\n", "coach_talk=on\n", "strafe_speed=forward\n", "minimap_spells=mine\n", "minimap_color.smiths=red\n", "minimap_color.quest_givers=default\n"] {
+            assert!(t.contains(line), "{line:?} in {t}");
+        }
+        assert_eq!(t.matches("minimap_color.").count(), 2, "{t}");
+        let back = ClientOptions::from_text(&t);
+        assert!(back.own_plate && back.coach_talk && back.strafe_match && back.minimap_spells_mine);
+        assert_eq!(back.minimap_colors, c.minimap_colors);
+        let odd = ClientOptions::from_text("minimap_color.smiths=mauve\nminimap_color.elbows=red\nstrafe_speed=warp");
+        assert_eq!(odd.minimap_colors, crate::minimapcolor::DEFAULTS);
+        assert!(!odd.strafe_match);
+    }
+
     /// Number Colors: every row Default by default and written not at all; a
     /// chosen row is one line by its row's and its colour's keys, and reads
     /// back to itself, the others Default; a row or colour not understood is
@@ -5347,7 +5826,7 @@ mod tests {
     #[test]
     fn number_colors_are_kept_only_when_chosen() {
         let d = ClientOptions::default();
-        assert_eq!(d.number_colors, [0, 0, 0, 0, 0, 0, 8, 6], "Default by default, the merc's Light Blue and Purple");
+        assert_eq!(d.number_colors, [0, 0, 0, 0, 0, 0, 8, 6, 0], "Default by default, the merc's Light Blue and Purple");
         assert!(!d.to_text().contains("number_color"), "nothing written as they came");
         let mut c = ClientOptions::default();
         c.number_colors[1] = crate::numcolor::from_key("red").unwrap();
@@ -5359,7 +5838,9 @@ mod tests {
         assert_eq!(ClientOptions::from_text(&text), c, "and nothing else changed");
         let odd = ClientOptions::from_text("number_color.procs=mauve\nnumber_color.elbows=red\nnumber_color.heals=default");
         assert_eq!(odd.number_colors, crate::numcolor::DEFAULTS, "not understood: as they came");
-        assert_eq!(ClientOptions::from_text("number_color.pet_damage=orange").number_colors, [0, 0, 0, 3, 0, 0, 8, 6]);
+        assert_eq!(ClientOptions::from_text("number_color.pet_damage=orange").number_colors, [0, 0, 0, 3, 0, 0, 8, 6, 0]);
+        // Damage Taken (petition 3081): kept by its key
+        assert_eq!(ClientOptions::from_text("number_color.taken=pink").number_colors[crate::numcolor::TAKEN], crate::numcolor::from_key("pink").unwrap());
         // a merc row chosen Default is kept as `default`, another colour as its key
         let mut m = ClientOptions::default();
         m.number_colors[6] = 0;
@@ -5386,16 +5867,17 @@ mod tests {
     }
 
     #[test]
-    fn the_dps_meter_is_kept_only_when_on_and_overall() {
+    fn the_dps_meter_preferences_round_trip() {
         use crate::dpsmeter::View;
         let d = ClientOptions::default();
-        assert!(!d.dps_meter && d.dps_view == View::Fight, "off by default, on the fight");
+        assert!(!d.dps_meter && !d.dps_hide_mercenary && d.dps_view == View::Fight);
         assert!(!d.to_text().contains("dps_meter"), "the defaults write nothing");
-        let c = ClientOptions { dps_meter: true, dps_view: View::Overall, ..Default::default() };
+        let c = ClientOptions { dps_meter: true, dps_view: View::Overall, dps_hide_mercenary: true, dps_merc_rows: true, ..Default::default() };
         let t = c.to_text();
         assert!(t.contains("dps_meter=on\n") && t.contains("dps_meter_shows=overall\n"), "{t}");
         let back = ClientOptions::from_text(&t);
-        assert!(back.dps_meter && back.dps_view == View::Overall, "round trip");
+        assert!(back.dps_meter && back.dps_view == View::Overall && back.dps_hide_mercenary && back.dps_merc_rows, "round trip");
+        assert!(!ClientOptions::from_text("dps_hide_mercenary=off").dps_hide_mercenary);
         assert!(!ClientOptions::from_text("dps_meter=off").dps_meter);
         assert_eq!(ClientOptions::from_text("dps_meter_shows=fight").dps_view, View::Fight);
         let odd = ClientOptions::from_text("dps_meter=maybe\ndps_meter_shows=sideways");

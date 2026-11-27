@@ -407,6 +407,16 @@ pub const OP_NOCLIP: u16 = 0x7E7A;
 pub const OP_COMBAT_RECORD: u16 = 0x7E20;
 /// The record: this client's ask (a u32 1), the server's rows (`record::read`).
 pub const OP_COMBAT_RECORD_DATA: u16 = 0x7E21;
+/// go-eqoa-server's own, no retail message either: the character's bestiary, the
+/// creatures it met by zone (`bestiary`), a u32 after the opcode, both ways. The
+/// server offers it (1) once the player is in the world, where its quality-of-life
+/// additions are on; this client answers 1 at once and shows Character > Bestiary,
+/// which asks for a page ([`OP_BESTIARY_DATA`], a u16) as its window opens and at
+/// each turn. A server that never offers it gets no answer and no entry shows.
+pub const OP_BESTIARY: u16 = 0x7EF4;
+/// A page of the bestiary: this client's ask (a u16 page, 0 the first), the
+/// server's page (`bestiary::read`).
+pub const OP_BESTIARY_DATA: u16 = 0x7EF5;
 /// go-eqoa-server's own, no retail message either: worlds the server has past
 /// the disc's, each made of the disc's own zones (`serverworlds`), a u32 after
 /// the opcode, both ways. The server offers them (1) after the session's first
@@ -710,20 +720,20 @@ pub const NUMBER_TAGS_LAYOUT: u8 = 2;
 /// damage in the fight and how fast (`dpsmeter`, the Extended page's DPS Meter;
 /// the server owner, 2026-11-10: "lets add dps meters, will work solo, group,
 /// raid"). The offer, server to client once the player is in the world: a u8,
-/// the newest [`OP_DPS_METER_DATA`] layout it writes (1, damage alone; 2 since
-/// 2026-11-25, healing and power too). CLIENT has no such case, so a PS2
-/// ignores it; nothing is asked of a server that made no offer.
+/// the newest [`OP_DPS_METER_DATA`] layout it writes. A PS2 ignores the offer.
 pub const OP_DPS_METER_OFFER: u16 = 0x7E3A;
 /// The answer to [`OP_DPS_METER_OFFER`], client to server, at once and whenever
 /// it changes (`agree_dps_meter`): a u8, the layout to be sent the meter in (the
 /// offer's, at most [`DPS_METER_LAYOUT`]), 0 to stop. A server of layout 1
 /// alone reads any answer but 0 as 1.
 pub const OP_DPS_METER_ANSWER: u16 = 0x7E3B;
-/// The newest DPS meter layout this client reads: 2, each line's healing and
-/// the power it gave beside its damage (go-eqoa-server, Heirloom petition 3030:
-/// "DPS meter should have options to include healing per second, and if
-/// possible power provided per second").
-pub const DPS_METER_LAYOUT: u8 = 2;
+/// The newest DPS meter layout this client reads.
+pub const DPS_METER_LAYOUT: u8 = 5;
+/// The first layout to distinguish mercenary contributions.
+pub const DPS_METER_MERC_LINES: u8 = 3;
+/// The first layout with each merc's own figures beside layout 4's rows
+/// ([`DpsMeter::merc_lines`]; Heirloom petition 3136).
+pub const DPS_METER_MERC_ROWS: u8 = 5;
 /// The meter, from a server the client asked: the fight of the player's group
 /// at most once a second while it changes, and once more as it ends (the server
 /// ends it 10 s after the group's last damage). [`DpsMeter`] has the layout.
@@ -731,14 +741,46 @@ pub const OP_DPS_METER_DATA: u16 = 0x7E3C;
 /// A reset, client to server (`reset_dps_meter`): a u8, 1. The server drops the
 /// fight under way (nothing more is sent of it) and numbers its next another.
 pub const OP_DPS_METER_RESET: u16 = 0x7E3D;
+/// go-eqoa-server's own: the characters' surnames for the name plates (Live
+/// petition 5648, `/surname`). The offer, server to client at every world
+/// entry: a u8, the [`OP_SURNAMES`] layout (1); answered at once with a u8, 1.
+/// A PS2 ignores it.
+pub const OP_SURNAME_OFFER: u16 = 0x7EF8;
+/// The surnames, from a server the client answered: u8 layout (1), u16 count,
+/// and each a character's name (its own, no tag) and its surname (empty: it
+/// has none any more), each a u8 byte count and UTF-8. The whole list once
+/// after the answer, then a character at a time ([`Session::surname`]).
+pub const OP_SURNAMES: u16 = 0x7EF9;
+/// go-eqoa-server's own: one faction's standing on the HUD (`factiontrack`,
+/// Heirloom petition 3216: "track one chosen faction on screen, outside the
+/// faction window"). The offer, server to client at every world entry: a u8,
+/// the [`OP_FACTION_TRACK_DATA`] layout (1). A PS2 ignores it.
+pub const OP_FACTION_TRACK_OFFER: u16 = 0x7E86;
+/// The answer to [`OP_FACTION_TRACK_OFFER`], client to server, at once and
+/// whenever it changes (`agree_faction_track`): a wide string, the faction's
+/// name (any case), empty to follow none.
+pub const OP_FACTION_TRACK_ANSWER: u16 = 0x7E87;
+/// The standing, from a server the client named a faction: at once and whenever
+/// it changes. A u8 layout (1), a u8 known (0: the name is no one faction's,
+/// the standing 0), the wide name (the faction's own), a zigzag standing.
+pub const OP_FACTION_TRACK_DATA: u16 = 0x7E88;
 
-/// A fight on the meter ([`OP_DPS_METER_DATA`]): u8 layout (1 or 2), u32 its
+/// A fight on the meter ([`OP_DPS_METER_DATA`]): u8 layout (1 to 3), u32 its
 /// number (another number, another fight), u8 1 when it is over (its last
 /// message), u32 its length in ms (from its first damage to its latest), u32 the
 /// damage of all its lines, u16 how many lines it has, u16 the player's own
 /// line's place among them (1 the most damage); layout 2: u32 the healing of all
 /// its lines, u32 their power given, u16 the player's own place by healing, u16
 /// by power; then u8 how many lines this message holds, and each [`DpsLine`].
+/// Layout 3 is layout 2 with each merc's line apart from its owner's (its
+/// owner's line without it; the wholes the same).
+/// Layout 4 sends player rows and includes the mercenary shares in those
+/// rows. The header includes totals and the receiver's places for both views.
+/// Layout 5 is layout 4, then u8 how many merc lines and each: u8 flags (4, 8
+/// the player's own merc, 2 its owner no longer in the group), u8 class, u32
+/// damage, its own pet's share, healing, its pet's share, power, u8 its
+/// owner's place among the lines sent (0 the first), its name. Each merc's
+/// figures are in its owner's `merc_share` too.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DpsMeter {
     /// The layout it came in: 1 has no healing or power (each 0).
@@ -760,14 +802,31 @@ pub struct DpsMeter {
     pub power_total: u32,
     pub heal_place: u16,
     pub power_place: u16,
+    pub without_mercs: Option<DpsRankedTotals>,
     pub lines: Vec<DpsLine>,
+    /// Layout 5: each merc's own line (`merc` set, `owner` its owner's line's
+    /// name), the most damage first; those the server had no room for are
+    /// left in their owner's `merc_share` alone.
+    pub merc_lines: Vec<DpsLine>,
 }
 
-/// A line of the meter: u8 flags (1 the player's own, 2 no longer in its group),
-/// u8 class, u32 damage (its pet's included), u32 its pet's share of that;
-/// layout 2: u32 its healing (what its heals restored, its pet's and merc's
-/// included), u32 their share of that, u32 the power it gave others; and its
-/// name (a u8 byte count and UTF-8).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DpsRankedTotals {
+    /// Damage, healing and power totals across the entire fight.
+    pub totals: [u32; 3],
+    /// The receiver's place in each metric, with 0 for no line.
+    pub places: [u16; 3],
+}
+
+/// A line of the meter: u8 flags (1 the player's own, 2 no longer in its group,
+/// 4 a merc's line, 8 the player's own merc's), u8 class, u32 damage (its pet's
+/// included), u32 its pet's share of that; layout 2: u32 its healing (what its
+/// heals restored, its pet's and merc's included: from layout 3 a merc's are on
+/// its own line), u32 their share of that, u32 the power it gave others; and its
+/// name (a u8 byte count and UTF-8); layout 3: its owner's name after it (the
+/// same: none but a merc's, and none in a message it would make too long).
+/// Layout 4 excludes mercenaries from the five row amounts and uses flag 4
+/// to mark a damage, healing and power u32 mercenary share after the name.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DpsLine {
     pub own: bool,
@@ -779,6 +838,45 @@ pub struct DpsLine {
     pub heal_pet: u32,
     pub power: u32,
     pub name: String,
+    /// Layout 3: a merc's line (flag 4), the player's own merc's (flag 8), and
+    /// its owner's name (empty when the server left it out).
+    pub merc: bool,
+    pub own_merc: bool,
+    pub owner: String,
+    pub merc_share: [u32; 3],
+}
+
+/// [`OP_SURNAMES`]'s body: each (name, surname), or None when it is short or of
+/// another layout.
+fn read_surnames(r: &mut Reader) -> Option<Vec<(String, String)>> {
+    if r.u8() != 1 {
+        return None;
+    }
+    let n = r.u16() as usize;
+    let mut out = Vec::with_capacity(n.min(512));
+    for _ in 0..n {
+        let a = r.u8() as usize;
+        let name = String::from_utf8_lossy(r.bytes(a)).into_owned();
+        let b = r.u8() as usize;
+        let surname = String::from_utf8_lossy(r.bytes(b)).into_owned();
+        if r.error {
+            return None;
+        }
+        out.push((name, surname));
+    }
+    (!r.error).then_some(out)
+}
+
+/// [`OP_FACTION_TRACK_DATA`]'s body: (known, name, standing), or None when it
+/// is short or of another layout. A standing is held to the window's -2000..2000.
+fn read_faction_track(r: &mut Reader) -> Option<(bool, String, i32)> {
+    if r.u8() != 1 {
+        return None;
+    }
+    let known = r.u8() != 0;
+    let name = r.wide(128);
+    let standing = r.signed().clamp(-2000, 2000) as i32;
+    (!r.error).then_some((known, name, standing))
 }
 
 /// [`OP_DPS_METER_DATA`]'s body, or None when it is short or of a layout this
@@ -793,6 +891,9 @@ fn read_dps_meter(r: &mut Reader) -> Option<DpsMeter> {
     if layout >= 2 {
         (m.heal_total, m.power_total, m.heal_place, m.power_place) = (r.u32(), r.u32(), r.u16(), r.u16());
     }
+    if layout >= 4 {
+        m.without_mercs = Some(DpsRankedTotals { totals: [r.u32(), r.u32(), r.u32()], places: [r.u16(), r.u16(), r.u16()] });
+    }
     let n = r.u8() as usize;
     m.lines = Vec::with_capacity(n);
     for _ in 0..n {
@@ -800,7 +901,53 @@ fn read_dps_meter(r: &mut Reader) -> Option<DpsMeter> {
         let (heal, heal_pet, power) = if layout >= 2 { (r.u32(), r.u32(), r.u32()) } else { (0, 0, 0) };
         let len = r.u8() as usize;
         let name = String::from_utf8_lossy(r.bytes(len)).into_owned();
-        m.lines.push(DpsLine { own: flags & 1 != 0, left: flags & 2 != 0, class, damage, pet, heal, heal_pet, power, name });
+        let owner = if layout == DPS_METER_MERC_LINES {
+            let len = r.u8() as usize;
+            String::from_utf8_lossy(r.bytes(len)).into_owned()
+        } else {
+            String::new()
+        };
+        m.lines.push(DpsLine {
+            own: flags & 1 != 0,
+            left: flags & 2 != 0,
+            class,
+            damage,
+            pet,
+            heal,
+            heal_pet,
+            power,
+            name,
+            merc: layout == DPS_METER_MERC_LINES && flags & 4 != 0,
+            own_merc: layout == DPS_METER_MERC_LINES && flags & 8 != 0,
+            owner,
+            merc_share: if layout >= 4 && flags & 4 != 0 { [r.u32(), r.u32(), r.u32()] } else { [0; 3] },
+        });
+    }
+    if layout >= DPS_METER_MERC_ROWS {
+        let n = r.u8() as usize;
+        for _ in 0..n {
+            if r.error {
+                break;
+            }
+            let (flags, class, damage, pet, heal, heal_pet, power, at) = (r.u8(), r.u8(), r.u32(), r.u32(), r.u32(), r.u32(), r.u32(), r.u8() as usize);
+            let len = r.u8() as usize;
+            let name = String::from_utf8_lossy(r.bytes(len)).into_owned();
+            let owner = m.lines.get(at).map(|l| l.name.clone()).unwrap_or_default();
+            m.merc_lines.push(DpsLine {
+                left: flags & 2 != 0,
+                class,
+                damage,
+                pet,
+                heal,
+                heal_pet,
+                power,
+                name,
+                merc: true,
+                own_merc: flags & 8 != 0,
+                owner,
+                ..DpsLine::default()
+            });
+        }
     }
     (!r.error).then_some(m)
 }
@@ -1049,6 +1196,37 @@ pub const OP_CON_LEVEL_OFFER: u16 = 0x7E70;
 /// session (`world.og_accounts`) is sent bits 12 to 14 too: the map and links
 /// locked, no mouse, no touch.
 pub const OP_VANILLA_UI: u16 = 0x7EA0;
+
+/// go-eqoa-server's own: what it knows of its NPCs that a client cannot read off
+/// their names and flags, for the minimap's colours (Heirloom petition 3092:
+/// a spell merchant is a "Merchant" like any other, known only by what he
+/// sells). Server to client, to a client that answered the bug report offer
+/// (never to a PS2), at that answer: a u8 version (1), a u8 of flags (1 the
+/// first part: forget what the last said; 2 the last), a u16 count, then each
+/// NPC a u8 role (1 a spell merchant), a u8 class (0-14 the class whose scrolls
+/// it sells most, 255 none) and its name (u8-counted UTF-8). Answered nothing.
+pub const OP_NPC_ROLES: u16 = 0x7EE0;
+
+/// One [`OP_NPC_ROLES`] part: whether it is the first, and its spell merchants
+/// (name, class); none for another version or a part cut short.
+fn read_npc_roles(r: &mut crate::stream::Reader) -> Option<(bool, Vec<(String, u8)>)> {
+    let (version, flags, n) = (r.u8(), r.u8(), r.u16());
+    if r.error || version != 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(n as usize);
+    for _ in 0..n {
+        let (role, class, len) = (r.u8(), r.u8(), r.u8());
+        let name = String::from_utf8_lossy(r.bytes(len as usize)).into_owned();
+        if r.error {
+            return None;
+        }
+        if role == 1 {
+            out.push((name, class));
+        }
+    }
+    Some((flags & 1 != 0, out))
+}
 
 /// go-eqoa-server's own: how many answers an NPC's box (0x0034) may hold (the
 /// owner, 2026-11-15: "lets increase the dialog box for heroic dungeons,
@@ -1352,8 +1530,14 @@ pub enum Event {
     RaidRoster { total: usize, first: usize, rows: Vec<RaidMember> },
     /// [`OP_DPS_METER_DATA`]: the meter's fight as it stands.
     DpsMeter(DpsMeter),
+    /// [`OP_FACTION_TRACK_DATA`]: the followed faction's standing; `known`
+    /// false when the name asked is no one faction's.
+    FactionTrack { known: bool, name: String, standing: i32 },
     /// [`OP_RAID_STATE`]: the raid as it is now.
     RaidState(crate::raid::State),
+    /// [`crate::mobdetails::OP_DETAILS`]: the answer about a creature asked
+    /// about (`ask_mob_details`).
+    MobDetails(Box<crate::mobdetails::Answer>),
     /// [`OP_MOB_INFO`]: the monster the client knows by `id` has nothing to say;
     /// its name and level, for the target's details box.
     MobInfo { id: u32, level: u8, name: String, extra: Vec<String> },
@@ -1572,6 +1756,9 @@ pub struct Session {
     /// ([`OP_GROUP_REG_STATE`]); none from a server that never offered it, and
     /// at a new connection.
     pub group_reg: Option<GroupReg>,
+    /// The characters' surnames the server told ([`OP_SURNAMES`]), by their
+    /// names in lower case; none at a new connection until told again.
+    pub surnames: std::collections::HashMap<String, String>,
     /// What character creation takes past the game's, as the server last told
     /// it ([`OP_CREATION_RACES`]); none from a server that never offers it.
     pub creation: Option<crate::creation::Creation>,
@@ -1654,6 +1841,9 @@ pub struct Session {
     /// The server offered the combat record ([`OP_COMBAT_RECORD`]) and this
     /// client took it: Character > Combat Record. Kept for the session.
     pub combat_record: bool,
+    /// The server offered the bestiary ([`OP_BESTIARY`]) and this client took
+    /// it: Character > Bestiary. Kept for the session.
+    pub bestiary: bool,
     /// The server offered capes ([`OP_CAPES`]) and this client took them: a
     /// cape is worn in its slot and drawn. Kept for the session.
     pub capes: bool,
@@ -1740,6 +1930,11 @@ pub struct Session {
     pub dps_meter_offer: bool,
     pub dps_meter_layout: u8,
     dps_meter_asked: Option<bool>,
+    /// Whether the server offered the faction tracker
+    /// ([`OP_FACTION_TRACK_OFFER`]) on this connection, and the name it was
+    /// last told (none since the offer).
+    pub faction_track_offer: bool,
+    faction_track_asked: Option<String>,
     /// Whether the server offered the raid's windows ([`OP_RAID_OFFER`]) on
     /// this connection, and what it was last told (none since the offer).
     pub raid_offer: bool,
@@ -1781,10 +1976,18 @@ pub struct Session {
     /// Whether the server offered its players their target's level
     /// ([`OP_CON_LEVEL_OFFER`]) on this connection: the target box draws it.
     pub con_level_offer: bool,
+    /// Whether the server offered a creature's details and loot chart
+    /// ([`crate::mobdetails::OP_OFFER`]) on this connection: a right click on
+    /// a creature asks for them (`eqoa`'s `mobwnd`).
+    pub mob_details_offer: bool,
     /// What the server turns off of this client's own additions
     /// ([`OP_VANILLA_UI`]) on this connection, a bit each; 0, everything on,
     /// until it says.
     pub qol_off: u32,
+    /// The spell merchants the server named ([`OP_NPC_ROLES`]) on this
+    /// connection, by name: the class whose scrolls each sells most (255
+    /// none); empty until it says.
+    pub spell_merchants: std::collections::HashMap<String, u8>,
     /// The worn looks the character hides, as the server told them
     /// (`crate::hidelook`): none offered until it does.
     pub hide_look: crate::hidelook::State,
@@ -1925,6 +2128,7 @@ impl Session {
             mercs: None,
             merc_windows: false,
             group_reg: None,
+            surnames: std::collections::HashMap::new(),
             creation: None,
             server_worlds: None,
             worlds_building: None,
@@ -1954,6 +2158,7 @@ impl Session {
             raid_roster_groups: false,
             raid_roster_kinds: false,
             combat_record: false,
+            bestiary: false,
             capes: false,
             item_lists: [ITEM_LIST_DISC; 2],
             cape_list: Default::default(),
@@ -1992,6 +2197,8 @@ impl Session {
             dps_meter_offer: false,
             dps_meter_layout: 0,
             dps_meter_asked: None,
+            faction_track_offer: false,
+            faction_track_asked: None,
             raid_offer: false,
             raid_asked: None,
             ready_offer: false,
@@ -2011,7 +2218,9 @@ impl Session {
             profanity_offer: false,
             profanity_asked: None,
             con_level_offer: false,
+            mob_details_offer: false,
             qol_off: 0,
+            spell_merchants: Default::default(),
             hide_look: crate::hidelook::State::default(),
             user: user.to_string(),
             token,
@@ -2155,6 +2364,18 @@ impl Session {
         w.u32(world).u32(x.to_bits()).u32(z.to_bits());
         self.send(&w.data);
         true
+    }
+
+    /// A page of the bestiary asked for now (its window opening, a page turned),
+    /// of a server that offered it ([`OP_BESTIARY`]); false, and nothing sent,
+    /// otherwise.
+    pub fn ask_bestiary(&mut self, page: u16) -> bool {
+        if self.bestiary {
+            let mut w = Writer::op(OP_BESTIARY_DATA);
+            w.u16(page);
+            self.send(&w.data);
+        }
+        self.bestiary
     }
 
     /// The combat record asked for now (its window opening), of a server that
@@ -2405,6 +2626,20 @@ impl Session {
         self.send(&w.data);
     }
 
+    /// The faction tracker: a server that offered it ([`OP_FACTION_TRACK_OFFER`])
+    /// is told the faction followed (`name`, "" none), at once and whenever that
+    /// changes, and afresh at another offer; one that made no offer is told
+    /// nothing.
+    pub fn agree_faction_track(&mut self, name: &str) {
+        if !self.faction_track_offer || self.faction_track_asked.as_deref() == Some(name) {
+            return;
+        }
+        self.faction_track_asked = Some(name.to_string());
+        let mut w = Writer::op(OP_FACTION_TRACK_ANSWER);
+        w.wide(name);
+        self.send(&w.data);
+    }
+
     /// The raid's windows: a server that offered them ([`OP_RAID_OFFER`]) is
     /// told whether to send them (`want`), at once and whenever that changes,
     /// and afresh at another offer; one that made no offer is told nothing.
@@ -2459,6 +2694,12 @@ impl Session {
         }
         self.head_marks_asked = Some(want);
         self.send(&crate::headmarks::answer(want));
+    }
+
+    /// The character `name`'s surname (its own name, no tag), as the server
+    /// told it ([`OP_SURNAMES`]); None for none.
+    pub fn surname(&self, name: &str) -> Option<&str> {
+        self.surnames.get(&name.to_lowercase()).map(String::as_str)
     }
 
     /// The mark over the entity `id`'s head, from a server that sends them
@@ -2579,6 +2820,18 @@ impl Session {
             return false;
         }
         let m = crate::itemlink::say(route, text, target, links);
+        self.send(&m);
+        true
+    }
+
+    /// A creature's details and loot chart asked for
+    /// ([`crate::mobdetails::OP_ASK`]): false (nothing sent) where the server
+    /// offered none.
+    pub fn ask_mob_details(&mut self, id: u32) -> bool {
+        if !self.mob_details_offer {
+            return false;
+        }
+        let m = crate::mobdetails::ask(id);
         self.send(&m);
         true
     }
@@ -2923,11 +3176,10 @@ impl Session {
                 self.mercs = None;
                 self.merc_windows = false;
                 self.group_reg = None;
+                // the surnames: the next world entry offers them again
+                self.surnames.clear();
                 // the old connection's channels go with it
                 self.early_states.clear();
-                self.power_bars_offer = false;
-                self.power_bars_asked = None;
-                self.power_bars.clear();
                 self.quest_marks_offer = false;
                 self.quest_marks_asked = None;
                 // others' power: offered again at the next world entry
@@ -2965,12 +3217,16 @@ impl Session {
                 self.dps_meter_offer = false;
                 self.dps_meter_layout = 0;
                 self.dps_meter_asked = None;
+                self.faction_track_offer = false;
+                self.faction_track_asked = None;
                 self.item_links_offer = false;
                 self.item_links_asked = None;
                 self.profanity_offer = false;
                 self.profanity_asked = None;
                 self.con_level_offer = false;
+                self.mob_details_offer = false;
                 self.qol_off = 0;
+                self.spell_merchants.clear();
                 self.hide_look = crate::hidelook::State::default();
                 ev.push(Event::Promoted);
             }
@@ -3152,6 +3408,13 @@ impl Session {
                 if r.u32() != 0 && !r.error {
                     self.combat_record = true;
                     self.send_op_int(OP_COMBAT_RECORD, 1);
+                }
+            }
+            // the bestiary offered: taken (`bestiary`, Character > Bestiary)
+            OP_BESTIARY => {
+                if r.u32() != 0 && !r.error {
+                    self.bestiary = true;
+                    self.send_op_int(OP_BESTIARY, 1);
                 }
             }
             // the live duel's messages offered: taken (the client has the
@@ -3409,6 +3672,17 @@ impl Session {
                     self.qol_off = off;
                 }
             }
+            // the NPCs' roles (at the bug report answer): the spell merchants
+            // by name, a part at a time; another version, or a part cut short,
+            // is left alone whole
+            OP_NPC_ROLES => {
+                if let Some((first, named)) = read_npc_roles(&mut r) {
+                    if first {
+                        self.spell_merchants.clear();
+                    }
+                    self.spell_merchants.extend(named);
+                }
+            }
             // the server's most answers in a box offered (each world entry):
             // told this client's own at once
             OP_DIALOG_ROOM => {
@@ -3435,6 +3709,18 @@ impl Session {
             crate::hidelook::OP_OFFER | crate::hidelook::OP_STATE => {
                 self.hide_look.read(op, &m.data[2.min(m.data.len())..]);
             }
+            // a creature's details offered (each world entry), in the layout
+            // this client reads: a right click on a creature asks (`ask_mob_details`)
+            crate::mobdetails::OP_OFFER => {
+                let layout = r.u8();
+                if !r.error && layout == crate::mobdetails::LAYOUT {
+                    self.mob_details_offer = true;
+                }
+            }
+            crate::mobdetails::OP_DETAILS => match crate::mobdetails::read(&m.data[2.min(m.data.len())..]) {
+                Some(a) => ev.push(Event::MobDetails(Box::new(a))),
+                None => debug_line(&format!("[net] a creature's details: {} bytes not read", m.data.len())),
+            },
             OP_ITEM_LINKS => {
                 let layout = r.u8();
                 if !r.error && layout == crate::itemlink::LAYOUT {
@@ -3491,13 +3777,13 @@ impl Session {
                     self.send(&w.data);
                 }
             }
-            // the merc windows offered (each world entry): answered 1, the
-            // layout read (`mercwin`)
+            // the merc windows offered (each world entry): answered 2, the
+            // layout read (1's with the kind USE: `mercwin`)
             crate::mercwin::OP_MERC_WINDOW_OFFER => {
                 let layout = r.u8();
                 if !r.error && layout == crate::mercwin::LAYOUT {
                     let mut w = Writer::op(crate::mercwin::OP_MERC_WINDOW_OFFER);
-                    w.u8(crate::mercwin::LAYOUT);
+                    w.u8(crate::mercwin::LAYOUT_USE);
                     self.send(&w.data);
                     self.merc_windows = true;
                 }
@@ -3681,6 +3967,27 @@ impl Session {
                     self.number_tags_asked = None;
                 }
             }
+            // the surnames offered (each world entry): answered 1 at once, the
+            // whole list to come (`OP_SURNAMES`)
+            OP_SURNAME_OFFER => {
+                if !r.error && r.u8() == 1 && !r.error {
+                    let mut w = Writer::op(OP_SURNAME_OFFER);
+                    w.u8(1);
+                    self.send(&w.data);
+                }
+            }
+            OP_SURNAMES => match read_surnames(&mut r) {
+                Some(pairs) => {
+                    for (name, surname) in pairs {
+                        if surname.is_empty() {
+                            self.surnames.remove(&name.to_lowercase());
+                        } else {
+                            self.surnames.insert(name.to_lowercase(), surname);
+                        }
+                    }
+                }
+                None => debug_line(&format!("[net] the surnames: {} bytes not read", m.data.len())),
+            },
             // the damage meter offered (again at every world entry): told
             // afresh whether the client wants it (`agree_dps_meter`)
             OP_DPS_METER_OFFER => {
@@ -3694,6 +4001,20 @@ impl Session {
             OP_DPS_METER_DATA => {
                 if let Some(m) = read_dps_meter(&mut r) {
                     ev.push(Event::DpsMeter(m));
+                }
+            }
+            // the faction tracker offered (again at every world entry): told
+            // afresh which faction the client follows (`agree_faction_track`)
+            OP_FACTION_TRACK_OFFER => {
+                r.u8();
+                if !r.error {
+                    self.faction_track_offer = true;
+                    self.faction_track_asked = None;
+                }
+            }
+            OP_FACTION_TRACK_DATA => {
+                if let Some((known, name, standing)) = read_faction_track(&mut r) {
+                    ev.push(Event::FactionTrack { known, name, standing });
                 }
             }
             // the raid's windows offered (again at every world entry): told
@@ -4415,6 +4736,43 @@ mod tests {
         assert_eq!(s.qol_off, 0, "a new connection forgets it");
     }
 
+    /// The NPCs' roles (go-eqoa-server's 0x7EE0, TestNpcRolesNameTheSpellMerchants'
+    /// layout): the spell merchants by name and class, a part at a time, the
+    /// first part forgetting the last list; answered nothing. The controls: a
+    /// part cut short or of another version is not taken, a new connection
+    /// forgets them.
+    #[test]
+    fn the_npcs_roles_are_kept_by_name() {
+        let part = |flags: u8, names: &[(&str, u8)]| {
+            let mut w = crate::stream::Writer::op(OP_NPC_ROLES);
+            w.u8(1).u8(flags).u16(names.len() as u16);
+            for (n, c) in names {
+                w.u8(1).u8(*c).u8(n.len() as u8).bytes(n.as_bytes());
+            }
+            w.data
+        };
+        let mut s = session();
+        s.record = Some(Vec::new());
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, part(1, &[("Merchant Timmerin", 13)]));
+        assert!(ev.is_empty(), "the message is the session's: {ev:?}");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, part(2, &[("Merchant Coridon", 12), ("Chemist Falen", 255)]));
+        assert_eq!(s.spell_merchants.len(), 3);
+        assert_eq!((s.spell_merchants["Merchant Timmerin"], s.spell_merchants["Chemist Falen"]), (13, 255));
+        let mut cut = part(3, &[("Merchant Verona", 10)]);
+        cut.pop();
+        deliver(&mut s, drdp::TYPE_GUARANTEED, cut);
+        assert_eq!(s.spell_merchants.len(), 3, "a part cut short is none, nor clears");
+        let mut other = part(3, &[("Merchant Verona", 10)]);
+        other[2] = 2;
+        deliver(&mut s, drdp::TYPE_GUARANTEED, other);
+        assert!(!s.spell_merchants.contains_key("Merchant Verona"), "another version is none");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, part(3, &[("Merchant Verona", 10)]));
+        assert_eq!(s.spell_merchants.keys().collect::<Vec<_>>(), vec!["Merchant Verona"], "a first part forgets the last list");
+        assert_eq!(s.record.as_ref().unwrap().len(), 0, "answered with nothing");
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert!(s.spell_merchants.is_empty(), "a new connection forgets them");
+    }
+
     /// More answers in an NPC's box (go-eqoa-server's 0x7E71): an offer of
     /// more than CLIENT's six is answered at once with this client's room, a
     /// u32 (go-eqoa-server's TestDialogRoomOffer's bytes); one cut short, or of
@@ -4432,6 +4790,26 @@ mod tests {
         let sent = s.record.as_ref().unwrap();
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].1, vec![0x71, 0x7E, DIALOG_ROOM as u8, 0, 0, 0]);
+    }
+
+    /// A creature's details (go-eqoa-server's `world.mob_details`): asked only
+    /// of a server that offered them in this client's layout; the answer is its
+    /// event; a new connection forgets the offer. The control: before the offer
+    /// (and after another layout's) nothing is sent.
+    #[test]
+    fn mob_details_are_asked_only_of_a_server_that_offered_them() {
+        let mut s = session();
+        s.record = Some(Vec::new());
+        assert!(!s.ask_mob_details(9), "no offer: nothing");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xFA, 0x7E, 2]);
+        assert!(!s.ask_mob_details(9), "another layout is not taken");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xFA, 0x7E, 1]);
+        assert!(s.ask_mob_details(9));
+        assert_eq!(s.record.as_ref().unwrap()[..], [(drdp::TYPE_GUARANTEED, vec![0xFB, 0x7E, 1, 9, 0, 0, 0])]);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xFC, 0x7E, 1, 9, 0, 0, 0, 2]);
+        assert!(matches!(&ev[..], [Event::MobDetails(a)] if a.id == 9 && a.status == crate::mobdetails::Status::TooSoon), "{ev:?}");
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert!(!s.mob_details_offer, "a new connection: the next world entry's offer");
     }
 
     #[test]
@@ -5026,9 +5404,50 @@ mod tests {
         assert!(!s.merc_windows && ours(&mut s).is_empty(), "another layout: nothing");
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x72, 0x7E, 1]);
         assert!(s.merc_windows);
-        assert_eq!(ours(&mut s), vec![vec![0x72, 0x7E, 1]], "answered 1");
+        assert_eq!(ours(&mut s), vec![vec![0x72, 0x7E, 2]], "answered 2 (the kind USE read)");
         let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x74, 0x7E, 1, 0]);
         assert!(matches!(&ev[..], [Event::Opcode { op: 0x7E74, data }] if data[..] == [1, 0]), "{ev:?}");
+    }
+
+    // The surnames (0x7EF8/0x7EF9, go-eqoa-server's /surname, Live petition
+    // 5648): the offer answered 1 at once, another layout nothing; the list
+    // kept by name in any case, a surname emptied forgotten, a short list not
+    // taken; a new connection forgets them.
+    #[test]
+    fn surnames_offered_answered_and_kept() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let ours = |s: &mut Session| -> Vec<Vec<u8>> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).map(|(_, d)| d).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        ours(&mut s);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xF8, 0x7E, 2]);
+        assert!(ours(&mut s).is_empty(), "another layout: nothing");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xF8, 0x7E, 1]);
+        assert_eq!(ours(&mut s), vec![vec![0xF8, 0x7E, 1]], "answered 1");
+        let list = |pairs: &[(&str, &str)]| {
+            let mut m = vec![0xF9, 0x7E, 1, pairs.len() as u8, 0];
+            for (a, b) in pairs {
+                m.push(a.len() as u8);
+                m.extend_from_slice(a.as_bytes());
+                m.push(b.len() as u8);
+                m.extend_from_slice(b.as_bytes());
+            }
+            m
+        };
+        deliver(&mut s, drdp::TYPE_GUARANTEED, list(&[("Cora", "Stoneheart"), ("Dab", "Ironhand")]));
+        assert_eq!((s.surname("Cora"), s.surname("cora"), s.surname("Dab"), s.surname("Bert")), (Some("Stoneheart"), Some("Stoneheart"), Some("Ironhand"), None));
+        deliver(&mut s, drdp::TYPE_GUARANTEED, list(&[("Cora", "")]));
+        assert_eq!((s.surname("Cora"), s.surname("Dab")), (None, Some("Ironhand")), "emptied: forgotten");
+        let mut short = list(&[("Bert", "Oakshield")]);
+        short.pop();
+        deliver(&mut s, drdp::TYPE_GUARANTEED, short);
+        assert_eq!(s.surname("Bert"), None, "a short list not taken");
+        deliver(&mut s, drdp::TYPE_CONNECT, Vec::new());
+        assert_eq!(s.surname("Dab"), None, "a new connection: none");
     }
 
     // The mercs (0x7E5A/0x7E5B) and the group search's standing (0x7E5D/
@@ -6118,6 +6537,52 @@ mod tests {
         assert!(ev.is_empty(), "cut short: nothing: {ev:?}");
     }
 
+    /// The faction tracker: nothing asked before an offer (the control); after
+    /// it the name told at once as a wide string, again only when it changes, ""
+    /// to stop; another offer has it told afresh; the standing read as the
+    /// server writes it (go-eqoa-server's factionTrackBody), one of another
+    /// layout or cut short not taken.
+    #[test]
+    fn faction_track_offer_answer_and_standing() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<Vec<u8>> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(_, d)| d.len() >= 2 && d[1] == 0x7E && d[0] == 0x87).map(|(_, d)| d).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        let wide = |name: &str| {
+            let mut w = Writer::op(OP_FACTION_TRACK_ANSWER);
+            w.wide(name);
+            w.data
+        };
+        s.agree_faction_track("Citizens of Freeport");
+        assert_eq!(answers(&mut s), Vec::<Vec<u8>>::new(), "no offer, nothing asked");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x86, 0x7E]);
+        assert!(!s.faction_track_offer, "a short offer is no offer");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x86, 0x7E, 1]);
+        assert!(s.faction_track_offer);
+        s.agree_faction_track("Citizens of Freeport");
+        s.agree_faction_track("Citizens of Freeport");
+        assert_eq!(answers(&mut s), [wide("Citizens of Freeport")], "told once");
+        s.agree_faction_track("");
+        assert_eq!(answers(&mut s), [vec![0x87, 0x7E, 0, 0, 0, 0]], "none: an empty string");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x86, 0x7E, 1]);
+        s.agree_faction_track("");
+        assert_eq!(answers(&mut s), [vec![0x87, 0x7E, 0, 0, 0, 0]], "another offer: told afresh");
+        // layout 1, known, "Ab", -49 (zigzag 97)
+        let data = vec![0x88, 0x7E, 1, 1, 2, 0, 0, 0, b'A', 0, b'b', 0, 97];
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, data.clone());
+        assert!(matches!(&ev[..], [Event::FactionTrack { known: true, name, standing: -49 }] if name == "Ab"), "{ev:?}");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, data[..data.len() - 1].to_vec());
+        assert!(!ev.iter().any(|e| matches!(e, Event::FactionTrack { .. })), "cut short: {ev:?}");
+        let mut other = data.clone();
+        other[2] = 2;
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, other);
+        assert!(!ev.iter().any(|e| matches!(e, Event::FactionTrack { .. })), "another layout: {ev:?}");
+    }
+
     // The damage meter (go-eqoa-server's 0x7E3A-0x7E3D): nothing asked with no
     // offer (the control); an offer answered at once with what is wanted (0
     // too), a u8, and again only when that changes; the fight read as the server
@@ -6203,15 +6668,83 @@ mod tests {
             power_total: 40,
             heal_place: 2,
             power_place: 2,
+            without_mercs: None,
+            merc_lines: Vec::new(),
             lines: vec![
-                DpsLine { own: true, left: false, class: 3, damage: 1000, pet: 0, heal: 50, heal_pet: 0, power: 0, name: "Dab".into() },
-                DpsLine { own: false, left: true, class: 9, damage: 300, pet: 120, heal: 900, heal_pet: 100, power: 40, name: "Jib".into() },
+                DpsLine { own: true, left: false, class: 3, damage: 1000, pet: 0, heal: 50, heal_pet: 0, power: 0, name: "Dab".into(), ..DpsLine::default() },
+                DpsLine { own: false, left: true, class: 9, damage: 300, pet: 120, heal: 900, heal_pet: 100, power: 40, name: "Jib".into(), ..DpsLine::default() },
             ],
         };
         assert!(matches!(&ev[..], [Event::DpsMeter(got)] if *got == want2), "layout 2: {ev:?}");
         let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m2[..m2.len() - 1].to_vec());
         assert!(!ev.iter().any(|e| matches!(e, Event::DpsMeter(_))), "layout 2 cut short: {ev:?}");
 
+        // layout 3, byte for byte as go-eqoa-server's TestDPSMeterLayoutThreeOnTheWire
+        // writes it: each line its owner's name after its own, the merc's flagged
+        let mut m3 = vec![0x3C, 0x7E, 3, 4, 3, 2, 1, 1, 0xDC, 5, 0, 0, 0x14, 5, 0, 0, 2, 0, 1, 0, 0xB6, 3, 0, 0, 40, 0, 0, 0, 2, 0, 2, 0, 2];
+        m3.extend([1, 3, 0xE8, 3, 0, 0, 0, 0, 0, 0, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, b'D', b'a', b'b', 0]);
+        m3.extend([12, 9, 0x2C, 1, 0, 0, 0, 0, 0, 0, 0x84, 3, 0, 0, 0, 0, 0, 0, 40, 0, 0, 0, 3, b'K', b'e', b'l', 3, b'D', b'a', b'b']);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m3.clone());
+        let want3 = DpsMeter {
+            layout: 3,
+            lines: vec![
+                DpsLine { own: true, class: 3, damage: 1000, heal: 50, name: "Dab".into(), ..DpsLine::default() },
+                DpsLine { class: 9, damage: 300, heal: 900, power: 40, name: "Kel".into(), merc: true, own_merc: true, owner: "Dab".into(), ..DpsLine::default() },
+            ],
+            ..want2.clone()
+        };
+        assert!(matches!(&ev[..], [Event::DpsMeter(got)] if *got == want3), "layout 3: {ev:?}");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m3[..m3.len() - 1].to_vec());
+        assert!(!ev.iter().any(|e| matches!(e, Event::DpsMeter(_))), "layout 3 cut short: {ev:?}");
+
+        // Same fixture as TestDPSMeterLayoutFourOnTheWire on the server.
+        let m4 = vec![
+            0x3C, 0x7E, 4, 4, 3, 2, 1, 1, 0xDC, 5, 0, 0, 0x14, 5, 0, 0, 2, 0, 1, 0,
+            0x2E, 4, 0, 0, 50, 0, 0, 0, 1, 0, 1, 0,
+            0xE8, 3, 0, 0, 170, 0, 0, 0, 10, 0, 0, 0, 1, 0, 2, 0, 2, 0, 2,
+            5, 3, 0xBC, 2, 0, 0, 120, 0, 0, 0, 50, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 3, b'D', b'a', b'b',
+            0x2C, 1, 0, 0, 0x84, 3, 0, 0, 40, 0, 0, 0,
+            2, 9, 0x2C, 1, 0, 0, 0, 0, 0, 0, 120, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 3, b'J', b'i', b'b',
+        ];
+        let want4 = DpsMeter {
+            layout: 4, heal_total: 1070, power_total: 50, heal_place: 1, power_place: 1,
+            without_mercs: Some(DpsRankedTotals { totals: [1000, 170, 10], places: [1, 2, 2] }),
+            lines: vec![
+                DpsLine { own: true, class: 3, damage: 700, pet: 120, heal: 50, heal_pet: 10, name: "Dab".into(), merc_share: [300, 900, 40], ..DpsLine::default() },
+                DpsLine { left: true, class: 9, damage: 300, heal: 120, power: 10, name: "Jib".into(), ..DpsLine::default() },
+            ],
+            ..want2
+        };
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m4.clone());
+        assert!(matches!(&ev[..], [Event::DpsMeter(got)] if *got == want4), "layout 4: {ev:?}");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m4[..m4.len() - 1].to_vec());
+        assert!(!ev.iter().any(|e| matches!(e, Event::DpsMeter(_))), "layout 4 cut short: {ev:?}");
+
+        // Layout 5: layout 4 and its merc lines (TestDPSMeterLayoutFiveMercRows's
+        // on the server, the same rows with Dab's two mercs)
+        let mut m5 = m4.clone();
+        m5[2] = 5;
+        m5.extend([2u8,
+            4 | 8, 9, 200, 0, 0, 0, 0, 0, 0, 0, 0x84, 3, 0, 0, 0, 0, 0, 0, 40, 0, 0, 0, 0, 3, b'K', b'e', b'l',
+            4 | 8, 0, 100, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, b'O', b'r', b'd',
+        ]);
+        let want5 = DpsMeter {
+            layout: 5,
+            merc_lines: vec![
+                DpsLine { class: 9, damage: 200, heal: 900, power: 40, name: "Kel".into(), merc: true, own_merc: true, owner: "Dab".into(), ..DpsLine::default() },
+                DpsLine { class: 0, damage: 100, pet: 10, name: "Ord".into(), merc: true, own_merc: true, owner: "Dab".into(), ..DpsLine::default() },
+            ],
+            ..want4.clone()
+        };
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m5.clone());
+        assert!(matches!(&ev[..], [Event::DpsMeter(got)] if *got == want5), "layout 5: {ev:?}");
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, m5[..m5.len() - 1].to_vec());
+        assert!(!ev.iter().any(|e| matches!(e, Event::DpsMeter(_))), "layout 5 cut short: {ev:?}");
+        let mut none = m4.clone();
+        none[2] = 5;
+        none.push(0);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, none);
+        assert!(matches!(&ev[..], [Event::DpsMeter(got)] if *got == DpsMeter { layout: 5, ..want4.clone() }), "layout 5 of no mercs: {ev:?}");
 
         // the offer again (the next world entry): told afresh
         deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x3A, 0x7E, 1]);
@@ -6226,10 +6759,11 @@ mod tests {
 
     // The DPS meter's answer names the layout offered, at most this client's
     // newest (DPS_METER_LAYOUT): a server of layout 1 is answered 1, of 2 2, of
-    // a later one 2; off is 0 whatever was offered. A fresh connection each.
+    // 3 3, of 4 4, of 5 or above 5; off is 0 whatever was offered. A fresh connection
+    // each.
     #[test]
     fn dps_meter_answer_names_the_layout_offered() {
-        for (offer, answer) in [(1u8, 1u8), (2, 2), (9, DPS_METER_LAYOUT)] {
+        for (offer, answer) in [(1u8, 1u8), (2, 2), (3, 3), (4, 4), (5, 5), (9, DPS_METER_LAYOUT)] {
             let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
             let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
             deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x3A, 0x7E, offer]);
@@ -6865,6 +7399,36 @@ mod tests {
         let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0x21, 0x7E, 1, 0, 0]);
         assert!(matches!(&ev[..], [Event::Opcode { op: OP_COMBAT_RECORD_DATA, data }] if data[..] == [1, 0, 0]), "{ev:?}");
         assert_eq!(answers(&mut s), [], "the record answered nothing");
+    }
+
+    // The bestiary (0x7EF4): the offer answered with 1 at once and kept, so a page
+    // may be asked for (0x7EF5, a u16); a page itself passed on for `bestiary`,
+    // answered with nothing. The controls: an offer cut short and an offer of 0 are
+    // neither answered nor kept, and a session never offered one asks nothing.
+    #[test]
+    fn the_bestiary_offer_is_answered() {
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut s = Session::connect_with(Box::new(Rec(sent.clone())), ([127, 0, 0, 1], 40000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
+        let answers = |s: &mut Session| -> Vec<(u8, Vec<u8>)> {
+            s.flush();
+            let m = sent.borrow().iter().flat_map(|d| messages(d)).filter(|(ty, d)| *ty == 251 && d.get(1) == Some(&0x7E)).collect();
+            sent.borrow_mut().clear();
+            m
+        };
+        assert!(!s.ask_bestiary(0), "never offered: no ask");
+        assert_eq!(answers(&mut s), [], "never offered");
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xF4, 0x7E, 1, 0, 0]);
+        deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xF4, 0x7E, 0, 0, 0, 0]);
+        assert!(!s.bestiary, "the controls: cut short, or 0");
+        assert_eq!(answers(&mut s), []);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xF4, 0x7E, 1, 0, 0, 0]);
+        assert!(ev.is_empty() && s.bestiary, "the offer is the session's: {ev:?}");
+        assert_eq!(answers(&mut s), [(251, vec![0xF4, 0x7E, 1, 0, 0, 0])]);
+        assert!(s.ask_bestiary(3));
+        assert_eq!(answers(&mut s), [(251, vec![0xF5, 0x7E, 3, 0])]);
+        let ev = deliver(&mut s, drdp::TYPE_GUARANTEED, vec![0xF5, 0x7E, 1, 0, 0]);
+        assert!(matches!(&ev[..], [Event::Opcode { op: OP_BESTIARY_DATA, data }] if data[..] == [1, 0, 0]), "{ev:?}");
+        assert_eq!(answers(&mut s), [], "the page answered nothing");
     }
 
     // Capes (0x7E25): the offer answered with 1 at once and kept; then the list's

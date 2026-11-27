@@ -27,7 +27,7 @@ use crate::fork_ext::addons::{
     window_sessions,
     window_takeover::{self, TakeoverKind},
 };
-use net::mercwin::{CARRIED, HEIRLOOM, OPEN, SLOTS, STOCK, WORN};
+use net::mercwin::{CARRIED, HEIRLOOM, OPEN, SLOTS, STOCK, USE, WORN};
 use serde_json::{Value as Json, json};
 use std::cell::RefCell;
 
@@ -191,7 +191,8 @@ pub(crate) fn dropped() {
 
 fn kind_name(kind: u8) -> &'static str {
     match kind {
-        CARRIED => "carried",
+        // layout 2 sends carried food and drink as USE (the game's Use row); to a mod it is still carried
+        CARRIED | USE => "carried",
         WORN => "worn",
         HEIRLOOM => "heirloom",
         STOCK => "stock",
@@ -846,7 +847,7 @@ fn dispatch_merc(play: &mut Play, action: &A11Action) -> DispatchOutcome {
                     Ask::Unequip(*id)
                 }
                 A11Action::MercTake { id } => {
-                    if !record(*id, &[CARRIED, WORN]) {
+                    if !record(*id, &[CARRIED, USE, WORN]) {
                         return refuse("stale_handle", "the mercenary holds no such record to take back");
                     }
                     Ask::Take(*id)
