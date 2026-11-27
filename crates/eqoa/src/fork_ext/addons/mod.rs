@@ -41,6 +41,7 @@ pub(crate) mod actions;
 pub(crate) mod window_actions;
 pub(crate) mod window_kinds;
 pub(crate) mod window_takeover;
+pub(crate) mod window_conflict;
 pub(crate) mod raid_strips;
 pub(crate) mod change_events;
 #[cfg(test)]
@@ -130,6 +131,8 @@ pub(crate) mod native_a6;
 mod a6_tests;
 #[cfg(test)]
 mod a13_tests;
+#[cfg(test)]
+mod window_conflict_tests;
 #[cfg(test)]
 mod a13_mod_tests;
 pub(crate) mod native_a8;

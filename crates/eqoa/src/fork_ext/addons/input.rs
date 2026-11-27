@@ -624,6 +624,11 @@ fn live_text_captures() -> Vec<(u64, Instant)> {
     })
 }
 
+/// Mod `vm` holds a live text capture (the player may be typing into it).
+pub(crate) fn vm_has_text_capture(vm: u64) -> bool {
+    live_text_captures().iter().any(|(v, _)| *v == vm)
+}
+
 /// The one mod a paste is for: the mod that holds a text capture. With two mods holding one at the press nobody can say
 /// which the player meant, and a mod that renews its hold after the others each frame must not be able to take the paste:
 /// then there is no recipient and nothing is read.

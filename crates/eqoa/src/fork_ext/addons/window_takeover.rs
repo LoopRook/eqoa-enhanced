@@ -448,7 +448,9 @@ pub(crate) fn takeover(
             "the player is using the game's windows: no mod replaces them".into(),
         ));
     }
-    with_state_mut(|s| {
+    // who holds the window when this asker is refused, told to `window_conflict` once the registry is let go of
+    let mut refused_by: Option<(u64, String)> = None;
+    let result = with_state_mut(|s| {
         let idx = kind as usize;
         if let Some(existing) = &mut s.holders[idx] {
             if existing.vm == vm {
@@ -462,6 +464,7 @@ pub(crate) fn takeover(
                 }
                 return Ok(());
             }
+            refused_by = Some((existing.vm, existing.addon_id.clone()));
             return Err((
                 "busy",
                 format!(
@@ -477,7 +480,11 @@ pub(crate) fn takeover(
             scope,
         });
         Ok(())
-    })
+    });
+    if let Some((holder_vm, holder_id)) = refused_by {
+        super::window_conflict::record(kind, (holder_vm, &holder_id), (vm, addon_id));
+    }
+    result
 }
 
 pub(crate) fn release(vm: u64, kind: TakeoverKind) -> bool {
@@ -1138,6 +1145,7 @@ pub(crate) fn expire_hidden_session_for_test(kind: TakeoverKind) {
 pub(crate) fn reset_all_for_test() {
     USE_GAME_WINDOWS.with(|value| value.set(Some(false)));
     STATE.with(|s| *s.borrow_mut() = TakeoverState::default());
+    super::window_conflict::reset_for_test();
     HAS_ACTIVITY.with(|a| a.set(false));
     #[cfg(test)]
     STATE_BORROWS.with(|n| n.set(0));
