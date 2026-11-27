@@ -187,6 +187,7 @@ fn bag_world(mutations: &[(&str, &str)]) -> Lua {
     lua.globals().set("MULTI_LOADER", loader(&lua, source("eqoa_bag_viewer/modules/multi.lua"), "multi.lua")).unwrap();
     lua.globals().set("AUCTION_LIST_LOADER", loader(&lua, source("eqoa_bag_viewer/modules/auction_list.lua"), "auction_list.lua")).unwrap();
     lua.globals().set("REPAIR_LOADER", loader(&lua, source("eqoa_bag_viewer/modules/repair.lua"), "repair.lua")).unwrap();
+    lua.globals().set("TRADE_LOADER", loader(&lua, source("eqoa_bag_viewer/modules/trade.lua"), "trade.lua")).unwrap();
     lua.load(FAKE).exec().unwrap();
     lua.load(FIXTURE).exec().unwrap();
     lua.load(
@@ -198,6 +199,7 @@ fn bag_world(mutations: &[(&str, &str)]) -> Lua {
         package.preload["multi"] = function() return MULTI_LOADER() end
         package.preload["auction_list"] = function() return AUCTION_LIST_LOADER() end
         package.preload["repair"] = function() return REPAIR_LOADER() end
+        package.preload["trade"] = function() return TRADE_LOADER() end
         -- character Alice saved "off" for all three helpers; Bob has no saved choice
         FILES["helpers.cfg"] = "auto:Alice:sell=0\nauto:Alice:restock=0\nauto:Alice:bank=0\n"
         POLLS = 0
