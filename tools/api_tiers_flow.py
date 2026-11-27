@@ -576,9 +576,13 @@ class Flow:
             value, after, info = self.chain(i)
             nxt = toks[after] if after < len(toks) else ("op", ";", 0)
             if nxt[0] == "name" and nxt[1] == "and" and after + 1 < len(toks) and T.is_name(toks[after + 1]):
-                # `cond and CHAIN` / `cond and CHAIN or nil`: the value is CHAIN's (or falsy)
+                # `cond and CHAIN` / `cond and CHAIN or nil`: the value is CHAIN's (or falsy); a run of guards
+                # (`eqoa.x and eqoa.x.get and eqoa.x.get()`) is the last one's
                 value, after, info = self.chain(after + 1)
                 nxt = toks[after] if after < len(toks) else ("op", ";", 0)
+                while nxt[0] == "name" and nxt[1] == "and" and after + 1 < len(toks) and T.is_name(toks[after + 1]):
+                    value, after, info = self.chain(after + 1)
+                    nxt = toks[after] if after < len(toks) else ("op", ";", 0)
                 if nxt[0] == "name" and nxt[1] == "or":
                     tail = toks[after + 1] if after + 1 < len(toks) else ("op", ";", 0)
                     if tail[1] not in ("{", "nil", "false"):

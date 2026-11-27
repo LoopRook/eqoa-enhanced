@@ -319,6 +319,10 @@ class Records(unittest.TestCase):
         # negative control: the fallback is something else
         tier = self.check("local ok = true\nlocal c = ok and eqoa.bank.get() or other\nlocal x = c.items\n")
         self.assertEqual(tier["eqoa.items.Container.items"], "provisional")
+        tier = self.check("local c = eqoa.bank and eqoa.bank.get and eqoa.bank.get()\nlocal x = c.items\n")
+        self.assertEqual(tier["eqoa.items.Container.items"], "proven")
+        tier = self.check("local c = eqoa.bank and eqoa.bank.get and other.get()\nlocal x = c.items\n")
+        self.assertEqual(tier["eqoa.items.Container.items"], "provisional")
         tier = self.check("local ok, c = pcall(eqoa.bank.get)\nlocal x = c.items\n")
         self.assertEqual(tier["eqoa.items.Container.items"], "proven")
         tier = self.check("local ok, c = pcall(other.get)\nlocal x = c.items\n")

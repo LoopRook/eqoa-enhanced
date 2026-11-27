@@ -4,8 +4,8 @@
  "rule": "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
  "counts": {
   "total": 2601,
-  "proven": 846,
-  "provisional": 1388,
+  "proven": 853,
+  "provisional": 1381,
   "compat": 367,
   "by_kind": {
    "action": {
@@ -24,8 +24,8 @@
     "compat": 0
    },
    "field": {
-    "proven": 337,
-    "provisional": 974,
+    "proven": 344,
+    "provisional": 967,
     "compat": 0
    },
    "function": {
@@ -872,13 +872,10 @@
   "eqoa.input.RawAxes.x",
   "eqoa.input.RawAxes.y",
   "eqoa.input.rotate_dpad",
-  "eqoa.items.Container.capacity",
   "eqoa.items.Container.full",
   "eqoa.items.Container.kind",
   "eqoa.items.Container.master_loot",
   "eqoa.items.Container.merchant",
-  "eqoa.items.Container.remaining",
-  "eqoa.items.Container.used",
   "eqoa.items.Container.view",
   "eqoa.items.ContainerView",
   "eqoa.items.ContainerView.rows",
@@ -1146,7 +1143,6 @@
   "eqoa.player.Location.place_id",
   "eqoa.player.Location.world_id",
   "eqoa.player.Player.armor",
-  "eqoa.player.Player.auto_attacking",
   "eqoa.player.Player.dead",
   "eqoa.player.Player.entity",
   "eqoa.player.Player.experience_debt",
@@ -1424,10 +1420,7 @@
   "eqoa.windows.Window.title",
   "eqoa.windows.Window.visible",
   "eqoa.windows.Windows.active",
-  "eqoa.windows.Windows.any_window_open",
   "eqoa.windows.Windows.mode",
-  "eqoa.windows.Windows.native_mode",
-  "eqoa.windows.Windows.start_menu_open",
   "eqoa.windows.Windows.windows",
   "eqoa.windows.find",
   "eqoa.windows.format_hint",
