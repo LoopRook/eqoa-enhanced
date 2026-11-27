@@ -162,6 +162,8 @@ EVENT_OPTIONAL = {
     ['batch.progress'] = 'ok code reason completed_tick failed_step',
     -- code/reason: only a batch that stopped or failed; failed_step: only when a step failed
     ['batch.result'] = 'code reason failed_step',
+    -- sender: only a line a player speaks (nil for a creature's, a system line, your own)
+    ['chat.message'] = 'sender',
     -- text: only a key that types a character
     ['input.key'] = 'text',
     -- closed_by: only a change that reports a corpse window going
@@ -288,8 +290,11 @@ fn round7c_refusing_members_report_the_same_capability_as_their_call() {
         assert(caps.get('eqoa.windows.takeover').round == 6)
         assert(caps.get('eqoa.entities.Entity.npc_flags').round == 6)
         assert(caps.get('eqoa.files.list').round == 7)
-        assert(caps.get('eqoa.chat.ChatMessage.sender').status == 'unsupported')
-        assert(caps.get('eqoa.events.chat.message.data.sender').status == 'unsupported')
+        assert(caps.get('eqoa.chat.ChatMessage.sender').status == 'supported')
+        assert(caps.get('eqoa.events.chat.message.data.sender').status == 'supported')
+        assert(caps.get('eqoa.chat.ChatMessage.channel_code').status == 'unsupported')
+        assert(caps.get('eqoa.chat.ChatMessage.outgoing').status == 'unsupported')
+        assert(caps.get('eqoa.events.chat.message.data.outgoing').status == 'unsupported')
         assert(caps.get('eqoa.hotbar.HotbarSlot.command').status == 'unsupported')
         for _, row in ipairs(caps.list('')) do
             if row.status == 'not_yet' then

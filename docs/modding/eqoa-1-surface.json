@@ -2168,6 +2168,7 @@
         "eqoa.actions.merc_take",
         "eqoa.actions.merc_unequip",
         "eqoa.actions.move",
+        "eqoa.actions.open_chat_line",
         "eqoa.actions.open_link",
         "eqoa.actions.open_loot",
         "eqoa.actions.open_window",
@@ -3243,6 +3244,14 @@
       "revision": 0,
       "round": 6,
       "status": "not_yet"
+    },
+    {
+      "children": [],
+      "path": "eqoa.actions.open_chat_line",
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
     },
     {
       "children": [],
@@ -4698,7 +4707,7 @@
     {
       "children": [],
       "path": "eqoa.chat.ChatMessage.channel_code",
-      "reason": "the chat observer retains only text, color and the channel name",
+      "reason": "the chat observer retains only text, color, the channel name and the speaker",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -4730,7 +4739,7 @@
     {
       "children": [],
       "path": "eqoa.chat.ChatMessage.outgoing",
-      "reason": "the chat observer retains only text, color and the channel name",
+      "reason": "the chat observer retains only text, color, the channel name and the speaker",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -4738,10 +4747,10 @@
     {
       "children": [],
       "path": "eqoa.chat.ChatMessage.sender",
-      "reason": "the chat observer retains only text, color and the channel name",
-      "revision": 0,
-      "round": null,
-      "status": "unsupported"
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
     },
     {
       "children": [],
@@ -7486,7 +7495,7 @@
     {
       "children": [],
       "path": "eqoa.events.chat.message.data.channel_code",
-      "reason": "the chat observer retains only text, color and the channel name",
+      "reason": "the chat observer retains only text, color, the channel name and the speaker",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -7518,7 +7527,7 @@
     {
       "children": [],
       "path": "eqoa.events.chat.message.data.outgoing",
-      "reason": "the chat observer retains only text, color and the channel name",
+      "reason": "the chat observer retains only text, color, the channel name and the speaker",
       "revision": 0,
       "round": null,
       "status": "unsupported"
@@ -7526,10 +7535,10 @@
     {
       "children": [],
       "path": "eqoa.events.chat.message.data.sender",
-      "reason": "the chat observer retains only text, color and the channel name",
-      "revision": 0,
-      "round": null,
-      "status": "unsupported"
+      "reason": null,
+      "revision": 1,
+      "round": 2,
+      "status": "supported"
     },
     {
       "children": [],
@@ -24018,9 +24027,9 @@
     }
   ],
   "metadata": {
-    "client_version": "0.7.0",
+    "client_version": "0.7.1",
     "commit": "unstamped local build",
-    "generated_utc": "2026-11-26",
+    "generated_utc": "2026-11-27",
     "platform": "windows-x86_64"
   },
   "schema_version": 1

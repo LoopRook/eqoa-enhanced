@@ -3,13 +3,13 @@
  "schema_version": 1,
  "rule": "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
  "counts": {
-  "total": 2601,
-  "proven": 874,
-  "provisional": 1360,
+  "total": 2604,
+  "proven": 880,
+  "provisional": 1357,
   "compat": 367,
   "by_kind": {
    "action": {
-    "proven": 85,
+    "proven": 86,
     "provisional": 47,
     "compat": 0
    },
@@ -24,8 +24,8 @@
     "compat": 0
    },
    "field": {
-    "proven": 364,
-    "provisional": 947,
+    "proven": 368,
+    "provisional": 945,
     "compat": 0
    },
    "function": {
@@ -39,8 +39,8 @@
     "compat": 0
    },
    "type": {
-    "proven": 75,
-    "provisional": 86,
+    "proven": 76,
+    "provisional": 85,
     "compat": 0
    }
   }
@@ -262,7 +262,6 @@
   "eqoa.chat.ChatLink.len",
   "eqoa.chat.ChatLink.name",
   "eqoa.chat.ChatLink.start",
-  "eqoa.chat.ChatMessage",
   "eqoa.chat.ChatMessage.channel",
   "eqoa.chat.ChatMessage.color",
   "eqoa.chat.ChatMessage.kind",
@@ -399,8 +398,6 @@
   "eqoa.entities.Entity.diseased",
   "eqoa.entities.Entity.disposition",
   "eqoa.entities.Entity.entity_type",
-  "eqoa.entities.Entity.head_mark",
-  "eqoa.entities.Entity.merc_tag",
   "eqoa.entities.Entity.poisoned",
   "eqoa.entities.Entity.ref",
   "eqoa.entities.Entity.status_flags",
