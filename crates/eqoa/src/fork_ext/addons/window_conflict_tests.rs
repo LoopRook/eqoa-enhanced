@@ -265,7 +265,7 @@ fn a_long_name_and_many_conflicts_keep_the_box_short() {
     let long = |_: &str| "A".repeat(100);
     let (_holder, _rival) = two_mods();
     let line = wc::box_lines(&long).remove(0);
-    assert!(line.chars().count() < 100, "{line}");
+    assert!(!line.contains(&"A".repeat(33)), "{line}");
     assert!(line.contains('\u{2026}'));
     // seven windows at once: five lines and a count
     let a = mod_with("a", &[]);

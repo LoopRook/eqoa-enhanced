@@ -69,12 +69,12 @@ pub(crate) fn record(kind: TakeoverKind, holder: (u64, &str), loser: (u64, &str)
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         prune(&mut s);
+        let key = (kind, conflict.holder_id.clone(), conflict.loser_id.clone());
+        if s.announced.insert(key) && !s.boxed.contains(&conflict) {
+            s.boxed.push(conflict.clone());
+        }
         if s.conflicts.contains(&conflict) {
             return;
-        }
-        let key = (kind, conflict.holder_id.clone(), conflict.loser_id.clone());
-        if s.announced.insert(key) {
-            s.boxed.push(conflict.clone());
         }
         s.conflicts.push(conflict);
     });
