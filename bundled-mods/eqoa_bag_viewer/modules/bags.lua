@@ -23,6 +23,8 @@ local M = {
     -- a merchant or banker the mod's own helpers talked to (open_talk_npc, until their release): not a visit the player made
     -- (modules/trade.lua shows a visit as the Merchant tab or the Bank tab's two panels)
     helper_hold = {},
+    -- corpses (entity ids) last seen with nothing on them, by the mod or by the player's own window: no tab for them
+    emptied = {},
 }
 
 local JUNK_FILE = "junk.cfg"
@@ -97,7 +99,7 @@ local function scan_zone(ttl)
         local age = now - scan_at
         if age < (ttl or SCAN_TTL) and not (scan_dirty and age >= SCAN_MIN) then return scan_data end
     end
-    local data = {corpses = {}, nearest = {}}
+    local data = {corpses = {}, nearest = {}, corpse_near = {}}
     M.scan_count = M.scan_count + 1
     scan_data, scan_at, scan_dirty = data, now, false
     local list = eqoa.entities and eqoa.entities.list and eqoa.entities.list()
@@ -118,6 +120,7 @@ local function scan_zone(ttl)
         if e.corpse then
             local d2 = dist_sq(ppos, e.actor_position or e.position) or 0
             data.corpses[#data.corpses + 1] = e
+            data.corpse_near[#data.corpse_near + 1] = {e = e, d2 = d2}
             consider("corpse", e, d2)
         else
             if pid and not data.hostile and e.kind == "npc" and e.target_id == pid and not M.not_a_fight(e, ppos, pl) then
@@ -137,11 +140,57 @@ local function scan_zone(ttl)
             end
         end
     end
+    -- a corpse that is gone is forgotten (its id may come again for another)
+    if next(M.emptied) ~= nil then
+        local present = {}
+        for _, e in ipairs(data.corpses) do present[e.id] = true end
+        for id in pairs(M.emptied) do
+            if not present[id] then M.emptied[id] = nil end
+        end
+    end
     return data
 end
 
 function M.scan_reset()
     scan_at, scan_data, scan_dirty = nil, nil, false
+end
+
+-- The corpse the Corpse tab and its buttons are about: the nearest within loot reach that is not known to be empty. The
+-- client cannot say what lies on a corpse nobody has opened (an `Entity` has no loot), so "still has loot" is: not seen empty.
+-- A corpse is seen empty when its window listed nothing (the mod's own open or the player's, `note_corpse_contents`).
+function M.lootable_corpse(ttl)
+    local data = scan_zone(ttl)
+    local reach = M.loot_reach_now()
+    local best, best_d2
+    for _, c in ipairs(data.corpse_near or {}) do
+        if c.d2 <= reach * reach and not M.emptied[c.e.id] and (best_d2 == nil or c.d2 < best_d2) then
+            best, best_d2 = c.e, c.d2
+        end
+    end
+    if not best then return nil end
+    return best, best_d2
+end
+
+-- loot.changed (the mod's always-on listener): what the corpse window lists says whether that corpse still has loot. The
+-- corpse is the one the client names (`source`), else the one the mod asked for, else the player's target when it is a corpse
+-- in the zone as last looked at.
+function M.note_corpse_contents(d)
+    local after = d and d.after
+    if not after then
+        M.opening_id = nil
+        return
+    end
+    local id = (after.source and after.source.entity_id) or M.opening_id
+    if not id then
+        local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
+        local target = pl and pl.target_id
+        -- (the scan as it stands: a handler of the loot window does not make a look at the zone of its own)
+        for _, e in ipairs(scan_data and scan_data.corpses or {}) do
+            if e.id == target then id = target break end
+        end
+    end
+    if not id then return end
+    if #(after.items or {}) == 0 then M.emptied[id] = true else M.emptied[id] = nil end
 end
 
 function M.nearby_corpse(ttl)
@@ -328,7 +377,7 @@ end
 function M.visible_tabs()
     local tabs = {}
     for _, t in ipairs(M.TABS) do tabs[#tabs + 1] = t end
-    if eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse(M.DRAW_TTL) ~= nil then
+    if eqoa.loot.get() or keeping_corpse_tab() or M.lootable_corpse(M.DRAW_TTL) ~= nil then
         local t = M.CORPSE_TAB
         tabs[#tabs + 1] = {key = t.key, label = t.label, idx = 7}
     end
@@ -452,7 +501,7 @@ local function active_key_and_container()
             if not loot_batch_active() then
                 M.corpse_tab_kept = false
             end
-        elseif keeping_corpse_tab() or M.nearby_corpse() ~= nil then
+        elseif keeping_corpse_tab() or M.lootable_corpse() ~= nil then
             c = EMPTY_CORPSE
         else
             M.tab = 1
@@ -539,7 +588,7 @@ function M.select(tab)
     if M.result and M.result.expires then M.result = nil end
     if M.multi and tab ~= M.tab then M.multi.clear() end -- multi-select: a selection belongs to the tab it was made on
     if M.trade and tab ~= M.tab then M.trade.leaving(M.tab) end -- the Merchant tab left: the visit ends
-    if tab == 7 and (eqoa.loot.get() or keeping_corpse_tab() or M.nearby_corpse() ~= nil) and M.tab ~= 7 then
+    if tab == 7 and (eqoa.loot.get() or keeping_corpse_tab() or M.lootable_corpse() ~= nil) and M.tab ~= 7 then
         if M.tab == 6 then release_takeover("bank") end
         M.tab = 7; M.scroll = 0; M.grid_scroll = 0; M.grid = nil; M.menu = nil
     elseif tab ~= M.tab and (M.TABS[tab] or (M.trade and tab == M.trade.TAB and M.trade.visit_merchant())) then
@@ -934,6 +983,7 @@ function M.open_loot_corpse(after_kind, corpse_id, keep_target)
         return nil, {code = "busy", message = "still waiting for the server to open a corpse"}
     end
     if not M.ensure_takeover("loot") then return nil, {message = "window busy"} end
+    M.opening_id = corpse_id
     local req, err = eqoa.actions.open_loot(corpse_id, keep_target and {keep_target = true} or nil)
     if not req then
         release_takeover("loot")
@@ -1024,7 +1074,8 @@ function M.start_loot_button()
         M.dirty()
         return true
     end
-    return M.open_loot_corpse(nil) ~= nil
+    local c = M.lootable_corpse()
+    return M.open_loot_corpse(nil, c and c.id) ~= nil
 end
 
 function M.start_sell_junk()
@@ -1106,6 +1157,21 @@ function M.start_loot_all()
         return true
     end
 end
+
+-- The Corpse tab's two Take buttons (the player's click). With the corpse window open they are `start_loot_all` and
+-- `start_loot_non_junk`. With none open they ask for the corpse the tab is about (`lootable_corpse`: in reach, not known to be
+-- empty), by its id. Auto-loot and the finish of an open it asked for keep calling `start_loot_all`/`start_loot_non_junk`
+-- as they were (the nearest corpse, whatever is known of it): the tab's idea of "still has loot" does not steer them.
+local function take_button(start, kind)
+    if eqoa.loot.get() then return start() end
+    local c = M.lootable_corpse()
+    if c ~= nil then return M.open_loot_corpse(kind, c.id) ~= nil end
+    M.dirty()
+    M.result = {text = "Corpse has no items", ok = false}
+    return false
+end
+function M.take_all_button() return take_button(M.start_loot_all, "loot_all") end
+function M.take_non_junk_button() return take_button(M.start_loot_non_junk, "loot_non_junk") end
 
 function M.start_loot_non_junk()
     local loot = eqoa.loot.get()
