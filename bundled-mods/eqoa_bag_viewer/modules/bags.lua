@@ -1125,9 +1125,8 @@ end
 function M.start_loot_all()
     local loot = eqoa.loot.get()
     if not loot then
-        local c = M.lootable_corpse()
-        if c ~= nil then
-            return M.open_loot_corpse("loot_all", c.id) ~= nil
+        if M.nearby_corpse() ~= nil then
+            return M.open_loot_corpse("loot_all") ~= nil
         end
         M.dirty()
         M.result = {text = "Corpse has no items", ok = false}
@@ -1159,12 +1158,26 @@ function M.start_loot_all()
     end
 end
 
+-- The Corpse tab's two Take buttons (the player's click). With the corpse window open they are `start_loot_all` and
+-- `start_loot_non_junk`. With none open they ask for the corpse the tab is about (`lootable_corpse`: in reach, not known to be
+-- empty), by its id. Auto-loot and the finish of an open it asked for keep calling `start_loot_all`/`start_loot_non_junk`
+-- as they were (the nearest corpse, whatever is known of it): the tab's idea of "still has loot" does not steer them.
+local function take_button(start, kind)
+    if eqoa.loot.get() then return start() end
+    local c = M.lootable_corpse()
+    if c ~= nil then return M.open_loot_corpse(kind, c.id) ~= nil end
+    M.dirty()
+    M.result = {text = "Corpse has no items", ok = false}
+    return false
+end
+function M.take_all_button() return take_button(M.start_loot_all, "loot_all") end
+function M.take_non_junk_button() return take_button(M.start_loot_non_junk, "loot_non_junk") end
+
 function M.start_loot_non_junk()
     local loot = eqoa.loot.get()
     if not loot then
-        local c = M.lootable_corpse()
-        if c ~= nil then
-            return M.open_loot_corpse("loot_non_junk", c.id) ~= nil
+        if M.nearby_corpse() ~= nil then
+            return M.open_loot_corpse("loot_non_junk") ~= nil
         end
         M.dirty()
         M.result = {text = "Corpse has no items", ok = false}

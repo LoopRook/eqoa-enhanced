@@ -158,3 +158,33 @@ fn corpse_tab_a_selected_tab_falls_back_to_all_when_it_goes_and_the_buttons_open
     run(&bad, "B.start_loot_button()");
     assert_eq!(string(&bad, "tostring(OPENS[1].id)"), "nil", "negative control: no corpse named, the nearest (the empty one) is asked for");
 }
+
+#[test]
+fn corpse_tab_the_take_buttons_ask_for_the_corpse_with_loot_and_auto_loots_path_is_as_it_was() {
+    // the nearer corpse (600) is known empty, the other (601) is not
+    let setup = "corpses({{600, 2}, {601, 5}}); window(600, {}); window_closes()";
+    let lua = world();
+    run(&lua, setup);
+    run(&lua, "B.take_all_button()");
+    assert_eq!(string(&lua, "#OPENS .. ':' .. tostring(OPENS[1].id)"), "1:601", "the Take all button names the corpse that has loot");
+    let lua = world();
+    run(&lua, setup);
+    run(&lua, "B.take_non_junk_button()");
+    assert_eq!(string(&lua, "#OPENS .. ':' .. tostring(OPENS[1].id)"), "1:601", "so does Take all but junk");
+    // Auto-loot's finish of an open it asked for (and the player's attack-key path) call `start_loot_all` with no window: as
+    // before this change it asks for the nearest corpse the old way (no id), known empty or not
+    let lua = world();
+    run(&lua, setup);
+    run(&lua, "B.start_loot_all()");
+    assert_eq!(string(&lua, "#OPENS .. ':' .. tostring(OPENS[1].id)"), "1:nil", "Auto-loot's path is untouched");
+    // negative control: if the button asked as Auto-loot's path does, it would ask for the nearest (the empty one)
+    let bad = mutated(&[("    if eqoa.loot.get() then return start() end\n    local c = M.lootable_corpse()", "    if true then return start() end\n    local c = M.lootable_corpse()")]);
+    run(&bad, setup);
+    run(&bad, "B.take_all_button()");
+    assert_eq!(string(&bad, "tostring(OPENS[1].id)"), "nil", "negative control: no corpse named");
+    // nothing in reach with loot: the button says so and asks for nothing
+    let lua = world();
+    run(&lua, "corpses({{600, 2}}); window(600, {}); window_closes(); B.take_all_button()");
+    assert_eq!(string(&lua, "#OPENS"), "0");
+    assert_eq!(string(&lua, "B.result.text"), "Corpse has no items");
+}

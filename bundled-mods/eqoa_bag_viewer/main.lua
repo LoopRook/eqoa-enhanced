@@ -710,8 +710,8 @@ function draw()
         local steps, _ = B.loot_non_junk_list()
         local can_non_junk = (loot ~= nil and #steps > 0) or (loot == nil and near_corpse ~= nil)
         ctx_btn(PAD, w_loot, "Look at corpse", can_open and c.text or c.muted, c.border, B.start_loot_button)
-        ctx_btn(PAD + w_loot + bgap, w_all, "Take all", has_items and c.text or c.muted, has_items and c.worn or c.border, B.start_loot_all)
-        ctx_btn(PAD + w_loot + bgap + w_all + bgap, w_non, "Take all but junk", can_non_junk and c.text or c.muted, can_non_junk and c.worn or c.border, B.start_loot_non_junk)
+        ctx_btn(PAD + w_loot + bgap, w_all, "Take all", has_items and c.text or c.muted, has_items and c.worn or c.border, B.take_all_button)
+        ctx_btn(PAD + w_loot + bgap + w_all + bgap, w_non, "Take all but junk", can_non_junk and c.text or c.muted, can_non_junk and c.worn or c.border, B.take_non_junk_button)
     elseif merch ~= nil then
         -- the merchant window is open (the player's own or ours): never blocked by distance
         local _, cnt, tunar = B.junk_sell_list()
