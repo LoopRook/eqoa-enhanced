@@ -784,8 +784,8 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
     let table: Table = modules.get(module)?;
     let symbol = format!("eqoa.{module}.{name}");
     // Files, textures and fonts are served on every system (the rooted file operations of `sandbox.rs` work on Unix too).
-    // Sound has a backend on Windows only until a Unix one is built: there the name is refused, visibly.
-    if !cfg!(windows) && module == "sound" {
+    // Sound has a backend on Windows (MCI), Linux and macOS (`sound_mix.rs`); elsewhere the name is refused, visibly.
+    if !cfg!(any(windows, target_os = "linux", target_os = "macos")) && module == "sound" {
         let round = declared_round(lua, &symbol);
         let reason = "no native sound backend on this platform";
         return refuse_member(
