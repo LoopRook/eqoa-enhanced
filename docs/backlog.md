@@ -489,6 +489,9 @@ A font restored after going missing is retried after a face or size change or af
   his test: "it'd be cool"). Today it runs only for someone the journal already sends you to and presses only a
   sole answer. Not looked at: whether the client can tell a mod that a talk offers a quest, or that an answer costs
   coin. After the note to DabDavis.
+- **Mods on a server that asks for the game as it was** (owner, 2026-11-28: leave it alone for now). Today mods
+  are not restricted there. Not an API matter: it would be a switch in the client for whether mods load, and no
+  `eqoa/1` name changes. Raise it again if DabDavis asks when he sees the mod API pull request.
 - **Quest Journal mod: a button to track a quest's enemy or NPC** (owner, 2026-11-28: "would be very cool").
   Click a quest (or one of its goals) and the map and minimap point at the creature or person it needs. Goes with
   the quest guide work after the note to DabDavis.
