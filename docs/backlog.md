@@ -489,6 +489,9 @@ A font restored after going missing is retried after a face or size change or af
   his test: "it'd be cool"). Today it runs only for someone the journal already sends you to and presses only a
   sole answer. Not looked at: whether the client can tell a mod that a talk offers a quest, or that an answer costs
   coin. After the note to DabDavis.
+- **Quest Journal mod: a button to track a quest's enemy or NPC** (owner, 2026-11-28: "would be very cool").
+  Click a quest (or one of its goals) and the map and minimap point at the creature or person it needs. Goes with
+  the quest guide work after the note to DabDavis.
 - **Dialog mod: its three switches in its Settings panel in Mods & Addons** (owner looked there on 2026-11-28 and
   found it empty; the rows are on the Enhanced page). His answer: later, with the settings pane.
 - **World Map mod: quest icons are small, and "tracking" shows on the minimap but not on the World Map** (owner,
