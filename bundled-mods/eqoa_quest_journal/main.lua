@@ -67,7 +67,11 @@ local function pointer_pressed(d)
         if inside(d.x, d.y, h) and h.run then h.run(); return end
     end
     for _, h in ipairs(state.row_hits) do
-        if inside(d.x, d.y, h) then state.selected = h.quest.title; return end
+        if inside(d.x, d.y, h) then
+            state.selected = h.quest.title
+            eqoa.log.write("debug", "Quest Journal: selected " .. tostring(h.quest.title))
+            return
+        end
     end
 end
 

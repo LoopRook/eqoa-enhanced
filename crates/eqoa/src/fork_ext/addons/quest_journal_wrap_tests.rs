@@ -5,7 +5,6 @@
 //! SECOND line of a wrapped quest and shows that this quest, not the one under it, is selected.
 use super::{
     a1_mod_tests::{addon, click, context, fixture, frames, press},
-    action_broker::{self, ActionKind},
     bridge::Bridge,
     host::Host,
 };
@@ -29,7 +28,7 @@ const WIDTH: &str = "function(t) return #t * 7 end";
 fn wrap_puts_a_long_line_on_several_all_inside_the_width_and_loses_no_word() {
     let lua = wrap_module();
     let lines: Vec<String> = lua
-        .load(&format!("local out = W.wrap('{LONG}', 300, {WIDTH}) return out"))
+        .load(&format!("local out = W.wrap([[{LONG}]], 300, {WIDTH}) return out"))
         .eval::<Vec<String>>()
         .unwrap();
     assert!(lines.len() >= 2, "a long line goes onto several: {lines:?}");
@@ -99,19 +98,13 @@ fn set_quests(titles: &[&str]) {
     });
 }
 
-/// Which quest the Drop button names after a click at `(row_y)` HUD pixels down the window: the click selects, Drop asks about it.
-fn dropped_after_clicking(titles: &[&str], row_y: f64) -> Option<String> {
+/// The quest the journal reports selected after a click `row_y` HUD pixels down the window (the mod's debug line).
+fn selected_after_clicking(titles: &[&str], row_y: f64) -> Option<String> {
     let mut j = journal(titles);
     let (x0, y0, k) = j.place();
     click(&j.host, x0 + 30.0 * k, y0 + row_y * k, "left");
     j.frames(2);
-    // the Drop button: PAD + 6 across, the bar 248 HUD pixels down
-    click(&j.host, x0 + 16.0 * k, y0 + 256.0 * k, "left");
-    j.frames(2);
-    action_broker::queued_actions_for_test().into_iter().find_map(|a| match a {
-        ActionKind::DropQuest { title, .. } => Some(title),
-        _ => None,
-    })
+    j.host.drain_logs().unwrap().iter().rev().find_map(|l| l.split("Quest Journal: selected ").nth(1).map(str::to_string))
 }
 
 /// A click on the SECOND line of a wrapped quest selects that quest. Negative control (red before the change): the journal
@@ -120,14 +113,14 @@ fn dropped_after_clicking(titles: &[&str], row_y: f64) -> Option<String> {
 fn a_click_on_the_second_line_of_a_wrapped_quest_selects_that_quest() {
     // the list starts 24 HUD pixels down; a line is 13: 19 pixels in is the second line of the first quest
     let titles = [LONG, "Bat Eyes"];
-    assert_eq!(dropped_after_clicking(&titles, 24.0 + 13.0 + 6.0).as_deref(), Some(LONG), "the second line belongs to the long quest");
+    assert_eq!(selected_after_clicking(&titles, 24.0 + 13.0 + 6.0).as_deref(), Some(LONG), "the second line belongs to the long quest");
     // controls: the first line is the same quest, and the quest below the wrapped one is still reachable under it
-    assert_eq!(dropped_after_clicking(&titles, 24.0 + 6.0).as_deref(), Some(LONG), "the first line");
+    assert_eq!(selected_after_clicking(&titles, 24.0 + 6.0).as_deref(), Some(LONG), "the first line");
     // a wrapped quest below a one-line one: the one-line row is 13 pixels, the second line of the long one is 26 + 6 down
     assert_eq!(
-        dropped_after_clicking(&["Bat Eyes", LONG], 24.0 + 13.0 + 13.0 + 6.0).as_deref(),
+        selected_after_clicking(&["Bat Eyes", LONG], 24.0 + 13.0 + 13.0 + 6.0).as_deref(),
         Some(LONG),
         "the second line of the second quest"
     );
-    assert_eq!(dropped_after_clicking(&["Bat Eyes", LONG], 24.0 + 6.0).as_deref(), Some("Bat Eyes"), "the one-line quest above");
+    assert_eq!(selected_after_clicking(&["Bat Eyes", LONG], 24.0 + 6.0).as_deref(), Some("Bat Eyes"), "the one-line quest above");
 }
