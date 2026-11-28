@@ -63,11 +63,12 @@ fn latest() -> &'static Mutex<BTreeMap<PathBuf, u64>> {
     LATEST.get_or_init(Default::default)
 }
 fn ordered_path(path: PathBuf) -> PathBuf {
-    #[cfg(windows)]
+    // Windows' and macOS' default file systems do not tell `Journal.json` from `journal.json`: one path, one key.
+    #[cfg(any(windows, target_os = "macos"))]
     {
         return PathBuf::from(path.to_string_lossy().to_lowercase());
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         path
     }
@@ -206,21 +207,45 @@ fn write(job: &Job) -> std::result::Result<(), String> {
         let _ = started.send(());
         let _ = release.recv_timeout(Duration::from_secs(5));
     }
-    super::storage::atomic_replace_with(&target, &out.0, |from, to| {
-        let gate = latest().lock().unwrap();
-        if !job.permit.load(Ordering::Acquire)
-            || gate.get(&ordered_path(target.clone())) != Some(&job.generation)
-        {
-            return Err(std::io::Error::other("JSON save superseded or disabled"));
+    // Linux and macOS: the temporary file, the gate, the rename and the removal of the tombstone all happen
+    // relative to the held folders (`rooted.rs`).
+    #[cfg(unix)]
+    {
+        let gate = || {
+            let gate = latest().lock().unwrap();
+            if !job.permit.load(Ordering::Acquire)
+                || gate.get(&ordered_path(target.clone())) != Some(&job.generation)
+            {
+                return Err(std::io::Error::other("JSON save superseded or disabled"));
+            }
+            Ok(())
+        };
+        super::rooted::write_replace(&target, &out.0, true, Some(&gate)).map_err(|e| e.to_string())?;
+        match super::rooted::remove_file(&deleted) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
         }
-        std::fs::rename(from, to)?;
-        if deleted.exists() {
-            std::fs::remove_file(&deleted)?;
-        }
+        return Ok(());
+    }
+    #[cfg(not(unix))]
+    {
+        super::storage::atomic_replace_with(&target, &out.0, |from, to| {
+            let gate = latest().lock().unwrap();
+            if !job.permit.load(Ordering::Acquire)
+                || gate.get(&ordered_path(target.clone())) != Some(&job.generation)
+            {
+                return Err(std::io::Error::other("JSON save superseded or disabled"));
+            }
+            std::fs::rename(from, to)?;
+            if deleted.exists() {
+                std::fs::remove_file(&deleted)?;
+            }
+            Ok(())
+        })
+        .map_err(|e| e.to_string())?;
         Ok(())
-    })
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    }
 }
 #[cfg(test)]
 static PAUSE: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = Mutex::new(None);

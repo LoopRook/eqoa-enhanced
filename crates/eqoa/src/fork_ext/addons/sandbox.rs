@@ -109,7 +109,7 @@ impl Mounts {
         check_quota(root, &target, bytes.len())?;
         super::deferred_sync::atomic_replace_deferred(&target, bytes, Some(&self.addon.id)).map_err(|e| e.to_string())?;
         if deleted.exists() {
-            fs::remove_file(&deleted).map_err(|e| e.to_string())?;
+            remove_file(&deleted).map_err(|e| e.to_string())?;
         }
         super::exchange::saved(self, &key);
         Ok(())
@@ -148,66 +148,34 @@ impl Mounts {
     }
 }
 
-/// Unix counterparts of the Windows handle checks: every folder is opened without following a link, its
-/// identity (device and inode) is compared with what the path shows, and the chain is checked again at the end.
-/// Links owned by root (macOS' `/var`, `/tmp`) are the system's own and are followed; any other link is refused.
-#[cfg(unix)]
-pub(crate) mod unix {
-    use std::{fs, os::unix::fs::{MetadataExt, OpenOptionsExt}, path::Path};
-
-    pub(crate) fn identity(file: &fs::File) -> Result<(u64, u64), String> {
-        let meta = file.metadata().map_err(|e| e.to_string())?;
-        Ok((meta.dev(), meta.ino()))
-    }
-    pub(crate) fn trusted_link(meta: &fs::Metadata) -> bool {
-        meta.file_type().is_symlink() && meta.uid() == 0
-    }
-    pub(crate) fn open_dir(dir: &Path) -> Result<fs::File, String> {
-        let seen = fs::symlink_metadata(dir).map_err(|e| e.to_string())?;
-        let mut options = fs::OpenOptions::new();
-        options.read(true);
-        // O_NOFOLLOW refuses a link as the last component; a root-owned system link is followed on purpose.
-        options.custom_flags(libc::O_DIRECTORY | if trusted_link(&seen) { 0 } else { libc::O_NOFOLLOW });
-        let file = options.open(dir).map_err(|e| e.to_string())?;
-        let now = fs::symlink_metadata(dir).map_err(|e| e.to_string())?;
-        if now.file_type().is_symlink() && !trusted_link(&now) {
-            return Err("symlink in addon path".into());
-        }
-        still_there(dir, identity(&file)?)?;
-        Ok(file)
-    }
-    pub(crate) fn still_there(dir: &Path, id: (u64, u64)) -> Result<(), String> {
-        let meta = fs::metadata(dir).map_err(|e| e.to_string())?;
-        if (meta.dev(), meta.ino()) != id {
-            return Err("folder replaced in addon path".into());
-        }
-        Ok(())
-    }
-    pub(crate) fn open_file(path: &Path) -> Result<fs::File, String> {
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(path)
-            .map_err(|e| e.to_string())?;
-        let meta = file.metadata().map_err(|e| e.to_string())?;
-        if !meta.is_file() {
-            return Err("addon resource is not a regular file".into());
-        }
-        still_there(path, (meta.dev(), meta.ino())).map_err(|_| "resource replaced in addon path".to_string())?;
-        Ok(file)
-    }
+/// Removes a file a mod's data folder holds: relative to the held folder on Linux and macOS.
+pub(crate) fn remove_file(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    return super::rooted::remove_file(path);
+    #[cfg(not(unix))]
+    fs::remove_file(path)
 }
 
 pub(crate) struct PathGuard {
     _parents: Vec<fs::File>,
 }
+/// Linux and macOS: the folders above `path` are held open from a resolved root down, none a link (`rooted.rs`).
+#[cfg(unix)]
+pub(crate) fn lock_parents(path: &Path, create: bool) -> Result<PathGuard, String> {
+    path.parent().ok_or("file has no parent")?;
+    Ok(PathGuard {
+        _parents: match super::rooted::descend_parent(path, create)? {
+            super::rooted::Held::Missing => Vec::new(),
+            super::rooted::Held::At(chain, _) => chain.into_files(),
+        },
+    })
+}
+#[cfg(not(unix))]
 pub(crate) fn lock_parents(path: &Path, create: bool) -> Result<PathGuard, String> {
     let parent = path.parent().ok_or("file has no parent")?;
     let mut dirs = parent.ancestors().collect::<Vec<_>>();
     dirs.reverse();
     let mut handles = Vec::new();
-    #[cfg(unix)]
-    let mut held: Vec<(PathBuf, (u64, u64))> = Vec::new();
     for dir in dirs {
         if !dir.exists() {
             super::file_io::no_links(dir)?;
@@ -242,13 +210,7 @@ pub(crate) fn lock_parents(path: &Path, create: bool) -> Result<PathGuard, Strin
             }
             handles.push(file);
         }
-        #[cfg(unix)]
-        {
-            let file = unix::open_dir(dir)?;
-            held.push((dir.to_path_buf(), unix::identity(&file)?));
-            handles.push(file);
-        }
-        #[cfg(not(any(windows, unix)))]
+        #[cfg(not(windows))]
         {
             let _ = (&mut handles, dir);
             return Err(
@@ -257,14 +219,13 @@ pub(crate) fn lock_parents(path: &Path, create: bool) -> Result<PathGuard, Strin
             );
         }
     }
-    // A folder swapped for a link while the chain was being walked no longer resolves to the folder
-    // that was opened: refuse (Unix cannot block the rename the way Windows' share mode does).
-    #[cfg(unix)]
-    for (dir, id) in &held {
-        unix::still_there(dir, *id)?;
-    }
     Ok(PathGuard { _parents: handles })
 }
+#[cfg(unix)]
+pub(crate) fn lock_resource(path: &Path) -> Result<PathGuard, String> {
+    Ok(PathGuard { _parents: super::rooted::open_regular(path)? })
+}
+#[cfg(not(unix))]
 pub(crate) fn lock_resource(path: &Path) -> Result<PathGuard, String> {
     let mut guard = lock_parents(path, false)?;
     super::file_io::no_links(path)?;
@@ -289,10 +250,14 @@ pub(crate) fn lock_resource(path: &Path) -> Result<PathGuard, String> {
         }
         guard._parents.push(file);
     }
-    #[cfg(unix)]
-    guard._parents.push(unix::open_file(path)?);
     Ok(guard)
 }
+/// A regular file's bytes, at most `max`, read from the handle that was opened below the held folders.
+#[cfg(unix)]
+pub(crate) fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>, String> {
+    super::rooted::read_file(path, max)
+}
+#[cfg(not(unix))]
 pub(crate) fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>, String> {
     let _guard = lock_resource(path)?;
     let mut options = fs::OpenOptions::new();
@@ -302,18 +267,7 @@ pub(crate) fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>, String> {
         use std::os::windows::fs::OpenOptionsExt;
         options.share_mode(3).custom_flags(0x00200000);
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
     let file = options.open(path).map_err(|e| e.to_string())?;
-    #[cfg(unix)]
-    {
-        if !file.metadata().map_err(|e| e.to_string())?.is_file() {
-            return Err("addon file is not a regular file".into());
-        }
-    }
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -373,10 +327,7 @@ fn read_settings_file(path: &Path, max: u64) -> Result<serde_json::Value, String
     if fs::metadata(path).map_err(|e| e.to_string())?.len() > max {
         return Err("settings file exceeds quota".into());
     }
-    #[cfg(windows)]
     let bytes = read_bounded(path, max as usize)?;
-    #[cfg(not(windows))]
-    let bytes = fs::read(path).map_err(|e| e.to_string())?;
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 

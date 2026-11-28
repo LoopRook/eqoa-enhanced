@@ -24,6 +24,8 @@ pub(crate) const RATE: u32 = 48_000;
 const MAX_FRAMES: usize = RATE as usize * 120;
 /// All decoded clips of one bank together (`MAX_AGGREGATE_BYTES` of `sound.rs`, in decoded bytes).
 const MAX_DECODED_BYTES: usize = 64 * 1024 * 1024;
+/// The largest file read (the limit `sound.rs` has on every system).
+const MAX_FILE_BYTES: usize = 16 * 1024 * 1024;
 
 /// What a file is, by its first bytes, for the refusal's wording.
 pub(crate) fn sniff(bytes: &[u8]) -> &'static str {
@@ -62,18 +64,18 @@ pub(crate) fn decode_wav(bytes: &[u8]) -> Result<Vec<i16>, String> {
     }
     let (mut fmt, mut data) = (None, None);
     let mut at = 12;
-    while at + 8 <= bytes.len() {
+    while bytes.len().saturating_sub(at) >= 8 {
         let id = &bytes[at..at + 4];
         let len = le32(bytes, at + 4).ok_or("truncated WAV")? as usize;
         let body = at + 8;
         let end = body.saturating_add(len).min(bytes.len());
         match id {
             b"fmt " => fmt = Some(&bytes[body..end]),
-            b"data" => {
-                data = Some(&bytes[body..end]);
-                break;
-            }
+            b"data" => data = Some(&bytes[body..end]),
             _ => {}
+        }
+        if fmt.is_some() && data.is_some() {
+            break;
         }
         at = body.saturating_add(len).saturating_add(len & 1);
     }
@@ -84,6 +86,11 @@ pub(crate) fn decode_wav(bytes: &[u8]) -> Result<Vec<i16>, String> {
     let rate = le32(fmt, 4).ok_or("truncated WAV fmt")?;
     let bits = le16(fmt, 14).ok_or("truncated WAV fmt")?;
     if tag == 0xFFFE {
+        // WAVE_FORMAT_EXTENSIBLE: the sub-format GUID is the format tag followed by the standard tail.
+        const TAIL: [u8; 14] = [0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xAA, 0, 0x38, 0x9B, 0x71];
+        if fmt.get(26..40) != Some(&TAIL[..]) {
+            return Err("unsupported sound format: WAV with a custom sub-format".into());
+        }
         tag = le16(fmt, 24).ok_or("truncated WAV extensible fmt")?;
     }
     if !(1..=2).contains(&channels) {
@@ -121,7 +128,11 @@ pub(crate) fn decode_wav(bytes: &[u8]) -> Result<Vec<i16>, String> {
     }
     let out_frames = ((n as u64 * RATE as u64) / rate as u64).max(1) as usize;
     if out_frames > MAX_FRAMES {
-        return Err(format!("sound too long: {} s (at most {} s plays)", out_frames / RATE as usize, MAX_FRAMES / RATE as usize));
+        return Err(format!(
+            "unsupported sound format: WAV of {} s (at most {} s plays)",
+            out_frames.div_ceil(RATE as usize),
+            MAX_FRAMES / RATE as usize
+        ));
     }
     let mut out = Vec::with_capacity(out_frames * 2);
     let step = rate as f64 / RATE as f64;
@@ -155,26 +166,36 @@ pub(crate) struct Mixer {
 }
 
 impl Mixer {
-    /// Adds the voices to interleaved stereo `pcm` (48 kHz, as `audio.rs` mixes). Allocates nothing.
+    /// Adds the voices to interleaved stereo `pcm` (48 kHz, as `audio.rs` mixes). Allocates nothing: the sum of all
+    /// voices is made in a small buffer on the stack and clipped once, so the order of the voices cannot matter.
     fn mix_voices(&mut self, pcm: &mut [i16]) {
-        for voice in self.voices.values_mut().filter(|v| v.playing) {
-            let frames = voice.clip.len() / 2;
-            for out in pcm.chunks_exact_mut(2) {
-                if voice.pos >= frames {
-                    if voice.looping && frames > 0 {
-                        voice.pos = 0;
-                    } else {
-                        voice.playing = false;
-                        voice.pos = 0;
-                        break;
+        const CHUNK: usize = 512;
+        for block in pcm.chunks_mut(CHUNK * 2) {
+            let mut sum = [0f32; CHUNK * 2];
+            let mut any = false;
+            for voice in self.voices.values_mut().filter(|v| v.playing) {
+                let frames = voice.clip.len() / 2;
+                for k in 0..block.len() / 2 {
+                    if voice.pos >= frames {
+                        if voice.looping && frames > 0 {
+                            voice.pos = 0;
+                        } else {
+                            voice.playing = false;
+                            voice.pos = 0;
+                            break;
+                        }
                     }
+                    let at = voice.pos * 2;
+                    sum[k * 2] += voice.clip[at] as f32 * voice.gain;
+                    sum[k * 2 + 1] += voice.clip[at + 1] as f32 * voice.gain;
+                    voice.pos += 1;
+                    any = true;
                 }
-                let at = voice.pos * 2;
-                for c in 0..2 {
-                    let v = out[c] as f32 + voice.clip[at + c] as f32 * voice.gain;
-                    out[c] = v.clamp(-32768.0, 32767.0) as i16;
+            }
+            if any {
+                for (out, add) in block.iter_mut().zip(sum.iter()) {
+                    *out = (*out as f32 + add).clamp(-32768.0, 32767.0) as i16;
                 }
-                voice.pos += 1;
             }
         }
     }
@@ -182,15 +203,21 @@ impl Mixer {
 
 type Shared = Arc<Mutex<Mixer>>;
 
+static MIXER: OnceLock<Shared> = OnceLock::new();
+
+/// The game's mixer, made when the first sound bank is: before any sound can play, so before the output has anything
+/// of ours to mix. Never called from the output callback.
 fn global() -> &'static Shared {
-    static MIXER: OnceLock<Shared> = OnceLock::new();
     MIXER.get_or_init(Default::default)
 }
 
 /// The hook `audio.rs` calls on every block it has mixed: adds the mod sounds that are playing. A mixer another thread
 /// holds at that moment costs this block its mod sound (silence), never a wait.
 pub(crate) fn mix_into_stream(pcm: &mut [i16]) {
-    mix_shared(global(), pcm);
+    // No bank has been made yet: nothing can be playing. Never makes the mixer, never allocates, never waits.
+    if let Some(shared) = MIXER.get() {
+        mix_shared(shared, pcm);
+    }
 }
 
 fn mix_shared(shared: &Shared, pcm: &mut [i16]) {
@@ -222,7 +249,10 @@ impl MixBackend {
         let rest = rest.strip_prefix('"').ok_or("open needs a quoted path")?;
         let (path, tail) = rest.rsplit_once("\" type mpegvideo alias ").ok_or("malformed open command")?;
         let alias = tail.trim().to_string();
-        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        // The file is read once, from a handle opened below held folders, at most `MAX_FILE_BYTES`.
+        let bytes = super::sandbox::read_bounded(std::path::Path::new(path), MAX_FILE_BYTES).map_err(|e| {
+            if e.contains("exceeds") { format!("unsupported sound format: file larger than {} MiB", MAX_FILE_BYTES >> 20) } else { e }
+        })?;
         let clip: Arc<[i16]> = decode_wav(&bytes)?.into();
         let size = clip.len() * 2;
         if self.decoded_bytes + size > MAX_DECODED_BYTES {
@@ -270,10 +300,13 @@ impl super::sound::MciBackend for MixBackend {
                 self.with_voice(&alias, |v| v.gain = (value / 1000.0).clamp(0.0, 1.0)).map(|()| String::new())
             }
             "close" => {
+                // The voice goes first, and its clip is freed after the lock is let go, so the output's `try_lock`
+                // is not made to miss by a large free.
+                let voice = self.mixer.lock().map_err(|_| "mixer unavailable".to_string())?.voices.remove(&alias);
+                drop(voice);
                 if let Some(clip) = self.clips.remove(&alias) {
                     self.decoded_bytes = self.decoded_bytes.saturating_sub(clip.len() * 2);
                 }
-                self.mixer.lock().map_err(|_| "mixer unavailable".to_string())?.voices.remove(&alias);
                 Ok(String::new())
             }
             other => Err(format!("unsupported sound command {other}")),

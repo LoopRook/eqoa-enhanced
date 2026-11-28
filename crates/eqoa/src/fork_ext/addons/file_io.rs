@@ -304,12 +304,12 @@ fn read(path: &Path) -> std::result::Result<Vec<u8>, String> {
 // Reject symlinks in every existing component, including dangling links. This
 // guards both reads and writes before create_dir_all/atomic_replace follows them.
 pub(super) fn no_links(path: &Path) -> std::result::Result<(), String> {
+    // Linux and macOS: no link of any owner below the root the path was registered under (`rooted.rs`).
+    #[cfg(unix)]
+    return super::rooted::links_below_root(path);
+    #[cfg(not(unix))]
     for p in path.ancestors() {
         if let Ok(meta) = fs::symlink_metadata(p) {
-            #[cfg(unix)]
-            if meta.file_type().is_symlink() && super::sandbox::unix::trusted_link(&meta) {
-                continue;
-            }
             if meta.file_type().is_symlink() {
                 return Err("symlink in addon file path".into());
             }
@@ -322,6 +322,7 @@ pub(super) fn no_links(path: &Path) -> std::result::Result<(), String> {
             }
         }
     }
+    #[cfg(not(unix))]
     Ok(())
 }
 
@@ -376,6 +377,21 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
         .any(|c| c == "large_data")
     {
         lua.set_memory_limit(super::async_json::JSON_HEAP)?;
+    }
+    // Linux and macOS: the roots a mod's files live under are resolved once, here (`rooted.rs`).
+    #[cfg(unix)]
+    {
+        super::rooted::register_root(&addon.script_root);
+        super::rooted::register_root(&addon.package_root);
+        if let Some(mods) = &addon.mods_root {
+            super::rooted::register_root(mods);
+        }
+        if let Some(data) = &data {
+            super::rooted::register_root(data);
+            if let Some(parent) = data.parent() {
+                super::rooted::register_root(parent);
+            }
+        }
     }
     lua.set_app_data(super::sandbox::Mounts {
         addon: addon.clone(),
@@ -437,7 +453,7 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
                     super::deferred_sync::atomic_replace_deferred(&target, &[], Some(&addon_open.id)).map_err(|e| e.to_string())?;
                     if let Some(deleted) = deleted {
                         if deleted.exists() {
-                            fs::remove_file(deleted).map_err(|e| e.to_string())?;
+                            super::sandbox::remove_file(&deleted).map_err(|e| e.to_string())?;
                         }
                     }
                     Ok(FileState {
@@ -604,11 +620,20 @@ fn list_entries(
         }
         let _guard =
             super::sandbox::lock_parents(&root.join("__list_guard"), false).map_err(denied)?;
-        for entry in fs::read_dir(&root).map_err(|e| ("io_error", e.to_string()))? {
-            let entry = entry.map_err(|e| ("io_error", e.to_string()))?;
-            no_links(&entry.path()).map_err(denied)?;
-            let name = entry
-                .file_name()
+        #[cfg(unix)]
+        let listed = super::rooted::list_names(&root).map_err(denied)?;
+        #[cfg(not(unix))]
+        let listed = {
+            let mut listed = Vec::new();
+            for entry in fs::read_dir(&root).map_err(|e| ("io_error", e.to_string()))? {
+                let entry = entry.map_err(|e| ("io_error", e.to_string()))?;
+                no_links(&entry.path()).map_err(denied)?;
+                listed.push(entry.file_name());
+            }
+            listed
+        };
+        for name in listed {
+            let name = name
                 .into_string()
                 .map_err(|_| ("io_error", "directory contains a non-UTF-8 name".into()))?;
             if !filename_matches(glob, &name) {
@@ -644,11 +669,20 @@ fn list_entries(
             super::sandbox::lock_resource(&source)
         }
         .map_err(denied)?;
-        let metadata = fs::metadata(&source).map_err(|e| ("io_error", e.to_string()))?;
-        if !metadata.is_file() && !metadata.is_dir() {
+        #[cfg(unix)]
+        let (is_file, is_dir, len) = {
+            let st = super::rooted::stat(&source).map_err(denied)?;
+            (st.is_file, st.is_dir, st.len)
+        };
+        #[cfg(not(unix))]
+        let (is_file, is_dir, len) = {
+            let metadata = fs::metadata(&source).map_err(|e| ("io_error", e.to_string()))?;
+            (metadata.is_file(), metadata.is_dir(), metadata.len())
+        };
+        if !is_file && !is_dir {
             return Err(denied("special files are excluded".into()));
         }
-        records.push(serde_json::json!({"path":path,"kind":if metadata.is_dir(){"directory"}else{"file"},"size":if metadata.is_file(){Some(metadata.len())}else{None}}));
+        records.push(serde_json::json!({"path":path,"kind":if is_dir{"directory"}else{"file"},"size":if is_file{Some(len)}else{None}}));
     }
     Ok(records)
 }
@@ -803,6 +837,7 @@ pub(super) fn install_native(host: &Host) -> Result<()> {
                                 "not_found"
                             } else if e.contains("reparse point")
                                 || e.contains("symlink")
+                                || e.contains("not a regular file")
                                 || e.contains("imports staging")
                             {
                                 "permission_denied"

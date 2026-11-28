@@ -934,35 +934,49 @@ struct Registry {
 }
 
 fn no_links(path: &Path) -> Result<(), String> {
-    for component in path.ancestors() {
-        match fs::symlink_metadata(component) {
-            Ok(meta) => {
-                let mut link = meta.file_type().is_symlink();
-                // A link the system itself owns (macOS: /var, /tmp) is not one a mod could have made.
-                #[cfg(unix)]
-                if link && std::os::unix::fs::MetadataExt::uid(&meta) == 0 {
-                    link = false;
+    // Linux and macOS: no link of any owner below the root the path was registered under (`addons/rooted.rs`).
+    #[cfg(unix)]
+    return super::addons::rooted::links_below_root(path);
+    #[cfg(not(unix))]
+    {
+        for component in path.ancestors() {
+            match fs::symlink_metadata(component) {
+                Ok(meta) => {
+                    let mut link = meta.file_type().is_symlink();
+                    #[cfg(windows)]
+                    {
+                        use std::os::windows::fs::MetadataExt;
+                        link |= meta.file_attributes() & 0x400 != 0;
+                    }
+                    if link {
+                        return Err(format!(
+                            "link/reparse point in bundled path: {}",
+                            component.display()
+                        ));
+                    }
                 }
-                #[cfg(windows)]
-                {
-                    use std::os::windows::fs::MetadataExt;
-                    link |= meta.file_attributes() & 0x400 != 0;
-                }
-                if link {
-                    return Err(format!(
-                        "link/reparse point in bundled path: {}",
-                        component.display()
-                    ));
-                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("cannot inspect bundled path: {e}")),
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("cannot inspect bundled path: {e}")),
         }
+        Ok(())
     }
-    Ok(())
 }
 
 fn read_bounded(path: &Path, limit: usize) -> Result<Option<Vec<u8>>, String> {
+    // Linux and macOS: read from the handle opened below the held folders (`addons/rooted.rs`).
+    #[cfg(unix)]
+    return match super::addons::rooted::read_file(path, limit) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(e) if e == "file not found" => Ok(None),
+        Err(e) => Err(format!("cannot read bundle file: {e}")),
+    };
+    #[cfg(not(unix))]
+    read_bounded_by_path(path, limit)
+}
+
+#[cfg(not(unix))]
+fn read_bounded_by_path(path: &Path, limit: usize) -> Result<Option<Vec<u8>>, String> {
     no_links(path)?;
     let file = match fs::File::open(path) {
         Ok(f) => f,
@@ -1173,6 +1187,11 @@ pub(crate) fn install_bundled_mods_saying(
         return Err("cannot install bundled mods into unavailable mods folder fallback".into());
     }
     let cfg = config_dir.ok_or("config directory unavailable")?;
+    #[cfg(unix)]
+    {
+        super::addons::rooted::register_root(mods_dir);
+        super::addons::rooted::register_root(cfg);
+    }
     no_links(mods_dir)?;
     let mut registry = read_registry(cfg)?;
     let key = mods_folder_key(mods_dir);

@@ -115,7 +115,7 @@ impl Drop for RequestGate {
     }
 }
 fn request_gate(mut owner: PathBuf) -> Option<RequestGate> {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         owner = PathBuf::from(owner.to_string_lossy().to_lowercase());
     }

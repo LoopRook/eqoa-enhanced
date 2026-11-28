@@ -34,9 +34,30 @@ thread_local! {
 /// `storage::atomic_replace` without the sync on the calling thread. Same temporary file and rename; the
 /// file's sync is queued for the background thread. `owner` is the mod to blame if that sync fails.
 pub(crate) fn atomic_replace_deferred(target: &Path, bytes: &[u8], owner: Option<&str>) -> std::io::Result<()> {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
     // the part of a mod's file write that runs on the frame: said if a disk operation here waits
     let _probe = super::stall_probe::scope_of("mod file write on the frame", target.file_name().and_then(|n| n.to_str()).unwrap_or(""));
+    // Linux and macOS: the temporary file is made and renamed relative to the held folder, and the background
+    // sync uses the handle of that very file (nothing is opened again by its path).
+    #[cfg(unix)]
+    {
+        let file = super::rooted::write_replace(target, bytes, false, None)?;
+        let path = target.to_path_buf();
+        SYNCS.with(|q| {
+            q.submit(
+                path.clone(),
+                owner.map(str::to_owned),
+                Box::new(move || sync_file(&file, &path)),
+            )
+        });
+        return Ok(());
+    }
+    #[cfg(not(unix))]
+    atomic_replace_by_path(target, bytes, owner)
+}
+
+#[cfg(not(unix))]
+fn atomic_replace_by_path(target: &Path, bytes: &[u8], owner: Option<&str>) -> std::io::Result<()> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
     let parent = target
         .parent()
         .ok_or_else(|| std::io::Error::other("storage target has no parent"))?;
@@ -70,7 +91,7 @@ pub(crate) fn atomic_replace_deferred(target: &Path, bytes: &[u8], owner: Option
 
 /// A mod's `remove` of a file: the file goes at once; a sync waiting for that path finds nothing and is done.
 pub(crate) fn remove_file(path: &Path) -> std::io::Result<()> {
-    retry_once_after_syncs(|| fs::remove_file(path))
+    retry_once_after_syncs(|| super::sandbox::remove_file(path))
 }
 
 /// On a filesystem without POSIX delete/rename semantics (FAT, exFAT, some network shares) a path the background
@@ -83,6 +104,16 @@ fn retry_once_after_syncs(op: impl Fn() -> std::io::Result<()>) -> std::io::Resu
         }
         other => other,
     }
+}
+
+/// The background half on Linux and macOS: sync the file that was written, by its own handle.
+#[cfg(unix)]
+fn sync_file(file: &fs::File, path: &Path) -> Result<(), String> {
+    #[cfg(test)]
+    if FAIL_NEXT.swap(false, Ordering::SeqCst) {
+        return Err(format!("{}: injected failure", path.display()));
+    }
+    file.sync_all().map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The background half: sync what is at `path` now. A file that was removed meanwhile needs nothing.

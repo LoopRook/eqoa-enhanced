@@ -562,7 +562,7 @@ Paths are relative and are looked up in the mod's own package, then the shared r
 | `eqoa.sound.play(sound:Sound, {loop:bool=false, volume:number=1}?)` | `true` when playback started. |
 | `eqoa.sound.stop(sound?)`, `eqoa.sound.set_volume(sound, volume)`, `eqoa.sound.is_playing(sound?)`, `eqoa.sound.release(sound?)` | `true`, `true`, a bool, `true`. Volume is 0..1. |
 
-`eqoa.fonts.game` (the game's own bitmap font as an ImGui font) is `unsupported`; `eqoa.hud.text` draws with that font. Files, textures, fonts and sound work on Windows, Linux and macOS. Sound plays WAV and MP3 (whatever Windows decodes) on Windows; on Linux and macOS it plays WAV only (PCM 8 or 16 bit, 32 or 64 bit float, one or two channels, up to two minutes) and any other file fails `eqoa.sound.load` with the format named in the diagnostic. System fonts are not available on Linux and macOS. A mod's sounds stop when it is disabled.
+`eqoa.fonts.game` (the game's own bitmap font as an ImGui font) is `unsupported`; `eqoa.hud.text` draws with that font. Files, textures, fonts and sound work on Windows, Linux and macOS. Sound plays WAV and MP3 (whatever Windows decodes) on Windows; on Linux and macOS it plays WAV only (PCM 8 or 16 bit, 32 or 64 bit float, one or two channels, a file of at most 16 MiB (the limit on every system) and at most two minutes once decoded) and any other file fails `eqoa.sound.load` with the format named in the diagnostic. System fonts are not available on Linux and macOS. A mod's sounds stop when it is disabled.
 
 Loading a texture, font or sound also fires `resource.ready` or `resource.failed` (§3) with `kind` `"texture"`, `"font"` or `"sound"`.
 

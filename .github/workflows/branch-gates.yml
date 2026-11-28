@@ -257,14 +257,26 @@ jobs:
             SKIPS=(--skip a_hidden_loot_session_that_ends_without_a_packet_is_gone_on_the_next_drawn_frame --skip owner1125b_auto_loot_switched_on_after_the_kill_takes_your_recent_kill --skip owner_h_sell_junk_puts_the_players_own_target_back --skip trade_window_an_error_in_an_always_on_listener_lets_both_claims_go_and_the_games_windows_come_back --skip round4_live_capture_quota_lifecycle_and_device_cleanup --skip round4_live_texture_quota_returns_nil_error --skip round4b_fix_existing_profile_enables_packaged_map_mods_and_keeps_manual_off)
           fi
           cargo +1.99.1 test --locked -p eqoa --bin eqoa fork_ext::addons:: -- --test-threads=1 --nocapture "${SKIPS[@]}" 2>&1 | tee "$GATE_LOGS/unix-addons.log"
+          # A filter that matches nothing exits 0: fail unless a floor of tests really ran (1208 ran on Linux when this was set).
+          awk '/^test result:/ {n += $4} END {if (n < 1000) {print "only " n " tests ran, at least 1000 expected"; exit 1}}' "$GATE_LOGS/unix-addons.log"
+      - name: unix-extra
+        id: extra
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          # The files this branch changed outside fork_ext::addons: the bundled-mod installer and the audio output.
+          cargo +1.99.1 test --locked -p eqoa --bin eqoa -- --test-threads=1 --nocapture fork_ext::bundled:: audio:: 2>&1 | tee "$GATE_LOGS/unix-extra.log"
+          awk '/^test result:/ {n += $4} END {if (n < 20) {print "only " n " tests ran, at least 20 expected"; exit 1}}' "$GATE_LOGS/unix-extra.log"
       - name: Summarize
         if: always()
         shell: bash
         env:
           GATE_PROGRAM: ${{ steps.program.outcome }}
           GATE_ADDONS: ${{ steps.addons.outcome }}
+          GATE_EXTRA: ${{ steps.extra.outcome }}
         run: |
-          python -X utf8 tools/ci_gates.py summarize --job ${{ matrix.os }} --logs "$GATE_LOGS" --out "$GATE_LOGS/summary.json" --markdown "$GITHUB_STEP_SUMMARY" --result unix-program="$GATE_PROGRAM" --result unix-addons="$GATE_ADDONS"
+          python -X utf8 tools/ci_gates.py summarize --job ${{ matrix.os }} --logs "$GATE_LOGS" --out "$GATE_LOGS/summary.json" --markdown "$GITHUB_STEP_SUMMARY" --result unix-program="$GATE_PROGRAM" --result unix-addons="$GATE_ADDONS" --result unix-extra="$GATE_EXTRA"
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -272,7 +284,7 @@ jobs:
           path: ${{ env.GATE_LOGS }}
           retention-days: 7
       - name: Fail when a gate failed
-        if: steps.program.outcome != 'success' || steps.addons.outcome != 'success'
+        if: steps.program.outcome != 'success' || steps.addons.outcome != 'success' || steps.extra.outcome != 'success'
         run: |
           echo 'A gate failed (see the summary)'
           exit 1

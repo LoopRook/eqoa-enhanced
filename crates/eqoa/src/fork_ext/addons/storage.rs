@@ -772,6 +772,10 @@ impl PreparedWrite {
 }
 
 pub(crate) fn atomic_replace(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    // Linux and macOS: made and renamed relative to the held folder, synced before the rename (`rooted.rs`).
+    #[cfg(unix)]
+    return super::rooted::write_replace(target, bytes, true, None).map(|_| ());
+    #[cfg(not(unix))]
     atomic_replace_with(target, bytes, |from, to| fs::rename(from, to))
 }
 

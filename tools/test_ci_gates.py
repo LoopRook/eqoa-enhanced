@@ -246,7 +246,7 @@ class WorkflowTests(unittest.TestCase):
                      "cargo +1.99.1 check --locked -p eqoa 2>&1"):
             self.assertIn(gate, self.WORKFLOW)
         for name in ("addons", "full", "wasm", "program", "footprint", "paths", "player-release",
-                     "unix-program", "unix-addons"):
+                     "unix-program", "unix-addons", "unix-extra"):
             self.assertIn(f"--result {name}=", self.WORKFLOW)
             self.assertIn(name, ci_gates.GATE_STEPS)
 

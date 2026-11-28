@@ -524,30 +524,29 @@ impl SoundBank {
             };
             self.next_sound_id += 1;
 
-            // Linux and macOS play WAV only: any other file is refused here with its format named.
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
-            {
-                use std::io::Read;
-                let mut head = [0u8; 16];
-                let got = fs::File::open(&canonical).and_then(|mut f| f.read(&mut head)).unwrap_or(0);
-                let kind = super::sound_mix::sniff(&head[..got]);
-                if kind != "wav" {
-                    self.record(SoundDiagnostic::UnsupportedFormat(format!(
-                        "unsupported sound format: {kind} (only WAV plays on {})",
-                        std::env::consts::OS
-                    )));
-                    return None;
-                }
-            }
-
             let alias = format!("uiforge_snd_{:08x}_{}", self.owner_id, sound_id.as_u32());
             let open_cmd = format!("open \"{}\" type mpegvideo alias {}", canonical_str, alias);
             if let Err(err) = self.backend.send(&open_cmd) {
-                self.record(SoundDiagnostic::MciCommandFailed {
-                    command: open_cmd,
-                    error: err,
-                });
-                return None;
+                // Linux and macOS: a format that does not play is said by name; no host path is shown to a mod.
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                {
+                    if err.starts_with("unsupported sound format") {
+                        self.record(SoundDiagnostic::UnsupportedFormat(err));
+                        return None;
+                    }
+                    let shown = format!("open \"{path_str}\" type mpegvideo alias {alias}");
+                    let err = err.replace(&canonical_str, path_str);
+                    self.record(SoundDiagnostic::MciCommandFailed { command: shown, error: err });
+                    return None;
+                }
+                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+                {
+                    self.record(SoundDiagnostic::MciCommandFailed {
+                        command: open_cmd,
+                        error: err,
+                    });
+                    return None;
+                }
             }
 
             self.aggregate_bytes += file_size;
