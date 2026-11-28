@@ -1319,6 +1319,8 @@ mod tests {
         let mut bank = SoundBank::with_owner_id_and_backend(102, Box::new(super::super::sound_mix::MixBackend::with_mixer(shared)));
         bank.set_active(true);
         let dir = temp_dir("unix_formats");
+        super::super::rooted::isolate_for_test(&dir);
+        super::super::rooted::register_root(&dir);
         let mp3 = dir.join("song.mp3");
         fs::write(&mp3, [b'I', b'D', b'3', 3, 0, 0, 0, 0, 0, 0, 0xFF, 0xFB, 0x90, 0]).unwrap();
         assert!(bank.load_sound(&mp3.to_string_lossy(), &dir, &[dir.clone()]).is_none());

@@ -69,6 +69,11 @@ fn parent_traversal_is_refused_for_reads_and_writes() {
 #[test]
 fn a_plain_folder_chain_is_locked_and_a_missing_one_is_made_only_when_asked() {
     let root = scratch("chain");
+    #[cfg(unix)]
+    {
+        super::rooted::isolate_for_test(&root);
+        super::rooted::register_root(&root);
+    }
     let target = root.join("a/b/c.txt");
     assert!(lock_parents(&target, false).is_ok());
     assert!(!root.join("a").exists());

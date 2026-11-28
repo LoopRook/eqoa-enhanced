@@ -763,7 +763,7 @@ impl PreparedWrite {
     /// The write with the file's sync left to the background thread (`deferred_sync.rs`): the file is in place
     /// when this returns, so a read right after sees it.
     pub(crate) fn commit_deferred_sync(self, owner: Option<&str>) -> Result<(), String> {
-        super::deferred_sync::atomic_replace_deferred(&self.path, &self.bytes, owner).map_err(|e| e.to_string())
+        super::deferred_sync::atomic_replace_deferred_internal(&self.path, &self.bytes, owner).map_err(|e| e.to_string())
     }
     /// The atomic replace (temporary file, write, `sync_all`, rename). This is the slow part.
     pub(crate) fn commit(self) -> Result<(), String> {

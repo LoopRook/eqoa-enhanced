@@ -34,13 +34,26 @@ thread_local! {
 /// `storage::atomic_replace` without the sync on the calling thread. Same temporary file and rename; the
 /// file's sync is queued for the background thread. `owner` is the mod to blame if that sync fails.
 pub(crate) fn atomic_replace_deferred(target: &Path, bytes: &[u8], owner: Option<&str>) -> std::io::Result<()> {
+    atomic_replace_deferred_scoped(target, bytes, owner, false)
+}
+
+/// The same for the host's own configuration files (settings, profiles): no mod can name them, so they need no root.
+pub(crate) fn atomic_replace_deferred_internal(target: &Path, bytes: &[u8], owner: Option<&str>) -> std::io::Result<()> {
+    atomic_replace_deferred_scoped(target, bytes, owner, true)
+}
+
+fn atomic_replace_deferred_scoped(target: &Path, bytes: &[u8], owner: Option<&str>, internal: bool) -> std::io::Result<()> {
     // the part of a mod's file write that runs on the frame: said if a disk operation here waits
     let _probe = super::stall_probe::scope_of("mod file write on the frame", target.file_name().and_then(|n| n.to_str()).unwrap_or(""));
     // Linux and macOS: the temporary file is made and renamed relative to the held folder, and the background
     // sync uses the handle of that very file (nothing is opened again by its path).
     #[cfg(unix)]
     {
-        let file = super::rooted::write_replace(target, bytes, false, None)?;
+        let file = if internal {
+            super::rooted::write_replace_internal(target, bytes, false)?
+        } else {
+            super::rooted::write_replace(target, bytes, false, None)?
+        };
         let path = target.to_path_buf();
         SYNCS.with(|q| {
             q.submit(
@@ -52,7 +65,10 @@ pub(crate) fn atomic_replace_deferred(target: &Path, bytes: &[u8], owner: Option
         return Ok(());
     }
     #[cfg(not(unix))]
-    atomic_replace_by_path(target, bytes, owner)
+    {
+        let _ = internal;
+        atomic_replace_by_path(target, bytes, owner)
+    }
 }
 
 #[cfg(not(unix))]
