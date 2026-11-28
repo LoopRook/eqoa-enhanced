@@ -301,6 +301,7 @@ B.load_junk()
 HP.load()
 require("repair") -- the blacksmith's repair panel (modules/repair.lua)
 eqoa.events.on("loot.changed", function(e)
+    B.note_corpse_contents(e.data)
     B.log_loot(e.data)
     B.note_loot_closed(e.data)
     if not B.open then B.on_loot_changed(e.data) end
@@ -385,7 +386,7 @@ end)
 eqoa.events.on("world.leaving", function(e)
     if e.data and e.data.reason == "disconnect" then B.on_disconnect() end
 end)
-eqoa.events.on("state.reset", function() failed(pcall(function() B.leaving = nil; T.reset(); AL.on_session({phase = "closed", ref = AL.session}); X.clear(); B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); HP.reset(); B.char_dirty = true; B.dirty() end)) end)
+eqoa.events.on("state.reset", function() failed(pcall(function() B.leaving = nil; B.emptied = {}; T.reset(); AL.on_session({phase = "closed", ref = AL.session}); X.clear(); B.clear_corpse_hold(); B.scan_reset(); B.reset_icons(); HP.reset(); B.char_dirty = true; B.dirty() end)) end)
 -- the character is read once the world is up (and again after a new world or login): the Auto-loot choice is per character
 eqoa.events.on("player.changed", function(e)
     failed(pcall(function()
@@ -698,7 +699,7 @@ function draw()
     local loot = eqoa.loot.get()
     local merch = eqoa.merchant.get()
     -- only the corpse buttons read it: a look at the zone is not made for it otherwise
-    local near_corpse = (is_corpse or loot ~= nil) and B.nearby_corpse() or nil
+    local near_corpse = (is_corpse or loot ~= nil) and B.lootable_corpse() or nil
     if is_corpse or loot ~= nil then
         -- "Look at corpse" only shows what is in it; the "Take" buttons take (the green ones)
         local bw, bgap = W - 2 * PAD, 6

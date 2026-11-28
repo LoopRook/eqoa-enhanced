@@ -120,11 +120,12 @@ fn owner_h_the_tooltip_wraps_a_long_line_to_its_width_and_keeps_every_word() {
 }
 
 #[test]
-fn owner_h_the_corpse_tab_shows_while_a_corpse_is_in_the_zone_and_is_left_when_there_is_none() {
-    // the facts the owner asked about: a corpse in the zone list shows the tab (any corpse, whatever its distance), and with
-    // none the tab is gone and a selection of it falls back to All
+fn owner_h_the_corpse_tab_shows_while_a_corpse_is_in_reach_and_is_left_when_there_is_none() {
+    // the facts the owner asked about: a corpse in the zone list showed the tab whatever its distance (the owner's yes of
+    // 2026-11-28 limits it to a corpse in loot reach that is not known to be empty: `bag_corpse_tab_tests.rs`); with none the
+    // tab is gone and a selection of it falls back to All
     let lua = world();
-    run(&lua, "NPCS = {{id = 600, kind = 'npc', corpse = true, name = 'a rat', position = {x = 30, y = 0, z = 0}}}; B.scan_reset()");
+    run(&lua, "NPCS = {{id = 600, kind = 'npc', corpse = true, name = 'a rat', position = {x = 3, y = 0, z = 0}}}; B.scan_reset()");
     assert_eq!(string(&lua, "(function() local t = {} for _, x in ipairs(B.visible_tabs()) do t[#t + 1] = x.label end return table.concat(t, ',') end)()"), "All,Usable,Equipment,Charged,Misc,Bank,Corpse");
     run(&lua, "B.tab = 7; B.rebuild()");
     assert_eq!(int(&lua, "B.tab"), 7, "selected, empty: the corpse is near and can be looked at");
