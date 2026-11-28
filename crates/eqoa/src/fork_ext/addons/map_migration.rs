@@ -7,6 +7,8 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 pub(super) fn migrate(config: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    super::rooted::register_root(config);
     let root = config.join("addons");
     let marker = root.join("journal-migration-v1");
     super::file_io::no_links(&marker)?;

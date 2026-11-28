@@ -116,7 +116,8 @@ fn sync_file(file: &fs::File, path: &Path) -> Result<(), String> {
     file.sync_all().map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// The background half: sync what is at `path` now. A file that was removed meanwhile needs nothing.
+/// The background half on Windows: sync what is at `path` now. A file that was removed meanwhile needs nothing.
+#[cfg(not(unix))]
 fn sync_path(path: &Path) -> Result<(), String> {
     #[cfg(test)]
     if FAIL_NEXT.swap(false, Ordering::SeqCst) {

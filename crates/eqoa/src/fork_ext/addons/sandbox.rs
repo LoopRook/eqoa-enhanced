@@ -65,6 +65,10 @@ impl Mounts {
         for prefix in ["package_resources/", "resources/"] {
             let key = self.key(&format!("{prefix}{normalized}"))?;
             match self.read_path(&key) {
+                // Linux and macOS: a link answers "refused" before anything asks whether what it points at
+                // exists, so a link can never be used to learn that.
+                #[cfg(unix)]
+                Ok(p) if super::file_io::no_links(&p).is_err() => return Err(super::file_io::no_links(&p).unwrap_err()),
                 Ok(p) if p.is_file() => {
                     super::file_io::no_links(&p)?;
                     return Ok(p);

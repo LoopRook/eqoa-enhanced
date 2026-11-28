@@ -360,6 +360,8 @@ impl Textures {
         lua: &Lua,
         addon: &DiscoveredAddon,
     ) -> Result<()> {
+        #[cfg(unix)]
+        super::rooted::register_addon(addon);
         owner.borrow_mut().set_budget(ADDON_BUDGET);
         let log_path = if addon.package_root.join("mod.lua").is_file() {
             addon.package_root.join("addons_error.log")

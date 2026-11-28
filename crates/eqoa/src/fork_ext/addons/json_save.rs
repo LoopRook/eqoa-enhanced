@@ -211,21 +211,24 @@ fn write(job: &Job) -> std::result::Result<(), String> {
     // relative to the held folders (`rooted.rs`).
     #[cfg(unix)]
     {
-        let gate = || {
+        // The generation check, the rename and the removal of the tombstone happen under one hold of the lock,
+        // as the Windows branch below orders them: an older generation cannot rename after a newer one, nor
+        // bring back a file that was cleared.
+        let commit = |rename: &dyn Fn() -> std::io::Result<()>| -> std::io::Result<()> {
             let gate = latest().lock().unwrap();
             if !job.permit.load(Ordering::Acquire)
                 || gate.get(&ordered_path(target.clone())) != Some(&job.generation)
             {
                 return Err(std::io::Error::other("JSON save superseded or disabled"));
             }
-            Ok(())
+            rename()?;
+            match super::rooted::remove_file(&deleted) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e),
+            }
         };
-        super::rooted::write_replace(&target, &out.0, true, Some(&gate)).map_err(|e| e.to_string())?;
-        match super::rooted::remove_file(&deleted) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.to_string()),
-        }
+        super::rooted::write_replace(&target, &out.0, true, Some(&commit)).map_err(|e| e.to_string())?;
         return Ok(());
     }
     #[cfg(not(unix))]

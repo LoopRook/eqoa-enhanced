@@ -997,6 +997,8 @@ fn read_bounded_by_path(path: &Path, limit: usize) -> Result<Option<Vec<u8>>, St
 }
 
 fn read_registry(config_dir: &Path) -> Result<Registry, String> {
+    #[cfg(unix)]
+    super::addons::rooted::register_root(config_dir);
     let Some(bytes) = read_bounded(&bundled_registry_path(config_dir), MAX_REGISTRY_BYTES)? else {
         return Ok(Registry::default());
     };
@@ -1039,6 +1041,8 @@ pub fn load_bundled_registry(config_dir: Option<&Path>, mods_dir: &Path) -> BTre
 }
 
 fn save_bundled_registry(config_dir: &Path, registry: &Registry) -> Result<(), String> {
+    #[cfg(unix)]
+    super::addons::rooted::register_root(config_dir);
     let path = bundled_registry_path(config_dir);
     no_links(&path)?;
     let bytes = serde_json::to_vec_pretty(
@@ -1093,6 +1097,8 @@ fn bootstrap_hashes(path: &str) -> BTreeSet<String> {
 /// none extra and none missing, each byte for byte this build's; (c) the manifest discovery reads there
 /// (`manifest.json` before `mod.json`) and the entry it chose are among them. Anything else is not.
 pub fn is_shipped_package(package: &str, root: &Path, install_root: &Path, entry: &Path) -> bool {
+    #[cfg(unix)]
+    super::addons::rooted::register_root(install_root);
     if !PACKAGES.contains(&package) {
         return false;
     }

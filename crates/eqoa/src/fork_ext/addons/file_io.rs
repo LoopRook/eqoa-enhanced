@@ -378,19 +378,14 @@ pub(super) fn install(host: &Host, addon: &DiscoveredAddon, data: Option<PathBuf
     {
         lua.set_memory_limit(super::async_json::JSON_HEAP)?;
     }
-    // Linux and macOS: the roots a mod's files live under are resolved once, here (`rooted.rs`).
+    // Linux and macOS: the roots a mod's files live under are resolved once, here, and their handles held
+    // (`rooted.rs`). The data folder is not a root of its own: it is descended from the configuration folder's
+    // `addons` folder, so a link made of it is a link below a root and is refused.
     #[cfg(unix)]
     {
-        super::rooted::register_root(&addon.script_root);
-        super::rooted::register_root(&addon.package_root);
-        if let Some(mods) = &addon.mods_root {
-            super::rooted::register_root(mods);
-        }
-        if let Some(data) = &data {
-            super::rooted::register_root(data);
-            if let Some(parent) = data.parent() {
-                super::rooted::register_root(parent);
-            }
+        super::rooted::register_addon(addon);
+        if let Some(parent) = data.as_deref().and_then(Path::parent) {
+            super::rooted::register_root(parent);
         }
     }
     lua.set_app_data(super::sandbox::Mounts {
@@ -620,20 +615,38 @@ fn list_entries(
         }
         let _guard =
             super::sandbox::lock_parents(&root.join("__list_guard"), false).map_err(denied)?;
+        // Linux and macOS: read from the folder's held handle, the glob and the cap applied entry by entry
+        // as the folder is read, in the order the Windows loop below does (`rooted.rs`).
         #[cfg(unix)]
-        let listed = super::rooted::list_names(&root).map_err(denied)?;
+        super::rooted::list_each::<(&'static str, String)>(
+            &root,
+            |name, is_link| {
+                if is_link {
+                    return Err(denied("symlink in addon file path".into()));
+                }
+                let name = name
+                    .into_string()
+                    .map_err(|_| ("io_error", "directory contains a non-UTF-8 name".into()))?;
+                if !filename_matches(glob, &name) {
+                    return Ok(());
+                }
+                names.insert(name);
+                if names.len() > 1024 {
+                    return Err((
+                        "quota",
+                        "directory enumeration exceeds 1,024 entries".into(),
+                    ));
+                }
+                Ok(())
+            },
+            |e| if e.contains("symlink") { denied(e) } else { ("io_error", e) },
+        )?;
         #[cfg(not(unix))]
-        let listed = {
-            let mut listed = Vec::new();
-            for entry in fs::read_dir(&root).map_err(|e| ("io_error", e.to_string()))? {
-                let entry = entry.map_err(|e| ("io_error", e.to_string()))?;
-                no_links(&entry.path()).map_err(denied)?;
-                listed.push(entry.file_name());
-            }
-            listed
-        };
-        for name in listed {
-            let name = name
+        for entry in fs::read_dir(&root).map_err(|e| ("io_error", e.to_string()))? {
+            let entry = entry.map_err(|e| ("io_error", e.to_string()))?;
+            no_links(&entry.path()).map_err(denied)?;
+            let name = entry
+                .file_name()
                 .into_string()
                 .map_err(|_| ("io_error", "directory contains a non-UTF-8 name".into()))?;
             if !filename_matches(glob, &name) {

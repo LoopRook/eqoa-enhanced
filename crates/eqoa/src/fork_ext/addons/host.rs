@@ -560,6 +560,9 @@ impl Host {
     }
 
     pub fn for_addon(addon: &DiscoveredAddon) -> Result<Self> {
+        // Linux and macOS: the folders this mod's files are read from are rooted before anything is read.
+        #[cfg(unix)]
+        super::rooted::register_addon(addon);
         let base = create_base_host()?;
         let host_registry = Rc::new(RefCell::new(HashMap::new()));
         super::package::install_package_loader(

@@ -373,6 +373,8 @@ impl FontBank {
         lua: &Lua,
         addon: &DiscoveredAddon,
     ) -> LuaResult<()> {
+        #[cfg(unix)]
+        super::rooted::register_addon(addon);
         let forge: Table = lua.globals().get("UiForge")?;
         let bank = owner.clone();
         let addon_clone = addon.clone();

@@ -164,22 +164,141 @@ mod links {
         let _ = fs::remove_dir_all(&root);
     }
 
+    /// The macOS `/var`, `/tmp` case, made by hand: a link ABOVE the root is the player's arrangement, followed once at
+    /// registration. A path in either spelling lands under the root; a link below the root is still refused; a path
+    /// under no root is refused.
     #[test]
-    fn a_root_reached_through_a_link_is_resolved_once_and_the_link_below_it_is_still_refused() {
+    fn a_root_under_a_linked_ancestor_is_matched_in_both_spellings_and_a_link_below_it_is_refused() {
         let base = scratch("rootlink");
         let real = base.join("real");
         fs::create_dir_all(real.join("data")).unwrap();
         fs::write(real.join("data/f.txt"), b"fine").unwrap();
         let alias = base.join("alias");
         symlink(&real, &alias).unwrap();
-        // the root as the host is given it runs through a system-style link: followed once, at registration
-        let root = alias.join("data");
-        rooted::register_root(&root);
-        assert_eq!(rooted::read_file(&root.join("f.txt"), 100).unwrap(), b"fine");
-        // a link below the root is not
-        symlink(real.join("data/f.txt"), root.join("l.txt")).unwrap();
-        assert!(rooted::read_file(&root.join("l.txt"), 100).is_err());
+        let lexical = alias.join("data");
+        let canonical = real.join("data");
+        rooted::register_root(&lexical);
+        assert_eq!(rooted::read_file(&lexical.join("f.txt"), 100).unwrap(), b"fine", "the path as given");
+        assert_eq!(rooted::read_file(&canonical.join("f.txt"), 100).unwrap(), b"fine", "the canonicalized path");
+        assert!(rooted::links_below_root(&canonical.join("f.txt")).is_ok());
+        symlink(real.join("data/f.txt"), lexical.join("l.txt")).unwrap();
+        assert!(rooted::read_file(&lexical.join("l.txt"), 100).is_err());
+        assert!(rooted::read_file(&canonical.join("l.txt"), 100).is_err());
+        let stranger = base.join("elsewhere/x.txt");
+        fs::create_dir_all(stranger.parent().unwrap()).unwrap();
+        fs::write(&stranger, b"x").unwrap();
+        assert!(rooted::read_file(&stranger, 100).unwrap_err().contains("outside every registered root"));
         let _ = fs::remove_dir_all(&base);
+    }
+
+    /// A root replaced by a link after it was registered changes nothing: the held handle is still the folder
+    /// that was resolved. Control: a read by the root's path now reaches the outside file.
+    #[test]
+    fn a_root_replaced_by_a_link_after_registration_has_no_effect() {
+        let (root, m, outside) = tree("rootswap");
+        let data_root = root.join("mod-files");
+        fs::write(outside.join("probe.txt"), b"outside").unwrap();
+        fs::write(data_root.join("files/data/probe.txt"), b"inside").unwrap();
+        // the swap: the registered root moves away and a link to the outside takes its name
+        fs::rename(&data_root, root.join("mod-files.orig")).unwrap();
+        fs::create_dir_all(outside.join("files/data")).unwrap();
+        fs::write(outside.join("files/data/probe.txt"), b"outside").unwrap();
+        symlink(&outside, &data_root).unwrap();
+        assert_eq!(fs::read(data_root.join("files/data/probe.txt")).unwrap(), b"outside", "control: by path the link is followed");
+        assert_eq!(m.read("probe.txt").unwrap(), b"inside", "the held root is the folder that was registered");
+        m.write("w.txt", b"w").unwrap();
+        assert!(!outside.join("files/data/w.txt").exists());
+        assert!(root.join("mod-files.orig/files/data/w.txt").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A data or package folder that is a link, below a registered root, is a link below a root: refused.
+    #[test]
+    fn a_linked_folder_below_the_registered_root_is_refused() {
+        let base = scratch("linked-data");
+        let outside = base.join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("f.txt"), b"outside").unwrap();
+        let mods = base.join("mods");
+        fs::create_dir_all(&mods).unwrap();
+        rooted::register_root(&mods);
+        // registered afterwards, it is not a root of its own: it lies below `mods`
+        rooted::register_root(&mods.join("pack-files"));
+        symlink(&outside, mods.join("pack-files")).unwrap();
+        assert!(rooted::read_file(&mods.join("pack-files/f.txt"), 100).is_err());
+        assert!(rooted::write_replace(&mods.join("pack-files/new.txt"), b"x", false, None).is_err());
+        assert!(!outside.join("new.txt").exists());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// `Mounts::media` answers a link the same whether or not what it points at exists.
+    #[test]
+    fn a_link_in_resources_cannot_be_used_to_learn_whether_its_target_exists() {
+        let (root, m, outside) = tree("oracle");
+        let resources = root.join("mod/resources");
+        fs::create_dir_all(&resources).unwrap();
+        symlink(outside.join("c.txt"), resources.join("here.png")).unwrap();
+        symlink(outside.join("missing.txt"), resources.join("gone.png")).unwrap();
+        fs::write(resources.join("plain.png"), b"p").unwrap();
+        let here = m.media("here.png").unwrap_err();
+        let gone = m.media("gone.png").unwrap_err();
+        assert_eq!(here, gone, "the two answers differ: a link reveals whether its target exists");
+        assert!(here.contains("symlink"), "{here}");
+        assert!(m.media("plain.png").is_ok(), "control: a plain file is found");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Two generations of a save. The check is made under a lock that stays held across the rename (what `commit`
+    /// allows): the newer generation then always ends last, and a file cleared after the older save is not brought
+    /// back by it. Control: with the lock let go before the rename the older rename lands last and the cleared file
+    /// is back (the failure the Windows ordering prevents).
+    #[test]
+    fn two_generations_racing_the_newer_wins_and_a_cleared_file_stays_cleared() {
+        use std::sync::{Arc, Mutex};
+        // returns what is on disk at the end, None when the file is absent
+        fn race(name: &str, hold_across_rename: bool, newer_clears: bool) -> Option<Vec<u8>> {
+            let (root, _m, _outside) = tree(name);
+            let target = root.join("mod-files/files/data/gen.json");
+            let lock = Arc::new(Mutex::new(()));
+            let (older_lock, older_target) = (lock.clone(), target.clone());
+            let older = std::thread::spawn(move || {
+                let commit = |rename: &dyn Fn() -> std::io::Result<()>| -> std::io::Result<()> {
+                    let guard = older_lock.lock().unwrap();
+                    if hold_across_rename {
+                        std::thread::sleep(std::time::Duration::from_millis(250));
+                        rename()?;
+                        drop(guard);
+                    } else {
+                        drop(guard);
+                        std::thread::sleep(std::time::Duration::from_millis(250));
+                        rename()?;
+                    }
+                    Ok(())
+                };
+                rooted::write_replace(&older_target, b"old", false, Some(&commit)).unwrap();
+            });
+            std::thread::sleep(std::time::Duration::from_millis(80));
+            {
+                // the newer generation takes the lock (it waits for the older commit while that holds it)
+                let _guard = lock.lock().unwrap();
+                if newer_clears {
+                    match rooted::remove_file(&target) {
+                        Ok(()) => {}
+                        Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::NotFound),
+                    }
+                } else {
+                    rooted::write_replace(&target, b"new", false, None).unwrap();
+                }
+            }
+            older.join().unwrap();
+            let seen = fs::read(&target).ok();
+            let _ = fs::remove_dir_all(&root);
+            seen
+        }
+        assert_eq!(race("gen-held-write", true, false).as_deref(), Some(&b"new"[..]), "the newer write is last");
+        assert_eq!(race("gen-held-clear", true, true), None, "a cleared file stays cleared");
+        assert_eq!(race("gen-open-write", false, false).as_deref(), Some(&b"old"[..]), "control: the older rename lands last");
+        assert_eq!(race("gen-open-clear", false, true).as_deref(), Some(&b"old"[..]), "control: the cleared file is brought back");
     }
 
     /// The swap goes between the descent and the operation (a test seam): the operation still happens in the folder

@@ -958,6 +958,8 @@ impl SoundBank {
         lua: &Lua,
         addon: &DiscoveredAddon,
     ) -> LuaResult<()> {
+        #[cfg(unix)]
+        super::rooted::register_addon(addon);
         let forge: Table = lua.globals().get("UiForge")?;
         let script_root = addon.script_root.clone();
         let resource_dirs = addon.resource_dirs.clone();
@@ -1308,8 +1310,8 @@ mod tests {
         ));
     }
 
-    /// Linux and macOS play WAV only: an mp3 is refused at load with its format named, a WAV loads, plays and is heard
-    /// by the mixer. Control: the same bank with a WAV succeeds where the mp3 failed.
+    /// Linux and macOS play WAV only: an mp3 is refused at load with its format named, a WAV loads, plays, is queried, has its
+    /// volume set, stops and is released (the mixer's samples are tested in `sound_mix.rs`). Control: the same bank with a WAV succeeds where the mp3 failed.
     #[test]
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn forge_sound_load_refuses_mp3_by_name_and_plays_wav_on_linux_and_macos() {
