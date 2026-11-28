@@ -336,7 +336,16 @@ fn open_leaf(parent: RawFd, leaf: &OsStr, flags: libc::c_int, create_mode: libc:
 
 /// The bytes of a regular file, read from the handle opened below the held folders, at most `max`.
 pub(crate) fn read_file(path: &Path, max: usize) -> Result<Vec<u8>, String> {
-    let (chain, leaf) = match descend_parent(path, false)? {
+    read_file_in(path, max, Scope::Mod)
+}
+
+/// The same for a file of the host's own configuration folder.
+pub(crate) fn read_file_internal(path: &Path, max: usize) -> Result<Vec<u8>, String> {
+    read_file_in(path, max, Scope::Internal)
+}
+
+fn read_file_in(path: &Path, max: usize, scope: Scope) -> Result<Vec<u8>, String> {
+    let (chain, leaf) = match descend_parent_in(path, false, scope)? {
         Held::Missing => return Err("file not found".into()),
         Held::At(chain, Some(leaf)) => (chain, leaf),
         Held::At(..) => return Err("addon path names no file".into()),
@@ -593,10 +602,10 @@ pub(crate) fn list_names(dir: &Path) -> Result<Vec<OsString>, String> {
     Ok(names)
 }
 
-/// A static check for the code that wants to refuse early: no link in `path` below its root. A path under no
-/// registered root is refused.
+/// A static check for the code that wants to refuse early: no link in `path` below its root. It only answers
+/// early: the operations themselves are done by handle and refuse a path under no registered root.
 pub(crate) fn links_below_root(path: &Path) -> Result<(), String> {
-    let (root, names) = anchor(path, Scope::Mod)?;
+    let (root, names) = anchor(path, Scope::Internal)?;
     let mut current = root.canonical.clone();
     for name in names {
         current.push(name);

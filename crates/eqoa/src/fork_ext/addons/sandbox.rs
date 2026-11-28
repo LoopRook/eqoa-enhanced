@@ -331,6 +331,10 @@ fn read_settings_file(path: &Path, max: u64) -> Result<serde_json::Value, String
     if fs::metadata(path).map_err(|e| e.to_string())?.len() > max {
         return Err("settings file exceeds quota".into());
     }
+    // The profile files are the host's own (configuration folder): no root of a mod holds them.
+    #[cfg(unix)]
+    let bytes = super::rooted::read_file_internal(path, max as usize)?;
+    #[cfg(not(unix))]
     let bytes = read_bounded(path, max as usize)?;
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
