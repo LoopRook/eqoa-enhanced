@@ -13,7 +13,10 @@ local W, PAD, LINE = 332, 8, 13
 local state = {
     open = false, session = nil, tokens = {}, escape = nil, selected = nil, result = nil,
     hits = {}, row_hits = {}, last_req = nil,
+    first = 1,          -- the first quest row shown (rows are as tall as their wrapped text, so the list scrolls by rows)
+    list_rect = nil,    -- the list's box in screen pixels, for the wheel
 }
+local LIST_H = 8 * LINE -- the list's height; the goals pane below holds as many lines
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 
@@ -25,6 +28,13 @@ local function listen(name, fn)
     if GATED[name] then inner = function(e) if map_up() then return end return fn(e) end end
     local token = eqoa.events.on(name, inner)
     if token then state.tokens[#state.tokens + 1] = token end
+end
+
+-- `text` wrapped to `maxw` HUD pixels (modules/wrap.lua: the Bag Viewer tooltip's rule). `k` is the HUD scale (ImGui measures
+-- in screen pixels).
+local wrapper = require("wrap")
+local function wrap(text, maxw, k)
+    return wrapper.wrap(text, maxw, function(t) return ui.CalcTextSize(t) / k end)
 end
 
 local function say(text, ok) state.result = { text = text, ok = ok } end
@@ -57,7 +67,11 @@ local function pointer_pressed(d)
         if inside(d.x, d.y, h) and h.run then h.run(); return end
     end
     for _, h in ipairs(state.row_hits) do
-        if inside(d.x, d.y, h) then state.selected = h.quest.title; return end
+        if inside(d.x, d.y, h) then
+            state.selected = h.quest.title
+            eqoa.log.write("debug", "Quest Journal: selected " .. tostring(h.quest.title))
+            return
+        end
     end
 end
 
@@ -103,6 +117,11 @@ local function open(opened_from)
         if e.data.down and not e.data["repeat"] and e.data.key:lower() == "escape" then close() end
     end)
     listen("pointer.pressed", function(e) pointer_pressed(e.data) end)
+    listen("pointer.wheel", function(e)
+        local d = e.data
+        if not inside(d.x, d.y, state.list_rect) then return end
+        state.first = math.max(1, state.first + (d.steps > 0 and -1 or 1))
+    end)
     -- Escape is the window's, not the game menu's, while it is up
     state.escape = eqoa.input.claim("Escape", true)
 end
@@ -176,32 +195,55 @@ function draw()
     state.hits[1] = hit(W - 18, 4, 12, 12, { run = function() close() end })
 
     local list_y = 24
+    local textw = W - 2 * PAD - 4
     if #quests == 0 then text(PAD, list_y, "No quests in your journal", c.muted) end
+    state.first = math.max(1, math.min(state.first, math.max(1, #quests)))
     local chosen
-    for i, q in ipairs(quests) do
-        local y = list_y + (i - 1) * LINE
-        local on = state.selected == q.title
-        if on then fill(PAD, y, W - 2 * PAD, LINE, c.hl); chosen = q end
-        text(PAD + 2, y, q.title, c.text, W - 2 * PAD - 4)
-        state.row_hits[#state.row_hits + 1] = hit(PAD, y, W - 2 * PAD, LINE, { quest = q })
+    for _, q in ipairs(quests) do
+        if state.selected == q.title then chosen = q end
     end
+    -- each quest takes as many lines as its words need; the rows that fit the list's height are drawn, from `first`
+    local y = 0
+    local last_shown = state.first - 1
+    for i = state.first, #quests do
+        local q = quests[i]
+        local lines = wrap(q.title, textw, k)
+        local h = #lines * LINE
+        if y + h > LIST_H and i > state.first then break end
+        local shown = math.min(#lines, math.floor((LIST_H - y) / LINE))
+        h = shown * LINE
+        if state.selected == q.title then fill(PAD, list_y + y, W - 2 * PAD, h, c.hl) end
+        for n = 1, shown do text(PAD + 2, list_y + y + (n - 1) * LINE, lines[n], c.text) end
+        state.row_hits[#state.row_hits + 1] = hit(PAD, list_y + y, W - 2 * PAD, h, { quest = q })
+        y = y + h
+        last_shown = i
+    end
+    state.list_rect = hit(PAD, list_y, W - 2 * PAD, LIST_H)
+    if state.first > 1 then text(W - PAD - 8, list_y, "^", c.muted) end
+    if last_shown < #quests then text(W - PAD - 8, list_y + LIST_H - LINE, "v", c.muted) end
 
-    -- the chosen quest's goals, where the server sends the tracker
-    local detail_y = list_y + 8 * LINE + 12
+    -- the chosen quest's goals, where the server sends the tracker; every line wrapped, as many as the pane holds
+    local detail_y = list_y + LIST_H + 12
     fill(PAD, detail_y - 6, W - 2 * PAD, 1, c.border)
     if chosen then
-        text(PAD, detail_y, chosen.title, c.white, W - 2 * PAD)
+        local pane = {}
+        for _, l in ipairs(wrap(chosen.title, W - 2 * PAD, k)) do pane[#pane + 1] = { l, c.white, 0 } end
         local goals = goals_for(chosen.title)
         if goals and #goals > 0 then
-            for i = 1, math.min(6, #goals) do
+            for i = 1, #goals do
                 local g = goals[i]
                 local line = g.text
                 if (g.need or 0) > 0 then line = string.format("%s  %d/%d", g.text, g.have or 0, g.need) end
-                text(PAD + 4, detail_y + i * LINE, line, g.done and c.good or c.text, W - 2 * PAD - 8)
+                for _, l in ipairs(wrap(line, W - 2 * PAD - 8, k)) do pane[#pane + 1] = { l, g.done and c.good or c.text, 4 } end
             end
         else
-            text(PAD + 4, detail_y + LINE, "No goals sent for this quest", c.muted)
+            pane[#pane + 1] = { "No goals sent for this quest", c.muted, 4 }
         end
+        if #pane > 8 then
+            for n = #pane, 8, -1 do pane[n] = nil end
+            pane[8] = { "...", c.muted, 4 }
+        end
+        for n, l in ipairs(pane) do text(PAD + l[3], detail_y + (n - 1) * LINE, l[1], l[2]) end
     else
         text(PAD, detail_y, "Click a quest to see its goals", c.muted)
     end

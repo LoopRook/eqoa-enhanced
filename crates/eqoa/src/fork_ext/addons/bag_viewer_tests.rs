@@ -5476,7 +5476,7 @@ fn bv_say_yes(bv: &mut Bv) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Merchants and bankers in the window (the option "Open merchants and bankers in Bag Viewer", 2026-11-27). The Lua logic is
+// Merchants and bankers in the window (the option "Merchants in Bag Viewer", 2026-11-27). The Lua logic is
 // `bag_trade_tests.rs` (no GPU); these drive the drawn panels with real clicks and keys. Pictures: EQOA_R5B_CAPTURE_DIR.
 
 fn trade_wares() -> serde_json::Value {
