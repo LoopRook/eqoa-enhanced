@@ -522,3 +522,24 @@ Budget changes (reasons in docs/fork-footprint.json): play.rs +95/-51 to +99/-51
 152 passed, 54 SKIP lines (no decomp or oracle here; upstream's manual GPU tests are ignored); Python tools 235
 passed. The first run had one failure, the HUD Numbers mod reading a null `frame_x` (a window of zero size made
 the scaled rectangle NaN), fixed before the final run. Nothing was played in either interface.
+
+## Sync 2026-11-27 (38 commits, 706ddcc9..354ce978)
+
+Merge 03a5041d on sync/2026-11-27, follow-up 98da7138. Upstream added damage taken, every merc's row and DPS
+Meter Lines to the DPS meter, mouse buttons and the wheel in Key Bindings, a Field of View slider, Foliage
+Distance, Feet on Slopes, creature levels on the map's camps, Mouseover Casting for friends' utility spells,
+merc trade, and Heroic Nagafen's cinder pools. One hunk needed a hand: play.rs at `Event::Disconnected`, where
+upstream's `self.cinder_pool = None;` and the fork's `self.forge_health.reset();` were added at the same line;
+both are kept, upstream's line unchanged. The script merged one `Play { ... }` literal field by field. Upstream's
+CLAUDE.md did not change.
+
+Follow-up: `fork_ext/a4_hud_tests.rs` built upstream's `dpsmeter::Shown` field by field at two places and did not
+compile against its new fourth rate and `most_rows`; the two fixtures now take the meter's defaults for the fields
+they do not set (tests only).
+
+Review: the hand-resolved hunk is two adjacent one-line additions; the lead read it and no separate reviewer was
+used. No budget changed; `reviewed_base` 706ddcc9 to 354ce978. Tests (`tools/sync_upstream.py --continue
+--tests-only`, one thread, the owner's disc linked): client and net 4194 passed / 0 failed / 47 ignored, 55 SKIP
+lines (no client.bin, 2002 disc, live S2, captures or symlink privilege here; no decomp or oracle); Python tools
+310 passed. An earlier run without the disc link had four failures, all upstream tests that open `run/eqoa.iso`
+directly: link the disc in the sync worktree before the first run. Nothing was played.
