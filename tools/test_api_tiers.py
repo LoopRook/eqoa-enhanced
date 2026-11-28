@@ -115,6 +115,21 @@ class FunctionsAndAliases(unittest.TestCase):
             _, t = T.build(fp, tmp / "bundled-mods")
             self.assertEqual(t.tier["eqoa.items.get"], "provisional")
 
+    def test_a_once_bundled_mod_kept_as_an_example_still_proves_its_names(self):
+        # the Stats Box left bundled-mods for docs/modding/examples (2026-11-27): the names it proved stay proven
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            make_mod(tmp / "bundled-mods", "a", {"main.lua": "eqoa.items.find(1)\n"})
+            make_mod(tmp / "examples", "b", {"main.lua": "eqoa.items.get(1)\n"})
+            fp = tmp / "f.json"
+            fp.write_text(json.dumps({"supported": FROZEN}), encoding="utf-8")
+            _, t = T.build(fp, tmp / "bundled-mods", tmp / "examples")
+            self.assertEqual(t.tier["eqoa.items.get"], "proven")
+            self.assertEqual(t.tier["eqoa.items.find"], "proven")
+            # control: without the examples folder the example's name is not proven
+            _, t = T.build(fp, tmp / "bundled-mods")
+            self.assertEqual(t.tier["eqoa.items.get"], "provisional")
+
     def test_compat_names_are_left_out_of_the_counts(self):
         doc, tier = tiers_for({"m": {"main.lua": "frontiers_forge = nil\nUiForge.Log('x')\n"}})
         self.assertEqual(tier["UiForge.Log"], "compat")

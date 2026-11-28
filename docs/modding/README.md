@@ -6,7 +6,7 @@ EQOA Enhanced runs native Lua mods through the `eqoa` API (`eqoa/1`). Start here
 |---|---|
 | [GETTING-STARTED.md](GETTING-STARTED.md) | The first mod, step by step, and the common patterns |
 | [template/](template/) | A starter folder (`mod.json` + `main.lua`) to copy |
-| [EXAMPLES.md](EXAMPLES.md) | What each bundled mod shows and which API areas it uses |
+| [EXAMPLES.md](EXAMPLES.md) | What each bundled mod shows and which API areas it uses, and the example mods in [examples/](examples/) that are not shipped |
 | [EQOA-API-SPEC.md](EQOA-API-SPEC.md) | The reference, as built: every function, record, event, error, and the rules for permissions, windows and keys |
 | [SUPPORT-TABLE.md](SUPPORT-TABLE.md) | Every name with its status, printed by the client itself (`eqoa mod-api`); `eqoa-1-surface.json` is the same list for programs |
 | [VERSIONING.md](VERSIONING.md) | What `eqoa/1` promises, and how to test for features |

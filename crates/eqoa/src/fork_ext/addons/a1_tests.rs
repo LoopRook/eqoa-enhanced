@@ -349,8 +349,8 @@ fn a1_mods_and_addons_says_what_a_mod_provides_before_it_is_enabled() {
     assert!(journal.contains(&"Asks you first: drop a quest".to_string()), "{journal:?}");
     // the label never says drop quest acts on its own
     assert!(!journal.iter().any(|l| l.starts_with("Actions: can act on its own") && l.contains("drop_quest")), "{journal:?}");
-    // the control: a mod that provides nothing says nothing
-    assert!(!lines("eqoa_stats_box").iter().any(|l| l.starts_with("Provides:")));
+    // the control: a mod that provides nothing says nothing (Mana Bars; the Stats Box until it left the bundle)
+    assert!(!lines("eqoa_mana_bars").iter().any(|l| l.starts_with("Provides:")));
     // the label comes from the manifest and is shown as written: a bad entry is refused
     let temp = std::env::temp_dir().join(format!("a1-provides-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&temp);
@@ -374,7 +374,9 @@ fn a1_the_three_windows_take_their_keys_and_the_stats_box_gives_up_b() {
     bindpage::reset_in_memory();
     // the Stats Box answers the game's own Stat Window key, so its own key is an extra and is unbound until the player binds it
     for (addon, default) in [("eqoa_stats_box", ""), ("eqoa_bag_viewer", "shift+b"), ("eqoa_spellbook", "shift+k"), ("eqoa_quest_journal", "shift+j")] {
-        let manifest = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods").join(addon).join(if addon == "eqoa_bag_viewer" { "main.lua" } else { "main.lua" })).unwrap();
+        // the Stats Box is kept as an example (docs/modding/examples) since 2026-11-27; the others are bundled
+        let folder = if addon == "eqoa_stats_box" { super::example_mods::dir(addon) } else { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods").join(addon) };
+        let manifest = std::fs::read_to_string(folder.join("main.lua")).unwrap();
         assert!(manifest.contains(&format!("default_key = \"{default}\"")), "{addon} declares {default}");
         bindpage::register(addon, if addon == "eqoa_stats_box" { "toggle" } else { "open" }, default, addon);
     }

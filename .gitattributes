@@ -14,3 +14,4 @@ mods/resources/map-entities.json -text
 *.wgsl text eol=lf
 # Release-packaged helper files keep their exact bytes (hash-checked by build_player_release.py).
 tools/release-files/** -text
+docs/modding/examples/** -text

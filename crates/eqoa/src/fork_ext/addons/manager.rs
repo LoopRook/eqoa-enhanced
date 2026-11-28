@@ -2828,13 +2828,14 @@ mod tests {
         let config = Scratch::new();
         let mods = Scratch::new();
         crate::fork_ext::bundled::install_bundled_mods(&mods.0, Some(&config.0)).unwrap();
-        round7c_bind_older_release(&config.0, &mods.0, &[("eqoa_bag_viewer", true), ("eqoa_stats_box", false)]);
+        // (a disabled bundled package: Target of Target; the Stats Box played this part until it left the bundle, 2026-11-27)
+        round7c_bind_older_release(&config.0, &mods.0, &[("eqoa_bag_viewer", true), ("eqoa_target_of_target", false)]);
         let manager = gpu.manager(&mods.0, Some(config.0.clone()));
         let entry = |id: &str| manager.entries().iter().find(|e| e.metadata.id == id).unwrap().enabled_intent;
         assert!(entry("eqoa_bag_viewer"), "the shipped package stays enabled");
-        assert!(!entry("eqoa_stats_box"), "and a disabled one stays disabled");
+        assert!(!entry("eqoa_target_of_target"), "and a disabled one stays disabled");
         assert!(!round7c_permissions_line(&manager, "eqoa_bag_viewer"), "{:?}", manager.diagnostics());
-        assert!(!round7c_permissions_line(&manager, "eqoa_stats_box"), "{:?}", manager.diagnostics());
+        assert!(!round7c_permissions_line(&manager, "eqoa_target_of_target"), "{:?}", manager.diagnostics());
         drop(manager);
 
         // the player edited a shipped file: no longer the shipped package
@@ -3089,7 +3090,9 @@ mod tests {
             "eqoa_mana_bars",
             "eqoa_hud_numbers",
         ];
-        for file in crate::fork_ext::bundled::EMBEDDED_FILES {
+        // the three bundled HUD mods and the Stats Box, now an example (docs/modding/examples): the one of the four with a
+        // Controls row, so it is the case that the row goes when the mod is turned off
+        for file in super::super::example_mods::with_bundled() {
             if ids
                 .iter()
                 .any(|id| file.path.starts_with(&format!("{id}/")))

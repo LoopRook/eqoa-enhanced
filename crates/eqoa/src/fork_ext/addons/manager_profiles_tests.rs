@@ -1684,7 +1684,7 @@ fn mod_profiles_update_enables_bundled_defaults_missing_from_an_older_store() {
     // The update installs the round 3 bundled mods (their real mod.json files),
     // a bundled mod that ships off, and the player's own mod.
     for file in crate::fork_ext::bundled::EMBEDDED_FILES {
-        if ["eqoa_hud_numbers/", "eqoa_mana_bars/", "eqoa_stats_box/"]
+        if ["eqoa_hud_numbers/", "eqoa_mana_bars/", "eqoa_target_of_target/"]
             .iter()
             .any(|p| file.path.starts_with(p))
         {
@@ -1698,9 +1698,10 @@ fn mod_profiles_update_enables_bundled_defaults_missing_from_an_older_store() {
     let addons = super::super::discovery::discover(&root.0).addons;
     let key = |id: &str| Storage::key(addons.iter().find(|a| a.id == id).unwrap()).unwrap();
     assert!(addons.iter().find(|a| a.id == "eqoa_hud_numbers").unwrap().initially_enabled);
-    // The player once switched Stats Box off by hand: an explicit false stays.
+    // The player once switched Target of Target (on by default) off by hand: an explicit false stays. (The Stats Box
+    // played this part until it left the bundle on 2026-11-27.)
     let mut default = store.read("Default").unwrap();
-    default.enabled.insert(key("eqoa_stats_box"), false);
+    default.enabled.insert(key("eqoa_target_of_target"), false);
     store.write("Default", &default).unwrap();
     let ari = CharacterSnapshot::new(true, "Ari", 3).unwrap();
     store
@@ -1724,7 +1725,7 @@ fn mod_profiles_update_enables_bundled_defaults_missing_from_an_older_store() {
     );
     assert!(intent(&manager, "eqoa_mana_bars"), "bundled mana bars must be on");
     assert!(
-        !intent(&manager, "eqoa_stats_box"),
+        !intent(&manager, "eqoa_target_of_target"),
         "an explicit false in the document must be respected"
     );
     assert!(
@@ -1741,7 +1742,7 @@ fn mod_profiles_update_enables_bundled_defaults_missing_from_an_older_store() {
     manager.writes.flush();
     let saved = store.read("Default").unwrap();
     assert_eq!(saved.enabled.get(&key("eqoa_hud_numbers")), Some(&true));
-    assert_eq!(saved.enabled.get(&key("eqoa_stats_box")), Some(&false));
+    assert_eq!(saved.enabled.get(&key("eqoa_target_of_target")), Some(&false));
     assert_eq!(saved.enabled.get(&key("my_user_mod")), None);
     // A character on the Tank role profile (seeded before these mods existed).
     manager.profile_boundary(&mut gpu.context, Some(ari), "server.example");

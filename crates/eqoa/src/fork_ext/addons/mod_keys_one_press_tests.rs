@@ -442,8 +442,13 @@ fn keys_hud_mod(
     claims: &std::rc::Rc<std::cell::RefCell<super::visibility::HudClaimsRegistry>>,
 ) -> (Mod, super::visibility::VisibilityLease) {
     use std::{cell::RefCell, rc::Rc};
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods").canonicalize().unwrap();
-    let addon = super::discovery::discover(&dir).addons.into_iter().find(|a| a.id == id).unwrap_or_else(|| panic!("{id} is bundled"));
+    // a bundled mod, or one kept as an example (the Stats Box, docs/modding/examples, since 2026-11-27)
+    let dir = if super::example_mods::FILES.iter().any(|f| f.package == id) {
+        super::example_mods::dir(id).parent().unwrap().canonicalize().unwrap()
+    } else {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bundled-mods").canonicalize().unwrap()
+    };
+    let addon = super::discovery::discover(&dir).addons.into_iter().find(|a| a.id == id).unwrap_or_else(|| panic!("{id} is bundled or an example"));
     let host = Host::for_addon(&addon).unwrap();
     let snapshot = crate::play::Play::bundled_ui_fixture().forge_snapshot(None);
     // the fixture asks for the manager's demand; the tests here deliver as the fixture's own demand
@@ -466,8 +471,7 @@ fn keys_hud_mod(
 /// (`Runtime::scripted_key` -> `route_key` -> `input.key` -> the mod's binding; the game's side as the viewer does it:
 /// `KeyEdge`, then `Play::toggle_stat_window` for a key sent on as F4), PC interface, the game's Stat Window setting On, the
 /// mod's own key given F1 on Controls (Controls is left with none): one press of F1 flips the box exactly once, one press of
-/// F4 flips it exactly once, a held key's repeats do not flip it again, the game's Stat Window setting is the box's state
-/// after every press (one state since develop a73c4170), and a second mod (a binding with F1 as its default, a
+/// F4 flips it exactly once, a held key's repeats do not flip it again, and a second mod (a binding with F1 as its default, a
 /// `hud.piece_requested` listener) is never fired or told. "Exactly once" is read twice: from the box's switch, and from the
 /// mod's own log, which writes one "Stats Box: <who> asked" line per flip (so two flips on one press are seen as two lines).
 /// Control: the same F1 with the mod's key unbound does nothing to the box.
@@ -520,8 +524,8 @@ fn one_press_stats_box_body() {
         keys_core::flush_deferred();
         frames(mods, context, 2);
         super::visibility::publish_claims(&claims.borrow());
-        // the box and the game's Stat Window are one state (develop a73c4170): the setting follows the box
-        assert_eq!(crate::settings::stat_window(), box_on(), "{name}: the game's Stat Window setting is the box's state");
+        // (the box's switch was the game's Stat Window setting until the Stats Box left the bundle on 2026-11-27: since then
+        // it is the mod's own option, and that assertion went with the client's special case)
         // one line in the mod's log for each flip ("Stats Box: <who> asked; the box is now ...")
         let flips = stats.host.drain_logs().unwrap().iter().filter(|l| l.contains("Stats Box: ") && l.contains(" asked")).count();
         assert_eq!(flips, usize::from(box_on() != box_before), "{name}: one log line per flip, and as many flips as the box shows");

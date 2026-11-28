@@ -11,7 +11,6 @@ API names below are the ones each `main.lua` calls (see the spec for signatures)
 | `eqoa_hud_numbers` | Text drawn over the game's own bars, with an on/off option and a movable layout. | `player`, `target`, `hud.text`, `hud.visible`, `hud.layout`, `options.toggle/get` |
 | `eqoa_mana_bars` | A gauge under the target's health bar. | `target`, `hud.gauge`, `hud.layout`, `hud.visible`, `options` |
 | `eqoa_target_of_target` | A target-of-target panel you can click to assist: the smallest example of a game action and its declared capability. | `target`, `entities.find`, `hud.image/gauge/text/frame`, `actions.assist`, `imgui` |
-| `eqoa_stats_box` | A stats panel with a key bind; a click opens the game's Summary window. | `player.stats`, `hud.panel/text`, `input.bind`, `text.localized`, `windows.open`, `actions.toggle_stats_box` (reserved for this mod) |
 | `eqoa_round_minimap` | A round minimap replacing the square one, with hover names and wheel zoom. | `map.view/get/markers`, `hud.hide/image/layout`, `input.pointer`, `input.claim_pointer`, `input.minimap_wheel`, `entities.pick_dot/find`, `group`, `fonts` |
 | `eqoa_map_search` | Map search with a guide line to a creature or place; a text box of its own; reads another mod's shared file. | `map.get/markers/set_guide/clear_guide/open`, `entities.list/named`, `input.bind`, `input.capture_text`, `input.claim_pointer`, `files.load_json` (an `@mod/` path), `mods.send`, `fonts`, `binds.get`; manifest `commands` |
 | `eqoa_creature_journal` | A background data file: records discoveries, imports/exports, shares its file read-only. Declares `large_data`. | `entities.list`, `files.load_json`, `files.save_json_async`, `files.import/export`, `options.button`, `mods.send`, manifest `shares`, `commands`, `permissions` |
@@ -26,6 +25,15 @@ API names below are the ones each `main.lua` calls (see the spec for signatures)
 | `eqoa_quest_journal` | A quest journal window on its own key (Shift+J): your quests and their goals, and a Drop quest button that asks the player first (`confirm.closed`). Off by default. | `quests.list/goals`, `actions.drop_quest`, `windows.open_session/close_session`, `input.bind/claim/pointer/claim_pointer`, `imgui` |
 | `eqoa_social` | A social window on Shift+F (Friends) and Shift+G (Guild): Friends, Ignore, Guild roster/MOTD, Who, Group Search, plus incoming Friend Request and Guild Invitation prompts with 45-second timeout and client-drawn confirms for kick and accept. Off by default. | `social`, `guild`, `who`, `lfg`, `actions` (`friend_*`, `ignore_*`, `guild_*`, `group_invite`, `command`), `windows.open_session/close_session/takeover/pass`, `input.bind/claim/capture_text`, `imgui` |
 | `eqoa_character` | A Character window on its own key (Shift+C): stats, resists and training points with a spend control per stat, Class Masteries (browse, buy, refund), factions and the combat record. Spending a point and buying or refunding a skill always ask the player first (the client's own question). A window session that the client ends for you, and a Class Mastery session held while the Masteries tab is up. Off by default. | `player.get/stats/training`, `mastery.get/skills/selected`, `factions.list`, `combat.record`, `actions.train_stats/mastery_browse/mastery_buy/mastery_refund/request_factions/request_combat_record`, `windows.open_session/close_session`, `input.bind/claim/pointer/claim_pointer`, `imgui` |
+
+## Example mods not shipped with the client
+
+These are in [examples/](examples/): copy one into your `mods` folder to run it. They shipped with the client once and are kept
+because they show an API area the bundled mods do not.
+
+| Mod | What it demonstrates | API areas it uses |
+|---|---|---|
+| [`eqoa_stats_box`](examples/eqoa_stats_box/) | Replacing one of the game's HUD pieces, the Stat Window: it holds the game's window back while it is on, answers the game's own Stat Window key and `/stats`, and draws a stats panel of its own (a click opens the game's Summary window). Bundled until 2026-11-27, when the game's own Stat Window became the one players use. | `hud.hide/show/visible` (`stat_window`), `hud.piece_requested`, manifest `replaces` (`hud.stat_window`), `player.stats`, `hud.panel/text/frame`, `input.bind`, `text.localized`, `windows.open`, `options.toggle/get`, `actions.toggle_stats_box` (reserved for this mod's id) |
 
 ## Forge-style packages (run unchanged on this client)
 
@@ -46,3 +54,4 @@ mod; use the native examples above.
 - Game actions and their results: `eqoa_target_of_target` (one), `eqoa_bag_viewer` (many, with batches).
 - Timers, cast bars and unit-frame data: `eqoa_frames`.
 - Working at a merchant, banker or corpse without the game's window: `eqoa_bag_viewer`.
+- Replace a piece of the game's HUD and answer its key: `eqoa_stats_box` (in [examples/](examples/)).

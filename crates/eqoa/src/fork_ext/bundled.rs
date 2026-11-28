@@ -27,7 +27,6 @@ pub const PACKAGES: &[&str] = &[
     "arpg_ui",
     "avoids_modern_ui",
     "eqoa_example_hearts",
-    "eqoa_stats_box",
     "eqoa_target_of_target",
     "eqoa_mana_bars",
     "eqoa_hud_numbers",
@@ -52,6 +51,14 @@ pub const PACKAGES: &[&str] = &[
     "eqoa_trade",
 ];
 
+/// Mods the client shipped and no longer does: the Quest Turn-in Helper (folded into the Dialog Window mod, 2026-11-23)
+/// and the Stats Box (2026-11-27: the game's own Stat Window is the one players use; the mod is kept as an example in
+/// `docs/modding/examples/`). A folder of one that this client's bundler installed (recorded in `bundled.json`) and whose
+/// every file is still byte for byte a version the client shipped is taken out at start (`retire_leftovers`), so a
+/// profile that still has the mod on loads nothing and the game works as without it. A folder with any file the player
+/// changed or added is the player's own mod now and is kept; so is one the bundler never installed.
+pub const RETIRED: &[&str] = &["eqoa_turnin", "eqoa_stats_box"];
+
 #[derive(Clone, Copy, Debug)]
 pub struct BundledFile {
     pub path: &'static str,
@@ -66,6 +73,10 @@ pub struct InstallResult {
     pub skipped_existing: usize,
     pub files_updated: usize,
     pub kept_edited: BTreeMap<String, usize>,
+    /// Retired mods whose unchanged folder was taken out (`RETIRED`).
+    pub retired_removed: Vec<String>,
+    /// Retired mods whose folder the player changed, so it is kept.
+    pub retired_kept: Vec<String>,
 }
 
 pub const EMBEDDED_FILES: &[BundledFile] = &[
@@ -397,21 +408,6 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         path: "eqoa_example_hearts/README.md",
         package: "eqoa_example_hearts",
         data: include_bytes!("../../../../bundled-mods/eqoa_example_hearts/README.md"),
-    },
-    BundledFile {
-        path: "eqoa_stats_box/mod.json",
-        package: "eqoa_stats_box",
-        data: include_bytes!("../../../../bundled-mods/eqoa_stats_box/mod.json"),
-    },
-    BundledFile {
-        path: "eqoa_stats_box/main.lua",
-        package: "eqoa_stats_box",
-        data: include_bytes!("../../../../bundled-mods/eqoa_stats_box/main.lua"),
-    },
-    BundledFile {
-        path: "eqoa_stats_box/README.md",
-        package: "eqoa_stats_box",
-        data: include_bytes!("../../../../bundled-mods/eqoa_stats_box/README.md"),
     },
     BundledFile {
         path: "eqoa_target_of_target/mod.json",
@@ -1038,6 +1034,13 @@ fn hash(bytes: &[u8]) -> String {
 
 fn shipped_hashes(file: &BundledFile) -> BTreeSet<String> {
     let mut hashes = BTreeSet::from([hash(file.data)]);
+    hashes.extend(bootstrap_hashes(file.path));
+    hashes
+}
+
+/// The hashes of `path` in the previously shipped manifests (and this build's SOURCE.txt).
+fn bootstrap_hashes(path: &str) -> BTreeSet<String> {
+    let mut hashes = BTreeSet::new();
     // Bootstrap pre-version-registry installs using actual previously shipped
     // manifests. Never learn a trusted hash from the player's current bytes.
     for source in [
@@ -1045,8 +1048,8 @@ fn shipped_hashes(file: &BundledFile) -> BTreeSet<String> {
         include_str!("../../../../bundled-mods/SOURCE.txt"),
     ] {
         for line in source.lines() {
-            if let Some((sha, path)) = line.split_once("  ") {
-                if path == file.path
+            if let Some((sha, path_of)) = line.split_once("  ") {
+                if path_of == path
                     && sha.len() == 64
                     && sha.bytes().all(|b| b.is_ascii_hexdigit())
                 {
@@ -1154,6 +1157,7 @@ pub fn install_bundled_mods(
     let mut registry = read_registry(cfg)?;
     let key = mods_folder_key(mods_dir);
     let mut recorded = registry.folders.get(&key).cloned().unwrap_or_default();
+    let (retired_removed, retired_kept) = retire_leftovers(mods_dir, &recorded, registry.shipped.get(&key));
     let mut packages = Vec::new();
     for &pkg in PACKAGES {
         let path = mods_dir.join(pkg);
@@ -1181,7 +1185,7 @@ pub fn install_bundled_mods(
     // Check writable registry before touching package files; preserve histories
     // on partial failures so a later start can finish safely.
     save_bundled_registry(cfg, &registry)?;
-    let mut result = InstallResult::default();
+    let mut result = InstallResult { retired_removed, retired_kept, ..InstallResult::default() };
     for &pkg in &packages {
         for file in files.iter().filter(|f| f.package == pkg) {
             extract_single_file(
@@ -1202,7 +1206,49 @@ pub fn install_bundled_mods(
             "Bundled mods: {package}: kept {count} player-edited file(s)"
         ));
     }
+    for package in &result.retired_removed {
+        crate::say(&format!(
+            "Bundled mods: {package} is no longer part of the client; its folder, unchanged since the client put it there, was taken out"
+        ));
+    }
+    for package in &result.retired_kept {
+        crate::say(&format!(
+            "Bundled mods: {package} is no longer part of the client; its folder has changes of yours, so it was kept"
+        ));
+    }
     Ok(result)
+}
+
+/// The `RETIRED` mods in `mods_dir` (see there): each folder the bundler installed (`recorded`) whose files are all,
+/// byte for byte, versions the client shipped (`shipped`, this install's history, or the bootstrap list) is removed.
+/// Returns (removed, kept). Anything unreadable, linked or unknown is kept: nothing the player made is ever removed.
+fn retire_leftovers(mods_dir: &Path, recorded: &BTreeSet<String>, shipped: Option<&ShippedFiles>) -> (Vec<String>, Vec<String>) {
+    let (mut removed, mut kept) = (Vec::new(), Vec::new());
+    for &pkg in RETIRED {
+        let root = mods_dir.join(pkg);
+        if !recorded.contains(pkg) || !root.is_dir() {
+            continue; // never installed by the bundler here, or already gone: not ours to touch
+        }
+        let unchanged = no_links(&root).is_ok()
+            && package_files(&root, 64).is_some_and(|files| {
+                !files.is_empty()
+                    && files.iter().all(|rel| {
+                        let path = format!("{pkg}/{rel}");
+                        let Ok(Some(bytes)) = read_bounded(&root.join(rel), MAX_BUNDLE_FILE_BYTES) else {
+                            return false;
+                        };
+                        let h = hash(&bytes);
+                        shipped.and_then(|s| s.get(&path)).is_some_and(|known| known.contains(&h))
+                            || bootstrap_hashes(&path).contains(&h)
+                    })
+            });
+        if unchanged && fs::remove_dir_all(&root).is_ok() {
+            removed.push(pkg.to_string());
+        } else {
+            kept.push(pkg.to_string());
+        }
+    }
+    (removed, kept)
 }
 
 fn extract_single_file(
@@ -1413,7 +1459,6 @@ mod tests {
                 "arpg_ui",
                 "avoids_modern_ui",
                 "eqoa_example_hearts",
-                "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
                 "eqoa_hud_numbers",
@@ -1721,7 +1766,6 @@ mod tests {
                 "arpg_ui",
                 "avoids_modern_ui",
                 "eqoa_example_hearts",
-                "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
                 "eqoa_hud_numbers",
@@ -1782,7 +1826,6 @@ mod tests {
                 "arpg_ui",
                 "avoids_modern_ui",
                 "eqoa_example_hearts",
-                "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
                 "eqoa_hud_numbers",
@@ -1817,7 +1860,6 @@ mod tests {
                 "arpg_ui",
                 "avoids_modern_ui",
                 "eqoa_example_hearts",
-                "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
                 "eqoa_hud_numbers",
@@ -1918,7 +1960,6 @@ mod tests {
                 "arpg_ui",
                 "avoids_modern_ui",
                 "eqoa_example_hearts",
-                "eqoa_stats_box",
                 "eqoa_target_of_target",
                 "eqoa_mana_bars",
                 "eqoa_hud_numbers",

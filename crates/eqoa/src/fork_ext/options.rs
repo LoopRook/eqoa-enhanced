@@ -29,8 +29,9 @@ const _: () = assert!(super::pages_fit(&PAGES));
 // the Enhanced page joins the Other group's menu (upstream's UI menu is full at `MENU_MOST`, sync
 // 2026-11-26): every group's menu must still fit (`menus_fit`)
 const _: () = assert!(super::menus_fit(&PAGES));
-/// The rows of the Enhanced page ahead of the Mods & Addons rows: one per Enhanced HUD toggle.
-const HUD_ROWS: usize = 6;
+/// The rows of the Enhanced page ahead of the Mods & Addons rows: one per Enhanced HUD toggle (the Stats Box's row,
+/// 2000, went with the mod when it left the bundle on 2026-11-27).
+const HUD_ROWS: usize = 5;
 #[cfg(test)]
 thread_local! { static FORK_PAGES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
 #[cfg(not(target_arch = "wasm32"))]
@@ -47,7 +48,7 @@ thread_local! {
 #[cfg(not(target_arch = "wasm32"))]
 fn dynamic_hud_tables() -> (&'static [Category], &'static [(i32, &'static str)]) {
     let active = crate::fork_ext::addons::options::active_mod_items();
-    let is_default = active.len() == 6
+    let is_default = active.len() == HUD_ROWS
         && active
             .iter()
             .zip(&ITEMS[ITEMS.len() - HUD_ROWS..])
@@ -112,7 +113,6 @@ pub(super) const ITEMS: &[(i32, &str)] = &[
     (1052, "Combat Parser"),
     #[cfg(not(target_arch = "wasm32"))]
     (1053, "Addon Manager"),
-    (2000, "Stats Box"),
     (2001, "Target of Target"),
     (2002, "Mana Bars"),
     (2003, "HUD Numbers"),
@@ -122,7 +122,6 @@ pub(super) const ITEMS: &[(i32, &str)] = &[
 pub(super) const CATEGORY: Category = Category {
     name: "Enhanced",
     items: &[
-        2000,
         2001,
         2002,
         2003,
@@ -152,17 +151,6 @@ pub(super) fn change(c: &mut ClientOptions, item: i32) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     if crate::fork_ext::addons::options::is_button(item) { return false; }
     match item {
-        // The Stats Box row is the game's Stat Window setting (the box replaces that window: one state). The page flips it in its
-        // own copy of the options, as it does the HUD Extras row, and `set_client`s the copy: setting it anywhere else here
-        // would be written over by that copy at once (the row would read Off again).
-        #[cfg(not(target_arch = "wasm32"))]
-        item if crate::fork_ext::addons::options::is_game_stat_window_item(item) => {
-            c.stat_window = !c.stat_window;
-            // kept at once, as F4 keeps it: the row is not one of the page's previews that backing out puts back
-            if !crate::fork_ext::addons::options::keep_stat_window_from_the_row(c.stat_window) {
-                c.stat_window = !c.stat_window; // the save failed: the row stays as it was
-            }
-        }
         #[cfg(not(target_arch = "wasm32"))]
         item if item >= crate::fork_ext::addons::options::MOD_OPTION_BASE => {
             return crate::fork_ext::addons::options::toggle_by_item(item);
@@ -364,7 +352,8 @@ mod tests {
         let (fork, upstream_pages) = pages().split_last().unwrap();
         assert!(super::super::pages_fit(upstream_pages) && super::super::pages_fit(pages()));
         assert_eq!(fork.name, "Enhanced");
-        assert_eq!(fork.items.len(), if cfg!(target_arch = "wasm32") { 8 } else { 9 }, "six HUD rows and the Mods & Addons rows");
+        // five HUD rows (six until the Stats Box's row left with the mod, 2026-11-27) and the Mods & Addons rows
+        assert_eq!(fork.items.len(), if cfg!(target_arch = "wasm32") { 7 } else { 8 }, "five HUD rows and the Mods & Addons rows");
         assert_eq!(pages().iter().filter(|c| c.name == "Enhanced HUD" || c.name == "Mods & Addons").count(), 0, "no second fork page");
         assert!(fork.items.len() > super::super::STANDARD_PAGE_ITEMS, "control: the fork's page is more than a standard page's rows");
         assert!(
@@ -404,8 +393,9 @@ mod tests {
         let cats = pages();
         let first = cats.len() - 1;
         assert_eq!(cats[first].name, "Enhanced", "one fork page, after upstream's last");
-        assert_eq!(&cats[first].items[..6], &[2000, 2001, 2002, 2003, 2004, 2005], "Enhanced HUD rows first");
-        assert_eq!(&cats[first].items[6..8], &[1051, 1052], "then the Mods & Addons rows");
+        assert_eq!(&cats[first].items[..5], &[2001, 2002, 2003, 2004, 2005], "Enhanced HUD rows first");
+        assert_eq!(&cats[first].items[5..7], &[1051, 1052], "then the Mods & Addons rows");
+        assert!(!cats[first].items.contains(&2000) && !items().any(|i| i.0 == 2000), "the Stats Box row left with the mod (2026-11-27)");
         assert!(!cats[first].items.contains(&1045) && !items().any(|i| i.0 == 1045), "the Quest Markers row is gone (owner 2026-11-22)");
         // Extended's groups (upstream, sync 2026-11-15): the Enhanced page closes the Other group's
         // menu and is in no other group's
@@ -661,108 +651,11 @@ quest_tracker=off
         let vui = vi::ui::Vui::new(Default::default(), Default::default(), Vec::new());
         let measure = |label: &str| Window::default().text_width(&vui, &font, &wide(label));
         let labels = fork_row_labels();
-        assert!(labels.len() >= 17, "the scan found the fork's rows and the bundled mods' rows: {labels:?}");
+        assert!(labels.len() >= 15, "the scan found the fork's rows and the bundled mods' rows: {labels:?}");
         let too_wide: Vec<String> = labels.iter().filter(|l| measure(l) > column).map(|l| format!("{l:?} is {} wide, the column {column}", measure(l))).collect();
         assert!(too_wide.is_empty(), "labels that run under the value box: {too_wide:#?}");
         for old in ["Show invitations, summons and resurrection offers", "Answer quest hand-ins automatically", "World Map: text and marker size..."] {
             assert!(measure(old) > column, "control: {old:?} ({}) does not fit {column}", measure(old));
         }
-    }
-
-    /// Owner 2026-11-27, in the world with the Options page open on Options, Extended, Other, Enhanced: "Stats Box" set to On read Off
-    /// again at once. The real page, the way a player changes a row: right, left, a click on the right and the left half of the
-    /// value, and ✕ (which changes nothing on any row of a page, the game's rule). The row is the game's Stat Window setting
-    /// (`stat_window`, the box replaces that window): set On it reads On, in the row and in the game's own setting, through the
-    /// frames the page draws, and Off again with the next change. Control: the game's Stat Window row (HUD Extras) is flipped the same
-    /// way by the same page, and a copy of the options the page writes back (`set_client`) would undo a setting written anywhere else.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn owner1127a_the_enhanced_stats_box_row_set_on_stays_on_on_the_real_options_page() {
-        use crate::fork_ext::addons::options::value_by_item;
-        testing::reset(false);
-        crate::fork_ext::addons::options::reset_in_memory();
-        let _pages = ForkPages::enter();
-        let vui = vui();
-        let mut w = WndOptions::default();
-        let mut o = GameOptions::default();
-        let (mut cues, mut ups) = (Vec::new(), Vec::new());
-        w.open(&vui, &NullRaster, &o);
-        w.sel = 3;
-        w.key(&vui, &mut NullRaster, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-        let groups = &super::super::GROUPS;
-        let other = groups.iter().position(|g| g.0 == super::super::Group::Other).unwrap();
-        let in_other = super::super::group_categories(other);
-        w.grp_sel = other as i32;
-        w.key(&vui, &mut NullRaster, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-        w.cat_sel = (in_other.len() - 1) as i32;
-        w.key(&vui, &mut NullRaster, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-        w.draw(&vui, &mut NullRaster, &o, &mut ups);
-        assert_eq!(w.item, 2000, "the cursor is on Stats Box, the page's first row");
-        let (width, left) = (w.window2.size[0], w.window2.top_left()[0]);
-        let frame = (left + width - 176) as f32;
-        let y = w.window2.row_center(&vui, &NullRaster, 1)[1] as f32;
-        let state = |w: &mut WndOptions, o: &GameOptions, ups: &mut Vec<crate::options::OptionsUp>| {
-            for _ in 0..3 {
-                w.draw(&vui, &mut NullRaster, o, ups); // the frames the page draws while it stays open
-            }
-            (value_by_item(2000), settings::stat_window())
-        };
-        for how in ["right", "left", "click on the right half", "click on the left half"] {
-            settings::set_stat_window(false).unwrap();
-            assert_eq!(state(&mut w, &o, &mut ups), (Some(false), false), "{how}: control: Off to begin with");
-            let keys = match how {
-                "right" => vec![key::RIGHT],
-                "left" => vec![key::LEFT],
-                "click on the right half" => w.point([frame + 110.0, y]),
-                _ => w.point([frame + 20.0, y]),
-            };
-            assert!(!keys.is_empty(), "{how}: the click is a key");
-            for k in keys {
-                w.key(&vui, &mut NullRaster, &mut o, k, 0, &mut cues, &mut ups);
-            }
-            assert_eq!(state(&mut w, &o, &mut ups), (Some(true), true), "{how}: set to On, the row and the game's setting read On");
-            let again = if how == "left" || how == "click on the left half" { key::LEFT } else { key::RIGHT };
-            w.key(&vui, &mut NullRaster, &mut o, again, 0, &mut cues, &mut ups);
-            assert_eq!(state(&mut w, &o, &mut ups), (Some(false), false), "{how}: the next change turns it Off");
-        }
-        // ✕ changes nothing on a row of a page, here as on every row
-        settings::set_stat_window(false).unwrap();
-        w.key(&vui, &mut NullRaster, &mut o, key::CROSS, 0, &mut cues, &mut ups);
-        assert_eq!(state(&mut w, &o, &mut ups), (Some(false), false), "✕ does nothing on the row");
-
-        // Round 2b: the row keeps at once. Set On, back out of the page WITHOUT Save Changes (Triangle up to the menu, Triangle on
-        // the menu): the setting, client.opt as kept and the row on opening the page again all say On. Control: another option
-        // changed in the same visit (not saved) IS put back, in memory and out of the file.
-        let kept_text = || String::from_utf8_lossy(&testing::kept("client.opt").unwrap_or_default()).into_owned();
-        let visit = |w: &mut WndOptions, o: &mut GameOptions, cues: &mut Vec<i32>, ups: &mut Vec<crate::options::OptionsUp>| {
-            w.open(&vui, &NullRaster, o);
-            w.sel = 3;
-            w.key(&vui, &mut NullRaster, o, key::CROSS, 0, cues, ups);
-            w.grp_sel = other as i32;
-            w.key(&vui, &mut NullRaster, o, key::CROSS, 0, cues, ups);
-            w.cat_sel = (in_other.len() - 1) as i32;
-            w.key(&vui, &mut NullRaster, o, key::CROSS, 0, cues, ups);
-            w.draw(&vui, &mut NullRaster, o, ups);
-        };
-        settings::set_stat_window(false).unwrap();
-        let marks_before = settings::client().quest_markers;
-        visit(&mut w, &mut o, &mut cues, &mut ups);
-        assert_eq!(w.item, 2000);
-        // another option changed in the same visit, as the page does it (a copy of the options, `set_client`)
-        let mut other_row = settings::client();
-        other_row.quest_markers = !marks_before;
-        settings::set_client(other_row);
-        w.key(&vui, &mut NullRaster, &mut o, key::RIGHT, 0, &mut cues, &mut ups);
-        assert_eq!(state(&mut w, &o, &mut ups), (Some(true), true), "the row set On");
-        assert!(kept_text().contains("stat_window=on"), "kept at once, in client.opt: {}", kept_text());
-        for _ in 0..4 {
-            w.key(&vui, &mut NullRaster, &mut o, key::TRIANGLE, 0, &mut cues, &mut ups); // up to the menu (three), then the cancel
-        }
-        assert!(settings::stat_window(), "backing out without saving leaves the Stats Box as it was set");
-        assert!(kept_text().contains("stat_window=on"), "and client.opt as kept says On: {}", kept_text());
-        assert_eq!(settings::client().quest_markers, marks_before, "control: the other option, changed in the same visit, is put back");
-        assert_eq!(kept_text().contains("quest_markers=off"), !marks_before, "control: and it never reached client.opt");
-        visit(&mut w, &mut o, &mut cues, &mut ups);
-        assert_eq!(state(&mut w, &o, &mut ups), (Some(true), true), "the row reads On when the page is opened again");
     }
 }

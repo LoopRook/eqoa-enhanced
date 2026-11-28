@@ -497,6 +497,80 @@ def choice_scenes(suite):
     ]
 
 
+# The game's own Stat Window ("Stats", an X, HP/HoT/AC and the resists) sits at the left, under the compass; the Stats Box
+# mod's panel (2 columns x 8 rows, no title) at HUD (200, 54). Calibrated on the 2026-11-27 pictures (PC interface, HUD scale
+# 85, 1280x720): the game's window makes GAME_STATS_BOX ~0.95 dark (the world there 0.23-0.58); the Stats Box makes
+# STATS_BOX_BOX ~0.84 dark (0.00-0.03 without it). Its right column only: the Frames mod's windows can cover the left one.
+GAME_STATS_BOX = (20, 300, 290, 462)
+STATS_BOX_BOX = (410, 100, 512, 288)
+# the owner's mods (his Melee profile, 2026-11-27) and his PC interface; his keys.opt moves Controls to B, so F1 is free
+OWNER_MODS = ("eqoa_quest_journal", "eqoa_world_map", "eqoa_character", "eqoa_mana_bars", "eqoa_start_menu",
+              "eqoa_target_of_target", "eqoa_spellbook", "eqoa_round_minimap", "eqoa_nameplates", "eqoa_crafting",
+              "eqoa_bag_viewer", "eqoa_dialogs", "eqoa_creature_journal", "eqoa_chat", "eqoa_mail", "eqoa_frames",
+              "eqoa_map_search", "eqoa_social", "eqoa_trade")
+OWNER_PC = "ui_mode=pc" + chr(10) + "hud_scale=85" + chr(10) + "health_numbers=on" + chr(10) + "chat_always=on" + chr(10)
+OWNER_KEYS = "key.map_out=" + chr(10) + "key.controls=b" + chr(10)
+
+
+def stat_window_checks(game_up):
+    """game_up: shot name -> True (the game's own Stat Window is on screen) / False. In every shot, loading ones too, the
+    Stats Box mod's panel is not on screen."""
+    def checks(run_dir, log):
+        out = []
+        for shot in sorted(run_dir.glob("*.png")):
+            box = ss.dark_fraction(shot, STATS_BOX_BOX)
+            out.append((f"{shot.name}: no Stats Box panel (dark {box if box is None else round(box, 2)})",
+                        box is not None and box <= 0.3))
+        for name, up in game_up.items():
+            game = ss.dark_fraction(run_dir / name, GAME_STATS_BOX)
+            shown = game if game is None else round(game, 2)
+            out.append((f"{name}: the game's own Stat Window is {'on screen' if up else 'not on screen'} (dark {shown})",
+                        game is not None and (game >= 0.85 if up else game < 0.85)))
+        return out
+    return checks
+
+
+def stats_box_retired_scenes():
+    """The Stats Box left the bundle (2026-11-27): F4 and /stats are the game's own Stat Window's again. 11a: the owner's old
+    install as the dev build 4936f2c0 left it: the Stats Box's folder in his mods folder (recorded in bundled.json as the
+    bundler's), the mod still ON in his profile, his old key line for it (F1), his twenty mods and PC interface, the Stat Window
+    off at load. The client takes the unchanged folder out at start: nothing of the mod loads, F4 shows the game's window and
+    F4 hides it, F1 does nothing. Control: the same folder with a line the player added is his own mod and is kept: it loads,
+    holds the game's window, and the checks fail. 11b: a fresh install with the Stat Window on at load: the game's window is up,
+    F4 hides it, F4 shows it again."""
+    retired_line = (r"Bundled mods: eqoa_stats_box is no longer part of the client; its folder, unchanged since the client "
+                    r"put it there, was taken out")
+    absent = [("anything from the Stats Box mod", r"addon eqoa_stats_box:"),
+              ("the Stats Box's own toggle", r"stats box (shown|hidden)"),
+              ("a Controls row or warning about its key", r"Toggle Stats Box")]
+    old = ss.Scene(
+        "11a", "Stats Box retired: the owner's old install (leftover folder, mod on in his profile, F1 line); F4 twice, F1",
+        mods=OWNER_MODS + ("eqoa_stats_box",), leftovers={"eqoa_stats_box": "4936f2c0"}, control_leftovers_edited=True,
+        mod_keys_file="mod.eqoa_stats_box.toggle=f1" + chr(10),
+        files={"client.opt": "ability_bars=4" + chr(10), "interface-pc.opt": OWNER_PC, "keys.opt": OWNER_KEYS},
+        env={"EQOA_MOD_KEYS": "f4@10000;f4@13000;f1@16000"},
+        quit_after=20,
+        shots="1500=0a-load.png,2200=0b-load.png,2900=0c-load.png,3600=0d-load.png,4500=0e-load.png,9000=1-at-load.png,"
+              "11500=2-f4-once.png,14500=3-f4-twice.png,17500=4-old-f1.png",
+        expect=[("the leftover folder is taken out at start", retired_line)],
+        absent=absent,
+        extra=stat_window_checks({"1-at-load.png": False, "2-f4-once.png": True, "3-f4-twice.png": False,
+                                  "4-old-f1.png": False}),
+    )
+    fresh = ss.Scene(
+        "11b", "Stats Box retired: a fresh install, the Stat Window on at load; F4 twice",
+        mods=OWNER_MODS,
+        files={"client.opt": "stat_window=on" + chr(10) + "ability_bars=4" + chr(10), "interface-pc.opt": OWNER_PC,
+               "keys.opt": OWNER_KEYS},
+        env={"EQOA_MOD_KEYS": "f4@10000;f4@13000"},
+        quit_after=17,
+        shots="1500=0a-load.png,2900=0b-load.png,9000=1-at-load.png,11500=2-f4-once.png,14500=3-f4-twice.png",
+        absent=absent,
+        extra=stat_window_checks({"1-at-load.png": True, "2-f4-once.png": False, "3-f4-twice.png": True}),
+    )
+    return [old, fresh]
+
+
 def make_scenes(suite):
-    return [dialog_scene(), start_menu_scene(), chat_scene(), overlap_scene(), sell_scene(suite), destroy_scene(suite),
+    return [*stats_box_retired_scenes(), dialog_scene(), start_menu_scene(), chat_scene(), overlap_scene(), sell_scene(suite), destroy_scene(suite),
             drag_scene(), perf_scene(), *handin_scenes(suite), restart_scene(suite), *realquest_scenes(suite), *choice_scenes(suite)]

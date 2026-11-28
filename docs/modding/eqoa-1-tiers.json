@@ -1,7 +1,7 @@
 {
  "api": "eqoa/1",
  "schema_version": 1,
- "rule": "A name is proven when a bundled mod uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
+ "rule": "A name is proven when a bundled mod, or a once-bundled mod kept in docs/modding/examples, uses it (a call or reference, a subscribed event, a field it reads); every other frozen name is provisional; the FrontiersForge layer is compat; names not listed are proven.",
  "counts": {
   "total": 2604,
   "proven": 895,
