@@ -2014,7 +2014,7 @@ mod tests {
             .unwrap();
         fs::create_dir_all(data.join("files/data")).unwrap();
         fs::write(data.join("files/data/full"), vec![b'x'; 15 * 1024 * 1024]).unwrap();
-        h.execute("finished=false;eqoa.events.on('resource.failed',function(e) assert(e.data.request==req and e.data.kind=='json_saved');finished=true end);req=assert(eqoa.files.save_json_async('journal.json',{payload=string.rep('x',2*1024*1024)}))").unwrap();
+        h.execute("finished=false;eqoa.events.on('resource.failed',function(e) assert(e.data.request==req and e.data.kind=='json_saved');finished=true end);local p='x';for i=1,21 do p=p..p end;req=assert(eqoa.files.save_json_async('journal.json',{payload=p}))").unwrap();
         drive_json(&h, "finished");
     }
     #[test]
