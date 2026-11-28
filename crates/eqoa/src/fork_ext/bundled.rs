@@ -938,6 +938,11 @@ fn no_links(path: &Path) -> Result<(), String> {
         match fs::symlink_metadata(component) {
             Ok(meta) => {
                 let mut link = meta.file_type().is_symlink();
+                // A link the system itself owns (macOS: /var, /tmp) is not one a mod could have made.
+                #[cfg(unix)]
+                if link && std::os::unix::fs::MetadataExt::uid(&meta) == 0 {
+                    link = false;
+                }
                 #[cfg(windows)]
                 {
                     use std::os::windows::fs::MetadataExt;

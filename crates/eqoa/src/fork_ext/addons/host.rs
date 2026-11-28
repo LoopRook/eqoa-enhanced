@@ -115,7 +115,7 @@ fn create_base_host() -> Result<BaseHost> {
 
     // Extract clean os whitelist (clock, date) and remove dangerous functions
     let os_orig: Table = lua.globals().get("os")?;
-    let clock_fn: Function = os_orig.get("clock")?;
+    let clock_fn = wall_clock(&lua, os_orig.get("clock")?)?;
     let date_fn: Function = os_orig.get("date")?;
     let clean_os = lua.create_table()?;
     clean_os.set("clock", clock_fn)?;
@@ -858,6 +858,20 @@ impl Host {
     }
 }
 
+/// `os.clock` as the Windows client has always had it: seconds since the program started, by the wall clock. The
+/// system's own `clock()` on Linux and macOS is processor time, which does not move while the program waits, so a mod
+/// that times a wait with it (Bag Viewer's merchant pass, FrontiersForge addons) would never see the wait end.
+#[cfg(windows)]
+fn wall_clock(_: &Lua, system: Function) -> Result<Function> {
+    Ok(system)
+}
+#[cfg(not(windows))]
+fn wall_clock(lua: &Lua, _: Function) -> Result<Function> {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let start = *START.get_or_init(std::time::Instant::now);
+    lua.create_function(move |_, ()| Ok(start.elapsed().as_secs_f64()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -986,6 +1000,18 @@ mod tests {
         // Next independent host call must cleanly recover with replenished budget
         host.execute("recovered = 42").unwrap();
         assert_eq!(host.lua.globals().get::<i32>("recovered").unwrap(), 42);
+    }
+
+    #[test]
+    fn forge_host_os_clock_counts_elapsed_time_while_the_game_waits() {
+        // Windows' clock() is time since the program started; Linux's and macOS' is processor time, which stands
+        // still while the program sleeps: a mod that waits "3 seconds" by os.clock() would wait for ever. Control:
+        // with the system's own clock on Linux or macOS this reads about 0.
+        let host = Host::new().unwrap();
+        host.execute("t0 = os.clock()").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        host.execute("assert(os.clock() - t0 >= 0.15, 'os.clock did not move while the program slept: ' .. (os.clock() - t0))")
+            .unwrap();
     }
 
     #[test]
