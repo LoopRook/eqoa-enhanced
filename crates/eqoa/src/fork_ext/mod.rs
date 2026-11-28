@@ -2,6 +2,11 @@
 //! Fork-owned services. These modules accept plain data and do not depend on the app.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod addons;
+/// What `audio.rs` calls on the frames it has mixed: mod sound on Linux and macOS (`addons::sound_mix`); nothing on the web.
+#[cfg(not(target_arch = "wasm32"))]
+pub use addons::sound_mix::mix_into_stream as mix_mod_sound;
+#[cfg(target_arch = "wasm32")]
+pub fn mix_mod_sound(_: &mut [i16]) {}
 #[cfg(not(target_arch = "wasm32"))]
 pub use addons::modtools;
 #[cfg(target_arch = "wasm32")]

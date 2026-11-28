@@ -238,7 +238,7 @@ impl Shared {
             self.take_answer();
         }
         self.wind.mix(&mut self.pcm[from..]);
-        crate::fork_ext::addons::sound_mix::mix_into_stream(&mut self.pcm[from..]);
+        crate::fork_ext::mix_mod_sound(&mut self.pcm[from..]);
     }
 }
 

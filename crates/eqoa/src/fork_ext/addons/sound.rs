@@ -1319,7 +1319,7 @@ mod tests {
         bank.set_active(true);
         let dir = temp_dir("unix_formats");
         let mp3 = dir.join("song.mp3");
-        fs::write(&mp3, b"ID3      ÿû ").unwrap();
+        fs::write(&mp3, [b'I', b'D', b'3', 3, 0, 0, 0, 0, 0, 0, 0xFF, 0xFB, 0x90, 0]).unwrap();
         assert!(bank.load_sound(&mp3.to_string_lossy(), &dir, &[dir.clone()]).is_none());
         match bank.last_diagnostic() {
             Some(SoundDiagnostic::UnsupportedFormat(what)) => assert!(what.contains("mp3"), "{what}"),
