@@ -123,12 +123,35 @@ class FunctionsAndAliases(unittest.TestCase):
             make_mod(tmp / "examples", "b", {"main.lua": "eqoa.items.get(1)\n"})
             fp = tmp / "f.json"
             fp.write_text(json.dumps({"supported": FROZEN}), encoding="utf-8")
-            _, t = T.build(fp, tmp / "bundled-mods", tmp / "examples")
+            _, t = T.build(fp, tmp / "bundled-mods", tmp / "examples", retired={"b"})
             self.assertEqual(t.tier["eqoa.items.get"], "proven")
             self.assertEqual(t.tier["eqoa.items.find"], "proven")
             # control: without the examples folder the example's name is not proven
             _, t = T.build(fp, tmp / "bundled-mods")
             self.assertEqual(t.tier["eqoa.items.get"], "provisional")
+
+    def test_only_an_example_of_a_retired_bundled_mod_proves_anything(self):
+        # review round 1 (2026-11-27): an example folder counts only if the client lists it as a retired bundled mod;
+        # a made-up example that never shipped proves nothing
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            make_mod(tmp / "bundled-mods", "a", {"main.lua": "eqoa.items.find(1)\n"})
+            make_mod(tmp / "examples", "made_up_example", {"main.lua": "eqoa.items.get(1)\n"})
+            make_mod(tmp / "examples", "eqoa_stats_box", {"main.lua": "eqoa.raid.get()\n"})
+            fp = tmp / "f.json"
+            fp.write_text(json.dumps({"supported": FROZEN}), encoding="utf-8")
+            # the client's own RETIRED list (read from bundled.rs) is what decides
+            _, t = T.build(fp, tmp / "bundled-mods", tmp / "examples")
+            self.assertEqual(t.tier["eqoa.items.get"], "provisional", "a made-up example proves nothing")
+            self.assertEqual(t.tier["eqoa.raid.get"], "proven", "the retired Stats Box's example does")
+            # control: with the made-up folder on the list, it would prove its name
+            _, t = T.build(fp, tmp / "bundled-mods", tmp / "examples", retired={"made_up_example"})
+            self.assertEqual(t.tier["eqoa.items.get"], "proven")
+
+    def test_the_retired_list_is_read_from_the_client(self):
+        ids = T.retired_ids()
+        self.assertIn("eqoa_stats_box", ids)
+        self.assertIn("eqoa_turnin", ids)
 
     def test_compat_names_are_left_out_of_the_counts(self):
         doc, tier = tiers_for({"m": {"main.lua": "frontiers_forge = nil\nUiForge.Log('x')\n"}})

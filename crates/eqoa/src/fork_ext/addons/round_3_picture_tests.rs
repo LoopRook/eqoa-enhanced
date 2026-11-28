@@ -1027,7 +1027,9 @@ fn fresh_hud_mod_load_defaults_and_live_stats_key_and_menu_wiring() {
     nums.execute("assert(eqoa.options.get('hud_numbers') and eqoa.options.get('xp_details') and eqoa.options.get('target_hp_percent'))").unwrap();
     // Change the same item the native Enhanced HUD page changes; Lua must observe it. (The mod's row: an ordinary mod option row
     // since the Stats Box left the bundle on 2026-11-27; it had the fixed item 2000 until then.)
-    let stats_item = options::register_toggle("eqoa_stats_box", "stats_box", "Stats Box", false).1;
+    let rows = options::item_ids_of("eqoa_stats_box");
+    assert_eq!(rows.len(), 1, "the row the mod's main.lua registered: {rows:?}");
+    let stats_item = rows[0];
     assert!(options::toggle_by_item(stats_item));
     stats
         .execute("assert(eqoa.options.get('stats_box') == true)")

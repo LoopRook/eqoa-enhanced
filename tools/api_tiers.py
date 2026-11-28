@@ -35,6 +35,17 @@ TIERS = ROOT / "docs/modding/eqoa-1-tiers.json"
 PROVISIONAL_MD = ROOT / "docs/modding/PROVISIONAL.md"
 BUNDLED = ROOT / "bundled-mods"
 EXAMPLES = ROOT / "docs/modding/examples"   # mods that shipped with the client and are kept as examples
+BUNDLED_RS = ROOT / "crates/eqoa/src/fork_ext/bundled.rs"   # its `RETIRED` list: the mods the client shipped and no longer does
+
+
+def retired_ids(bundled_rs=BUNDLED_RS):
+    """The client's own list of retired bundled mods (`pub const RETIRED: &[&str] = &[...]` in bundled.rs): the one
+    source of truth for which example folders were once shipped. Fails loudly if the line is not found."""
+    text = Path(bundled_rs).read_text(encoding="utf-8")
+    m = re.search(r"pub const RETIRED: &\[&str\] = &\[([^\]]*)\];", text)
+    if not m:
+        raise SystemExit(f"api_tiers: no `pub const RETIRED` list in {bundled_rs}")
+    return set(re.findall(r'"([^"]+)"', m.group(1)))
 
 RULE = (
     "A name is proven when a bundled mod, or a once-bundled mod kept in docs/modding/examples, uses it (a call or "
@@ -438,11 +449,16 @@ def scan_mod(mod_dir, frozen, nested):
     return mod
 
 
-def scan_bundled(frozen, bundled=BUNDLED, examples=None):
+def scan_bundled(frozen, bundled=BUNDLED, examples=None, retired=None):
+    """The bundled mods, and of `examples` only the folders whose id is a retired bundled mod (`retired`, default the
+    client's `RETIRED` list): an example that never shipped proves nothing."""
     import api_tiers_flow as flow
     nested = flow.load_nested()
-    roots = [bundled] + ([examples] if examples is not None and examples.is_dir() else [])
-    return [scan_mod(d, set(frozen), nested) for r in roots for d in sorted(p for p in r.iterdir() if p.is_dir())]
+    dirs = sorted(p for p in bundled.iterdir() if p.is_dir())
+    if examples is not None and examples.is_dir():
+        allowed = retired_ids() if retired is None else set(retired)
+        dirs += sorted(p for p in examples.iterdir() if p.is_dir() and p.name in allowed)
+    return [scan_mod(d, set(frozen), nested) for d in dirs]
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -570,9 +586,9 @@ def summarize(t):
     return total, by
 
 
-def build(frozen_path=FROZEN, bundled=BUNDLED, examples=None):
+def build(frozen_path=FROZEN, bundled=BUNDLED, examples=None, retired=None):
     frozen = json.loads(Path(frozen_path).read_text(encoding="utf-8"))
-    t = Tiers(frozen["supported"], scan_bundled(frozen["supported"], bundled, examples)).run()
+    t = Tiers(frozen["supported"], scan_bundled(frozen["supported"], bundled, examples, retired)).run()
     total, by = summarize(t)
     doc = {
         "api": "eqoa/1",
@@ -704,7 +720,8 @@ def main(argv=None):
     ap.add_argument("--frozen", default=str(FROZEN))
     ap.add_argument("--bundled", default=str(BUNDLED))
     ap.add_argument("--examples", default=str(EXAMPLES),
-                    help="once-bundled mods kept as examples, which still prove the names they use ('' for none)")
+                    help="once-bundled mods kept as examples, which still prove the names they use ('' for none); only the "
+                         "folders named in bundled.rs's RETIRED list count")
     ap.add_argument("--tiers", default=str(TIERS))
     ap.add_argument("--md", default=str(PROVISIONAL_MD))
     ap.add_argument("--why", metavar="NAME", help="print where a bundled mod uses NAME (or that none does)")

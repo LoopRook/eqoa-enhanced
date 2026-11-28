@@ -55,8 +55,11 @@ pub const PACKAGES: &[&str] = &[
 /// and the Stats Box (2026-11-27: the game's own Stat Window is the one players use; the mod is kept as an example in
 /// `docs/modding/examples/`). A folder of one that this client's bundler installed (recorded in `bundled.json`) and whose
 /// every file is still byte for byte a version the client shipped is taken out at start (`retire_leftovers`), so a
-/// profile that still has the mod on loads nothing and the game works as without it. A folder with any file the player
-/// changed or added is the player's own mod now and is kept; so is one the bundler never installed.
+/// profile that still has the mod on loads nothing and the game works as without it, and it is taken off the record. A
+/// folder with any file the player changed or added is the player's own mod now: kept, said once, taken off the record;
+/// so is a copy the player makes later (it is never on the record), and one the bundler never installed. A removal the
+/// system refuses is said with its reason and tried again at the next start. `tools/api_tiers.py` reads this list: an
+/// example in `docs/modding/examples/` proves `eqoa/1` names only if it is one of these.
 pub const RETIRED: &[&str] = &["eqoa_turnin", "eqoa_stats_box"];
 
 #[derive(Clone, Copy, Debug)]
@@ -75,8 +78,11 @@ pub struct InstallResult {
     pub kept_edited: BTreeMap<String, usize>,
     /// Retired mods whose unchanged folder was taken out (`RETIRED`).
     pub retired_removed: Vec<String>,
-    /// Retired mods whose folder the player changed, so it is kept.
+    /// Retired mods whose folder the player changed, so it is kept (as the player's own mod from then on).
     pub retired_kept: Vec<String>,
+    /// Retired mods whose unchanged folder the system would not let go of (a file open elsewhere), with the system's
+    /// reason: the client tries again at the next start.
+    pub retired_failed: Vec<(String, String)>,
 }
 
 pub const EMBEDDED_FILES: &[BundledFile] = &[
@@ -1149,6 +1155,15 @@ pub fn install_bundled_mods(
     mods_dir: &Path,
     config_dir: Option<&Path>,
 ) -> Result<InstallResult, String> {
+    install_bundled_mods_saying(mods_dir, config_dir, &mut |line| crate::say(line))
+}
+
+/// `install_bundled_mods`, with the lines for the player written through `say` (the tests read them).
+pub(crate) fn install_bundled_mods_saying(
+    mods_dir: &Path,
+    config_dir: Option<&Path>,
+    say: &mut dyn FnMut(&str),
+) -> Result<InstallResult, String> {
     if mods_dir.file_name().and_then(|n| n.to_str()) == Some("eqoa-mods-unavailable") {
         return Err("cannot install bundled mods into unavailable mods folder fallback".into());
     }
@@ -1157,7 +1172,6 @@ pub fn install_bundled_mods(
     let mut registry = read_registry(cfg)?;
     let key = mods_folder_key(mods_dir);
     let mut recorded = registry.folders.get(&key).cloned().unwrap_or_default();
-    let (retired_removed, retired_kept) = retire_leftovers(mods_dir, &recorded, registry.shipped.get(&key));
     let mut packages = Vec::new();
     for &pkg in PACKAGES {
         let path = mods_dir.join(pkg);
@@ -1185,7 +1199,29 @@ pub fn install_bundled_mods(
     // Check writable registry before touching package files; preserve histories
     // on partial failures so a later start can finish safely.
     save_bundled_registry(cfg, &registry)?;
-    let mut result = InstallResult { retired_removed, retired_kept, ..InstallResult::default() };
+    // Retired mods' leftovers, only once the record can be written (so what is taken out is also taken off the record).
+    // The player is told at once, before anything later in the install can fail.
+    let (retired_removed, retired_kept, retired_failed) = retire_leftovers(mods_dir, &mut recorded, registry.shipped.get(&key));
+    for package in &retired_removed {
+        say(&format!(
+            "Bundled mods: {package} is no longer part of the client; its folder, unchanged since the client put it there, was taken out"
+        ));
+    }
+    for package in &retired_kept {
+        say(&format!(
+            "Bundled mods: {package} is no longer part of the client; its folder has changes of yours, so it is kept as your own mod"
+        ));
+    }
+    for (package, error) in &retired_failed {
+        say(&format!(
+            "Bundled mods: {package} is no longer part of the client; its folder could not be taken out ({error}); the client tries again at the next start"
+        ));
+    }
+    if registry.folders.get(&key) != Some(&recorded) {
+        registry.folders.insert(key.clone(), recorded.clone());
+        save_bundled_registry(cfg, &registry)?;
+    }
+    let mut result = InstallResult { retired_removed, retired_kept, retired_failed, ..InstallResult::default() };
     for &pkg in &packages {
         for file in files.iter().filter(|f| f.package == pkg) {
             extract_single_file(
@@ -1202,37 +1238,42 @@ pub fn install_bundled_mods(
     registry.folders.insert(key, recorded);
     save_bundled_registry(cfg, &registry)?;
     for (package, count) in &result.kept_edited {
-        crate::say(&format!(
+        say(&format!(
             "Bundled mods: {package}: kept {count} player-edited file(s)"
-        ));
-    }
-    for package in &result.retired_removed {
-        crate::say(&format!(
-            "Bundled mods: {package} is no longer part of the client; its folder, unchanged since the client put it there, was taken out"
-        ));
-    }
-    for package in &result.retired_kept {
-        crate::say(&format!(
-            "Bundled mods: {package} is no longer part of the client; its folder has changes of yours, so it was kept"
         ));
     }
     Ok(result)
 }
 
-/// The `RETIRED` mods in `mods_dir` (see there): each folder the bundler installed (`recorded`) whose files are all,
-/// byte for byte, versions the client shipped (`shipped`, this install's history, or the bootstrap list) is removed.
-/// Returns (removed, kept). Anything unreadable, linked or unknown is kept: nothing the player made is ever removed.
-fn retire_leftovers(mods_dir: &Path, recorded: &BTreeSet<String>, shipped: Option<&ShippedFiles>) -> (Vec<String>, Vec<String>) {
-    let (mut removed, mut kept) = (Vec::new(), Vec::new());
+/// The `RETIRED` mods in `mods_dir` (see there), each one only if the bundler installed it here (`recorded`):
+/// - a folder whose files are all, byte for byte, versions the client shipped (`shipped`, this install's history, or the
+///   bootstrap list), or that is empty (what a removal the system cut short leaves), is removed and taken off the record;
+/// - if the system will not remove it (a file open in another program), it is reported with the system's reason and
+///   stays on the record, so the next start tries again (what is left still matches, or is empty);
+/// - a folder with anything the player changed or added (or that is not a plain folder) is kept and taken off the record:
+///   it is the player's own mod from then on, never removed and never reported again;
+/// - a recorded folder that is gone is taken off the record, so a copy the player makes later (the example in
+///   `docs/modding/examples/`) is his own mod, whatever its bytes.
+/// Returns (removed, kept, could not be removed with the reason). Nothing the player made is ever removed.
+fn retire_leftovers(
+    mods_dir: &Path,
+    recorded: &mut BTreeSet<String>,
+    shipped: Option<&ShippedFiles>,
+) -> (Vec<String>, Vec<String>, Vec<(String, String)>) {
+    let (mut removed, mut kept, mut failed) = (Vec::new(), Vec::new(), Vec::new());
     for &pkg in RETIRED {
         let root = mods_dir.join(pkg);
-        if !recorded.contains(pkg) || !root.is_dir() {
-            continue; // never installed by the bundler here, or already gone: not ours to touch
+        if !recorded.contains(pkg) {
+            continue; // never installed by the bundler here: not ours to touch
         }
-        let unchanged = no_links(&root).is_ok()
+        if fs::symlink_metadata(&root).is_err() {
+            recorded.remove(pkg); // gone (taken out before, or by the player): nothing of the bundler's is left
+            continue;
+        }
+        let unchanged = root.is_dir()
+            && no_links(&root).is_ok()
             && package_files(&root, 64).is_some_and(|files| {
-                !files.is_empty()
-                    && files.iter().all(|rel| {
+                files.iter().all(|rel| {
                         let path = format!("{pkg}/{rel}");
                         let Ok(Some(bytes)) = read_bounded(&root.join(rel), MAX_BUNDLE_FILE_BYTES) else {
                             return false;
@@ -1242,13 +1283,24 @@ fn retire_leftovers(mods_dir: &Path, recorded: &BTreeSet<String>, shipped: Optio
                             || bootstrap_hashes(&path).contains(&h)
                     })
             });
-        if unchanged && fs::remove_dir_all(&root).is_ok() {
-            removed.push(pkg.to_string());
-        } else {
+        if !unchanged {
             kept.push(pkg.to_string());
+            recorded.remove(pkg);
+            continue;
+        }
+        match fs::remove_dir_all(&root) {
+            Ok(()) => {
+                removed.push(pkg.to_string());
+                recorded.remove(pkg);
+            }
+            Err(_) if fs::symlink_metadata(&root).is_err() => {
+                removed.push(pkg.to_string()); // gone all the same
+                recorded.remove(pkg);
+            }
+            Err(error) => failed.push((pkg.to_string(), error.to_string())),
         }
     }
-    (removed, kept)
+    (removed, kept, failed)
 }
 
 fn extract_single_file(

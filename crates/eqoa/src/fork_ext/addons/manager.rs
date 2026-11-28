@@ -3130,15 +3130,15 @@ mod tests {
             lua(&manager, id).load(assertion).exec().unwrap();
         }
         for id in ids {
-            let items = super::super::options::BUNDLED_TOGGLES
-                .iter()
-                .filter(|t| t.0 == id)
-                .map(|t| t.3)
-                .collect::<Vec<_>>();
+            // the mod's own rows as it registered them: the fixed bundled ones and the dynamic ones (the Stats Box's, an
+            // example mod since 2026-11-27, is dynamic): never an empty list, so the checks below are never vacuous
+            let items = super::super::options::item_ids_of(id);
+            assert!(!items.is_empty(), "{id} registered its option rows");
             assert!(
                 items
                     .iter()
-                    .all(|item| super::super::options::active_mod_item_ids().contains(item))
+                    .all(|item| super::super::options::active_mod_item_ids().contains(item)),
+                "{id}: its rows are on the Enhanced page while it is on"
             );
             super::super::native_core::CORE.with(|c| c.borrow_mut().view.in_world = true);
             lua(&manager, id)

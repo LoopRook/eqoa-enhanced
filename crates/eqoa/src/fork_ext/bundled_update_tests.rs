@@ -272,3 +272,146 @@ fn every_shipped_version_of_a_retired_mod_is_in_the_bootstrap_list() {
     assert!(bootstrap_hashes("eqoa_stats_box/main.lua").contains("2192342f2d5c8c61a824254f0a5ad05a12e6b6ad2e22345b7aad5fb25eeaa755"));
     assert!(!bootstrap_hashes("eqoa_stats_box/main.lua").contains(&hash(b"-- not a shipped file\n")));
 }
+
+// ---- review round 1 (2026-11-27): what the player is told, and the install record, when a retired mod's folder goes ----
+
+const OLD_STATS_BOX: [(&str, &[u8]); 3] = [
+    ("eqoa_stats_box/mod.json", br#"{"schemaVersion":1,"runtime":"lua","api":"eqoa/1","id":"eqoa_stats_box","entry":"main.lua"}"#),
+    ("eqoa_stats_box/main.lua", b"-- an old client's Stats Box\n"),
+    ("eqoa_stats_box/README.md", b"# Stats Box\n"),
+];
+
+/// An older client's install of the Stats Box in `i`: its files, the hashes that client wrote in bundled.json, and the
+/// folder on the record as the bundler's.
+fn install_old_stats_box(i: &Install) {
+    fs::create_dir_all(i.mods.join("eqoa_stats_box")).unwrap();
+    for (path, bytes) in OLD_STATS_BOX {
+        fs::write(i.mods.join(path), bytes).unwrap();
+        i.remember_old(path, bytes);
+    }
+    let file = bundled_registry_path(&i.cfg);
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    value["folders"][mods_folder_key(&i.mods)].as_array_mut().unwrap().push("eqoa_stats_box".into());
+    fs::write(file, serde_json::to_vec(&value).unwrap()).unwrap();
+}
+
+/// Whether bundled.json still records the Stats Box as the bundler's in `i`'s mods folder.
+fn on_record(i: &Install) -> bool {
+    let value: serde_json::Value = serde_json::from_slice(&fs::read(bundled_registry_path(&i.cfg)).unwrap()).unwrap();
+    value["folders"][mods_folder_key(&i.mods)].as_array().unwrap().iter().any(|v| v == "eqoa_stats_box")
+}
+
+fn install_saying(i: &Install) -> (Result<InstallResult, String>, Vec<String>) {
+    let mut lines = Vec::new();
+    let r = install_bundled_mods_saying(&i.mods, Some(&i.cfg), &mut |l| lines.push(l.to_string()));
+    (r, lines)
+}
+
+/// MEDIUM-2: a retired folder taken out is also taken off the record. A player who later copies the example
+/// (docs/modding/examples/eqoa_stats_box) into his mods folder has made his own mod: never removed and never reported,
+/// on an install that once had the bundled copy; even an exact old shipped copy put back is his. Red before the fix:
+/// the id stayed on the record, so the example was reported as "changes of yours" at every start and the old copy was
+/// taken out again.
+#[test]
+fn review1_after_retirement_a_copy_the_player_makes_is_his_own_mod() {
+    let i = Install::new();
+    install_old_stats_box(&i);
+    let (r, lines) = install_saying(&i);
+    assert_eq!(r.unwrap().retired_removed, ["eqoa_stats_box"]);
+    assert_eq!(lines.iter().filter(|l| l.contains("eqoa_stats_box")).count(), 1, "{lines:?}");
+    assert!(!on_record(&i), "taken off the record once taken out");
+    // the player copies the example in
+    for file in crate::fork_ext::addons::example_mods::FILES {
+        let path = i.mods.join(file.path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, file.data).unwrap();
+    }
+    for start in 0..2 {
+        let (r, lines) = install_saying(&i);
+        let r = r.unwrap();
+        assert!(r.retired_removed.is_empty() && r.retired_kept.is_empty() && r.retired_failed.is_empty(), "start {start}: {r:?}");
+        assert!(!lines.iter().any(|l| l.contains("eqoa_stats_box")), "start {start}: never reported: {lines:?}");
+        assert!(i.mods.join("eqoa_stats_box/main.lua").is_file(), "start {start}: the player's copy stays");
+    }
+    // and an exact old shipped copy put back is his too: not taken out again
+    fs::remove_dir_all(i.mods.join("eqoa_stats_box")).unwrap();
+    for (path, bytes) in OLD_STATS_BOX {
+        fs::create_dir_all(i.mods.join(path).parent().unwrap()).unwrap();
+        fs::write(i.mods.join(path), bytes).unwrap();
+    }
+    let (r, _) = install_saying(&i);
+    assert!(r.unwrap().retired_removed.is_empty());
+    assert_eq!(fs::read(i.mods.join("eqoa_stats_box/main.lua")).unwrap(), b"-- an old client's Stats Box\n");
+}
+
+/// MEDIUM-1: an empty folder left of a retired mod (what a removal the system cut short leaves) is simply removed at the
+/// next start, without a "changes of yours" line. Red before the fix: an empty folder counted as changed and was kept,
+/// with that line at every start. Control: a folder with a file the player added is his: kept, said once, then never.
+#[test]
+fn review1_an_empty_leftover_folder_is_removed_without_a_changes_line() {
+    let i = Install::new();
+    install_old_stats_box(&i);
+    for (path, _) in OLD_STATS_BOX {
+        fs::remove_file(i.mods.join(path)).unwrap();
+    }
+    let (r, lines) = install_saying(&i);
+    let r = r.unwrap();
+    assert_eq!(r.retired_removed, ["eqoa_stats_box"], "{r:?}");
+    assert!(r.retired_kept.is_empty());
+    assert!(!lines.iter().any(|l| l.contains("changes of yours")), "{lines:?}");
+    assert!(!i.mods.join("eqoa_stats_box").exists() && !on_record(&i));
+    let j = Install::new();
+    install_old_stats_box(&j);
+    fs::write(j.mods.join("eqoa_stats_box/notes.txt"), b"mine").unwrap();
+    let (r, lines) = install_saying(&j);
+    assert_eq!(r.unwrap().retired_kept, ["eqoa_stats_box"]);
+    assert_eq!(lines.iter().filter(|l| l.contains("changes of yours")).count(), 1);
+    assert!(j.mods.join("eqoa_stats_box/notes.txt").is_file() && !on_record(&j));
+    let (r, lines) = install_saying(&j);
+    assert!(r.unwrap().retired_kept.is_empty() && !lines.iter().any(|l| l.contains("eqoa_stats_box")), "said once only");
+}
+
+/// MEDIUM-1: the system will not remove the folder (a file held open by another program without delete sharing, as an
+/// editor can on Windows): the player is told that, with the system's reason, not "changes of yours"; the folder stays on
+/// the record and the next start, with the file let go, takes out what is left. Red before the fix: reported as kept for
+/// the player's changes.
+#[cfg(windows)]
+#[test]
+fn review1_a_folder_the_system_will_not_remove_is_reported_truthfully_and_tried_again() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let i = Install::new();
+    install_old_stats_box(&i);
+    // read sharing only: it can be read (and so matched), not deleted
+    let held = fs::OpenOptions::new().read(true).share_mode(1).open(i.mods.join("eqoa_stats_box/main.lua")).unwrap();
+    let (r, lines) = install_saying(&i);
+    let r = r.unwrap();
+    assert!(r.retired_kept.is_empty(), "not reported as the player's changes: {r:?}");
+    assert!(r.retired_removed.is_empty());
+    assert_eq!(r.retired_failed.len(), 1, "{r:?}");
+    assert_eq!(r.retired_failed[0].0, "eqoa_stats_box");
+    assert!(!r.retired_failed[0].1.is_empty(), "the system's reason is given");
+    assert_eq!(lines.iter().filter(|l| l.contains("could not be taken out") && l.contains("tries again")).count(), 1, "{lines:?}");
+    assert!(!lines.iter().any(|l| l.contains("changes of yours")), "{lines:?}");
+    assert!(on_record(&i), "stays on the record: tried again at the next start");
+    drop(held);
+    let (r, lines) = install_saying(&i);
+    assert_eq!(r.unwrap().retired_removed, ["eqoa_stats_box"], "{lines:?}");
+    assert!(!i.mods.join("eqoa_stats_box").exists() && !on_record(&i));
+}
+
+/// MEDIUM-1, the reviewer's last case: the folder has been taken out and a later step of the install fails: the player is
+/// told what was taken out all the same. Red before the fix: the lines were written only after every later step.
+#[test]
+fn review1_the_line_is_written_even_if_a_later_step_of_the_install_fails() {
+    let i = Install::new();
+    install_old_stats_box(&i);
+    // a later step fails: a folder where a bundled mod's file belongs
+    let blocker = i.mods.join("eqoa_dialogs/main.lua");
+    fs::remove_file(&blocker).unwrap();
+    fs::create_dir_all(&blocker).unwrap();
+    let (r, lines) = install_saying(&i);
+    assert!(r.is_err(), "the install stops at the folder in the file's place");
+    assert!(!i.mods.join("eqoa_stats_box").exists(), "the retired folder was taken out before that");
+    assert_eq!(lines.iter().filter(|l| l.contains("eqoa_stats_box") && l.contains("was taken out")).count(), 1, "{lines:?}");
+    assert!(!on_record(&i), "and taken off the record");
+}

@@ -423,6 +423,13 @@ pub fn active_mod_items() -> Vec<(i32, String)> {
     rows
 }
 
+/// Every option row `addon_id` has registered (its fixed bundled rows and the ones `eqoa.options.toggle` made), on or off:
+/// for the tests that must find a mod's own rows rather than assume their numbers.
+#[cfg(test)]
+pub(crate) fn item_ids_of(addon_id: &str) -> Vec<i32> {
+    TOGGLES.with(|t| t.borrow().iter().filter(|o| o.addon_id == addon_id).map(|o| o.item_id).collect())
+}
+
 pub fn active_mod_item_ids() -> Vec<i32> {
     active_mod_items().into_iter().map(|(id,_)|id).collect()
 }
