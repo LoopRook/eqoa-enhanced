@@ -46,6 +46,8 @@ pub(crate) mod raid_strips;
 pub(crate) mod change_events;
 #[cfg(test)]
 mod change_events_tests;
+#[cfg(test)]
+mod sandbox_tests;
 pub(crate) mod gesture;
 mod async_json;
 pub(crate) mod bit;

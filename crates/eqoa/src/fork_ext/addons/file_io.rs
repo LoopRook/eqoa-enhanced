@@ -306,6 +306,10 @@ fn read(path: &Path) -> std::result::Result<Vec<u8>, String> {
 pub(super) fn no_links(path: &Path) -> std::result::Result<(), String> {
     for p in path.ancestors() {
         if let Ok(meta) = fs::symlink_metadata(p) {
+            #[cfg(unix)]
+            if meta.file_type().is_symlink() && super::sandbox::unix::trusted_link(&meta) {
+                continue;
+            }
             if meta.file_type().is_symlink() {
                 return Err("symlink in addon file path".into());
             }
