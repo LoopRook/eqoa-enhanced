@@ -250,7 +250,13 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cargo +1.99.1 test --locked -p eqoa --bin eqoa fork_ext::addons:: -- --test-threads=1 --nocapture 2>&1 | tee "$GATE_LOGS/unix-addons.log"
+          # These tests need a GPU adapter, which a Linux runner lacks (the Windows runner has WARP and runs them);
+          # macOS has one and runs them. The report names them as not run on Linux.
+          SKIPS=()
+          if [ "${{ matrix.os }}" = linux ]; then
+            SKIPS=(--skip a_hidden_loot_session_that_ends_without_a_packet_is_gone_on_the_next_drawn_frame --skip owner1125b_auto_loot_switched_on_after_the_kill_takes_your_recent_kill --skip owner_h_sell_junk_puts_the_players_own_target_back --skip trade_window_an_error_in_an_always_on_listener_lets_both_claims_go_and_the_games_windows_come_back --skip round4_live_capture_quota_lifecycle_and_device_cleanup --skip round4_live_texture_quota_returns_nil_error --skip round4b_fix_existing_profile_enables_packaged_map_mods_and_keeps_manual_off)
+          fi
+          cargo +1.99.1 test --locked -p eqoa --bin eqoa fork_ext::addons:: -- --test-threads=1 --nocapture "${SKIPS[@]}" 2>&1 | tee "$GATE_LOGS/unix-addons.log"
       - name: Summarize
         if: always()
         shell: bash
