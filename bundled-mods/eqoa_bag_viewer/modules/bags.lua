@@ -172,7 +172,8 @@ function M.lootable_corpse(ttl)
 end
 
 -- loot.changed (the mod's always-on listener): what the corpse window lists says whether that corpse still has loot. The
--- corpse is the one the client names (`source`), else the one the mod asked for, else the player's target when it is a corpse.
+-- corpse is the one the client names (`source`), else the one the mod asked for, else the player's target when it is a corpse
+-- in the zone as last looked at.
 function M.note_corpse_contents(d)
     local after = d and d.after
     if not after then
@@ -183,7 +184,8 @@ function M.note_corpse_contents(d)
     if not id then
         local pl = eqoa.player and eqoa.player.get and eqoa.player.get()
         local target = pl and pl.target_id
-        for _, e in ipairs(scan_zone(M.DRAW_TTL).corpses) do
+        -- (the scan as it stands: a handler of the loot window does not make a look at the zone of its own)
+        for _, e in ipairs(scan_data and scan_data.corpses or {}) do
             if e.id == target then id = target break end
         end
     end
