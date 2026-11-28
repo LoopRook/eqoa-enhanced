@@ -489,6 +489,10 @@ A font restored after going missing is retried after a face or size change or af
   his test: "it'd be cool"). Today it runs only for someone the journal already sends you to and presses only a
   sole answer. Not looked at: whether the client can tell a mod that a talk offers a quest, or that an answer costs
   coin. After the note to DabDavis.
+- **Downloaded mods update themselves** (owner, 2026-11-28). Mods will live in their own repository; a player who
+  downloads one should get its updates without doing it by hand. Mods have no network access, so this is the
+  client's work (the Mods window fetching a mod's newer release and checking its hash), not a mod's. Any `eqoa/1`
+  or client addition for it comes after the pull requests to DabDavis.
 - **Mods on a server that asks for the game as it was** (owner, 2026-11-28: leave it alone for now). Today mods
   are not restricted there. Not an API matter: it would be a switch in the client for whether mods load, and no
   `eqoa/1` name changes. Raise it again if DabDavis asks when he sees the mod API pull request.
