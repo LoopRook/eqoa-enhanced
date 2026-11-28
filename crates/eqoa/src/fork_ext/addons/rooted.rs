@@ -94,6 +94,14 @@ pub(crate) fn register_root(root: &Path) {
     roots.push(Arc::new(Root { lexical: probe.lexical, canonical, fd: Mutex::new(held) }));
 }
 
+/// Test seam: other tests register whatever parent folder their data lives in (often the system temp folder), which
+/// would make everything below it a folder of that root. A test about roots takes the roots that contain its own
+/// folder out first, so what it checks is its own registrations.
+#[cfg(test)]
+pub(crate) fn isolate_for_test(path: &Path) {
+    lock_roots().retain(|r| !under(path, r));
+}
+
 /// A mod's folders: the mods folder it came from, its script folder and its package folder.
 pub(crate) fn register_addon(addon: &super::discovery::DiscoveredAddon) {
     if let Some(mods) = &addon.mods_root {

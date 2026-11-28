@@ -21,6 +21,7 @@ fn mounts(root: &Path) -> Mounts {
     fs::create_dir_all(data.join("files")).unwrap();
     #[cfg(unix)]
     {
+        super::rooted::isolate_for_test(root);
         super::rooted::register_root(&scripts);
         super::rooted::register_root(&data);
     }
@@ -170,6 +171,7 @@ mod links {
     #[test]
     fn a_root_under_a_linked_ancestor_is_matched_in_both_spellings_and_a_link_below_it_is_refused() {
         let base = scratch("rootlink");
+        rooted::isolate_for_test(&base);
         let real = base.join("real");
         fs::create_dir_all(real.join("data")).unwrap();
         fs::write(real.join("data/f.txt"), b"fine").unwrap();
@@ -216,6 +218,7 @@ mod links {
     #[test]
     fn a_linked_folder_below_the_registered_root_is_refused() {
         let base = scratch("linked-data");
+        rooted::isolate_for_test(&base);
         let outside = base.join("outside");
         fs::create_dir_all(&outside).unwrap();
         fs::write(outside.join("f.txt"), b"outside").unwrap();
