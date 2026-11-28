@@ -77,6 +77,13 @@ impl Journal {
 
 fn journal(titles: &[&str]) -> Journal {
     fixture();
+    // the process-wide input state an earlier test may have left (a click needs the window focused and the pointer known)
+    super::input::reset_input_state();
+    super::input::focus(true);
+    super::pointer_api::position([0.0, 0.0], true, (1024, 768));
+    super::native_core::fixture_demand(true);
+    // the window size the HUD frame is worked out from (a process-wide value an earlier test may have left at zero)
+    super::hud_layout::set_window_size(1024, 768);
     set_quests(titles);
     let context = context();
     let host = Host::for_addon(&addon("eqoa_quest_journal")).unwrap();
@@ -104,7 +111,12 @@ fn selected_after_clicking(titles: &[&str], row_y: f64) -> Option<String> {
     let (x0, y0, k) = j.place();
     click(&j.host, x0 + 30.0 * k, y0 + row_y * k, "left");
     j.frames(2);
-    j.host.drain_logs().unwrap().iter().rev().find_map(|l| l.split("Quest Journal: selected ").nth(1).map(str::to_string))
+    let logs = j.host.drain_logs().unwrap();
+    let found = logs.iter().rev().find_map(|l| l.split("Quest Journal: selected ").nth(1).map(str::to_string));
+    if found.is_none() {
+        eprintln!("no selection after the click at {row_y}; place {:?}; logs {logs:?}", (x0, y0, k));
+    }
+    found
 }
 
 /// A click on the SECOND line of a wrapped quest selects that quest. Negative control (red before the change): the journal
