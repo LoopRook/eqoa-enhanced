@@ -227,3 +227,11 @@ fn a_failed_sync_is_attributed_to_the_mod_for_every_kind_of_write() {
     assert_eq!(failures.len(), 1, "{failures:?}");
     assert_eq!(failures[0].owner.as_deref(), Some("toggle_mod"));
 }
+
+#[test]
+fn zz_diag_what_error_does_a_lua_write_give() {
+    let (_dir, host) = fixture();
+    let r = host.execute("local ok, e = eqoa.files.write('a.txt','one'); if not ok then error('DIAG ' .. tostring(e and e.code) .. ' | ' .. tostring(e and e.message)) end");
+    eprintln!("DIAG RESULT {r:?}");
+    assert!(r.is_ok(), "{r:?}");
+}
