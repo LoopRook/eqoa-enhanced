@@ -1,5 +1,5 @@
 // Code in this file published in EQOA Enhanced 0.4.5 or earlier is MIT (see NOTICE). LoopRook's additions first published in 0.4.6 or later are under the GNU Affero General Public License v3 or later (see LICENSE); upstream and third-party code stays under its own license.
-//! Bag Viewer: merchants and bankers in the window (the option "Open merchants and bankers in Bag Viewer", 2026-11-27).
+//! Bag Viewer: merchants and bankers in the window (the option "Merchants in Bag Viewer", 2026-11-27).
 //! Tested without a window or a GPU: the shipped `bags.lua`, `helpers.lua`, `multi.lua` and `trade.lua` are loaded into a
 //! plain Lua state with the fake `eqoa` of `bag_helpers_tests.rs` (its fixture) and a few more calls the module uses. Each
 //! test has a negative control: the same scenario against the shipped source with one line of the feature changed

@@ -98,6 +98,7 @@ BUNDLED_MOD_FILES = [
     "eqoa_quest_journal/README.md",
     "eqoa_quest_journal/main.lua",
     "eqoa_quest_journal/mod.json",
+    "eqoa_quest_journal/modules/wrap.lua",
     "eqoa_spellbook/README.md",
     "eqoa_spellbook/main.lua",
     "eqoa_spellbook/mod.json",

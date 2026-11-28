@@ -171,7 +171,7 @@ window when that mod is on.
 
 ## Merchants and bankers in this window (option, off by default)
 
-In Mods & Addons, the game's options list the mod's switch **Open merchants and bankers in Bag Viewer**. It is **off**: the
+In Mods & Addons, the game's options list the mod's switch **Merchants in Bag Viewer**. It is **off**: the
 game's own merchant and bank windows open as always, and nothing here changes. Turned **on**, the mod holds those two
 windows whole (`eqoa.windows.takeover(kind, {scope = "all"})`; the manifest lists `merchant` and `bank` in `replaces`, and the
 player's **Use the game's windows** switch still overrides it) and a merchant or banker you talk to opens this window instead.

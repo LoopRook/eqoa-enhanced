@@ -1,5 +1,5 @@
 -- Bag viewer: merchants and bankers in the Bags window (an option, off by default).
--- With "Open merchants and bankers in Bag Viewer" on, the mod holds the game's merchant and bank windows whole
+-- With "Merchants in Bag Viewer" on, the mod holds the game's merchant and bank windows whole
 -- (`eqoa.windows.takeover(kind, {scope = "all"})`): a merchant or banker the player talks to opens this window instead,
 -- on the Merchant tab (wares and prices on the left, the pack on the right) or the Bank tab (the bank on the left, the
 -- pack on the right). A click buys, sells or moves; a stack asks how many first. Leaving the tab, closing the window,
@@ -25,7 +25,7 @@ local OPTION = "open_npc"
 local KINDS = {"merchant", "bank"}
 local HEAD, ROW, FOOT = 16, 17, 17 -- the panel's header, a row, and the foot (Sell (N))
 
-eqoa.options.toggle({id = OPTION, label = "Open merchants and bankers in Bag Viewer", default = false})
+eqoa.options.toggle({id = OPTION, label = "Merchants in Bag Viewer", default = false})
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 

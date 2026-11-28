@@ -174,6 +174,8 @@ mod a7_mod_tests;
 mod a2_mod_tests;
 #[cfg(test)]
 mod a5_mod_tests;
+#[cfg(test)]
+mod quest_journal_wrap_tests;
 pub(crate) mod window_sessions;
 pub(crate) mod dialog_sessions;
 pub(crate) mod confirm;

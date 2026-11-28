@@ -341,6 +341,11 @@ pub const EMBEDDED_FILES: &[BundledFile] = &[
         data: include_bytes!("../../../../bundled-mods/eqoa_quest_journal/main.lua"),
     },
     BundledFile {
+        path: "eqoa_quest_journal/modules/wrap.lua",
+        package: "eqoa_quest_journal",
+        data: include_bytes!("../../../../bundled-mods/eqoa_quest_journal/modules/wrap.lua"),
+    },
+    BundledFile {
         path: "eqoa_quest_journal/README.md",
         package: "eqoa_quest_journal",
         data: include_bytes!("../../../../bundled-mods/eqoa_quest_journal/README.md"),
