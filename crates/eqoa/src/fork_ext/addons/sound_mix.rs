@@ -440,7 +440,7 @@ mod tests {
     fn the_backend_opens_plays_queries_sets_volume_stops_and_closes() {
         let shared: Shared = Default::default();
         let mut b = MixBackend::with_mixer(shared.clone());
-        let p = scratch("beep.wav", &wav16(48_000, 1, &[vec![1000]; 4]));
+        let p = scratch("beep.wav", &wav16(48_000, 1, &vec![vec![1000]; 4]));
         let open = format!("open \"{}\" type mpegvideo alias s1", p.display());
         b.send(&open).unwrap();
         assert_eq!(b.send("status s1 mode").unwrap(), "stopped");
