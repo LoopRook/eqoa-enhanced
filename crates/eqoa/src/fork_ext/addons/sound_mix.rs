@@ -295,7 +295,7 @@ impl Drop for MixBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fork_ext::addons::sound::MciBackend;
+    use super::super::sound::MciBackend;
 
     /// A WAV built in the test: `samples` per channel, PCM 16-bit.
     pub(crate) fn wav16(rate: u32, channels: u16, frames: &[Vec<i16>]) -> Vec<u8> {
