@@ -783,17 +783,11 @@ pub(crate) fn bind(lua: &Lua, module: &str, name: &str, function: Function) -> R
     let modules: Table = lua.named_registry_value("eqoa_modules")?;
     let table: Table = modules.get(module)?;
     let symbol = format!("eqoa.{module}.{name}");
-    if !cfg!(windows)
-        && (module == "files"
-            || module == "sound"
-            || matches!((module, name), ("textures", "load") | ("fonts", "load")))
-    {
+    // Files, textures and fonts are served on every system (the rooted file operations of `sandbox.rs` work on Unix too).
+    // Sound has a backend on Windows only until a Unix one is built: there the name is refused, visibly.
+    if !cfg!(windows) && module == "sound" {
         let round = declared_round(lua, &symbol);
-        let reason = if module == "sound" {
-            "no native sound backend on this platform"
-        } else {
-            "secure file backend is not implemented on this platform"
-        };
+        let reason = "no native sound backend on this platform";
         return refuse_member(
             lua,
             &table,
