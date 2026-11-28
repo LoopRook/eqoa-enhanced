@@ -43,7 +43,9 @@
 //!   large for it, which beside Back it then says) and Loading Screens
 //!   (Longer: a long trip's loading screen up at least a second, as a PS2's
 //!   disc read keeps it; Instant: down as soon as the place is in,
-//!   `loading::Screen::hold_far`);
+//!   `loading::Screen::hold_far`); Field of View (2026-11-27, Heirloom
+//!   petition 3336: a slider and its number, 45 to 95 degrees up the
+//!   height in fives, the game's 55 by default, `walker::Walker::view`);
 //! - World (the user's, 2026-10-25): Fog (a slider: the game's distance fog
 //!   and far plane in the middle, off at the left, thicker to the right,
 //!   `fog`), Mipmaps (On, the game's: the textures' mip levels sampled by
@@ -100,7 +102,10 @@
 //!   again a pass grown by the game's rule off seeds of their own, and that
 //!   many more drawn, `vi::flora::System::density`) and Foliage Reacts (Off,
 //!   the game's; On, the plants round a player or a creature leaning away
-//!   from it and easing back, `flora::React`);
+//!   from it and easing back, `flora::React`), Foliage Distance (2026-11-27,
+//!   Heirloom petition 3356: Retail, the game's 40 units; 1.5x, 2x or 3x,
+//!   2x the most in a page and on a phone, the field growing in over its
+//!   outer quarter, `vi::flora::System::distance`);
 //! - UI: Ability Bars (the game's 2, or 3 or 4: the HUD's quick menus and
 //!   the spell book's slots, `hudmenu`), Stacked Spell Bars (2026-11-13,
 //!   a player's ticket 1913, Off by default: On, on a computer, every bar shown
@@ -165,9 +170,12 @@
 //!   the game's camera could be a name plate is drawn, the game's 22, then
 //!   30 to 200 in tens, `play::PlateView`) and Overlapping Names (Hide, the
 //!   game's: a name whose plate meets a nearer one's is not drawn; Show,
-//!   every one, the nearest over the rest: `play::labels`) and Shadows (On,
+//!   every one, the nearest over the rest: `play::labels`), Shadows (On,
 //!   the game's: the characters' blob shadows, `shadows`; Off: none; on
-//!   World until Ground Fog took its row, 2026-10-30);
+//!   World until Ground Fog took its row, 2026-10-30) and Feet on Slopes
+//!   (On, by default since the owner's of 2026-11-26: a biped's legs fitted
+//!   to the ground under each foot as drawn, `feet`; Off, the game's: the
+//!   uphill foot in the hill);
 //! - Sound: Sound in Background (one setting for every window: off, a window
 //!   not in front is not heard, `audio::set_heard`) and natively Output
 //!   Device (Default, the system's, followed when it changes, or a device
@@ -1082,6 +1090,10 @@ impl WndOptions {
                     // Foliage Reacts: the plants lean from the next frame
                     // (`flora::React`)
                     FOLIAGE_REACTS => c.foliage_reacts = !c.foliage_reacts,
+                    // Foliage Distance: Retail, 1.5x, 2x, 3x round (2x the
+                    // most in a page and on a phone), the swatches grown
+                    // again at the next frame (`flora::Flora::frame`)
+                    FOLIAGE_DISTANCE => c.foliage_distance = foliage_distance_step(crate::settings::foliage_distance_drawn(&c), d),
                     // Master Volume: a step, stopping at the ends (as the
                     // game's volumes stop), heard from the next frame
                     // (`audio::set_master`)
@@ -1176,6 +1188,9 @@ impl WndOptions {
                     WEATHER => slide(&mut c.weather, 0, crate::settings::SHARE_FULL, crate::settings::SHARE_STEP),
                     // Shadows: drawn or not from the next frame (`viewer`, `shadows`)
                     46 => c.shadows = !c.shadows,
+                    // Feet on Slopes: the legs fitted or not from the next
+                    // frame (`feet`)
+                    FEET_ON_SLOPES => c.feet_on_slopes = !c.feet_on_slopes,
                     // Ground Fog: the fog's fans from the next frame (`fx`,
                     // `render::fog16`)
                     47 => c.ps2_fog = !c.ps2_fog,
@@ -1196,6 +1211,10 @@ impl WndOptions {
                             cues.push(9);
                         }
                     }
+                    // Field of View: a step of 5 degrees from 45 to 95, the
+                    // game's 55 between; the world drawn and culled through it
+                    // from the next frame (`walker::Walker::view`)
+                    FIELD_OF_VIEW => slide(&mut c.fov, crate::settings::FOV_MIN, crate::settings::FOV_MAX, crate::settings::FOV_STEP),
                     // Ambient Occlusion: its passes over the world from the
                     // next frame (`viewer`, `render::ao`)
                     54 => c.ambient_occlusion = !c.ambient_occlusion,
@@ -1224,6 +1243,8 @@ impl WndOptions {
                     // Mercs as Own Rows: each merc a row of its own, from the
                     // next frame (`dpsmeter`)
                     DPS_MERC_ROWS => c.dps_merc_rows = !c.dps_merc_rows,
+                    // DPS Meter Lines: round All, 5, 10, 15, 20, 25
+                    DPS_LINES => c.dps_lines = crate::dpsmeter::lines_step(c.dps_lines, d),
                     // Faction Tracker: the server told from the next frame
                     // (`Session::agree_faction_track`), the panel drawn or not
                     FACTION_TRACK => c.faction_track = !c.faction_track,
@@ -2023,7 +2044,7 @@ impl WndOptions {
                 DPS_COLUMNS | DPS_SORT => self.meter_note.clone().or_else(|| self.meter_heal_note.clone()),
                 DPS_HIDE_MERCS => self.meter_note.clone().or_else(|| self.meter_merc_note.map(str::to_string)),
                 DPS_MERC_ROWS => self.meter_note.clone().or_else(|| self.meter_merc_rows_note.map(str::to_string)),
-                70..=72 => self.meter_note.clone(),
+                70..=72 | DPS_LINES => self.meter_note.clone(),
                 _ => None,
             },
             Note::Faction => self.faction_note.clone(),
@@ -2250,6 +2271,7 @@ const EXTENDED_ITEMS: &[(i32, &str)] = &[
     (COMPARE_GEAR, "Compare Gear"),
     (DPS_HIDE_MERCS, "Hide mercs"),
     (DPS_MERC_ROWS, "Mercs as Own Rows"),
+    (DPS_LINES, "DPS Meter Lines"),
     (crate::numcolor::TAKEN_ITEM, crate::numcolor::LABELS[crate::numcolor::TAKEN]),
     (OWN_PLATE, "Own Name Plate"),
     (COACH_TALK, "Coach Talk on Arrival"),
@@ -2265,11 +2287,14 @@ const EXTENDED_ITEMS: &[(i32, &str)] = &[
     (crate::minimapcolor::SPELLS_SHOWN_ITEM, "Spell Merchants Shown"),
     (FOLIAGE_DENSITY, "Foliage Density"),
     (FOLIAGE_REACTS, "Foliage Reacts"),
+    (FOLIAGE_DISTANCE, "Foliage Distance"),
     (FACTION_TRACK, "Faction Tracker"),
     (FACTION_TRACK_STYLE, "Faction Tracker Shows"),
     (MASTER_VOLUME, "Master Volume"),
     (HUD_SAVE, "Save HUD Layout"),
     (TOWN_MAP, "Town Map First"),
+    (FEET_ON_SLOPES, "Feet on Slopes"),
+    (FIELD_OF_VIEW, "Field of View"),
 ];
 
 /// What a page says beside Back while a row the server turns off is chosen
@@ -2389,7 +2414,39 @@ pub(crate) const HUD_SAVE: i32 = 341;
 /// Town Map First's (Live petition 5650): M in a town opens the map on the
 /// town (`map::Map::show`), on UI's Map page.
 pub(crate) const TOWN_MAP: i32 = 342;
+/// Feet on Slopes' (the owner's of 2026-11-26, on by default): a biped's legs
+/// fitted to the ground under each foot (`feet`), on Graphics' Characters page.
+pub(crate) const FEET_ON_SLOPES: i32 = 343;
 pub(crate) const FOLIAGE_REACTS: i32 = 321;
+/// Foliage Distance's (Heirloom petition 3356, 2026-11-27): the plants drawn
+/// out to 1.5, 2 or 3 times the game's 40 units (`vi::flora::System::distance`),
+/// on Graphics' Foliage page.
+pub(crate) const FOLIAGE_DISTANCE: i32 = 322;
+
+/// Foliage Distance a step on (`d` > 0) or back, round this build's steps
+/// (`settings::foliage_distance_most`).
+pub(crate) fn foliage_distance_step(now: u16, d: i32) -> u16 {
+    let most = crate::settings::foliage_distance_most();
+    let steps: Vec<u16> = crate::settings::FOLIAGE_DISTANCES.into_iter().filter(|&v| v <= most).collect();
+    let n = steps.len() as i32;
+    let at = steps.iter().position(|&v| v == now).unwrap_or(0) as i32;
+    steps[(at + d.signum() + n).rem_euclid(n) as usize]
+}
+
+/// Foliage Distance's value as the row shows it.
+pub(crate) fn foliage_distance_name(v: u16) -> &'static str {
+    match v {
+        150 => "1.5x",
+        200 => "2x",
+        300 => "3x",
+        _ => "Retail",
+    }
+}
+/// Field of View's (Heirloom petition 3336, the owner's of 2026-11-27): the
+/// world's view up the height, 45 to 95 degrees, the game's 55 by default
+/// (`settings::ClientOptions::fov`, `walker::Walker::view`), on Graphics'
+/// Video page. 350, not the next free.
+pub(crate) const FIELD_OF_VIEW: i32 = 350;
 /// The Faction Tracker's rows (Heirloom petition 3216, 2026-11-26): Faction
 /// Tracker (Off, On: `factiontrack`) and Faction Tracker Shows (Number, Bar,
 /// Both), on UI's Faction Tracker page.
@@ -2406,6 +2463,9 @@ pub(crate) const DPS_HIDE_MERCS: i32 = 278;
 /// see each merc's DPS individually?"), with the DPS Meter's rows: each merc a
 /// row of its own on a server of layout 5 (`dpsmeter`). Off by default.
 pub(crate) const DPS_MERC_ROWS: i32 = 279;
+/// DPS Meter Lines' item (Heirloom petition 3397): the most rows the meter
+/// shows, All (as many as fit, the default) or 5 to 25 (`dpsmeter::LINES`).
+pub(crate) const DPS_LINES: i32 = 281;
 
 const HUD_SCALE: i32 = 240;
 const NAMEPLATE_SCALE: i32 = 241;
@@ -2525,7 +2585,7 @@ const ALL_CATEGORIES: [Category; 31] = [
     Category { name: "Video", items: VIDEO, note: Note::Scale, group: Group::Graphics },
     Category { name: "World", items: &[20, 35, 36, 37, 47, 25], note: Note::None, group: Group::Graphics },
     Category { name: "Lighting", items: &[52, 53, 56, 57, 54, 63], note: Note::Lighting, group: Group::Graphics },
-    Category { name: "Characters", items: &[12, 23, 24, 46], note: Note::Server, group: Group::Graphics },
+    Category { name: "Characters", items: &[12, 23, 24, 46, FEET_ON_SLOPES], note: Note::Server, group: Group::Graphics },
     Category { name: "Textures", items: TEXTURES, note: Note::Textures, group: Group::Graphics },
     Category { name: "HUD", items: &[22, 90, 30, 40, 58, 83], note: Note::None, group: Group::Ui },
     // the group's and the raid's windows (2026-11-12, Power Bars: HUD's page
@@ -2544,7 +2604,7 @@ const ALL_CATEGORIES: [Category; 31] = [
     Category { name: "Map", items: &[41, 42, 87, 43, 44, 45, TOWN_MAP], note: Note::None, group: Group::Ui },
     Category { name: "Number Colors", items: &crate::numcolor::NUMBER_ITEMS, note: Note::None, group: Group::Ui },
     Category { name: "Merc Colors", items: &crate::numcolor::MERC_ITEMS, note: Note::None, group: Group::Ui },
-    Category { name: "DPS Meter", items: &[70, 71, DPS_COLUMNS, DPS_SORT, DPS_HIDE_MERCS, DPS_MERC_ROWS, 72], note: Note::Meter, group: Group::Ui },
+    Category { name: "DPS Meter", items: &[70, 71, DPS_COLUMNS, DPS_SORT, DPS_HIDE_MERCS, DPS_MERC_ROWS, DPS_LINES, 72], note: Note::Meter, group: Group::Ui },
     Category { name: "Chat", items: &[73, 89, R2_CHANNELS, INLINE_CHAT, CHAT_OPACITY, CHAT_FADE_DELAY], note: Note::Links, group: Group::Ui },
     Category { name: "General", items: &[29, 38, 84, SHARED_SHORTCUTS, AUTO_SAVE, AUTO_LOOT], note: Note::Shortcuts, group: Group::Other },
     Category { name: "Combat", items: &[78, 79, PETS_PASS, WEAPON_SWAP_BACK, MOUSEOVER_CAST, ATTACK_ABILITIES], note: Note::None, group: Group::Other },
@@ -2576,7 +2636,7 @@ const ALL_CATEGORIES: [Category; 31] = [
     // the item menu's (petition 3118): its grid, its order, the comparison
     Category { name: "Inventory", items: &[INVENTORY_STYLE, BAG_SORT, COMPARE_GEAR], note: Note::None, group: Group::Ui },
     // the radial flora's more and its lean (petition 3197): World's page is full
-    Category { name: "Foliage", items: &[FOLIAGE_DENSITY, FOLIAGE_REACTS], note: Note::None, group: Group::Graphics },
+    Category { name: "Foliage", items: &[FOLIAGE_DENSITY, FOLIAGE_REACTS, FOLIAGE_DISTANCE], note: Note::None, group: Group::Graphics },
     // one faction's standing on the HUD (petition 3216), picked in the faction window
     Category { name: "Faction Tracker", items: &[FACTION_TRACK, FACTION_TRACK_STYLE], note: Note::Faction, group: Group::Ui },
 ];
@@ -2627,9 +2687,9 @@ fn lone_category(g: usize) -> Option<usize> {
 /// HUD when Render Scale came (2026-10-27); Loading Screens to Other's
 /// General (2026-11-11).
 #[cfg(not(target_arch = "wasm32"))]
-const VIDEO: &[i32] = &[33, 13, 14, 26, 39];
+const VIDEO: &[i32] = &[33, 13, 14, 26, 39, FIELD_OF_VIEW];
 #[cfg(target_arch = "wasm32")]
-const VIDEO: &[i32] = &[13, 14, SHOW_FPS, 26, 39];
+const VIDEO: &[i32] = &[13, 14, SHOW_FPS, 26, 39, FIELD_OF_VIEW];
 
 /// Sound's rows: Master Volume (petition 3261), then natively Output Device
 /// (a page's output is the browser's).
@@ -2799,6 +2859,7 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
             _ => "Retail",
         }),
         FOLIAGE_REACTS => on_off(c.foliage_reacts),
+        FOLIAGE_DISTANCE => wide(foliage_distance_name(crate::settings::foliage_distance_drawn(&c))),
         FACTION_TRACK => on_off(c.faction_track),
         FACTION_TRACK_STYLE => wide(c.faction_track_style.name()),
         300..=306 => wide(crate::numcolor::name(c.minimap_colors[crate::minimapcolor::row_of_item(item)?])),
@@ -2813,6 +2874,7 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         55 => wide("Open"),
         35 => on_off(c.mipmaps),
         46 => on_off(c.shadows),
+        FEET_ON_SLOPES => on_off(c.feet_on_slopes),
         47 => wide(if c.ps2_fog { "PS2" } else { "Exact" }),
         53 => on_off(c.sun_shadows),
         56 => on_off(c.light_shadows),
@@ -2825,6 +2887,7 @@ fn value_text(vui: &Vui, item: i32) -> Option<Vec<u16>> {
         DPS_SORT => wide(c.dps_sort.fit(c.dps_columns).name()),
         DPS_HIDE_MERCS => on_off(c.dps_hide_mercenary),
         DPS_MERC_ROWS => on_off(c.dps_merc_rows),
+        DPS_LINES => wide(&crate::dpsmeter::lines_name(c.dps_lines)),
         72 => wide("Reset"),
         76 => on_off(crate::hudlayout::unlocked()),
         MOVE_TOUCH => on_off(crate::touch::editing()),
@@ -2960,6 +3023,7 @@ fn slider_at(item: i32) -> Option<(f32, Option<u16>)> {
         61 => (at(c.touch_opacity as f32, TOUCH_OPACITY_MIN as f32, TOUCH_OPACITY_MAX as f32), Some(c.touch_opacity as u16)),
         62 => (c.touch_edge as f32 / TOUCH_EDGE_MAX as f32, Some(c.touch_edge as u16)),
         57 => (at(c.shadow_distance as f32, SHADOW_DISTANCE_GAME as f32, SHADOW_DISTANCE_MAX as f32), Some(c.shadow_distance)),
+        FIELD_OF_VIEW => (at(c.fov as f32, crate::settings::FOV_MIN as f32, crate::settings::FOV_MAX as f32), Some(c.fov as u16)),
         SPELL_BAR_OPACITY => (c.spell_bar_opacity as f32 / 100.0, Some(c.spell_bar_opacity as u16)),
         SPELL_BAR_SIZE => {
             let n = crate::hudlayout::piece_scale_percent(crate::hudlayout::Piece::SpellBars);
@@ -3565,6 +3629,27 @@ mod tests {
         press(&mut w, &mut o, key::LEFT, &mut cues);
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert_eq!(settings::client().render_scale, 1);
+        // Field of View: a slider and its number, the game's 55 two steps
+        // from the left (45), 5 degrees a press, 95 at the right
+        goto!(FIELD_OF_VIEW);
+        assert_eq!(w.item, FIELD_OF_VIEW, "Field of View");
+        assert_eq!((settings::fov(), slider_at(FIELD_OF_VIEW)), (55, Some((0.2, Some(55)))), "the game's 55");
+        for want in [50u8, 45, 45] {
+            press(&mut w, &mut o, key::LEFT, &mut cues);
+            assert_eq!(settings::fov(), want);
+        }
+        assert_eq!(cues.last(), Some(&9), "nothing under 45");
+        for want in [50u8, 55, 60, 65, 70, 75, 80, 85, 90, 95] {
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!((settings::fov(), cues.last()), (want, Some(&11)));
+        }
+        assert_eq!(slider_at(FIELD_OF_VIEW), Some((1.0, Some(95))));
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::fov(), cues.last()), (95, Some(&9)), "nothing past 95");
+        for _ in 0..8 {
+            press(&mut w, &mut o, key::LEFT, &mut cues);
+        }
+        assert_eq!(settings::fov(), 55, "and back to the game's");
         goto!(38);
         assert_eq!(w.item, 38, "Loading Screens");
         assert!(settings::loading_longer(), "Longer, the default: a long trip's screen held");
@@ -4215,6 +4300,8 @@ mod tests {
             assert_eq!(settings::dps_sort(), Metric::Power, "left: back round");
             press(&mut w, &mut o, key::UP, &mut cues);
             press(&mut w, &mut o, key::RIGHT, &mut cues);
+            assert_eq!((settings::dps_columns(), value_text(&vui, DPS_COLUMNS)), (Columns::Taken, Some(wide("DPS + Taken"))), "then the damage taken");
+            press(&mut w, &mut o, key::RIGHT, &mut cues);
             assert_eq!((settings::dps_columns(), settings::dps_sort(), value_text(&vui, DPS_SORT)), (Columns::Dps, Metric::Damage, Some(wide("DPS"))), "round to the DPS alone: by damage");
             assert_eq!(w.page_note(w.cat.unwrap()), None, "no note off a server");
             w.meter_heal_note = Some("This server's meter counts damage alone".into());
@@ -4236,6 +4323,15 @@ mod tests {
         assert!(settings::client().dps_merc_rows);
         press(&mut w, &mut o, key::LEFT, &mut cues);
         assert!(!settings::client().dps_merc_rows);
+        press(&mut w, &mut o, key::DOWN, &mut cues);
+        assert_eq!((w.item, value_text(&vui, DPS_LINES), settings::client().dps_lines), (DPS_LINES, Some(wide("All")), 0), "DPS Meter Lines: All by default");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!((settings::client().dps_lines, value_text(&vui, DPS_LINES)), (5, Some(wide("5"))));
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        press(&mut w, &mut o, key::LEFT, &mut cues);
+        assert_eq!((settings::client().dps_lines, value_text(&vui, DPS_LINES)), (25, Some(wide("25"))), "left: round to 25");
+        press(&mut w, &mut o, key::RIGHT, &mut cues);
+        assert_eq!(settings::client().dps_lines, 0, "and back to All");
         press(&mut w, &mut o, key::DOWN, &mut cues);
         assert_eq!((w.item, value_text(&vui, 72)), (72, Some(wide("Reset"))), "Reset DPS Meter");
         assert!(!crate::dpsmeter::take_reset(), "none asked yet");
@@ -4618,14 +4714,14 @@ mod tests {
         assert_eq!(
             of(0),
             vec![
-                ("Video", vec!["Display", "Brightness", "Frame Rate", "VSync", "Render Scale"]),
+                ("Video", vec!["Display", "Brightness", "Frame Rate", "VSync", "Render Scale", "Field of View"]),
                 ("World", vec!["Fog", "Mipmaps", "Flora", "Environment", "Ground Fog", "Art"]),
                 ("Lighting", vec!["Dynamic Lighting", "Sun Shadows", "Light Shadows", "Shadow Distance", "Ambient Occlusion", "Particles"]),
-                ("Characters", vec!["Level of Detail", "NPC/PC Display", "NPC/PC Distance", "Shadows"]),
+                ("Characters", vec!["Level of Detail", "NPC/PC Display", "NPC/PC Distance", "Shadows", "Feet on Slopes"]),
                 ("Textures", textures),
                 ("Weather", vec!["Weather"]),
                 ("Texture Cache", vec!["Precache Textures", "Pack Compression", "Rebuild Pack Cache"]),
-                ("Foliage", vec!["Foliage Density", "Foliage Reacts"]),
+                ("Foliage", vec!["Foliage Density", "Foliage Reacts", "Foliage Distance"]),
             ],
             "Graphics: how the world is drawn"
         );
@@ -4640,7 +4736,7 @@ mod tests {
                 ("Map", vec!["Map", "Minimap", "Map Pointer", "Map Markers", "Quest Helper", "Quest Tracker", "Town Map First"]),
                 ("Number Colors", [&n[..6], &n[8..]].concat()),
                 ("Merc Colors", n[6..8].to_vec()),
-                ("DPS Meter", vec!["DPS Meter", "DPS Meter Shows", "DPS Meter Columns", "DPS Meter Sort", "Hide mercs", "Mercs as Own Rows", "Reset DPS Meter"]),
+                ("DPS Meter", vec!["DPS Meter", "DPS Meter Shows", "DPS Meter Columns", "DPS Meter Sort", "Hide mercs", "Mercs as Own Rows", "DPS Meter Lines", "Reset DPS Meter"]),
                 ("Chat", vec!["Item Links", "Chat Always Shown", "R2 Channel Switch"]),
                 ("Chat Tabs", vec!["Say", "Tells", "Group", "Guild", "Shouts", "Combat", "Loot", "Rolls", "Experience", "System"]),
                 ("Interface Size", vec!["HUD Scale %", "Nameplate Size %"]),
@@ -5151,7 +5247,7 @@ mod tests {
         for k in [key::DOWN, key::DOWN, key::DOWN, key::CROSS] {
             w.key(&vui, &mut NullRaster, &mut o, k, 0, &mut cues, &mut ups);
         }
-        let off_rows = [44, 45, 85, TARGET_LEVEL, TARGET_OF_TARGET, 70, 71, 72, 64, 65, 66, 67, 68, 69, 80, 81, 86, HEALTH_NUMBERS, 83, BUFF_TIMERS, STAT_WINDOW, 58, GROUP_EFFECTS, NPC_DEBUFFS, 78, 79, 22, 90, SPELL_BAR_LAYOUT, UTILITY_LAYOUT, SPELL_BAR_SIZE, ITEM_ICONS, SPELL_COOLDOWNS, MOUSEOVER_CAST, AUTO_LOOT, ATTACK_ABILITIES, DPS_COLUMNS, DPS_SORT, DPS_HIDE_MERCS, DPS_MERC_ROWS, crate::numcolor::TAKEN_ITEM, COACH_TALK, STRAFE_SPEED];
+        let off_rows = [44, 45, 85, TARGET_LEVEL, TARGET_OF_TARGET, 70, 71, 72, 64, 65, 66, 67, 68, 69, 80, 81, 86, HEALTH_NUMBERS, 83, BUFF_TIMERS, STAT_WINDOW, 58, GROUP_EFFECTS, NPC_DEBUFFS, 78, 79, 22, 90, SPELL_BAR_LAYOUT, UTILITY_LAYOUT, SPELL_BAR_SIZE, ITEM_ICONS, SPELL_COOLDOWNS, MOUSEOVER_CAST, AUTO_LOOT, ATTACK_ABILITIES, DPS_COLUMNS, DPS_SORT, DPS_HIDE_MERCS, DPS_MERC_ROWS, DPS_LINES, crate::numcolor::TAKEN_ITEM, COACH_TALK, STRAFE_SPEED];
         qol::set_off(0xFFF);
         for &(item, _) in EXTENDED_ITEMS.iter() {
             assert_eq!(qol::item_off(item, TARGET_LEVEL), off_rows.contains(&item), "row {item}");
@@ -5506,5 +5602,28 @@ mod tests {
         // the other settings' unsaved changes stay unsaved
         assert_eq!(GameOptions::from_card(&testing::kept("game.opt").unwrap()).unwrap().no_damage, GameOptions::default().no_damage);
         testing::reset(false);
+    }
+
+    /// Foliage Distance's row: Retail, 1.5x, 2x, 3x round and back (2x the
+    /// most in a page and on a phone); a value off the steps steps from
+    /// Retail. The control: a step back from Retail is the farthest.
+    #[test]
+    fn foliage_distance_steps_round() {
+        let most = crate::settings::foliage_distance_most();
+        let mut v = 100u16;
+        let mut seen = vec![v];
+        loop {
+            v = foliage_distance_step(v, 1);
+            if v == 100 {
+                break;
+            }
+            seen.push(v);
+        }
+        let want: Vec<u16> = [100u16, 150, 200, 300].into_iter().filter(|&x| x <= most).collect();
+        assert_eq!(seen, want);
+        assert_eq!(foliage_distance_step(100, -1), most, "the control: back from Retail");
+        assert_eq!(foliage_distance_step(150, -1), 100);
+        assert_eq!(foliage_distance_step(123, 1), 150, "off the steps: from Retail");
+        assert_eq!(want.iter().map(|&x| foliage_distance_name(x)).collect::<Vec<_>>(), ["Retail", "1.5x", "2x", "3x"][..want.len()].to_vec());
     }
 }

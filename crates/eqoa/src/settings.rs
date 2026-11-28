@@ -659,6 +659,23 @@ const SERVER_FILE: &str = "server.opt";
 /// client. apk users reporting they cannot login"): natively alone, as a page
 /// is told its own (`web`'s `server` option) and another site's page must not
 /// be sent here.
+/// Foliage Distance's steps, in percent of the game's 40 units: Retail,
+/// 1.5x, 2x, 3x (`vi::flora::System::distance`).
+pub const FOLIAGE_DISTANCES: [u16; 4] = [vi::flora::DISTANCE_RETAIL, 150, 200, vi::flora::DISTANCE_MOST];
+
+/// The farthest Foliage Distance this build draws: 3x on a computer; 2x in
+/// a page and on a phone (3x there is about 9 times the game's plants to
+/// sort and draw a frame, `world_flora`'s `flora_distance_cost`). A file
+/// kept at 3x elsewhere is drawn at 2x here and kept as it was.
+pub fn foliage_distance_most() -> u16 {
+    if cfg!(any(target_arch = "wasm32", target_os = "android")) { 200 } else { vi::flora::DISTANCE_MOST }
+}
+
+/// The Foliage Distance drawn: the option's, held to this build's most.
+pub fn foliage_distance_drawn(c: &ClientOptions) -> u16 {
+    c.foliage_distance.clamp(vi::flora::DISTANCE_RETAIL, foliage_distance_most())
+}
+
 pub const DEFAULT_SERVER: &str = "eqoaclassic.com";
 
 /// The server the title's Network Setup keeps (`server.opt`: the address
@@ -757,6 +774,8 @@ pub fn with_binds<R>(f: impl FnOnce(&crate::binds::Binds) -> R) -> R {
                 crate::say(&format!("keys and buttons: {}", b.describe()));
             }
             BINDS_KEPT.with(|k| *k.borrow_mut() = Some(b.clone()));
+            #[cfg(target_arch = "wasm32")]
+            crate::web::mouse_sides(crate::binds::sides_bound(&b));
             b
         });
         f(b)
@@ -785,6 +804,8 @@ pub fn binds() -> crate::binds::Binds {
 /// Changes them (the Controls page, as it moves them); kept only by Save
 /// Changes (`save`).
 pub fn set_binds(b: crate::binds::Binds) {
+    #[cfg(target_arch = "wasm32")]
+    crate::web::mouse_sides(crate::binds::sides_bound(&b));
     BINDS.with(|c| *c.borrow_mut() = Some(b));
 }
 
@@ -840,6 +861,11 @@ pub enum FrameRate {
 impl FrameRate {
     /// The row's order, which left and right step through (and round).
     pub const ALL: [FrameRate; 3] = [FrameRate::Thirty, FrameRate::Sixty, FrameRate::Display];
+
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub fn browser_default(mobile: bool, webgl: bool, uncapped: bool) -> Self {
+        if (mobile || webgl) && !uncapped { Self::Thirty } else { Self::Display }
+    }
 
     /// The time between two frames it keeps, in ms (0: every frame the
     /// display shows). 30 is the game's own frame (`frames::FRAME_MS`), so
@@ -1023,7 +1049,7 @@ pub struct ClientOptions {
     /// Fog, 0 (off) to `fog::STEPS`, the game's at `fog::GAME` (`fog`)
     pub fog: u8,
     /// Frame Rate as chosen; `None` until it is, the platform's
-    /// (`set_platform_rate`: 30 on a page's WebGL2, else the display's)
+    /// (30 on mobile and WebGL2 by default, otherwise the display's rate)
     pub frame_rate: Option<FrameRate>,
     /// Show FPS in the browser client's status line.
     pub show_fps: bool,
@@ -1228,6 +1254,9 @@ pub struct ClientOptions {
     /// on the DPS meter (a server of layout 5), not a share of its owner's.
     /// Off by default.
     pub dps_merc_rows: bool,
+    /// DPS Meter Lines (Heirloom petition 3397): the most rows the panel
+    /// shows, 0 (All, the default) as many as fit (`dpsmeter::LINES`).
+    pub dps_lines: usize,
     /// Faction Tracker (`factiontrack`, Heirloom petition 3216): one faction's
     /// standing on the HUD, the one picked in the faction window or by `/track
     /// faction` (kept by name a character, `factiontrack::FILE`), where the
@@ -1253,8 +1282,8 @@ pub struct ClientOptions {
     /// target or a dead one, the nearest creature fighting the player (else
     /// its pet or group) targeted. Off by default.
     pub auto_target: bool,
-    /// Mouseover Casting (Heirloom petition 2960): in the PC interface, a heal
-    /// or buff cast at a target goes to the friend under the mouse (the
+    /// Mouseover Casting (Heirloom petition 2960): in the PC interface, a heal,
+    /// buff or friend's utility spell (petition 3350) cast at a target goes to the friend under the mouse (the
     /// player's pet, group or their mercs) without targeting it: Mouseover
     /// First, or Target First (only when the target is no friend). Off by
     /// default (`Play::mouseover_target`). A server that turns auto-cast off
@@ -1537,6 +1566,11 @@ pub struct ClientOptions {
     /// (`vi::shadow`, `shadows`: within 50 of the eye, on the ground and the
     /// props under each); off, none.
     pub shadows: bool,
+    /// Feet on Slopes: on (the owner's of 2026-11-26, "on by default, because it
+    /// is a bug"), a biped's legs fitted to the ground under each foot as drawn
+    /// (`feet`); off, the game's: the body on the one floor point under it, the
+    /// uphill foot in the hill.
+    pub feet_on_slopes: bool,
     /// Environment: how much of the effect volumes placed in the world
     /// (ground fog, dust, falling leaves, light shafts, the flocks of birds:
     /// `fx`) is drawn, 0 to 100 in tens: 100, the game's, as it draws them;
@@ -1558,6 +1592,12 @@ pub struct ClientOptions {
     /// plants round a player or a creature lean away from it and ease back
     /// once it has passed (`flora::React`).
     pub foliage_reacts: bool,
+    /// Foliage Distance (Heirloom petition 3356, 2026-11-27): 100, Retail,
+    /// the game's 40 units round the camera; 150, 200 or 300 (one of
+    /// `FOLIAGE_DISTANCES`), the plants drawn that many times as far, the
+    /// field growing in over its outer quarter (`vi::flora::System::distance`),
+    /// held to `foliage_distance_most` on a page and a phone.
+    pub foliage_distance: u16,
     /// Master Volume (Heirloom petition 3261: "the game's sound is loud even
     /// at the lowest setting"): the whole output, in percent of the game's,
     /// one of `MASTER_VOLUMES` (`audio::set_master`); 100, the game's.
@@ -1602,6 +1642,13 @@ pub struct ClientOptions {
     /// every light Dynamic Lighting draws) in `SHADOW_DISTANCE_STEP`s
     /// (`render::Renderer::set_shadow_distance`).
     pub shadow_distance: u16,
+    /// Field of View (Extended > Graphics > Video, Heirloom petition 3336,
+    /// the owner's of 2026-11-27): the world's view up the picture's height in
+    /// a 4:3 window, in degrees, `FOV_MIN` to `FOV_MAX` in `FOV_STEP`s; the
+    /// game's `FOV_GAME` (`VICamera::Init`'s 55, `walker::FOV`) by default.
+    /// Wider windows keep it up the height and see more at the sides (Hor+),
+    /// narrower ones keep its width (`walker::projection_at`).
+    pub fov: u8,
     /// Dynamic Lighting (the user's of 2026-11-08, phase 1): off, the
     /// PS2's, the strip programs' light per vertex with the personal light
     /// the one point light; on, the light per fragment and the scene's fires,
@@ -1728,6 +1775,17 @@ pub const TOUCH_MOVE_MOST: i16 = (crate::touch::MOVE_MOST * 1000.0) as i16;
 pub const SHADOW_DISTANCE_GAME: u16 = 250;
 pub const SHADOW_DISTANCE_MAX: u16 = 1000;
 pub const SHADOW_DISTANCE_STEP: u16 = 125;
+
+/// Field of View's ends, step and the game's (`ClientOptions::fov`).
+pub const FOV_GAME: u8 = 55;
+pub const FOV_MIN: u8 = 45;
+pub const FOV_MAX: u8 = 95;
+pub const FOV_STEP: u8 = 5;
+
+/// Field of View now, in degrees up a 4:3 picture's height (`walker::Walker::view`).
+pub fn fov() -> u8 {
+    client().fov
+}
 
 /// Shadow Distance as the renderer takes it: times the game's.
 pub fn shadow_scale() -> f32 {
@@ -1865,6 +1923,7 @@ impl Default for ClientOptions {
             dps_sort: crate::dpsmeter::Metric::Damage,
             dps_hide_mercenary: false,
             dps_merc_rows: false,
+            dps_lines: 0,
             faction_track: false,
             faction_track_style: crate::factiontrack::Style::Both,
             item_links: true,
@@ -1927,10 +1986,12 @@ impl Default for ClientOptions {
             mipmaps: true,
             flora: SHARE_FULL,
             shadows: true,
+            feet_on_slopes: true,
             environment: SHARE_FULL,
             weather: SHARE_FULL,
             foliage_density: 1,
             foliage_reacts: false,
+            foliage_distance: vi::flora::DISTANCE_RETAIL,
             master_volume: 100,
             ps2_fog: true,
             ps2_particles: true,
@@ -1938,6 +1999,7 @@ impl Default for ClientOptions {
             sun_shadows: false,
             light_shadows: false,
             shadow_distance: SHADOW_DISTANCE_GAME,
+            fov: FOV_GAME,
             dynamic_lighting: false,
             loading_longer: true,
             render_scale: 1,
@@ -2108,6 +2170,9 @@ impl ClientOptions {
         }
         if self.dps_sort != crate::dpsmeter::Metric::Damage {
             s.push_str(&format!("dps_meter_sort={}\n", self.dps_sort.key()));
+        }
+        if self.dps_lines != 0 {
+            s.push_str(&format!("dps_meter_lines={}\n", self.dps_lines));
         }
         if self.dps_merc_rows {
             s.push_str("dps_merc_rows=on\n");
@@ -2302,6 +2367,10 @@ impl ClientOptions {
         if !self.shadows {
             s.push_str("shadows=off\n");
         }
+        // Feet on Slopes only when off
+        if !self.feet_on_slopes {
+            s.push_str("feet_on_slopes=off\n");
+        }
         if let Some(v) = share_text(self.environment) {
             s.push_str(&format!("environment={v}\n"));
         }
@@ -2311,6 +2380,9 @@ impl ClientOptions {
         }
         if self.foliage_reacts {
             s.push_str("foliage_reacts=on\n");
+        }
+        if self.foliage_distance != vi::flora::DISTANCE_RETAIL && FOLIAGE_DISTANCES.contains(&self.foliage_distance) {
+            s.push_str(&format!("foliage_distance={}\n", self.foliage_distance));
         }
         // Master Volume only when turned down
         if self.master_volume < 100 {
@@ -2342,6 +2414,10 @@ impl ClientOptions {
         // Shadow Distance only when not the game's
         if self.shadow_distance != SHADOW_DISTANCE_GAME {
             s.push_str(&format!("shadow_distance={}\n", self.shadow_distance));
+        }
+        // Field of View only when not the game's
+        if self.fov != FOV_GAME {
+            s.push_str(&format!("fov={}\n", self.fov));
         }
         // Dynamic Lighting only when on
         if self.dynamic_lighting {
@@ -2515,6 +2591,9 @@ impl ClientOptions {
                 ("dps_meter_columns", "dps") => c.dps_columns = crate::dpsmeter::Columns::Dps,
                 ("dps_meter_columns", "hps") => c.dps_columns = crate::dpsmeter::Columns::Hps,
                 ("dps_meter_columns", "all") => c.dps_columns = crate::dpsmeter::Columns::All,
+                ("dps_meter_columns", "taken") => c.dps_columns = crate::dpsmeter::Columns::Taken,
+                ("dps_meter_sort", "taken") => c.dps_sort = crate::dpsmeter::Metric::Taken,
+                ("dps_meter_lines", n) if n.parse::<usize>().is_ok_and(|n| crate::dpsmeter::LINES.contains(&n)) => c.dps_lines = n.parse().unwrap_or(0),
                 ("dps_meter_sort", "dps") => c.dps_sort = crate::dpsmeter::Metric::Damage,
                 ("dps_meter_sort", "hps") => c.dps_sort = crate::dpsmeter::Metric::Healing,
                 ("dps_meter_sort", "power") => c.dps_sort = crate::dpsmeter::Metric::Power,
@@ -2673,6 +2752,11 @@ impl ClientOptions {
                     }
                 }
                 ("foliage_reacts", "on") => c.foliage_reacts = true,
+                ("foliage_distance", v) => {
+                    if let Some(v) = v.parse::<u16>().ok().filter(|v| FOLIAGE_DISTANCES.contains(v)) {
+                        c.foliage_distance = v;
+                    }
+                }
                 ("master_volume", v) => {
                     if let Ok(v @ 0..=100) = v.parse::<u8>() {
                         c.master_volume = v;
@@ -2681,6 +2765,8 @@ impl ClientOptions {
                 ("foliage_reacts", "off") => c.foliage_reacts = false,
                 ("shadows", "on") => c.shadows = true,
                 ("shadows", "off") => c.shadows = false,
+                ("feet_on_slopes", "on") => c.feet_on_slopes = true,
+                ("feet_on_slopes", "off") => c.feet_on_slopes = false,
                 ("environment", v) => {
                     if let Some(v) = share_of(v) {
                         c.environment = v;
@@ -2704,6 +2790,11 @@ impl ClientOptions {
                 ("shadow_distance", v) => {
                     if let Some(d) = v.parse::<u16>().ok().filter(|d| (SHADOW_DISTANCE_GAME..=SHADOW_DISTANCE_MAX).contains(d)) {
                         c.shadow_distance = d;
+                    }
+                }
+                ("fov", v) => {
+                    if let Some(f) = v.parse::<u8>().ok().filter(|f| (FOV_MIN..=FOV_MAX).contains(f)) {
+                        c.fov = f;
                     }
                 }
                 ("dynamic_lighting", "on") => c.dynamic_lighting = true,
@@ -3120,7 +3211,7 @@ pub mod qol {
         Some(match item {
             44 | 45 | 85 => QUEST_HELPER,
             crate::options::TARGET_OF_TARGET => TARGET_LEVEL,
-            70..=72 | crate::options::DPS_COLUMNS | crate::options::DPS_SORT | crate::options::DPS_HIDE_MERCS | crate::options::DPS_MERC_ROWS => DPS_METER,
+            70..=72 | crate::options::DPS_COLUMNS | crate::options::DPS_SORT | crate::options::DPS_HIDE_MERCS | crate::options::DPS_MERC_ROWS | crate::options::DPS_LINES => DPS_METER,
             64..=69 | 80 | 81 | crate::numcolor::TAKEN_ITEM => NUMBER_COLORS,
             86 | crate::options::HEALTH_NUMBERS => POWER_BARS,
             83 | crate::options::BUFF_TIMERS => BUFF_WINDOW,
@@ -3252,9 +3343,8 @@ pub mod qol {
     }
 }
 
-/// The frame rate when the player chose none: a page on WebGL2 keeps 30
-/// (`web::gfx`), everything else the display's.
-#[cfg(any(target_arch = "wasm32", test))]
+/// The frame rate used until the player chooses one in Video options.
+#[cfg(any(target_os = "android", target_arch = "wasm32", test))]
 pub fn set_platform_rate(r: FrameRate) {
     PLATFORM_RATE.with(|p| p.set(r));
 }
@@ -3890,6 +3980,11 @@ pub fn set_map_markers(on: bool) -> Result<(), String> {
 /// Whether the map names the towns.
 pub fn map_towns() -> bool {
     client().map_towns
+}
+
+/// Feet on Slopes now (`ClientOptions::feet_on_slopes`, `feet`).
+pub fn feet_on_slopes() -> bool {
+    client().feet_on_slopes
 }
 
 /// Town Map First now (`ClientOptions::town_map`).
@@ -4848,6 +4943,26 @@ mod tests {
         }
     }
 
+    /// Field of View: the game's 55 by default and not written then, kept
+    /// from 45 to 95 and read back as kept; anything else leaves the game's.
+    #[test]
+    fn field_of_view_kept_when_changed() {
+        let d = ClientOptions::default();
+        assert_eq!(d.fov, 55, "the game's");
+        assert_eq!(FOV_GAME as f32, crate::walker::FOV, "the walker's camera's");
+        assert!(!d.to_text().contains("fov"), "the default not written");
+        for f in [FOV_MIN, 60, 75, FOV_MAX] {
+            let c = ClientOptions { fov: f, ..Default::default() };
+            let t = c.to_text();
+            assert!(t.contains(&format!("fov={f}\n")), "{t}");
+            assert_eq!(ClientOptions::from_text(&t), c, "{f}: round trip");
+        }
+        for bad in ["fov=44", "fov=96", "fov=", "fov=wide", "fov=-55", "fov=300"] {
+            assert_eq!(ClientOptions::from_text(bad).fov, FOV_GAME, "{bad}: the game's");
+        }
+        assert_eq!(ClientOptions::from_text("fov=95").fov, 95);
+    }
+
     /// Shadow Distance, the game's 250 by default and not written then, kept
     /// between it and 1000; anything else leaves the game's.
     #[test]
@@ -5087,6 +5202,29 @@ mod tests {
             let c = ClientOptions::from_text(bad);
             assert_eq!((c.foliage_density, c.foliage_reacts), (1, false), "{bad}: the default");
         }
+    }
+
+    /// Foliage Distance (Retail): the game's by default and then not
+    /// written; each step kept and read back, beside the other Foliage rows;
+    /// anything not a step is Retail; drawn at most 2x in a page or on a
+    /// phone, 3x on a computer.
+    #[test]
+    fn foliage_distance_round_trips() {
+        let d = ClientOptions::default();
+        assert_eq!(d.foliage_distance, 100, "Retail");
+        assert!(!d.to_text().contains("foliage_distance"), "nothing kept at the game's");
+        for v in FOLIAGE_DISTANCES {
+            let c = ClientOptions { foliage_distance: v, foliage_density: 2, ..Default::default() };
+            let t = c.to_text();
+            assert_eq!(t.contains(&format!("foliage_distance={v}\n")), v != 100, "{t}");
+            assert!(ClientOptions::from_text(&t) == c, "{v}: read back");
+        }
+        for bad in ["foliage_distance=0", "foliage_distance=120", "foliage_distance=400", "foliage_distance=x", "foliage_distance=-150"] {
+            assert_eq!(ClientOptions::from_text(bad).foliage_distance, 100, "{bad}: Retail");
+        }
+        let far = ClientOptions { foliage_distance: 300, ..Default::default() };
+        assert_eq!(foliage_distance_drawn(&far), if cfg!(any(target_arch = "wasm32", target_os = "android")) { 200 } else { 300 });
+        assert_eq!(foliage_distance_drawn(&ClientOptions::default()), 100);
     }
 
     /// Render Scale, x1 by default, kept only above 1 and only as one of its
@@ -5637,6 +5775,21 @@ mod tests {
         assert!(!ClientOptions::from_text("auto_save_options=maybe").auto_save, "the default");
     }
 
+    /// Feet on Slopes (the owner's of 2026-11-26): on by default, a client.opt
+    /// without the key reads on, and it is written only when off.
+    #[test]
+    fn feet_on_slopes_is_on_unless_turned_off() {
+        let d = ClientOptions::default();
+        assert!(d.feet_on_slopes, "on by default");
+        assert!(!d.to_text().contains("feet_on_slopes"));
+        assert!(ClientOptions::from_text("lod=on\nbrightness=5\n").feet_on_slopes, "an old client.opt");
+        let t = ClientOptions { feet_on_slopes: false, ..Default::default() }.to_text();
+        assert!(t.contains("feet_on_slopes=off\n"), "{t}");
+        assert!(!ClientOptions::from_text(&t).feet_on_slopes, "round trip");
+        assert!(ClientOptions::from_text("feet_on_slopes=on").feet_on_slopes);
+        assert!(ClientOptions::from_text("feet_on_slopes=maybe").feet_on_slopes, "the default");
+    }
+
     /// The rows of tickets 1951, 1953, 1977 and 1987: kept only when changed,
     /// read back as kept, a value out of range left at its default.
     #[test]
@@ -5893,7 +6046,7 @@ mod tests {
         let d = ClientOptions::default();
         assert_eq!((d.dps_columns, d.dps_sort), (Columns::Dps, Metric::Damage), "the DPS alone by default");
         assert!(!d.to_text().contains("dps_meter_columns") && !d.to_text().contains("dps_meter_sort"));
-        for (cols, sort) in [(Columns::Hps, Metric::Healing), (Columns::All, Metric::Power), (Columns::All, Metric::Damage)] {
+        for (cols, sort) in [(Columns::Hps, Metric::Healing), (Columns::All, Metric::Power), (Columns::All, Metric::Damage), (Columns::Taken, Metric::Taken)] {
             let c = ClientOptions { dps_columns: cols, dps_sort: sort, ..Default::default() };
             let back = ClientOptions::from_text(&c.to_text());
             assert_eq!((back.dps_columns, back.dps_sort), (cols, sort), "{}", c.to_text());
@@ -5903,6 +6056,24 @@ mod tests {
         assert_eq!((odd.dps_columns, odd.dps_sort), (Columns::Dps, Metric::Damage), "anything else: the defaults");
         assert_eq!(Metric::Power.fit(Columns::Hps), Metric::Damage, "not shown: damage");
         assert_eq!(Metric::Healing.fit(Columns::Hps), Metric::Healing);
+    }
+
+    /// DPS Meter Lines (Heirloom petition 3397): All (0) by default, writing
+    /// nothing; each of 5 to 25 kept and read back; any other number All.
+    #[test]
+    fn the_dps_meters_lines_are_kept() {
+        let d = ClientOptions::default();
+        assert_eq!(d.dps_lines, 0);
+        assert!(!d.to_text().contains("dps_meter_lines"));
+        for n in crate::dpsmeter::LINES {
+            let c = ClientOptions { dps_lines: n, ..Default::default() };
+            let back = ClientOptions::from_text(&c.to_text());
+            assert_eq!(back.dps_lines, n, "{}", c.to_text());
+            assert_eq!(back, c, "nothing else changed");
+        }
+        for odd in ["dps_meter_lines=7", "dps_meter_lines=all", "dps_meter_lines=-5"] {
+            assert_eq!(ClientOptions::from_text(odd).dps_lines, 0, "{odd}: All");
+        }
     }
 
     #[test]
@@ -6280,6 +6451,19 @@ mod tests {
         assert_eq!(run(165.0, 0.0, 0.0, f64::INFINITY).0, 165.0, "the control");
     }
 
+    #[test]
+    fn mobile_and_webgl_frame_rate_defaults() {
+        for (mobile, webgl, expected) in [
+            (true, false, FrameRate::Thirty),
+            (true, true, FrameRate::Thirty),
+            (false, false, FrameRate::Display),
+            (false, true, FrameRate::Thirty),
+        ] {
+            assert_eq!(FrameRate::browser_default(mobile, webgl, false), expected);
+            assert_eq!(FrameRate::browser_default(mobile, webgl, true), FrameRate::Display);
+        }
+    }
+
     /// The rate in effect: the platform's until the player chooses one.
     #[test]
     fn the_players_rate_over_the_platforms() {
@@ -6287,12 +6471,12 @@ mod tests {
         assert_eq!(frame_rate(), FrameRate::Display);
         set_platform_rate(FrameRate::Thirty);
         assert_eq!(frame_rate(), FrameRate::Thirty);
-        set_client(ClientOptions { frame_rate: Some(FrameRate::Sixty), ..client() });
+        set_client(ClientOptions::from_text("frame_rate=60"));
         assert_eq!(frame_rate(), FrameRate::Sixty);
         assert!(frame_due(), "the first frame is due");
         assert!(!frame_due(), "the next comes a gap later");
         assert!(frame_wait().is_some());
-        set_client(ClientOptions { frame_rate: Some(FrameRate::Display), ..client() });
+        set_client(ClientOptions::from_text("frame_rate=display"));
         assert!(frame_due() && frame_due() && frame_wait().is_none(), "no cap: every frame");
         testing::reset(false);
     }
