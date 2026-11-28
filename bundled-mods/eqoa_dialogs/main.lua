@@ -2,8 +2,9 @@
 -- the mod's own, in place of the game's. Pressing Escape or the x leaves the conversation, as the game's own Escape does
 -- (an invitation, summons or resurrection offer has to be answered: Escape does nothing there); the "Game window" button hands
 -- the dialog to the game's own window instead.
--- An answer that names a quest in your journal is marked and has a Hand in button; with the option on, a dialog whose
--- only real answer is such a hand-in is answered by itself.
+-- An answer that names a quest in your journal is marked and has a Hand in button. With "Speed through hand-ins" on, a
+-- talk to someone your journal sends you to (a "?" step mark on them) is stepped through by itself: Done is pressed and the
+-- single real answer is picked, up to a real choice, where it stops and marks the choice. What was said stays in the window.
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 local ui = eqoa.imgui
 -- While the game's own full map is up this mod draws nothing and takes no click or key; it comes back as it was.
@@ -40,7 +41,9 @@ local DIGITS = { "1", "2", "3", "4", "5", "6", "7", "8", "9" }
 
 eqoa.options.toggle({ id = "offers", label = "Invitations and offers", default = true })
 eqoa.options.toggle({ id = "highlight", label = "Highlight hand-ins", default = true })
-eqoa.options.toggle({ id = "auto_answer", label = "Auto-answer hand-ins", default = false })
+-- A new id on purpose: the old "auto_answer" rule (answer only a hand-in) was a different thing, and a saved "on" of it must
+-- not switch this one on. Nothing reads "auto_answer" any more.
+eqoa.options.toggle({ id = "speed_hand_ins", label = "Speed through hand-ins", default = false })
 
 -- Never a real answer: the game's own paging entries, and a plain farewell (leaving is not a choice to make for the
 -- player, so a hand-in offered beside Goodbye is still the dialog's only real answer).
@@ -55,7 +58,21 @@ local state = {
     page = 0, page_ref = nil,
     hits = {}, keys = {}, result = nil, retry = {},
     offers_on = true,
-    auto_ref = nil,     -- ref of the dialog the automatic hand-in already judged
+    judged = nil,       -- ref of the dialog the speed-through already judged (one look per step, never two answers)
+    left = nil,         -- { npc, at }: the player left a talk with this speaker (Escape / x): no new run with them until their dialogs stop coming
+    run = nil,          -- the talk being sped through, or stopped and still shown: see `begin_run`
+    rec_off = 0, rec_n = 0, rec_rect = nil,   -- the record's scroll (lines up from the newest), its length, its screen box
+}
+local MAX_STEPS = 12
+local STOPPED_WAIT_TICKS = 60 -- a stopped talk is forgotten sooner: a new hail then starts afresh
+local WAIT_TICKS = 150  -- 30 Hz steps (5 s) to wait for the server's next step before the talk is forgotten
+local REC_ROWS = 6
+local STOPPED = {
+    choice = "Stopped here: this one is your choice",
+    cap = "Stopped after " .. MAX_STEPS .. " steps",
+    ["repeat"] = "Stopped: the same words came again",
+    unknown = "Stopped: not sure who is speaking",
+    refused = "Stopped: an answer was refused",
 }
 
 local function inside(x, y, r) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
@@ -146,18 +163,125 @@ local function only_answer(options)
     return index
 end
 
--- Answers a hand-in by itself, once per dialog, only when it is the dialog's single real answer.
-local function auto_hand_in(s)
-    if state.auto_ref == s.ref then return end
-    state.auto_ref = s.ref
-    if s.kind ~= "response_dialog" or not eqoa.options.get("auto_answer") then return end
-    local options = (s.data or {}).options or {}
-    local index = only_answer(options)
-    if not index then return end
-    local quest = hand_ins(options)[index]
-    if not quest then return end
-    note("info", "handing in " .. tostring(quest.title) .. " automatically")
-    answer(s.ref, index, "Hand in " .. tostring(quest.title))
+local function tick_now()
+    local c = eqoa.client.get()
+    return c and c.tick
+end
+
+-- The talk is forgotten (the window closed, the person changed, the player left or the wait ran out).
+local function end_run()
+    state.run = nil
+    state.rec_off, state.rec_n, state.rec_rect = 0, 0, nil
+end
+
+-- Stops stepping by itself; the words said so far stay in the window.
+local function halt(why)
+    local run = state.run
+    if run and run.active then
+        run.active, run.why = false, why
+        note("info", "speed-through stopped: " .. why .. " (" .. #run.record .. " steps in the record)")
+    end
+end
+
+-- The player leaves the conversation (Escape or the x): stepping stops at once, the talk and its record are forgotten, and
+-- the speed-through does not start again with this speaker while more of their dialogs keep arriving (a text dialog's leave
+-- is only its Done, and the next queued text of the same speaker would otherwise start a new run). Nothing is forgotten if
+-- the leave itself is refused: the dialog stays, with its record.
+local function leave_by_player(s)
+    local who = match.norm(s.data and s.data.talked_to and s.data.talked_to.name)
+    halt("player")
+    if leave(s.ref) then
+        end_run()
+        state.left = who ~= "" and { npc = who, at = tick_now() } or nil
+    end
+end
+
+-- One step of the talk is over: what was said and what was answered, for the record above the live words.
+local function record_step(s, said)
+    local run = state.run
+    if not run then return end
+    local data = s.data or {}
+    run.record[#run.record + 1] = { text = tostring(data.text or ""), said = tostring(said) }
+end
+
+-- Whether the journal sends the player to this person. The client's quest "step" marks (`eqoa.map.markers`, kind "quest",
+-- step = true) are matched by NAME, in the world the player is in, with the Map Markers setting on, and only a mark within
+-- NEAR game units of where that very creature (the dialog's `talked_to`, found by id) stands, so a namesake elsewhere in the
+-- world does not count. Nothing runs when the creature is not found or there is no mark.
+local NEAR = 60
+local function sent_to(who)
+    local m = eqoa.map.get()
+    if not (m and m.world_id and m.markers_on == true) then return false end
+    local e = who.id and eqoa.entities.find(who.id)
+    local at = e and e.position
+    if not (at and at.x and at.z) then return false end
+    return match.has_step_mark(eqoa.map.markers(m.world_id) or {}, who.name, at, NEAR)
+end
+
+-- Looks at a dialog the first time it is seen and, when the talk is being sped through, answers it.
+local function consider(s)
+    if state.judged == s.ref then return end
+    state.judged = s.ref
+    if s.kind ~= "response_dialog" and s.kind ~= "text_dialog" then return end
+    if eqoa.options.get("speed_hand_ins") ~= true then
+        end_run()
+        state.left = nil
+        return
+    end
+    local data = s.data or {}
+    local name = data.talked_to and data.talked_to.name
+    local who = match.norm(name)
+    local run = state.run
+    if run and run.idle and (tick_now() or 0) - run.idle > (run.active and WAIT_TICKS or STOPPED_WAIT_TICKS) then end_run(); run = nil end
+    if run and who ~= "" and run.npc ~= who then end_run(); run = nil end
+    if run and who == "" and not run.active then end_run(); run = nil end -- a stopped talk's words are not shown on an unnamed speaker
+    local left = state.left
+    if left then
+        local now = tick_now()
+        if who ~= left.npc or (now and left.at and now - left.at > STOPPED_WAIT_TICKS) then
+            state.left = nil -- another speaker, or a while with none of theirs: a new hail starts afresh
+        else
+            left.at = now -- the same speaker's dialogs are still coming: it stays stopped
+            return
+        end
+    end
+    if not run then
+        local sent = who ~= "" and sent_to(data.talked_to)
+        if not sent then return end
+        run = { npc = who, steps = 0, active = true, record = {} }
+        state.run = run
+        note("info", "speeding through the talk with " .. tostring(name))
+    end
+    if not run.active then return end
+    if who == "" then return halt("unknown") end
+    local options = s.kind == "response_dialog" and (data.options or {}) or nil
+    local sig = tostring(data.text) .. "|" .. table.concat(options or {}, "|")
+    if run.sig == sig then return halt("repeat") end
+    if run.steps >= MAX_STEPS then return halt("cap") end
+    local index, label
+    if options then
+        index = only_answer(options)
+        if not index then return halt("choice") end
+        label = tostring(options[index])
+    else
+        index, label = 1, "Done"
+    end
+    run.sig = sig
+    run.steps = run.steps + 1
+    local request = answer(s.ref, index, label)
+    if request then
+        run.pending = request
+        record_step(s, label)
+    else
+        halt("refused")
+    end
+end
+
+-- The player's own answer or click: the speed-through steps aside, and the words stay in the record.
+local function by_player(s, option, label, said)
+    halt("player")
+    record_step(s, said or label)
+    return answer(s.ref, option, label)
 end
 
 local function wrap(text, maxw, k)
@@ -196,6 +320,25 @@ eqoa.events.on("pointer.pressed", function(e)
         if inside(d.x, d.y, h) and h.run then h.run(); return end
     end
 end)
+-- A refusal that comes after the call was accepted (not ready, rate limited...): the step was not sent, so it stops
+-- and the record does not claim it was answered.
+eqoa.events.on("action.result", function(e)
+    local d = e.data
+    local run = state.run
+    if not (run and run.pending and d.request_id == run.pending) then return end
+    if d.state == "refused" or (d.state == "cancelled" and d.ok == false) then
+        run.pending = nil
+        run.record[#run.record] = nil
+        halt("refused")
+    elseif d.state ~= "queued" and d.state ~= "dispatched" then
+        run.pending = nil
+    end
+end)
+eqoa.events.on("pointer.wheel", function(e)
+    local d = e.data
+    if map_up() or not inside(d.x, d.y, state.rec_rect) then return end
+    state.rec_off = math.max(0, state.rec_off + (d.steps > 0 and 1 or -1) * 2)
+end)
 eqoa.events.on("confirm.closed", function(e)
     local d = e.data
     if d.kind ~= "revive_offer" and d.kind ~= "summon_offer" then return end
@@ -209,13 +352,25 @@ eqoa.events.on("windows.session", function(e)
     local d = e.data
     if d.phase == "opened" then
         note("info", "a " .. tostring(d.kind) .. " opened")
-    elseif d.phase == "closed" and d.reason and d.reason ~= "answered" and d.reason ~= "accepted" and d.reason ~= "declined" and d.reason ~= "passed" then
+        return
+    end
+    if d.phase ~= "closed" then return end
+    if state.run and (d.kind == "response_dialog" or d.kind == "text_dialog") then
+        if d.reason == "answered" then
+            state.run.idle = tick_now() -- an answer went: the server's next step is awaited
+        else
+            end_run() -- the window was left, closed, walked away from or handed back: the talk is over
+        end
+    end
+    if d.reason and d.reason ~= "answered" and d.reason ~= "accepted" and d.reason ~= "declined" and d.reason ~= "passed" then
         note("info", tostring(d.kind) .. " ended: " .. tostring(d.reason))
     end
 end)
 -- the host lets go of every claim when the world is left: held again as soon as the new one is up
 eqoa.events.on("world.entered", function() claim() end)
+eqoa.events.on("world.entered", function() end_run(); state.left = nil end)
 eqoa.events.on("state.reset", function() claim() end)
+eqoa.events.on("state.reset", function() end_run(); state.left = nil end)
 eqoa.events.on("disabling", function()
     for key, token in pairs(state.claimed) do eqoa.input.release(token); state.claimed[key] = nil end
     eqoa.windows.release()
@@ -291,7 +446,23 @@ local function draw_dialog(s, f, k, dw, dh)
     local rows = response and (last - first) or 1
     local more, back = state.page < pages - 1, state.page > 0
     rows = rows + (more and 1 or 0) + (back and 1 or 0)
-    local H = 24 + #lines * LINE + 8 + rows * 20 + PAD + 18
+    -- the record of the talk so far (the steps sped through, with the answer each got), above the live words
+    local run = state.run
+    local rec = {}
+    if run then
+        for _, e in ipairs(run.record) do
+            for _, l in ipairs(wrap(e.text, W - 2 * PAD - 14, k)) do rec[#rec + 1] = { t = l } end
+            rec[#rec + 1] = { t = "> " .. e.said, muted = true }
+        end
+    end
+    if state.rec_n ~= #rec then state.rec_n, state.rec_off = #rec, 0 end
+    local rec_rows = math.min(#rec, REC_ROWS)
+    state.rec_off = math.max(0, math.min(state.rec_off, #rec - rec_rows))
+    local rec_h = rec_rows > 0 and (rec_rows * LINE + 8) or 0
+    local banner = run and not run.active and STOPPED[run.why]
+    local ban_h = banner and 16 or 0
+    local base = 22 + rec_h
+    local H = base + #lines * LINE + 8 + ban_h + rows * 20 + PAD + 18
     local x0 = math.max(0, math.min(dw - W * k, f.offset_x + (640 - W) / 2 * f.scale_x))
     local y0 = math.max(0, math.min(dh - H * k, f.offset_y + 40 * f.scale_y))
     x0, y0 = clear_of_minimap(x0, y0, W * k, H * k, dw, dh, 6 * k)
@@ -305,10 +476,33 @@ local function draw_dialog(s, f, k, dw, dh)
     t.fill(W - 18, 4, 12, 12, col.raised)
     t.frame(W - 18, 4, 12, 12, col.border)
     t.text(W - 15, 4, "x", col.text)
-    t.hit(W - 18, 4, 12, 12, function() leave(s.ref) end)
-    for i, line in ipairs(lines) do t.text(PAD, 22 + (i - 1) * LINE, line, col.text, W - 2 * PAD) end
-    local y = 22 + #lines * LINE + 8
-    local keys = { escape = function() leave(s.ref) end }
+    t.hit(W - 18, 4, 12, 12, function() leave_by_player(s) end)
+    if rec_rows > 0 then
+        local last_row = #rec - state.rec_off
+        for i = 1, rec_rows do
+            local r = rec[last_row - rec_rows + i]
+            t.text(PAD, 22 + (i - 1) * LINE, r.t, r.muted and col.muted or col.text, W - 2 * PAD - 14)
+        end
+        t.fill(PAD - 4, 22 + rec_rows * LINE + 2, W - 2 * PAD + 8, 1, col.border)
+        state.rec_rect = { x = x0, y = y0, w = W * k, h = rec_h * k }
+        if #rec > rec_rows then
+            t.text(W - PAD - 8, 22, state.rec_off < #rec - rec_rows and "^" or " ", col.muted)
+            t.text(W - PAD - 8, 22 + (rec_rows - 1) * LINE, state.rec_off > 0 and "v" or " ", col.muted)
+            t.hit(W - PAD - 10, 22, 12, LINE, function() state.rec_off = state.rec_off + 2 end)
+            t.hit(W - PAD - 10, 22 + (rec_rows - 1) * LINE, 12, LINE, function() state.rec_off = math.max(0, state.rec_off - 2) end)
+        end
+    else
+        state.rec_rect = nil
+    end
+    for i, line in ipairs(lines) do t.text(PAD, base + (i - 1) * LINE, line, col.text, W - 2 * PAD) end
+    local y = base + #lines * LINE + 8
+    if banner then
+        t.text(PAD, y, banner, col.good, W - 2 * PAD)
+        y = y + ban_h
+    end
+    local answers_top = y
+    -- Escape stops the speed-through and leaves, as it does without it
+    local keys = { escape = function() leave_by_player(s) end }
     if response then
         -- Enter is this window's while a dialog is up, so it never reaches the game (it would open the chat line);
         -- on answers it does nothing: the number keys and clicks answer
@@ -316,13 +510,13 @@ local function draw_dialog(s, f, k, dw, dh)
         for i = first + 1, last do
             local n = i - first
             local option = i
-            local run = function() answer(s.ref, option, "Answer") end
+            local run = function() by_player(s, option, "Answer", options[option]) end
             local quest = hints[i]
             if quest then
                 -- a quest hand-in: the answer is marked and has its own Hand in button beside it
                 t.button(PAD, y, W - 2 * PAD - HAND_W - 4, n .. ". " .. tostring(options[i]), run, true)
                 t.button(W - PAD - HAND_W, y, HAND_W, "Hand in",
-                    function() answer(s.ref, option, "Hand in " .. tostring(quest.title)) end, true)
+                    function() by_player(s, option, "Hand in " .. tostring(quest.title), options[option]) end, true)
             else
                 t.button(PAD, y, W - 2 * PAD, n .. ". " .. tostring(options[i]), run)
             end
@@ -342,10 +536,11 @@ local function draw_dialog(s, f, k, dw, dh)
             y = y + 20
         end
     else
-        local run = function() answer(s.ref, 1, "Done") end
+        local run = function() by_player(s, 1, "Done") end
         t.button(PAD, y, 80, "Done", run, true)
         keys["enter"], keys["1"] = run, run
     end
+    if banner and run.why == "choice" then t.frame(PAD - 3, answers_top - 2, W - 2 * PAD + 6, y - answers_top + 4, col.good) end
     t.text(PAD, H - 16, "Esc: leave", col.muted, 70)
     t.button(W - PAD - 92, H - 20, 92, "Game window", function() pass(s.ref) end)
     if state.result and state.frame - state.result.at < 300 then
@@ -395,7 +590,14 @@ eqoa.events.on("render", function()
         local s = eqoa.windows.session(kind)
         if s and not dialog then dialog = s end
     end
-    if dialog then auto_hand_in(dialog) end
+    if dialog then
+        consider(dialog)
+        if state.run then state.run.idle = nil end
+    elseif state.run then
+        -- between steps: the server's next one is awaited, and Escape (held for that time) stops the run
+        local now = tick_now()
+        if state.run.idle and now and now - state.run.idle > (state.run.active and WAIT_TICKS or STOPPED_WAIT_TICKS) then end_run() end
+    end
     local offer
     for _, kind in ipairs(OFFER_KINDS) do
         local s = eqoa.windows.session(kind)
@@ -404,7 +606,12 @@ eqoa.events.on("render", function()
     state.hits, state.keys = {}, {}
     -- a dialog that arrives under the game's map waits there, unseen, and is drawn when the map closes
     if not dialog and not offer or map_up() then
-        set_claims({})
+        if not dialog and not map_up() and state.run and state.run.active then
+            state.keys = { escape = function() halt("player") end } -- stops it; a late step is then shown, not answered
+            set_claims({ escape = true })
+        else
+            set_claims({})
+        end
         return
     end
     local f = eqoa.hud.frame()
@@ -425,7 +632,7 @@ eqoa.events.on("render", function()
         local keys = draw_offer(offer, f, k, dw, dh, below)
         if not dialog then
             state.keys = keys
-            state.keys.escape = function() end -- an offer is answered, never left: Escape is held and does nothing
+            state.keys.escape = function() halt("player") end -- an offer is answered, never left: Escape only stops a run that is waiting for its next step
         end
     end
     local want = {}

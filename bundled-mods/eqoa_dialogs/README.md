@@ -27,12 +27,30 @@ appear in the mod's window instead of the game's dialog window.
   resurrection never is: the game's own **Are you sure?** appears and only your own Yes there sends it. Declining
   always goes at once. Turn the option off and the game shows these itself.
 
-- **Quest hand-ins** (options **Highlight hand-ins**, on by default, and **Auto-answer
-  hand-ins**, off by default, in the mod's options): an answer whose words name a quest in your journal (the
-  whole title, any capitals, the longest title wins) has a green frame and a **Hand in** button beside it. Clicking
-  either sends that answer, as the number key does. Only the answer's own words count, never its position. With
-  the automatic option on, a dialog whose only real answer (the game's own More, Back and Close, and a plain Goodbye or Farewell, do not count) names
-  a quest is answered at once. A dialog that offers any choice is only marked: your click answers it.
+- **Quest hand-ins** (option **Highlight hand-ins**, on by default, in the mod's options): an answer whose words
+  name a quest in your journal (the whole title, any capitals, the longest title wins) has a green frame and a
+  **Hand in** button beside it. Clicking either sends that answer, as the number key does. Only the answer's own words
+  count, never its position.
+- **Speed through hand-ins** (option, off by default; it replaces the old "Auto-answer hand-ins" rule, and a value saved
+  for that one does nothing): when you talk to someone your journal sends you to (a "?" quest step mark on their name in
+  the world you are in), the window steps through the talk by itself, straight to the end: it presses Done on a plain
+  message and picks the only real answer (the game's own More, Back and Close, and a plain Goodbye or Farewell, do not
+  count as answers), with no pause to show each line. It also carries on through a quest that is offered with a
+  single answer. It **stops and waits for you** the moment there is a real choice (two or more answers): that choice
+  has a green frame and a line saying where it stopped. Everything the person said stays in the window, in a record
+  above the live words (scroll it with the wheel or the ^ / v marks). Someone without a "?" for you is talked to as
+  usual, and nothing runs with the option off.
+  **To stop it:** press Escape (between two steps too: the late step is then shown, not answered), click an answer
+  yourself, click the x, or walk away. It also stops by itself after 12 steps, when the person who speaks is not
+  known, or when the server sends the very same step again. After you have answered a step yourself, the rest of that
+  talk is yours. **Who counts as "a "?" for you":** the creature you had targeted when the words arrived (a best guess, as for the
+  title), when the client has a quest step mark ("?") of the same name within 60 units of where that creature stands, in
+  the world you are in. **It does not run** when Map Markers is off, in the first seconds after entering a world (the
+  client builds its quest marks a moment later), when the creature cannot be found, or when the journal has no step
+  there. **It could run on the wrong person** when the speaker was not the creature you had targeted, or when a kill,
+  loot or reach step's creature of the same name stands at the mark; the cost is only that it presses Done or a
+  single answer for you (never a Goodbye, never one of two or more answers), and Escape stops it. After you leave a
+  talk with Escape or the x, or about two seconds after a stopped talk ends, the next talk starts afresh.
 
 It uses the window sessions of `eqoa/1` (`eqoa.windows.takeover` with `scope = "all"` for `text_dialog`,
 `response_dialog`, `group_invite`, `revive_offer`, `summon_offer`; `eqoa.windows.session`, `pass`, and
