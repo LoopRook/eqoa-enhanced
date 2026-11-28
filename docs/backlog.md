@@ -485,9 +485,15 @@ A font restored after going missing is retried after a face or size change or af
   spec: the bank is readable anywhere but a piece can only be taken out at a banker; the equip action cannot say
   which worn ring, earring, bracer or weapon a new piece replaces (an additive action would be needed). A first
   version exists unrun on the local branch `feat/best-gear-mod` (its one GitHub run failed and was not looked at).
-- **Bag Viewer: the Corpse tab shows for any corpse in the zone** (owner asked 2026-11-27 why it shows with no
-  corpse near). By design today: any corpse the client holds in its zone list, however far, even one already
-  emptied. Proposed, waiting for his yes: show it only for a corpse within loot reach that still has something.
+- **Speed through hand-ins: taking a new quest, and buying the item a quest asks for** (owner, 2026-11-28, after
+  his test: "it'd be cool"). Today it runs only for someone the journal already sends you to and presses only a
+  sole answer. Not looked at: whether the client can tell a mod that a talk offers a quest, or that an answer costs
+  coin. After the note to DabDavis.
+- **Dialog mod: its three switches in its Settings panel in Mods & Addons** (owner looked there on 2026-11-28 and
+  found it empty; the rows are on the Enhanced page). His answer: later, with the settings pane.
+- **World Map mod: quest icons are small, and "tracking" shows on the minimap but not on the World Map** (owner,
+  2026-11-28). Goes with the planned "quest guide and quest creatures on the World Map" work after the note; ask
+  him then which tracking he means.
 - **Dev tools: the offscreen test client still opens a blank window on the main monitor** (owner, 2026-11-27: he
   wants agents' windows on monitor 2). `EQOA_OFFSCREEN` makes the window anyway and ignores `window.opt`. A watcher
   outside the repository moves such windows for now; the proper fix is no window, or a place the tools can name.
