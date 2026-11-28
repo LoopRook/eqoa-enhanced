@@ -196,3 +196,77 @@ jobs:
         if: steps.wasm.outcome != 'success' || steps.program.outcome != 'success' || steps.footprint.outcome != 'success' || steps.paths.outcome != 'success' || steps.player_release.outcome != 'success' || steps.tools.outcome != 'success'
         shell: pwsh
         run: throw 'A gate failed (see the summary)'
+
+  # The mod host on Linux and macOS. Nobody here plays on those systems, so these runners are
+  # the proof: the client as a program, then the host's tests (no disc, no GPU: SKIPs are counted).
+  unix:
+    if: github.repository == 'LoopRook/eqoa-enhanced'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-22.04
+          - os: macos
+            runner: macos-15
+    name: unix (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      # cpal (ALSA) and gilrs (libudev) link these, as upstream's dev.yml installs them.
+      - name: Install the Linux libraries
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: branch-gates-unix-${{ matrix.os }}
+      - name: Prepare logs
+        run: |
+          mkdir -p "$RUNNER_TEMP/gate-logs" "$RUNNER_TEMP/eqoa-gates-config"
+          echo "GATE_LOGS=$RUNNER_TEMP/gate-logs" >> "$GITHUB_ENV"
+          echo "EQOA_CONFIG=$RUNNER_TEMP/eqoa-gates-config" >> "$GITHUB_ENV"
+      - name: unix-program
+        id: program
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo +1.99.1 check --locked -p eqoa 2>&1 | tee "$GATE_LOGS/unix-program.log"
+      - name: unix-addons
+        id: addons
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo +1.99.1 test --locked -p eqoa --bin eqoa fork_ext::addons:: -- --test-threads=1 --nocapture 2>&1 | tee "$GATE_LOGS/unix-addons.log"
+      - name: Summarize
+        if: always()
+        shell: bash
+        env:
+          GATE_PROGRAM: ${{ steps.program.outcome }}
+          GATE_ADDONS: ${{ steps.addons.outcome }}
+        run: |
+          python -X utf8 tools/ci_gates.py summarize --job ${{ matrix.os }} --logs "$GATE_LOGS" --out "$GATE_LOGS/summary.json" --markdown "$GITHUB_STEP_SUMMARY" --result unix-program="$GATE_PROGRAM" --result unix-addons="$GATE_ADDONS"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: gate-summary-${{ matrix.os }}
+          path: ${{ env.GATE_LOGS }}
+          retention-days: 7
+      - name: Fail when a gate failed
+        if: steps.program.outcome != 'success' || steps.addons.outcome != 'success'
+        run: |
+          echo 'A gate failed (see the summary)'
+          exit 1

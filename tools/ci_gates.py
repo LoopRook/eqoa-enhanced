@@ -30,8 +30,8 @@ WORKFLOW_PATH = ".github/workflows/" + WORKFLOW
 WORKFLOW_NAME = "Branch gates"  # the workflow's `name:`
 PREFIX = "ci/"
 REF_PREFIX = "refs/heads/ci/"
-SUMMARY_JOBS = ("tests", "checks")
-GATE_STEPS = ("addons", "full", "wasm", "program", "footprint", "paths", "player-release", "tools")
+SUMMARY_JOBS = ("tests", "checks", "linux", "macos")
+GATE_STEPS = ("addons", "full", "wasm", "program", "footprint", "paths", "player-release", "tools", "unix-program", "unix-addons")
 
 # Letters, digits and . _ - / only: no ':', '*', '^', '~', '?', '[', '\', spaces or '@{'.
 BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")

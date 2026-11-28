@@ -372,6 +372,7 @@ branch when its work merges (work branches may sit on the public repository only
 | checks | `program`: `cargo check -p eqoa`, the client as a program rather than its tests (a test-only function called from normal code passes every test gate) | none: locally `run_gates.py --release` builds it |
 | checks | `footprint`, `paths`, `player-release` | `run_gates.py` |
 | checks | `tools`: the Python tool tests | `enhanced-dev.yml` |
+| unix (linux: `ubuntu-22.04`, macos: `macos-15`) | `unix-program`: `cargo check -p eqoa`; `unix-addons`: the `fork_ext::addons::` tests. The mod host's only proof on those systems (nobody here plays on them); no disc, no GPU, SKIPs counted | upstream `dev.yml` runners |
 
 Each gate runs even when an earlier one failed. The job summary and the `gate-summary-*`
 artifact (kept 7 days) give pass/fail/ignored counts, the number of `SKIP` lines and the

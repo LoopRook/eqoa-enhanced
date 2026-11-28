@@ -245,9 +245,17 @@ class WorkflowTests(unittest.TestCase):
                      "check_no_local_paths.py", "test_player_release.py", "--target wasm32-unknown-unknown",
                      "cargo +1.99.1 check --locked -p eqoa 2>&1"):
             self.assertIn(gate, self.WORKFLOW)
-        for name in ("addons", "full", "wasm", "program", "footprint", "paths", "player-release"):
+        for name in ("addons", "full", "wasm", "program", "footprint", "paths", "player-release",
+                     "unix-program", "unix-addons"):
             self.assertIn(f"--result {name}=", self.WORKFLOW)
             self.assertIn(name, ci_gates.GATE_STEPS)
+
+    def test_workflow_has_a_linux_and_a_macos_job_with_the_pinned_toolchain(self):
+        self.assertIn("runner: ubuntu-22.04", self.WORKFLOW)
+        self.assertIn("runner: macos-15", self.WORKFLOW)
+        self.assertIn("libasound2-dev libudev-dev pkg-config", self.WORKFLOW)
+        for job in ("linux", "macos"):
+            self.assertIn(job, ci_gates.SUMMARY_JOBS)
 
 
 if __name__ == "__main__":
