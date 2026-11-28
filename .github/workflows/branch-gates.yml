@@ -138,6 +138,14 @@ jobs:
         run: |
           cargo +1.99.1 check --locked -p eqoa --target wasm32-unknown-unknown 2>&1 | Tee-Object -FilePath $env:GATE_LOGS/wasm.log
           if ($LASTEXITCODE -ne 0) { throw 'wasm failed' }
+      - name: program
+        id: program
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # The client as a program, not its tests: a test-only function called from normal code passes every test gate.
+          cargo +1.99.1 check --locked -p eqoa 2>&1 | Tee-Object -FilePath $env:GATE_LOGS/program.log
+          if ($LASTEXITCODE -ne 0) { throw 'program failed' }
       - name: footprint
         id: footprint
         continue-on-error: true
@@ -171,12 +179,13 @@ jobs:
         shell: pwsh
         env:
           GATE_WASM: ${{ steps.wasm.outcome }}
+          GATE_PROGRAM: ${{ steps.program.outcome }}
           GATE_FOOTPRINT: ${{ steps.footprint.outcome }}
           GATE_PATHS: ${{ steps.paths.outcome }}
           GATE_PLAYER: ${{ steps.player_release.outcome }}
           GATE_TOOLS: ${{ steps.tools.outcome }}
         run: |
-          python -X utf8 tools/ci_gates.py summarize --job checks --logs $env:GATE_LOGS --out $env:GATE_LOGS/summary.json --markdown $env:GITHUB_STEP_SUMMARY --result wasm=$env:GATE_WASM --result footprint=$env:GATE_FOOTPRINT --result paths=$env:GATE_PATHS --result player-release=$env:GATE_PLAYER --result tools=$env:GATE_TOOLS
+          python -X utf8 tools/ci_gates.py summarize --job checks --logs $env:GATE_LOGS --out $env:GATE_LOGS/summary.json --markdown $env:GITHUB_STEP_SUMMARY --result wasm=$env:GATE_WASM --result program=$env:GATE_PROGRAM --result footprint=$env:GATE_FOOTPRINT --result paths=$env:GATE_PATHS --result player-release=$env:GATE_PLAYER --result tools=$env:GATE_TOOLS
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -184,6 +193,6 @@ jobs:
           path: ${{ env.GATE_LOGS }}
           retention-days: 7
       - name: Fail when a gate failed
-        if: steps.wasm.outcome != 'success' || steps.footprint.outcome != 'success' || steps.paths.outcome != 'success' || steps.player_release.outcome != 'success' || steps.tools.outcome != 'success'
+        if: steps.wasm.outcome != 'success' || steps.program.outcome != 'success' || steps.footprint.outcome != 'success' || steps.paths.outcome != 'success' || steps.player_release.outcome != 'success' || steps.tools.outcome != 'success'
         shell: pwsh
         run: throw 'A gate failed (see the summary)'

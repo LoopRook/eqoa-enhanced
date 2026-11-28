@@ -369,6 +369,7 @@ branch when its work merges (work branches may sit on the public repository only
 | tests | `addons`: `fork_ext::addons::` tests | `run_gates.py` addons |
 | tests | `full`: whole workspace, `--test-threads=1`, skipping the GPU-bound upstream AO test | `enhanced-dev.yml` |
 | checks | `wasm`: `cargo check` for `wasm32-unknown-unknown` | `run_gates.py` wasm |
+| checks | `program`: `cargo check -p eqoa`, the client as a program rather than its tests (a test-only function called from normal code passes every test gate) | none: locally `run_gates.py --release` builds it |
 | checks | `footprint`, `paths`, `player-release` | `run_gates.py` |
 | checks | `tools`: the Python tool tests | `enhanced-dev.yml` |
 

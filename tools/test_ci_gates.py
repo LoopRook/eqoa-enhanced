@@ -242,10 +242,12 @@ class WorkflowTests(unittest.TestCase):
 
     def test_workflow_runs_every_named_gate_and_the_summary_names_match(self):
         for gate in ("fork_ext::addons::", "cargo +1.99.1 test --locked --workspace", "check_fork_footprint.py",
-                     "check_no_local_paths.py", "test_player_release.py", "--target wasm32-unknown-unknown"):
+                     "check_no_local_paths.py", "test_player_release.py", "--target wasm32-unknown-unknown",
+                     "cargo +1.99.1 check --locked -p eqoa 2>&1"):
             self.assertIn(gate, self.WORKFLOW)
-        for name in ("addons", "full", "wasm", "footprint", "paths", "player-release"):
+        for name in ("addons", "full", "wasm", "program", "footprint", "paths", "player-release"):
             self.assertIn(f"--result {name}=", self.WORKFLOW)
+            self.assertIn(name, ci_gates.GATE_STEPS)
 
 
 if __name__ == "__main__":

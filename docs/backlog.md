@@ -488,9 +488,6 @@ A font restored after going missing is retried after a face or size change or af
 - **Bag Viewer: the Corpse tab shows for any corpse in the zone** (owner asked 2026-11-27 why it shows with no
   corpse near). By design today: any corpse the client holds in its zone list, however far, even one already
   emptied. Proposed, waiting for his yes: show it only for a corpse within loot reach that still has something.
-- **Dev tools: the GitHub gates never build the client as a program** (2026-11-27). They build tests only, so a
-  test-only function called from normal code passed every gate and `develop` did not build as a release for some
-  hours. Add a plain `cargo check -p eqoa` (non-test) job to `tools/ci_gates.py`'s workflow.
 - **Dev tools: the offscreen test client still opens a blank window on the main monitor** (owner, 2026-11-27: he
   wants agents' windows on monitor 2). `EQOA_OFFSCREEN` makes the window anyway and ignores `window.opt`. A watcher
   outside the repository moves such windows for now; the proper fix is no window, or a place the tools can name.
