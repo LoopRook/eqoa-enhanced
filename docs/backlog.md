@@ -473,32 +473,35 @@ A font restored after going missing is retried after a face or size change or af
 
 ## Mod work approved or asked for, not built (2026-11-26)
 
-- **A mod toggle that IS a game setting** (lead, 2026-11-27; needs an additive `eqoa/1` option field, so it is the
-  lead's call once a second mod wants it). Today the client special-cases the mod id `eqoa_stats_box` in
-  `addons/options.rs` so that its `stats_box` toggle reads and writes the game's own Stat Window setting. A
-  third-party mod cannot do the same. A general form would be a field on `eqoa.options.toggle` naming the game
-  setting the toggle stands for, from a short list the client allows.
 - **Order agreed with the owner 2026-11-27** (he approved the "what you will see" lines below): first the Map Search
   HUD Scale fix, the two-mods message and the hand-ins (none adds an API name); after the offer to upstream the chat
   line, the quest guide, then the two map colour items (each adds `eqoa/1` names).
-- **Quest hand-ins go by themselves** (approved 2026-11-27, with changes). A switch **Speed through hand-ins**, off
-  until turned on. Talking to someone the journal sends you to (the one with a "?" for you), the window steps through
-  the talk by itself: it presses Done and picks the only answer, and goes straight to the end (owner: "the point is
-  for people like me who don't care or know the quest etc and just want to turn it in"). It stops and waits the moment
-  there is a real choice (two or more answers), and marks where it stopped. What was said stays readable in the
-  window. Escape stops it at once; talking to anyone without a "?" for you works as today. It keeps going through a
-  quest offered with a single answer (say so in the README). The owner does not want the switch in the Dialog window
-  itself in the long run (see the settings pane below); with the Dialog mod's options today is fine for now. Mod only
-  (`eqoa_dialogs`); replaces today's "Auto-answer hand-ins" rule, which fits almost no real quest; cap the run and
-  stop when who is talked to is unknown. Check first whether the retired Turn-in Helper still loads in an old install.
-- **One text size for every mod** (owner, 2026-11-27: "font scale, other ui scale like the tooltips on the map").
+- **Best Gear / a gear manager mod** (owner, 2026-11-27; PARKED the same day as mod project work: "if this is a big build
+  that should go into mod development, we can postpone this"). A Recommend button that looks at what you wear, carry
+  and have in the bank, proposes the best piece per slot by weights the player sets (Melee / Tank / Caster to start),
+  knows the stat caps (`eqoa.player.training().caps`; `StatItem.max` is not the cap), counts buffs, shows the totals
+  before and after, Equip all / per row / Undo, later saved gear sets. The owner expects to get the game's formulas
+  (damage dealt and taken): scoring sits behind one module so they slot in; none is invented. Limits read from the
+  spec: the bank is readable anywhere but a piece can only be taken out at a banker; the equip action cannot say
+  which worn ring, earring, bracer or weapon a new piece replaces (an additive action would be needed). A first
+  version exists unrun on the local branch `feat/best-gear-mod` (its one GitHub run failed and was not looked at).
+- **Bag Viewer: the Corpse tab shows for any corpse in the zone** (owner asked 2026-11-27 why it shows with no
+  corpse near). By design today: any corpse the client holds in its zone list, however far, even one already
+  emptied. Proposed, waiting for his yes: show it only for a corpse within loot reach that still has something.
+- **Dev tools: the GitHub gates never build the client as a program** (2026-11-27). They build tests only, so a
+  test-only function called from normal code passed every gate and `develop` did not build as a release for some
+  hours. Add a plain `cargo check -p eqoa` (non-test) job to `tools/ci_gates.py`'s workflow.
+- **Dev tools: the offscreen test client still opens a blank window on the main monitor** (owner, 2026-11-27: he
+  wants agents' windows on monitor 2). `EQOA_OFFSCREEN` makes the window anyway and ignores `window.opt`. A watcher
+  outside the repository moves such windows for now; the proper fix is no window, or a place the tools can name.
+- **PARKED (owner, 2026-11-27: mod project work, to be talked through with him; not this phase). One text size for every mod** (owner, 2026-11-27: "font scale, other ui scale like the tooltips on the map").
   Today each mod sizes its own text: the World Map has its own Text size choice (Small to Very large), the Round
   Minimap's hover text and the Chat box follow the window only, and the game has no text size setting besides HUD
   Scale. One choice the player makes once, followed by every mod's text and tooltips, needs one additive read in
   `eqoa/1` (a client-wide text scale beside `hud.layout()`'s `hud_scale`; a mod cannot read another mod's option) and
   a row for it; a tooltip needs no new call (`SetWindowFontScale` covers it). Needs its own five lines for the owner;
   after the offer to upstream because it adds a name. Read from the code, nothing run.
-- **One settings pane for the mods' options** (owner, 2026-11-27: "we will need a settings pane eventually. Think
+- **PARKED (owner, 2026-11-27: mod project work, to be talked through with him; not this phase). One settings pane for the mods' options** (owner, 2026-11-27: "we will need a settings pane eventually. Think
   something like OneForAll on wow"). New request: needs its own five lines for the owner before it is built. See also
   "One home for the fork's options" and "Bag Viewer: move the switches ... into a settings pane".
 - **Quest guide, quest creatures on the World Map, XP camps** (approved 2026-11-27; after the offer; needs API work).
@@ -515,12 +518,6 @@ A font restored after going missing is retried after a face or size change or af
   that it stopped. Selling junk gets the same kind of line. The line shows in the game's chat and in the Chat mod's
   window; the Repair box still shows the result. The Bag Viewer already calls the name when it is there. A mod must
   not be able to word the line as a tell or a GM line: one fixed colour, a length limit and a rate limit.
-- **A plain message when two mods want the same window** (approved 2026-11-27; client only, no API name). Only the
-  first mod gets the window; today only the log says so. A small box says it once in plain words: "Dialog window:
-  EQOA Dialog Window is using it, so Quest Turn-in Helper's is not shown." It has **OK** and **Open Mods & Addons**
-  and does not come back for the same pair until something changes; the client never turns a mod off by itself. In
-  Mods & Addons the mod that lost shows a yellow line under its name: which window it did not get and who has it.
-  Turning one of the two off clears the message and the other mod takes the window at once.
 - **Mods that drift at a HUD Scale other than 100%** (audit of 2026-11-27, read from the code, nothing run). Follow
   the scale: Mana Bars, Target of Target, the Target Frame demo, Round Minimap, Dialogs, HUD Numbers. To fix:
   **Map Search** sizes its Search button, its panel and the Track waypoint button on the game's full map from the
