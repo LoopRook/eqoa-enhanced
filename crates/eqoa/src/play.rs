@@ -145,6 +145,8 @@ struct Puppet {
     /// Dressed as a player's character (`dressed_as_player`: a player's, or a
     /// server's mercenary's): a merc told after it was made is made anew.
     player: bool,
+    /// Feet on Slopes' fit of its legs to the ground (`feet`).
+    plant: crate::feet::Plant,
 }
 
 impl Puppet {
@@ -294,6 +296,7 @@ pub struct Play {
     /// A server's regional weather (0x7E94, `weather_zones`; board entry
     /// #1550): its zones on `regional_clock`'s ms, and `/weatherpreview`'s
     pub regional: crate::weather_zones::Zones,
+    pub cinder_pool: Option<crate::cinderpool::Pool>,
     regional_clock: web_time::Instant,
     /// the last retail weather byte the server sent (a preview's end puts
     /// it back)
@@ -1576,7 +1579,7 @@ fn build_puppet_in(lib: &Library, g: &mut Gpu, e: &net::entity::Entity, look: Op
                     if !trims.is_empty() {
                         g.renderer.set_trims(g.device, g.queue, &mut gpu, &model, &trims, &textures);
                     }
-                    let mut p = Puppet { id: e.id, model: e.drawn_model, look, sprite, anims, rand, gpu, attached, held, projectile, name_at: None, slot4_at: None, actor_m: Matrix44::identity(), centre: Matrix44::identity(), weapons, trail: Default::default(), first: true, shown: false, era, textures: crate::texpack::generation(), cape: None, lights: None, race_look, tint, petdye, aura, pieces, wisp, prop, player };
+                    let mut p = Puppet { id: e.id, model: e.drawn_model, look, sprite, anims, rand, gpu, attached, held, projectile, name_at: None, slot4_at: None, actor_m: Matrix44::identity(), centre: Matrix44::identity(), weapons, trail: Default::default(), first: true, shown: false, era, textures: crate::texpack::generation(), cape: None, lights: None, race_look, tint, petdye, aura, pieces, wisp, prop, player, plant: Default::default() };
                     p.set_casts();
                     Some(p)
                 })
@@ -3894,7 +3897,7 @@ impl Play {
         crate::racelabel::clear();
         // Msg000D reads `m_speed` out of the dump
         let speed = dump.speed;
-        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, stood_sent: false, last_pos: [0.0; 3], send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), regional: Default::default(), regional_clock: web_time::Instant::now(), retail_weather: 0, weather_fog: None, abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), pc_gems: Default::default(), autocast: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), aloft_vy: vec![None; MAX_SLOTS], airs: vec![Default::default(); MAX_SLOTS], carried: vec![false; MAX_SLOTS], carry_buf: vec![Default::default(); MAX_SLOTS], actors: vec![None; MAX_SLOTS], actor_passes: vec![false; MAX_SLOTS], shortcuts: (false, false), self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, mob_info: None, talk_held: false, mob_shown_at: None, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), links: Default::default(), mobwnd: Default::default(), buffs: Default::default(), link_draft: None, event_no: 0, next_links: None, shift: false, wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, hc_fall: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), petart: Default::default(), pet_tops: Default::default(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_wait_since: None, cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), faction_follow: Default::default(), faction_heard: None, npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, chat_unsent: 0, reopened: 0, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, pc_windows: Default::default(), panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, ride: None, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, touched: false, rumbles: Vec::new(), glyphs: Default::default(), bars: Vec::new(), bar_follow: None, wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default(), record: Default::default(), bestiary: Default::default(), raid: Default::default(), meter: Default::default(), merc: Default::default(), dyepick: Default::default(), stat_panel: None, focus: None, pointer: None, pointer_view: None, coach_talk: None, self_name_at: None };
+        let mut p = Play { session, player, dump, entities: Entities::default(), view_sent: None, last_send: -1, stood_sent: false, last_pos: [0.0; 3], send_interval: 100, puppets: (0..MAX_SLOTS).map(|_| None).collect(), cues: vec![crate::sound::Cue::Named("respawn", 0.4)], weather: Vec::new(), regional: Default::default(), cinder_pool: None, regional_clock: web_time::Instant::now(), retail_weather: 0, weather_fog: None, abilities: Default::default(), ability_token: 0, presses: Default::default(), hud_menus: Default::default(), pc_gems: Default::default(), autocast: Default::default(), slot_asked: None, gear: Default::default(), walks: (0..MAX_SLOTS).map(|_| None).collect(), aloft_vy: vec![None; MAX_SLOTS], airs: vec![Default::default(); MAX_SLOTS], carried: vec![false; MAX_SLOTS], carry_buf: vec![Default::default(); MAX_SLOTS], actors: vec![None; MAX_SLOTS], actor_passes: vec![false; MAX_SLOTS], shortcuts: (false, false), self_actor: None, actors_in: 0, refresh_collision: false, self_model: None, self_puppet: None, self_shown: true, cam_inside: false, cam_carry: None, chat: Default::default(), typing: None, target: u32::MAX, auto_attack: false, attack: Default::default(), swung: 0, stats: Default::default(), #[cfg(not(target_arch = "wasm32"))] forge_health: Default::default(), effects: Default::default(), damage: Default::default(), rings: Default::default(), self_at: None, words: None, ui_textures: None, ui_data: None, ui_assets: None, ui_art: None, modules_taken: [false; 2], hud: None, target_info: None, target_title: String::new(), target_guild: String::new(), info_up: false, mob_info: None, talk_held: false, mob_shown_at: None, pet_id: u32::MAX, pet_name: String::new(), info_window: Default::default(), chat_pending: Vec::new(), links: Default::default(), mobwnd: Default::default(), buffs: Default::default(), link_draft: None, event_no: 0, next_links: None, shift: false, wnd_chat: None, hud_last: 0, channel: 0, reply_name: String::new(), mode: 0, dialogs: Default::default(), priv_chat: Default::default(), response: Default::default(), pending_box: None, world_change: None, arrival: Vec::new(), group: Default::default(), mbox: Default::default(), trails: Default::default(), trail_strips: Vec::new(), race_cams: None, light: Default::default(), cam_preset: Default::default(), cam_saved: Default::default(), cam_entered: false, race_framed: false, race_frame_due: Vec::new(), death: None, fade: Default::default(), dead_casters: Vec::new(), death_ms: 0, death_eye: None, start: None, quit: false, booted: false, disconnected: None, hc_fall: None, start_open: None, start_keys: Vec::new(), emote: None, edit: Default::default(), edit_keys: Vec::new(), who: Default::default(), who_wnd: Default::default(), who_open: false, search_mode: false, search: Default::default(), who_keys: Vec::new(), who_tell: None, edit_typed: 0, spells: None, projectiles: Default::default(), casts: Vec::new(), petart: Default::default(), pet_tops: Default::default(), spell_ids: vec![None; MAX_SLOTS], spell_rand: Rand(1), book: Default::default(), book_open: false, book_keys: Vec::new(), items: Default::default(), waiting: false, quests: Default::default(), quest_log: Default::default(), quest_open: false, quest_from_hud: false, quest_keys: Vec::new(), guide: Default::default(), server_quests: false, guide_from: None, guide_forced: std::env::var_os("EQOA_QUEST_GUIDE").is_some(), trainer: Default::default(), trainer_open: false, trainer_from_hud: false, trainer_refresh: false, trainer_keys: Vec::new(), cm: Default::default(), cm_wnd: Default::default(), cm_wait_since: None, cm_open: false, cm_msgs: Vec::new(), cm_keys: Vec::new(), factions: Default::default(), faction_wnd: Default::default(), faction_open: false, faction_keys: Vec::new(), faction_follow: Default::default(), faction_heard: None, npcw: Default::default(), options: crate::options::GameOptions { compact: std::env::var_os("EQOA_SOFT_KEYBOARD").is_none() as u8, ..Default::default() }, options_wnd: Default::default(), sound_ops: Vec::new(), apply_camera: false, filters_sent: None, shouts_told: false, shouts_dropped: false, chat_unsent: 0, reopened: 0, buddies: Default::default(), buddy_wnd: crate::social::BuddyList::new(0), ignore: Default::default(), ignore_wnd: crate::social::IgnoreList::new(0), panel_open: false, pc_windows: Default::default(), panel_keys: Vec::new(), controls_open: false, guild: Default::default(), guild_cmds: Default::default(), guild_wnd: Default::default(), guild_open: None, guild_keys: Vec::new(), craft: Default::default(), recipe_wnd: Default::default(), exp_wnd: Default::default(), craft_keys: Vec::new(), craft_outs: Vec::new(), mail: Default::default(), support: Default::default(), bank: Default::default(), autorun: false, following: false, follow_id: u32::MAX, cast_window: (0, 0), rooted: false, ride: None, locks: (true, true), aim_hold: false, aim_at: 0, manual_on: false, reticle_alpha: F::new(0.5), pad_mode: 0, last_group: false, keyboard: true, touched: false, rumbles: Vec::new(), glyphs: Default::default(), bars: Vec::new(), bar_follow: None, wheel: 0.0, key_queue: Default::default(), held: None, quick: Default::default(), quick_held: None, alarm: Default::default(), quick_typed: (0, 0), map: Default::default(), loading: Default::default(), speed, walk_speed: 3.0, drawn: 0, far_last: 0, fish: Default::default(), admin: Default::default(), live: Default::default(), duel: Default::default(), record: Default::default(), bestiary: Default::default(), raid: Default::default(), meter: Default::default(), merc: Default::default(), dyepick: Default::default(), stat_panel: None, focus: None, pointer: None, pointer_view: None, coach_talk: None, self_name_at: None };
         p.take_abilities();
         p.npcw_world_entry();
         // world entry: LoadModels and StreamFillCache under the loading screen
@@ -4234,6 +4237,9 @@ impl Play {
                         crate::inventory::set_hp(&mut self.dump.inventory, k, hp as i64);
                     }
                     self.cues.push(crate::sound::Cue::Ui(1));
+                }
+                Event::Opcode { op: crate::cinderpool::OPCODE, data } => {
+                    crate::cinderpool::Pool::receive(&mut self.cinder_pool, &data, web_time::Instant::now());
                 }
                 Event::Opcode { op: 0x0E02, data } => self.who.recv(&data),
                 // a race the game does not have, by its own words (`racelabel`)
@@ -4648,6 +4654,7 @@ impl Play {
                 Event::Disconnected(r) => {
                     #[cfg(not(target_arch = "wasm32"))]
                     self.forge_health.reset();
+                    self.cinder_pool = None;
                     let text = net::session::disconnect_word(r)
                         .and_then(|w| self.words.as_ref().map(|t| t.get(w, 0).to_string()))
                         .filter(|t| !t.is_empty())
@@ -5091,6 +5098,23 @@ impl Play {
                     }
                     p.first = false;
                     let m = cs.h.calc_trans_about_center(&actor, &p.anims);
+                    // Feet on Slopes (`feet`): the legs fitted to the ground
+                    // under each foot, for a body standing near the eye; drawing
+                    // only, after the pose and before what reads its nodes
+                    if pose {
+                        let standing = e.creature.as_ref().is_some_and(|c| {
+                            let walk = self.walks[slot].as_ref().map(|(_, w)| w).filter(|_| c.p255 != 0);
+                            walk.is_none_or(|w| w.phys.flags & vi::walk::flags::ON_FLOOR != 0 && w.phys.flags & vi::walk::flags::LIQUID == 0)
+                        });
+                        let can = standing
+                            && !cs.dead
+                            && prop.is_none()
+                            && !self.carried[slot]
+                            && matches!(self.airs[slot], crate::jump::Air::Ground)
+                            && !crate::seabody::swims(cs)
+                            && crate::lod::within(&at, &eye, crate::feet::NEAR);
+                        p.plant.plant(cs, &m, can, game_ms, &mut crate::feet::world_ground(&mut walker.scene));
+                    }
                     crate::trails::process(&mut self.trails, &mut p.trail, cs, &p.weapons, &m, game_ms);
                     if pose {
                         cs.h.set_blend_matrices();
@@ -5602,9 +5626,12 @@ impl Play {
     /// A creature's name as its plate and its details box show it: a
     /// player's with its surname after it (go-eqoa-server's `/surname`, Live
     /// petition 5648: `OP_SURNAMES`, by its name without the tags before it),
-    /// anyone else's as it is.
+    /// and a merc's with its own (`/merc surname`, Heirloom petition 3430: a
+    /// merc's name is the world's, so the same list names it); anyone else's
+    /// as it is.
     fn plate_name(&self, c: &net::entity::Creature) -> String {
-        if c.p256 == 2
+        let merc = c.p256 == 3 && self.session.mercs.as_ref().is_some_and(|m| m.is(&c.name));
+        if (c.p256 == 2 || merc)
             && let Some(s) = self.session.surname(crate::chat::plain_name(&c.name))
         {
             return format!("{} {s}", c.name);
@@ -5696,7 +5723,7 @@ impl Play {
     ///
     /// How far off the centre line a creature is (its x after the divide)
     /// is measured through `game`, the game's own camera (`m_viewProj`: 55
-    /// degrees and 10/7 across a 4:3 picture, `walker.view(4/3)`), as
+    /// degrees and 10/7 across a 4:3 picture, `walker.game_view(4/3)`), as
     /// `TargetCentre` measures; what is in view (`m_frustum.Cull`) is the
     /// view as drawn, `view_proj` (a wider window's sides, a narrower one's
     /// top and bottom: a creature the player sees can be cycled to). A wider
@@ -5847,13 +5874,13 @@ impl Play {
     }
 
     /// `cycle_target` from `walker`'s camera in a window `aspect` wide:
-    /// measured through the game's camera (`walker.view(4/3)`), in view as
+    /// measured through the game's camera (`walker.game_view(4/3)`), in view as
     /// drawn (`walker.view(aspect)`). The PC interface measures from the
     /// character instead (`cycle_target_from_character`); the Controller
     /// interface keeps the PS2's camera.
     pub fn cycle_target_from(&mut self, group: bool, walker: &Walker, aspect: f32) {
         let (drawn, view) = walker.view(aspect);
-        let (game, _) = walker.view(4.0 / 3.0);
+        let (game, _) = walker.game_view(4.0 / 3.0);
         if crate::settings::pc_mode() {
             self.cycle_target_from_character(group, &walker.cam.walk.phys, game * view, drawn * view);
         } else {
@@ -6057,12 +6084,12 @@ impl Play {
     }
 
     /// `VIClient::TargetCentre` (the manual camera all the way in, a frame of
-    /// the game's), measured through the game's camera (`walker.view(4/3)`:
+    /// the game's), measured through the game's camera (`walker.game_view(4/3)`:
     /// the frame's 10/7 across a 4:3 picture, as the console measures) and in
     /// view as drawn (`view_proj`: a wider window's sides count). True when
     /// the target changed (`DrawReticle(1)`).
     fn target_centre(&mut self, walker: &Walker, view_proj: glam::Mat4) -> bool {
-        let (proj, view) = walker.view(4.0 / 3.0);
+        let (proj, view) = walker.game_view(4.0 / 3.0);
         let eye = walker.eye_position();
         let seen: Vec<Seen> = self
             .entities
@@ -6545,8 +6572,9 @@ impl Play {
     /// the player/pet without selecting it and then use a hotkey to cast a
     /// heal spell ... a hierarchy the player chooses (mouseover before target
     /// if friendly or target if friendly before mouseover)"): for ability `a`,
-    /// a heal or buff cast at a target (scope 1, `autocast::guess`), in the
-    /// PC interface with the mouse in the window, the friend to cast it at in
+    /// a heal or buff cast at a target (scope 1, `autocast::guess`) or a
+    /// friend's utility spell (invisibility, an illusion, a cure...: petition
+    /// 3350, `autocast::friend_utility`), in the PC interface with the mouse in the window, the friend to cast it at in
     /// place of the target, which stays as it is: the player's side under the
     /// mouse (`own_side`: its pet, its group, their mercs) by Mouseover First,
     /// or by Target First only when the target is not one of them (nor the
@@ -6554,7 +6582,7 @@ impl Play {
     pub fn mouseover_target(&self, a: &net::dump::Ability) -> Option<u32> {
         use crate::settings::MouseoverCast;
         let order = crate::settings::mouseover_cast();
-        if order == MouseoverCast::Off || !crate::settings::pc_mode() || a.scope != 1 || !matches!(crate::autocast::guess(a), Some(crate::autocast::Kind::Heal | crate::autocast::Kind::Buff)) {
+        if order == MouseoverCast::Off || !crate::settings::pc_mode() || !crate::autocast::mouseover(a) {
             return None;
         }
         let (at, (vp, size)) = (self.pointer?, self.pointer_view?);
@@ -7021,6 +7049,33 @@ impl Play {
             }
             c.history_mut().wheel(Self::chat_point(at, size), lines, held)
         })
+    }
+
+    /// Whether the mouse's bindable inputs (`binds::mouse_name`, the wheel's
+    /// ways: petition 3359) may act as their rows' keys with the pointer at
+    /// window pixels `at` on a `size` window: in play or the manual camera
+    /// (no window up: a window's list takes the wheel, `window_wheel`), the
+    /// map and the player search closed, no line being typed, and the
+    /// pointer on none of what takes the wheel or a click over the world:
+    /// the chat box and its panes, an item link's window, a creature's
+    /// details, the rolls' strips, the minimap.
+    pub fn mouse_binds_at(&mut self, at: (f64, f64), size: (u32, u32)) -> bool {
+        if !matches!(self.mode, 0 | 38) || self.map.open || self.search.open || self.keyboard_typing() {
+            return false;
+        }
+        let f = render::ui::frame_from_window(size, [at.0 as f32, at.1 as f32]);
+        let shown = !crate::hideui::hidden();
+        if shown && (self.links.covers(f) || self.mobwnd.covers(f) || self.rolls_cover([at.0 as f32, at.1 as f32], size)) {
+            return false;
+        }
+        if self.map.mini_contains([at.0 as f32, at.1 as f32]) {
+            return false;
+        }
+        let Some(c) = self.wnd_chat.as_ref() else { return true };
+        if c.contains(Self::chat_point(at, size)) {
+            return false;
+        }
+        !(1..=crate::chat::TABS).any(|t| c.pane(t).is_some_and(|p| p.contains(Self::chat_pane_point(at, size, t))))
     }
 
     /// The wheel's `lines` (up positive; a finger's drag down) on the window
@@ -9925,7 +9980,8 @@ impl Play {
         let slot = ability.slot;
         eprintln!("play: use slot {slot} ({:?})", ability.name);
         // The cast request has its own target. Self-only abilities name the
-        // caster, and Mouseover Casting can redirect a targeted heal or buff.
+        // caster, and Mouseover Casting can redirect a targeted heal, buff or
+        // friend's utility spell.
         let at = if ability.scope == 0 {
             self.self_id32().unwrap_or(u32::MAX)
         } else {
@@ -12490,7 +12546,8 @@ impl Play {
         (c.dps_meter && self.session.dps_meter_offer && self.right_hud_up()).then(|| {
             let hide_mercs = (self.session.dps_meter_layout >= net::session::DPS_METER_MERC_LINES).then_some(c.dps_hide_mercenary);
             let own_rows = self.session.dps_meter_layout >= net::session::DPS_METER_MERC_ROWS && c.dps_merc_rows;
-            self.meter.shown_with(c.dps_view, &self.pet_name, c.dps_columns, c.dps_sort, hide_mercs, own_rows)
+            let s = self.meter.shown_with(c.dps_view, &self.pet_name, c.dps_columns, c.dps_sort, hide_mercs, own_rows);
+            crate::dpsmeter::Shown { most_rows: c.dps_lines, ..s }
         })
     }
 
@@ -12660,6 +12717,8 @@ impl Play {
             // healing and power (Heirloom petition 3030): from a server that
             // counts them (layout 2)
             Command::Sort(_) | Command::Columns if self.session.dps_meter_layout < 2 => "This server's DPS meter counts damage alone.",
+            // damage taken (Heirloom petition 3397): from a server of layout 6
+            Command::Sort(Metric::Taken) if self.session.dps_meter_layout < net::session::DPS_METER_TAKEN => "This server's DPS meter counts no damage taken.",
             Command::Sort(m) => {
                 let mut c = crate::settings::client();
                 c.dps_columns = c.dps_columns.with(m);
@@ -12670,6 +12729,7 @@ impl Play {
                     Metric::Damage => "The DPS meter is ranked by damage.",
                     Metric::Healing => "The DPS meter is ranked by healing.",
                     Metric::Power => "The DPS meter is ranked by power given.",
+                    Metric::Taken => "The DPS meter is ranked by damage taken.",
                 }
             }
             Command::Columns => {
@@ -12680,6 +12740,7 @@ impl Play {
                     Columns::Dps => "The DPS meter shows the DPS.",
                     Columns::Hps => "The DPS meter shows the DPS and HPS.",
                     Columns::All => "The DPS meter shows the DPS, HPS and power given a second.",
+                    Columns::Taken => "The DPS meter shows the DPS and damage taken a second.",
                 }
             }
         };
@@ -12945,9 +13006,12 @@ impl Play {
             // a merc's class (and a healer's mode) under its name, where the
             // server tells them (0x7E5B's layout 3: the owner's of 2026-11-12,
             // "for mercs show class also in the square pop up")
+            // its Master Class in place of its class once it has one (0x0010's
+            // title, entity/mercmaster.go MercTitle; Heirloom petition 3447)
             3 => Some(match self.session.mercs.as_ref().and_then(|m| m.class(&c.name)) {
                 Some((k, mode)) => {
-                    let class = word(if k < 15 { 165 + k as i32 } else { 165 });
+                    let title = if self.target_info.is_some() { self.target_title.as_str() } else { "" };
+                    let class = if title.is_empty() { word(if k < 15 { 165 + k as i32 } else { 165 }) } else { title.to_string() };
                     match mode {
                         1 => format!("{}\n{class} (Defensive)\n{level}", c.name),
                         2 => format!("{}\n{class} (Offensive)\n{level}", c.name),
@@ -13328,6 +13392,49 @@ mod commands {
         let mut s = Session::connect_with(Box::new(Nowhere), ([127, 0, 0, 1], 5000), ([127, 0, 0, 1], 10070), "test", [0; 32]).unwrap();
         s.self_id = Some(0x100);
         Play::new(s, Player::default(), dump)
+    }
+
+    /// The mouse's bindings (petition 3359) act only with the pointer on the
+    /// world in play: over the chat box, with a window up, the map open or a
+    /// line being typed the wheel and the buttons are the mouse's, as they
+    /// were. The control: the same pointer off the chat box is the world's.
+    #[test]
+    fn mouse_binds_act_only_on_the_world() {
+        crate::settings::testing::reset(false);
+        let size = (640, 480);
+        let mut p = play();
+        p.loading.wait = None;
+        let mut chat = crate::chat::WndChat::new();
+        chat.test_place([320, 400], [400, 100]);
+        p.wnd_chat = Some(chat);
+        let world = (320.0, 120.0);
+        // the chat box's middle, where `chat_point` puts it
+        let on_chat = (0..size.1).flat_map(|y| (0..size.0).map(move |x| (x as f64, y as f64)))
+            .find(|&at| p.wnd_chat.as_ref().unwrap().contains(Play::chat_point(at, size)))
+            .expect("the chat box under some pixel");
+        assert!(p.mouse_binds_at(world, size), "the control: on the world, in play");
+        assert!(!p.mouse_binds_at(on_chat, size), "over the chat box: the wheel scrolls it");
+        p.mode = 38;
+        assert!(p.mouse_binds_at(world, size), "the manual camera keeps them");
+        p.mode = 34;
+        assert!(!p.mouse_binds_at(world, size), "a window up (Options): its list takes the wheel");
+        p.mode = 0;
+        p.map.open = true;
+        assert!(!p.mouse_binds_at(world, size), "the map up: its zoom");
+        p.map.open = false;
+        p.mode = 2;
+        assert!(!p.mouse_binds_at(world, size), "a line typed");
+        p.mode = 0;
+        assert!(p.mouse_binds_at(world, size));
+        // and through the bindings: Wheel Up on the autorun's row is the
+        // row's X on the world, the zoom over the chat box
+        let mut b = crate::binds::Binds::default();
+        b.bind_key(crate::binds::row_named("autorun").unwrap(), "wheelup");
+        let mut n = crate::binds::WheelNotches::default();
+        let use_at = |p: &mut Play, at, n: &mut crate::binds::WheelNotches| crate::binds::wheel_use(1.0, n, false, p.mouse_binds_at(at, size), (false, false, false), &b, false);
+        assert_eq!(use_at(&mut p, world, &mut n), crate::binds::WheelUse::Keys("wheelup".into(), 1));
+        assert_eq!(use_at(&mut p, on_chat, &mut n), crate::binds::WheelUse::Mouse);
+        crate::settings::testing::reset(false);
     }
 
     /// A world change that failed (entry 1323) logs out (0x09B0 sent) and
@@ -14411,7 +14518,8 @@ mod commands {
 
     /// Mouseover Casting (petition 2960): a heal cast from the bars with
     /// the pointer on the player's pet goes to the pet (0x0032 names it),
-    /// the target kept; Target First casts at a friendly target instead, and
+    /// the target kept, and a friend's utility spell (petition 3350:
+    /// invisibility, levitation, an illusion) too, never a lull or a charm; Target First casts at a friendly target instead, and
     /// at the pet when the target is a foe. The controls: Off, a harmful
     /// spell, the Controller interface, the pointer off the pet, a stranger
     /// under it: the target, as ever.
@@ -14444,9 +14552,19 @@ mod commands {
         let set = |m: MouseoverCast, pc: bool| set_client(ClientOptions { mouseover_cast: m, pc_mode: pc, ..client() });
         set(MouseoverCast::Off, true);
         assert_eq!(p.mouseover_target(&heal), None, "the control: Off");
+        let invis = net::dump::Ability { id: 12, scope: 1, name: "Invisibility".into(), desc: "Invisibility".into(), ..Default::default() };
+        assert_eq!(p.mouseover_target(&invis), None, "the control: Off, a utility spell too");
         set(MouseoverCast::MouseoverFirst, true);
         assert_eq!(p.mouseover_target(&heal), Some(pet), "the pet under the mouse");
         assert_eq!(p.mouseover_target(&bolt), None, "the control: a harm goes at the target");
+        // a friend's utility spell too (petition 3350), never one on a creature
+        let utility = |name: &str, desc: &str| net::dump::Ability { id: 11, scope: 1, name: name.into(), desc: desc.into(), ..Default::default() };
+        for (name, desc) in [("Superior Invisibility", "Target, invis, 10min"), ("Levitate", "Target, Levitate, 10min"), ("Illusion: Dwarf", "Target, Dwarf form, Faction Change, 10min")] {
+            assert_eq!(p.mouseover_target(&utility(name, desc)), Some(pet), "{name}: the pet under the mouse");
+        }
+        for (name, desc) in [("Lull", "Reduces Aggression towards you."), ("Charm", "Target, Charm ; Increase 25% based on CHA, 2.2min")] {
+            assert_eq!(p.mouseover_target(&utility(name, desc)), None, "the control: {name} goes at the target");
+        }
         p.target = mate;
         assert_eq!(p.mouseover_target(&heal), Some(pet), "Mouseover First: the pet over the friendly target");
         set(MouseoverCast::TargetFirst, true);
@@ -14699,7 +14817,7 @@ mod commands {
     /// 20261026-154639, a tester at 1707x932: "a *slightly* higher preference to
     /// targeting mobs in front of you and close"). How far off the middle a
     /// creature is counts as the game's camera measures it
-    /// (`walker.view(4/3)`); the window's projection draws its x at 4/3 over
+    /// (`walker.game_view(4/3)`); the window's projection draws its x at 4/3 over
     /// the aspect of that (0.73 at the tester's shape, x squared 0.53), and at the
     /// game's in a window narrower than 4:3. From a camera at the origin
     /// looking along -z: A, 40 ahead (0.28), then B, 13 away and 5 to the
@@ -16080,6 +16198,13 @@ mod commands {
         assert_eq!(p.plate_name(&player), "[OG] Cora Stoneheart");
         assert_eq!(p.plate_name(&bert), "Bert");
         assert_eq!(p.plate_name(&pet), "Cora", "a pet or a merc: its own name");
+        // a merc's own surname (Heirloom petition 3430), a pet of no merc's name still none
+        let merc = net::entity::Creature { p256: 3, name: "Carian".into(), ..Default::default() };
+        p.session.surnames.insert("carian".into(), "Vale".into());
+        assert_eq!(p.plate_name(&merc), "Carian", "not a merc the list names: its own name");
+        p.session.mercs = Some(net::session::Mercs { own: false, names: vec!["Carian".into()], owners: vec!["Owner".into()], classes: vec![(13, 0)] });
+        assert_eq!(p.plate_name(&merc), "Carian Vale");
+        assert_eq!(p.plate_name(&pet), "Cora", "a pet the merc list does not name");
     }
 
     /// Coach Talk on Arrival (Heirloom petition 3091): a 0x00B2 while the
@@ -16552,8 +16677,15 @@ mod commands {
             assert_eq!((said(&p), crate::settings::dps_columns(), crate::settings::dps_sort()), ("The DPS meter is ranked by healing.".to_string(), Columns::Hps, Metric::Healing));
             p.chat_line("/dps power");
             assert_eq!((crate::settings::dps_columns(), crate::settings::dps_sort()), (Columns::All, Metric::Power), "power widens the columns");
+            p.chat_line("/dps taken");
+            assert_eq!(said(&p), "This server's DPS meter counts no damage taken.", "layout 2: no damage taken");
+            p.chat_line("/dps columns");
+            assert_eq!((said(&p), crate::settings::dps_columns()), ("The DPS meter shows the DPS and damage taken a second.".to_string(), Columns::Taken));
             p.chat_line("/dps columns");
             assert_eq!((said(&p), crate::settings::dps_columns(), crate::settings::dps_sort()), ("The DPS meter shows the DPS.".to_string(), Columns::Dps, Metric::Damage), "round to the DPS alone: by damage");
+            p.session.dps_meter_layout = net::session::DPS_METER_TAKEN;
+            p.chat_line("/dps taken");
+            assert_eq!((said(&p), crate::settings::dps_columns(), crate::settings::dps_sort()), ("The DPS meter is ranked by damage taken.".to_string(), Columns::Taken, Metric::Taken), "layout 6: by damage taken");
             p.chat_line("/dps damage");
             assert_eq!(said(&p), "The DPS meter is ranked by damage.");
         }
@@ -17155,6 +17287,31 @@ mod commands {
         p.target = 0x11;
         assert_eq!(p.target_info_text().as_deref(), Some("Plainogre\nw190\nw174\nw503 60"), "a name not on the list");
         crate::racelabel::clear();
+    }
+
+    /// A merc's Master Class (0x0010's title) stands where its class would
+    /// (Heirloom petition 3447), its healer's mode kept; the controls: no
+    /// title, the class; and no target info yet, the class.
+    #[test]
+    fn a_mercs_master_class_stands_for_its_class() {
+        let mut p = play();
+        p.words = Some(crate::groupsearch::tests::numbered());
+        p.session.mercs = Some(net::session::Mercs { own: true, names: vec!["Carian".into()], owners: vec!["Owner".into()], classes: vec![(13, 0)] });
+        p.entities.slots[0] = Some(net::entity::Entity {
+            id: 0x20,
+            creature: Some(net::entity::Creature { name: "Carian".into(), level: 60, p256: 3, ..Default::default() }),
+            ..Default::default()
+        });
+        p.target = 0x20;
+        assert_eq!(p.target_info_text().as_deref(), Some("Carian\nw178\nw503 60"), "no target info yet: the class");
+        p.target_info = Some(1);
+        p.target_title = "Sorcerer".into();
+        assert_eq!(p.target_info_text().as_deref(), Some("Carian\nSorcerer\nw503 60"));
+        p.target_title.clear();
+        assert_eq!(p.target_info_text().as_deref(), Some("Carian\nw178\nw503 60"), "no title: the class");
+        p.session.mercs = Some(net::session::Mercs { own: true, names: vec!["Carian".into()], owners: vec!["Owner".into()], classes: vec![(9, 1)] });
+        p.target_title = "Templar".into();
+        assert_eq!(p.target_info_text().as_deref(), Some("Carian\nTemplar (Defensive)\nw503 60"), "a healer's mode kept");
     }
 
     /// The server's lines under the level (`OP_MOB_INFO` layout 2, entry 680):

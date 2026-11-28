@@ -5,6 +5,80 @@ in the same push as the changes it describes. The dev release's page shows them
 (`release/notes.sh`, from `.github/workflows/dev.yml`); an edit to this file alone
 is put on the page by `.github/workflows/notes.yml`.
 
+## 2026-11-28 · Mercenary surnames
+
+- **Surnames for mercenaries**: on a server that has them, `/merc [name or 1-3] surname <surname>` gives your mercenary a surname, shown after its name on its name plate and in its details box, as a player's surname is; `/merc [name or 1-3] surname clear` takes it off.
+
+## 2026-11-27 · A merc's Master Class on its target window
+
+- **Master Class shown**: considering a mercenary that has a Master Class (Sorcerer, Templar and the like) now shows it where its class was, as a player's does; a healer's Defensive or Offensive stays beside it.
+
+## 2026-11-27 · Mobile defaults to 30 FPS
+
+- The Android app and mobile browsers now start at 30 FPS to reduce power use during play. You can choose 60 or Display under **Options > Extended > Graphics > Video > Frame Rate**. The game honors your saved choice.
+
+## 2026-11-27 · DPS meter: damage taken, every merc, how many lines
+
+- **Damage taken**: on a server that counts it, **DPS Meter Columns** has a new choice, **DPS + Taken**, showing the damage each player took a second (**DTPS**) beside their DPS, so a tank can see whether a change cuts what they take; **DPS Meter Sort** (or `/dps taken`) ranks the meter by it. A merc's damage taken is part of its owner's line, or its own row with **Mercs as Own Rows**.
+- **Every merc has a row**: with **Mercs as Own Rows** on, each merc out in your group shows on the meter from the start of the fight, even before it has done anything, so a healer merc no longer goes missing from the damage view.
+- **DPS Meter Lines** (Extended → UI → DPS Meter): how many rows the meter shows, **All** (as many as fit, the default) or **5** to **25**. The wheel and a click still page through the rest.
+
+## 2026-11-27 · Mouse buttons and the wheel in Key Bindings
+
+- In **Options → Controls** a row's key can now be a mouse input: the middle button (**Middle Mouse**), the side buttons (**Mouse 4**, **Mouse 5** and more) or the wheel (**Wheel Up**, **Wheel Down**): pick the row's key, then click or scroll. A wheel notch is one tap of the row (on Autorun it turns autorun on and off) and no longer zooms; an unbound wheel still zooms as before. Mouse binds work in the world only, not over the chat box, the minimap or an open window, and the left and right buttons stay as they are.
+
+## 2026-11-27 · Foliage Distance
+
+- A new **Foliage Distance** row in **Options → Extended → Graphics → Foliage** draws the grass and plants farther out: **Retail** (the game's, exactly as before, the default), **1.5x**, **2x** or **3x** (2x the most in the browser and on phones). Farther out the plants grow in gradually toward the edge as you run, instead of ending at a ring; 3x with 3x Foliage Density costs the most.
+
+## 2026-11-27 · Map camps show their creatures' levels
+
+- **The map's camps** show the levels of the creatures there now, not the guide's: the Salt Mine's siloths said 45-50 while they were 39-41.
+
+## 2026-11-27 · Cures are no longer auto-cast attacks
+
+- **Auto-cast** no longer turns a cure into an attack: right-clicking an Antidote, Curative, Purity or other spell that removes poison, disease or harmful effects used to make it an Attack (or a Buff) slot fired at your foe or at yourself for nothing; now it says it can't tell when to use it, and casting one at a friend no longer starts your auto-attack. Poison and disease attacks are auto-cast as before.
+
+## 2026-11-27 · Mouseover Casting for utility spells
+
+- **Mouseover Casting** (PC interface) now also sends your targeted **utility spells** to the pet or groupmate under the mouse: invisibility, illusions and glamours, cures (Antidote, Curative, Purity) and a few heals and buffs it missed before (Bind Wounds, Wild Growth, Forest's Succor, Tracker's Wisdom). Charms, lulls, calms, roots, pickpockets, gates and resurrections still go at your target, and auto-cast still never casts utility spells on its own.
+
+## 2026-11-27 · Mail an item with no message
+
+- A tell-gram that carries an item or tunar now sends with just a recipient and a subject: the message box can be left empty. Before, Send refused it (the only sign a red line in the chat behind the window), so the attachment seemed not to take. A gram with nothing attached still needs a message, as before.
+
+## 2026-11-27 · Field of View
+
+- A new **Field of View** slider in **Options > Extended > Graphics > Video** lets you see more of the world around you: from 45 up to 95 degrees in steps of 5. The original game's view, 55, is the default, so nothing changes until you move it.
+- It works in first and third person and as you move it. A wide window still shows more at the sides as before, and everything at the edges of the wider view is drawn: creatures, plants, name plates, shadows and effects. Targeting picks the same creature it always did.
+
+## 2026-11-27 · Feet on Slopes on stairs and steep ground
+
+- **Feet on Slopes** no longer flips your knees backwards or twitches your legs on stairs and steep ground: the knees stay bent forward, each foot follows a step up or down smoothly, and the fit no longer switches off and on between steps.
+
+## 2026-11-27 · Trade items to your mercenary
+
+- You can now hand items to **your own mercenary** with the ordinary trade: target it and press **Trade**, as you would with another player. The trade window opens at once with your merc already accepting; put in what you want it to have and accept. The items go into its inventory, the same as giving them through its own window (what its window would not take, it will not take here either, and it takes no tunar).
+- Another player's mercenary, a pet or an NPC still cannot be traded with. It needs the server's update (live).
+
+## 2026-11-27 · A custom race's looks at Customize Character
+
+- **Customize Character** (at character select) now shows a custom race's own appearance options, as at creation: its body variants, colours and textures. Pick and accept them there; colours you saved before come back when the body you pick has those parts. It needs the server's update (live).
+
+## 2026-11-27 · Crash reports say when the page ran out of memory
+
+- When the browser page stops with **"RuntimeError: unreachable"** because it was refused memory, its crash report now says how big the game's memory was and how much it had asked for, so the GMs can tell a game that grew out of control from a computer with no memory left to give (several windows multiboxing on one machine).
+- The page's memory line in the log now comes at once when the game's memory has grown a lot, not only every ten minutes, and on WebGL2 it no longer shows a falling, negative count of graphics buffers.
+
+## 2026-11-26 · Feet on the ground on hills
+
+- Characters no longer sink their feet into hills. Going up or down a slope (or standing across one), a troll's, an ogre's or anyone's uphill foot used to go into the ground, knee deep on a steep hill. Now each foot stands on the ground under it: the body is lowered to the downhill foot and the uphill knee bends. This is for you, other players and the NPCs that walk on two legs.
+- It is on by default. If you prefer the original game's look, turn off **Extended > Graphics > Characters > Feet on Slopes**.
+
+## 2026-11-26 · Windows: no crash at start in the OpenGL setup
+
+- On Windows the client no longer asks for OpenGL when it starts: it uses Vulkan or DirectX 12, as it already drew with. On some machines (an AMD Radeon Vega 8 among them) Windows' OpenGL setup could close the game while it was starting, even though the game draws with Vulkan.
+
 ## 2026-11-26 · Bank pages from the bank window
 
 - At the banker, on the **Items** page, you can now turn your bank's page without typing **/bank next**: press **R1** for the next page and **L1** for the one before (**Page Down** and **Page Up** on the keyboard). With **Inventory Style** set to **Bags** there are **Page** buttons under the bank's grid too, to click or tap. The chat says which page you are on, and the bank's side starts again from its top.
