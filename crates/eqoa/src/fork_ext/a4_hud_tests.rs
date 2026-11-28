@@ -606,11 +606,11 @@ fn a4_every_hud_piece_drops_quads_bounds_and_clicks_when_hidden() {
                 })
                 .collect(),
             pet: None,
-            pet_rates: [0.0; 3],
             first: 0,
             columns: crate::dpsmeter::Columns::Dps,
             sort: Default::default(),
             hide_mercs: None,
+            ..Default::default()
         }),
         ..Default::default()
     };
@@ -767,11 +767,11 @@ fn a4_wheel_captures_stop_when_raid_list_or_dps_meter_hidden() {
             dps: 1000.0,
             rows: meter_rows,
             pet: None,
-            pet_rates: [0.0; 3],
             first: 0,
             columns: crate::dpsmeter::Columns::Dps,
             sort: Default::default(),
             hide_mercs: None,
+            ..Default::default()
         }),
         ..Default::default()
     };
