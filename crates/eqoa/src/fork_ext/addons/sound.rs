@@ -112,8 +112,11 @@ fn parse_lua_sound_id(raw: i64) -> Option<SoundId> {
 /// Diagnostic outcome from a sound operation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SoundDiagnostic {
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     UnsupportedPlatform(&'static str),
+    /// Linux and macOS play WAV only; the format is named (`sound_mix.rs`).
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    UnsupportedFormat(String),
     PathSanitizationFailed(&'static str),
     FileNotFound(PathBuf),
     FileTooLarge {
@@ -146,10 +149,12 @@ pub enum SoundDiagnostic {
 impl fmt::Display for SoundDiagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            #[cfg(not(windows))]
+            #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
             Self::UnsupportedPlatform(p) => {
                 write!(f, "sound playback is unsupported on platform '{p}'")
             }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            Self::UnsupportedFormat(what) => write!(f, "{what}"),
             Self::PathSanitizationFailed(reason) => {
                 write!(f, "sound path rejected for security: {reason}")
             }
@@ -290,10 +295,10 @@ impl MciBackend for WindowsMciBackend {
 
 /// Non-Windows backend that always fails. It is never used for production
 /// playback because `load_sound` short-circuits with `UnsupportedPlatform`.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 struct UnsupportedBackend;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 impl MciBackend for UnsupportedBackend {
     fn as_any(&self) -> &dyn std::any::Any {
         self
@@ -308,7 +313,11 @@ fn default_backend() -> Box<dyn MciBackend> {
     {
         Box::new(WindowsMciBackend::new())
     }
-    #[cfg(not(windows))]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        Box::new(super::sound_mix::MixBackend::new())
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         Box::new(UnsupportedBackend)
     }
@@ -449,14 +458,14 @@ impl SoundBank {
     ) -> Option<SoundId> {
         self.last_diagnostic = None;
 
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
         {
             let _ = (path_str, script_root, resource_dirs);
             self.record(SoundDiagnostic::UnsupportedPlatform(std::env::consts::OS));
             return None;
         }
 
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
         {
             let (canonical, canonical_str) =
                 match resolve_sound_path(path_str, script_root, resource_dirs) {
@@ -514,6 +523,22 @@ impl SoundBank {
                 }
             };
             self.next_sound_id += 1;
+
+            // Linux and macOS play WAV only: any other file is refused here with its format named.
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            {
+                use std::io::Read;
+                let mut head = [0u8; 16];
+                let got = fs::File::open(&canonical).and_then(|mut f| f.read(&mut head)).unwrap_or(0);
+                let kind = super::sound_mix::sniff(&head[..got]);
+                if kind != "wav" {
+                    self.record(SoundDiagnostic::UnsupportedFormat(format!(
+                        "unsupported sound format: {kind} (only WAV plays on {})",
+                        std::env::consts::OS
+                    )));
+                    return None;
+                }
+            }
 
             let alias = format!("uiforge_snd_{:08x}_{}", self.owner_id, sound_id.as_u32());
             let open_cmd = format!("open \"{}\" type mpegvideo alias {}", canonical_str, alias);
@@ -825,12 +850,12 @@ fn contains_parent_traversal(path_str: &str) -> bool {
     false
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 fn is_contained_in(canonical: &Path, root: &Path) -> bool {
     canonical.starts_with(root) && canonical.is_file()
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 fn canonicalize_sound_path(path: &Path) -> Result<(PathBuf, String), SoundDiagnostic> {
     let canonical =
         fs::canonicalize(path).map_err(|_| SoundDiagnostic::FileNotFound(path.to_path_buf()))?;
@@ -844,7 +869,7 @@ fn canonicalize_sound_path(path: &Path) -> Result<(PathBuf, String), SoundDiagno
     Ok((canonical, canonical_str))
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 fn resolve_sound_path(
     path_str: &str,
     script_root: &Path,
@@ -897,6 +922,11 @@ fn resolve_sound_path(
     }
 
     Err(SoundDiagnostic::FileNotFound(path.to_path_buf()))
+}
+
+#[cfg(not(windows))]
+fn is_allowed_system_media_path(_: &Path) -> bool {
+    false
 }
 
 #[cfg(windows)]
@@ -1262,7 +1292,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn forge_sound_monotonic_id_exhaustion_guard() {
         let mut bank = SoundBank::with_owner_id_and_backend(102, Box::new(NoopBackend));
         bank.set_active(true);
@@ -1279,20 +1309,32 @@ mod tests {
         ));
     }
 
+    /// Linux and macOS play WAV only: an mp3 is refused at load with its format named, a WAV loads, plays and is heard
+    /// by the mixer. Control: the same bank with a WAV succeeds where the mp3 failed.
     #[test]
-    #[cfg(not(windows))]
-    fn forge_sound_load_returns_unsupported_platform_on_non_windows() {
-        let mut bank = SoundBank::with_owner_id_and_backend(102, Box::new(NoopBackend));
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn forge_sound_load_refuses_mp3_by_name_and_plays_wav_on_linux_and_macos() {
+        let shared: std::sync::Arc<std::sync::Mutex<super::super::sound_mix::Mixer>> = Default::default();
+        let mut bank = SoundBank::with_owner_id_and_backend(102, Box::new(super::super::sound_mix::MixBackend::with_mixer(shared)));
         bank.set_active(true);
-        let dir = temp_dir("unsupported");
+        let dir = temp_dir("unix_formats");
+        let mp3 = dir.join("song.mp3");
+        fs::write(&mp3, b"ID3      ÿû ").unwrap();
+        assert!(bank.load_sound(&mp3.to_string_lossy(), &dir, &[dir.clone()]).is_none());
+        match bank.last_diagnostic() {
+            Some(SoundDiagnostic::UnsupportedFormat(what)) => assert!(what.contains("mp3"), "{what}"),
+            other => panic!("expected UnsupportedFormat, got {other:?}"),
+        }
         let wav = dir.join("silence.wav");
         fs::write(&wav, generate_minimal_pcm_wav(8)).unwrap();
-        let res = bank.load_sound(&wav.to_string_lossy(), &dir, &[dir.clone()]);
-        assert!(res.is_none());
-        assert!(matches!(
-            bank.last_diagnostic(),
-            Some(SoundDiagnostic::UnsupportedPlatform(_))
-        ));
+        let id = bank.load_sound(&wav.to_string_lossy(), &dir, &[dir.clone()]).expect("a WAV loads");
+        assert!(bank.play_sound(Some(id), None));
+        assert!(bank.is_sound_playing(Some(id)));
+        assert!(bank.stop_sound(Some(id)));
+        assert!(!bank.is_sound_playing(Some(id)));
+        assert!(bank.set_sound_volume(Some(id), 0.5));
+        bank.release_sound(Some(id));
+        assert!(!bank.contains(id));
     }
 
     #[test]
@@ -1315,7 +1357,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn forge_sound_handle_and_file_size_limits() {
         let mut bank = SoundBank::with_owner_id_and_backend(104, Box::new(NoopBackend));
         bank.set_active(true);
@@ -1496,7 +1538,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn forge_sound_recorder_open_play_stop_volume_release_syntax_and_order() {
         let dir = temp_dir("recorder");
         let wav_path = dir.join("silence.wav");
@@ -1570,7 +1612,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn forge_sound_recorder_restart_replaces_play_and_loop_repeat() {
         let dir = temp_dir("recorder_loop");
         let wav_path = dir.join("silence.wav");
@@ -1616,7 +1658,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn forge_sound_recorder_failed_close_retains_accounting_and_limits() {
         let dir = temp_dir("recorder_close_fail");
         let wav_path = dir.join("silence.wav");
@@ -1644,7 +1686,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn forge_sound_recorder_quota_rejects_before_os_open() {
         let dir = temp_dir("recorder_quota");
         let wav_path = dir.join("silence.wav");
@@ -1688,7 +1730,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn forge_sound_recorder_setaudio_seek_failure_ignored_for_play_boolean() {
         let dir = temp_dir("recorder_partial");
         let wav_path = dir.join("silence.wav");
@@ -1714,7 +1756,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn forge_sound_absolute_path_outside_roots_rejected() {
         let dir = temp_dir("abs_contain");
         let script_root = dir.join("addon");
@@ -1761,7 +1803,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn forge_sound_resource_root_outside_script_root_rejected() {
         let dir = temp_dir("res_escape");
         let script_root = dir.join("addon");
@@ -1860,7 +1902,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn forge_sound_aggregate_budget_rejects_before_os_open() {
         let dir = temp_dir("aggregate");
         let wav_path = dir.join("silence.wav");
@@ -2047,7 +2089,7 @@ mod tests {
         (44 + samples * 4) as u64
     }
     #[test]
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn native_sound_release_reports_backend_failure_and_can_retry_idempotently() {
         let dir = temp_dir("native-release");
         std::fs::write(dir.join("silence.wav"), generate_minimal_pcm_wav(8)).unwrap();

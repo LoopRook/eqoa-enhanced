@@ -354,6 +354,11 @@
       "added": 3,
       "deleted": 3,
       "reason": "Round A11 (2026-11-24): the server's merc, dye and fishing windows must not open over a hidden session of a mod (the game's mode reads 0 there): one condition added to the line that decides whether the window may open, calling fork_hooks::server_window_blocked, which says what the game does with a window up (merc: not opened; dye: waits; fishing: cancelled). Backlog item of 2026-11-18, owner-approved plan row A11. Plus dyepick_done made pub(crate) so the mod's answer closes the picker through the game's own path. A11 kinds (2026-11-24): `pending` made pub(crate) so a mod that holds the dye picker takes the server's open into its session and hands it back to the game's picker on pass."
+    },
+    "crates/eqoa/src/audio.rs": {
+      "added": 1,
+      "deleted": 0,
+      "reason": "mod sound mixed into the game's stream on Linux and macOS; offered upstream with the mod host"
     }
   },
   "immutable": [

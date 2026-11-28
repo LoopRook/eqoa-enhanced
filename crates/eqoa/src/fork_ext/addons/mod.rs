@@ -205,6 +205,7 @@ mod round7c_fix_tests;
 #[cfg(test)]
 mod round7h_tests;
 mod sandbox;
+pub(crate) mod sound_mix;
 mod spike;
 pub(crate) mod storage;
 pub(crate) mod write_queue;

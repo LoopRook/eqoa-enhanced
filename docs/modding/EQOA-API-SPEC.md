@@ -558,11 +558,11 @@ Paths are relative and are looked up in the mod's own package, then the shared r
 | `eqoa.fonts.load(path:string, size:number=16)` | `FontInfo = {font:Font, status:string, reason:string?}` for a TTF or OTF file at a pixel size above 0 and up to 256 (design intent, §9). `status` is `"pending"` (it will be ready on a later frame), `"ready"`, or `"fallback"`: the file could not be used and `font` is the default font. Use it with `ImGui.PushFont`. `unavailable` before the drawing context exists. |
 | `eqoa.fonts.default()` | The default font's `FontInfo`. |
 | `eqoa.fonts.release(font:Font?)` | `true`. |
-| `eqoa.sound.load(path:string)` | A `Sound` from a WAV or MP3 file; `failed` if it cannot be loaded. |
+| `eqoa.sound.load(path:string)` | A `Sound` from a WAV or MP3 file (WAV only on Linux and macOS); `failed` if it cannot be loaded. |
 | `eqoa.sound.play(sound:Sound, {loop:bool=false, volume:number=1}?)` | `true` when playback started. |
 | `eqoa.sound.stop(sound?)`, `eqoa.sound.set_volume(sound, volume)`, `eqoa.sound.is_playing(sound?)`, `eqoa.sound.release(sound?)` | `true`, `true`, a bool, `true`. Volume is 0..1. |
 
-`eqoa.fonts.game` (the game's own bitmap font as an ImGui font) is `unsupported`; `eqoa.hud.text` draws with that font. Sound and fonts from files work on Windows, the published platform; elsewhere the functions answer `unsupported`. A mod's sounds stop when it is disabled.
+`eqoa.fonts.game` (the game's own bitmap font as an ImGui font) is `unsupported`; `eqoa.hud.text` draws with that font. Files, textures, fonts and sound work on Windows, Linux and macOS. Sound plays WAV and MP3 (whatever Windows decodes) on Windows; on Linux and macOS it plays WAV only (PCM 8 or 16 bit, 32 or 64 bit float, one or two channels, up to two minutes) and any other file fails `eqoa.sound.load` with the format named in the diagnostic. System fonts are not available on Linux and macOS. A mod's sounds stop when it is disabled.
 
 Loading a texture, font or sound also fires `resource.ready` or `resource.failed` (§3) with `kind` `"texture"`, `"font"` or `"sound"`.
 
@@ -1571,7 +1571,7 @@ A mod runs in its own Lua 5.1 state, apart from other mods and from the game's m
 | anything else, for example `notes.txt` or `data/journal.json` | The mod's private data | Read and write. |
 | `@<mod id>/data/...` | Another mod's shared file | Read, with `eqoa.files.load_json` only (§5). |
 
-The files in the `mods` folder itself are never changed by a mod: its private data and private copies live in the player's configuration folder, keyed by the mod's `id`. Removing a file that came from `resources/` or `package_resources/` hides it for this mod only (and it stays hidden after a restart); writing it again brings back a private copy. A bare file name given to `eqoa.textures.load`, `eqoa.fonts.load` or `eqoa.sound.load` is looked for in `package_resources/`, then `resources/`. Links and junctions are refused. Listing, private writes and font and sound loading work on Windows, the published platform, and answer `unsupported` elsewhere.
+The files in the `mods` folder itself are never changed by a mod: its private data and private copies live in the player's configuration folder, keyed by the mod's `id`. Removing a file that came from `resources/` or `package_resources/` hides it for this mod only (and it stays hidden after a restart); writing it again brings back a private copy. A bare file name given to `eqoa.textures.load`, `eqoa.fonts.load` or `eqoa.sound.load` is looked for in `package_resources/`, then `resources/`. Links and junctions are refused. Listing, private writes and font and sound loading work on Windows, Linux and macOS (sound formats differ: §5).
 
 **Limits.** The table lists every limit a test of the client pins or exercises; these are part of the contract in this sense: a mod within them works. It is the only place on this page that calls a number tested, and a test checks each row against the constant in the code and the test that covers it.
 
